@@ -16,9 +16,10 @@ const PUBLIC_POOL_DOCS = "https://github.com/jokeez/hackme/blob/main/docs/SETUP.
 
 export async function fetchPoolLive(): Promise<PoolLive> {
   try {
+    const t = 3_500;
     const [p, w] = await Promise.all([
-      fetchWithTimeout(`${poolBase()}/api/pool/stats`),
-      fetchWithTimeout(`${poolBase()}/api/work/stats`),
+      fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, t),
+      fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, t),
     ]);
     if (!p.ok || !w.ok) throw new Error(`pool HTTP ${p.status}/${w.status}`);
     const pool = (await p.json()) as PoolStats;
@@ -39,17 +40,22 @@ export async function fetchPoolLive(): Promise<PoolLive> {
           : "degraded",
     };
   } catch {
-    return {
-      poolGh: 0,
-      workers: 0,
-      miners: 0,
-      blockHeight: 0,
-      rewardPerM: 0,
-      totalPayoutHmc: 0,
-      targetMod: 0,
-      status: "offline",
-    };
+    return offlinePoolLive();
   }
+}
+
+/** Instant boot / race-timeout stand-in — not a live coordinator read. */
+export function offlinePoolLive(): PoolLive {
+  return {
+    poolGh: 0,
+    workers: 0,
+    miners: 0,
+    blockHeight: 0,
+    rewardPerM: 0,
+    totalPayoutHmc: 0,
+    targetMod: 0,
+    status: "offline",
+  };
 }
 
 export function renderPoolRail(live: PoolLive): string {

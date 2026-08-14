@@ -99,15 +99,27 @@ export function tickerFromMarket(m: MarketSnapshot, pairId: PairId): Ticker {
   };
 }
 
+/** Sync local mids when pool API is slow/unreachable — instant boot paint. */
+export function localFallbackMarket(anchor = 0.00042): MarketSnapshot {
+  return buildMarket(
+    { hashrate: REF_GH * 1e9, workers: 4, tip_height: 155000, status: "ok" },
+    { pool_hashrate_gh_s: REF_GH, reward_per_m: 0.00021, workers_online: 4 },
+    { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
+    anchor,
+  );
+}
+
 export async function fetchMarket(anchor = 0.00042): Promise<{
   market: MarketSnapshot;
   source: "live" | "fallback";
 }> {
   try {
+    // Bound oracle RTT — boot must not sit on default 10s hangs (VPN/CORS).
+    const t = 3_500;
     const [poolRes, workRes, supRes] = await Promise.all([
-      fetchWithTimeout(`${poolBase()}/api/pool/stats`),
-      fetchWithTimeout(`${poolBase()}/api/work/stats`),
-      fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, 8_000),
+      fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, t),
+      fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, t),
+      fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, t),
     ]);
     if (!poolRes.ok || !workRes.ok) throw new Error("pool");
     const pool = (await poolRes.json()) as PoolStats;
@@ -115,12 +127,6 @@ export async function fetchMarket(anchor = 0.00042): Promise<{
     const sup = supRes.ok ? ((await supRes.json()) as SupEconomics) : {};
     return { market: buildMarket(pool, work, sup, anchor), source: "live" };
   } catch {
-    const market = buildMarket(
-      { hashrate: REF_GH * 1e9, workers: 4, block_height: 155000, status: "ok" },
-      { pool_hashrate_gh_s: REF_GH, reward_per_m: 0.00021, workers_online: 4 },
-      { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
-      anchor,
-    );
-    return { market, source: "fallback" };
+    return { market: localFallbackMarket(anchor), source: "fallback" };
   }
 }

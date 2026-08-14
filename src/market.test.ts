@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMarket, midForPair, tickerFromMarket } from "./market";
+import { buildMarket, localFallbackMarket, midForPair, tickerFromMarket } from "./market";
 import { sampleMarket } from "./testFixtures";
 
 describe("buildMarket", () => {
@@ -22,6 +22,12 @@ describe("buildMarket", () => {
     const m = buildMarket({}, {}, {}, 0.00042);
     expect(m.poolGh).toBeGreaterThan(0);
     expect(m.hmcUsdt).toBeGreaterThan(0);
+  });
+
+  it("localFallbackMarket is sync and positive", () => {
+    const m = localFallbackMarket(0.00042);
+    expect(m.hmcUsdt).toBeGreaterThan(0);
+    expect(m.poolGh).toBe(35);
   });
 });
 
