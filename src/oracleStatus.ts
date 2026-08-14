@@ -10,6 +10,7 @@ const STALE_SEC = 12;
 
 export function oracleStatusKind(meta: OracleMeta, now = Date.now()): OracleStatusKind {
   if (meta.poolStatus === "offline") return "offline";
+  if (meta.poolStatus === "pending" || meta.fetchedAt === 0) return "fallback";
   if (meta.source === "fallback") return "fallback";
   const ageSec = meta.fetchedAt ? Math.max(0, Math.floor((now - meta.fetchedAt) / 1000)) : null;
   if (ageSec !== null && ageSec > STALE_SEC) return "stale";

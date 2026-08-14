@@ -165,7 +165,7 @@ import {
   snapshotEquity,
   volumeRatio5m,
 } from "./pnl";
-import { fetchPoolLive, offlinePoolLive, renderPoolPage } from "./pool";
+import { fetchPoolLive, offlinePoolLive, pendingPoolLive, renderPoolPage } from "./pool";
 import { copyTextToClipboard, escapeHtml, sanitizeOracleAnchor } from "./sanitize";
 import {
   cancelAllOpenOrders,
@@ -4169,24 +4169,34 @@ async function refresh(): Promise<void> {
   let source: "live" | "fallback" = oracleMeta.source === "live" ? "live" : "fallback";
   let live = prevLive;
 
-  const [mRes, liveRes] = await Promise.all([
-    raceMs(fetchMarket(state.oracleAnchor), 1_800),
-    raceMs(fetchPoolLive(), 1_800),
-  ]);
+  // First paint uses pending placeholders. Do NOT race-discard that warm-up —
+  // a 1.8s race was keeping offline zeros while /pool-proxy answered ~200ms later.
+  const warming =
+    oracleMeta.fetchedAt === 0 ||
+    !prevLive ||
+    prevLive.status === "pending" ||
+    (prevLive.status === "offline" && prevLive.poolGh === 0 && prevLive.blockHeight === 0);
+
+  const marketP = fetchMarket(state.oracleAnchor);
+  const liveP = fetchPoolLive();
+  const [mRes, liveRes] = warming
+    ? await Promise.all([marketP, liveP])
+    : await Promise.all([raceMs(marketP, 2_500), raceMs(liveP, 2_500)]);
 
   if (mRes) {
     m = mRes.market;
     source = mRes.source;
   } else if (!m) {
-    // Never uncapped re-fetch on first boot (was 2.8s race + up to 10s hang).
     m = localFallbackMarket(state.oracleAnchor);
     source = "fallback";
-  } else {
+  } else if (warming) {
     source = "fallback";
   }
+  // else keep previous live mids on a slow tick
 
   if (liveRes) live = liveRes;
-  else if (!live) live = offlinePoolLive();
+  else if (!live || live.status === "pending") live = offlinePoolLive();
+  // else keep previous live telemetry on a slow tick
 
   market = m!;
   poolLive = live!;
@@ -4238,8 +4248,8 @@ export async function boot(): Promise<void> {
   // Instant desk — never block first paint on oracle RTT / VPN / CORS.
   if (!market || !poolLive) {
     market = localFallbackMarket(state.oracleAnchor);
-    poolLive = offlinePoolLive();
-    oracleMeta = { source: "fallback", fetchedAt: 0, poolStatus: "offline" };
+    poolLive = pendingPoolLive();
+    oracleMeta = { source: "fallback", fetchedAt: 0, poolStatus: "pending" };
     ensureCandles(state, market);
     for (const p of PAIRS) {
       tickers[p.id] = tickerFromMarket(market, p.id);
@@ -4252,7 +4262,7 @@ export async function boot(): Promise<void> {
     await refresh();
   } catch (err) {
     console.warn("[hackme-exchange] initial oracle sync failed — using fallback", err);
-    if (!market || !poolLive) {
+    if (!market || !poolLive || poolLive.status === "pending") {
       market = localFallbackMarket(state.oracleAnchor);
       poolLive = offlinePoolLive();
       oracleMeta = { source: "fallback", fetchedAt: Date.now(), poolStatus: "offline" };

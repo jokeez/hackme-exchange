@@ -44,7 +44,21 @@ export async function fetchPoolLive(): Promise<PoolLive> {
   }
 }
 
-/** Instant boot / race-timeout stand-in — not a live coordinator read. */
+/** Instant boot stand-in — connecting, not a failed coordinator read. */
+export function pendingPoolLive(): PoolLive {
+  return {
+    poolGh: 0,
+    workers: 0,
+    miners: 0,
+    blockHeight: 0,
+    rewardPerM: 0,
+    totalPayoutHmc: 0,
+    targetMod: 0,
+    status: "pending",
+  };
+}
+
+/** Confirmed unreachable / error path. */
 export function offlinePoolLive(): PoolLive {
   return {
     poolGh: 0,
@@ -78,10 +92,16 @@ export function renderPoolRail(live: PoolLive): string {
 export function poolStatusBanner(live: PoolLive): string {
   if (live.status === "ok") return "";
   const poolHref = escapeHtml(poolBase());
+  if (live.status === "pending") {
+    return `<div class="pool-status-banner pending" role="status">
+      <strong>Connecting to coordinator…</strong>
+      <p class="muted small">Fetching <code class="mono">${poolHref}/api/pool/stats</code> · <code class="mono">${poolHref}/api/work/stats</code>. Spot already shows local demo mids.</p>
+    </div>`;
+  }
   if (live.status === "offline") {
     return `<div class="pool-status-banner offline" role="status">
       <strong>Coordinator offline</strong>
-      <p class="muted small">Could not reach <code class="mono">${poolHref}</code> <code>/api/pool/stats</code> · <code>/api/work/stats</code>. Spot mids fall back to local demo anchors until the pool responds.</p>
+      <p class="muted small">Could not reach <code class="mono">${poolHref}/api/pool/stats</code> · <code class="mono">${poolHref}/api/work/stats</code>. Spot mids fall back to local demo anchors until the pool responds.</p>
     </div>`;
   }
   return `<div class="pool-status-banner degraded" role="status">
@@ -93,9 +113,13 @@ export function poolStatusBanner(live: PoolLive): string {
 export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
   const poolHref = escapeHtml(poolBase());
   const emptyStats =
-    live.status !== "ok" && live.poolGh === 0 && live.workers === 0 && live.blockHeight === 0;
+    (live.status === "offline" || live.status === "pending") &&
+    live.poolGh === 0 &&
+    live.workers === 0 &&
+    live.blockHeight === 0;
   const statusCls = live.status === "ok" ? "" : live.status;
-  const statusLabel = live.status === "ok" ? "live" : live.status;
+  const statusLabel =
+    live.status === "ok" ? "live" : live.status === "pending" ? "connecting" : live.status;
 
   return `
   <section class="pool-page glass">

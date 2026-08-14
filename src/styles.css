@@ -2869,6 +2869,7 @@ label { display: block; font-size: 0.68rem; color: var(--muted); margin-bottom: 
   background: rgba(80, 20, 12, 0.35);
 }
 .pool-status-banner.offline { border-color: rgba(255, 120, 90, 0.4); }
+.pool-status-banner.pending { border-color: rgba(120, 180, 255, 0.35); }
 .pool-status-banner.degraded {
   border-color: rgba(255, 190, 80, 0.4);
   background: rgba(70, 50, 10, 0.3);

@@ -51,9 +51,18 @@ describe("pool html helpers", () => {
     expect(rail).toContain("check pool API");
     const banner = poolStatusBanner(offline);
     expect(banner).toContain("Coordinator offline");
+    expect(banner).toMatch(/\/api\/pool\/stats/);
     const page = renderPoolPage(offline, sampleMarket());
     expect(page).toContain("placeholders");
     expect(page).toContain("pool-status-banner");
+  });
+
+  it("pending status shows connecting banner not offline", () => {
+    const pending = { ...liveOk, status: "pending" as const, poolGh: 0, workers: 0, blockHeight: 0 };
+    const banner = poolStatusBanner(pending);
+    expect(banner).toContain("Connecting");
+    expect(banner).not.toContain("Coordinator offline");
+    expect(renderPoolPage(pending, sampleMarket())).toContain("connecting");
   });
 });
 
