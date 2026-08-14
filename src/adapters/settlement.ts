@@ -6,9 +6,11 @@ import {
   buildPlaceOrderBody,
   fetchExchangeBalances,
   formatExchangeReject,
+  getLabSessionMeta,
   mergeApiBalancesIntoWallet,
   postExchangeOrder,
 } from "./exchangeApi";
+import { isLabSessionStale } from "./labMatching";
 
 /** Future: swap demo localStorage backend for exchange API + on-chain settlement. */
 export type SettlementAdapter = {
@@ -55,6 +57,12 @@ export const hybridSettlement: SettlementAdapter = {
 export const liveSettlement: SettlementAdapter = {
   name: "liveSettlement",
   async syncBalances(demo) {
+    if (isLabSessionStale()) {
+      return { wallet: demo, note: "Lab session stale — reconnect fixture (balances frozen)" };
+    }
+    if (!getLabSessionMeta().hasCsrf) {
+      return { wallet: demo, note: "Lab API opted in — connect fixture (no paper/node merge)" };
+    }
     const bal = await fetchExchangeBalances();
     if (!bal.ok) {
       // FE-M03: fail closed — do not merge node into lab wallet (hybrid balances lie).
@@ -66,6 +74,9 @@ export const liveSettlement: SettlementAdapter = {
     };
   },
   async settleTrade(pairId, side, amountBase, quoteGross, fee) {
+    if (isLabSessionStale() || !getLabSessionMeta().hasCsrf) {
+      return { ok: false, reason: "Lab session stale — reconnect fixture" };
+    }
     const mid = amountBase > 0 ? quoteGross / amountBase : 0;
     // Market buy needs a price ceiling; use ~2% slip over mid when available.
     const ceiling = mid > 0 ? mid * 1.02 : undefined;

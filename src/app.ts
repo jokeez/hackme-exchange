@@ -1173,6 +1173,10 @@ async function runConvertDesk(): Promise<void> {
   if (go) go.disabled = true;
 
   try {
+  if (isLabSessionStale()) {
+    toast("Lab session stale — reconnect fixture (convert frozen)", "warn");
+    return;
+  }
   if (tradingGuards.convertFeeServer && useLabMatching() && def) {
     const apiRes = await postLabConvert({
       from,
@@ -1889,6 +1893,13 @@ async function syncLabLedgerUi(): Promise<void> {
  * When a lab session owns Spot balances, report node figures without overwriting the ledger.
  */
 async function syncNodeHmcSupUi(): Promise<void> {
+  if (isLabSessionStale()) {
+    const note = "Lab session stale — reconnect fixture before node sync (balances frozen)";
+    const msgEl = document.getElementById("sync-node-msg");
+    if (msgEl) msgEl.textContent = note;
+    toast(note, "warn");
+    return;
+  }
   const snap = await fetchNodeWallet({ timeoutMs: 10_000, retries: 1 });
   const msgEl = document.getElementById("sync-node-msg");
   if (!snap.ok) {
@@ -1896,8 +1907,11 @@ async function syncNodeHmcSupUi(): Promise<void> {
     toast(snap.reason, "warn");
     return;
   }
-  if (useLabMatching()) {
-    const note = `Node ${formatNum(snap.hmc, 4)} HMC / ${formatNum(snap.sup, 4)} SUP · Spot uses lab ledger — Sync balances`;
+  if (useLabMatching() || isLabApiEnabled()) {
+    // FE-M-STALE: never overwrite lab/paper hybrid when lab API is opted in.
+    const note = useLabMatching()
+      ? `Node ${formatNum(snap.hmc, 4)} HMC / ${formatNum(snap.sup, 4)} SUP · Spot uses lab ledger — Sync balances`
+      : `Node online · lab API opted in — connect fixture (no paper merge)`;
     if (msgEl) msgEl.textContent = note;
     toast(note, "info");
     if (isHubEmbed()) postHubGotoTab("wallet");
