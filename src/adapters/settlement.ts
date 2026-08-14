@@ -57,15 +57,8 @@ export const liveSettlement: SettlementAdapter = {
   async syncBalances(demo) {
     const bal = await fetchExchangeBalances();
     if (!bal.ok) {
-      // Fall back to node read so lab UI still works offline API.
-      const snap = await fetchNodeWallet();
-      if (snap.ok) {
-        return {
-          wallet: mergeNodeIntoDemoWallet(demo, snap),
-          note: `Lab API: ${bal.message} — fell back to node HMC/SUP`,
-        };
-      }
-      return { wallet: demo, note: `Lab API: ${bal.message}` };
+      // FE-M03: fail closed — do not merge node into lab wallet (hybrid balances lie).
+      return { wallet: demo, note: `Lab API: ${bal.message} — balances frozen (no node merge)` };
     }
     return {
       wallet: mergeApiBalancesIntoWallet(demo, bal.balances ?? [], { labAuthoritative: true }),

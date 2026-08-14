@@ -34,6 +34,13 @@ export function useLabMatching(): boolean {
   return isLabApiEnabled() && getLabSessionMeta().hasCsrf;
 }
 
+/** FE-M02: address remembered after reload but CSRF gone — freeze paper matching. */
+export function isLabSessionStale(): boolean {
+  if (!isLabApiEnabled()) return false;
+  const m = getLabSessionMeta();
+  return !!m.address && !m.hasCsrf;
+}
+
 export type LabBookCache = {
   pairId: PairId;
   bids: BookLevel[];

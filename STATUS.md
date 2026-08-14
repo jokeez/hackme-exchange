@@ -64,6 +64,7 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 | G10 visual pass | **ok** — Spot/Convert/Account/Pool · roadmap stays open · Mine HMC → hackme.tech · P0=0 |
 | D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
 | API `go test ./...` | **ok** |
+| Red team P0 (2026-08-14) | **patched** in API+SPA — public edge still **HOLD** (re-audit before bind) |
 | Public edge | **HOLD** |
 
 ## Roadmap ladder

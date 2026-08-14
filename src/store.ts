@@ -20,6 +20,7 @@ import {
 import { sanitizeFeeConfig } from "./fees";
 import { STORAGE_KEY } from "./theme";
 import { uid } from "./id";
+import { sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 
 /** Persisted candle tail per TF — full history stays in RAM during session. */
@@ -189,10 +190,10 @@ export function loadState(): DemoState {
       oracleAnchor: sanitizeOracleAnchor(parsed.oracleAnchor, DEFAULT.oracleAnchor),
       mainView: sanitizeMainView(parsed.mainView),
       orders: Array.isArray(parsed.orders)
-        ? parsed.orders.slice(0, STORAGE_ORDERS_CAP).map((o) => ({
-            ...o,
-            id: sanitizeDomId(o.id, uid()),
-          }))
+        ? parsed.orders
+            .slice(0, STORAGE_ORDERS_CAP)
+            .map((o) => sanitizeImportedOrder(o as Order))
+            .filter((o): o is Order => o != null)
         : [],
       priceAlerts: Array.isArray(parsed.priceAlerts)
         ? parsed.priceAlerts.slice(0, 50).map((a) => ({
@@ -210,14 +211,9 @@ export function loadState(): DemoState {
     if ((parsed as unknown as { feeRateBps?: number }).feeRateBps && !parsed.feeConfig) {
       s.feeConfig = sanitizeFeeConfig({ ...s.feeConfig, takerBps: (parsed as unknown as { feeRateBps: number }).feeRateBps });
     }
-    s.trades = (parsed.trades ?? []).slice(0, STORAGE_TRADES_CAP).map((t) => ({
-      ...t,
-      id: sanitizeDomId(t.id, uid()),
-      feeQuote: t.feeQuote ?? 0,
-      feeHmc: (t as { feeHmc?: number }).feeHmc ?? 0,
-      feeRole: t.feeRole ?? "taker",
-      feePaidInHmc: t.feePaidInHmc ?? false,
-    }));
+    s.trades = (parsed.trades ?? [])
+      .slice(0, STORAGE_TRADES_CAP)
+      .map((t) => sanitizeImportedTrade(t));
     if (s.equityBaselineV < 2) {
       s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.00042, 0.000046, 67_500);
       s.equityBaselineV = 2;

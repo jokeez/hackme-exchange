@@ -56,7 +56,17 @@ function effectiveMode(raw: IntegrationMode): IntegrationMode {
   return raw;
 }
 
-const nodeOrigin = sanitizeHttpUrl(env("VITE_NODE_ORIGIN", "http://127.0.0.1:8080"), "http://127.0.0.1:8080");
+const rawNodeOrigin = sanitizeHttpUrl(env("VITE_NODE_ORIGIN", "http://127.0.0.1:8080"), "http://127.0.0.1:8080");
+const nodeOrigin = (() => {
+  // FE-M01: never wire non-loopback node origins into the client (phishing / SSRF surface).
+  if (isLoopbackOrigin(rawNodeOrigin)) return rawNodeOrigin;
+  if (typeof console !== "undefined") {
+    console.warn(
+      "[hackme-exchange] VITE_NODE_ORIGIN ignored — must be loopback (127.0.0.1/localhost). Falling back to http://127.0.0.1:8080.",
+    );
+  }
+  return "http://127.0.0.1:8080";
+})();
 const rawLabFlag = env("VITE_LAB_API", "");
 const rawApiOrigin = env("VITE_EXCHANGE_API_ORIGIN", "");
 

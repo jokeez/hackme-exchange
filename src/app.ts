@@ -77,6 +77,7 @@ import {
   runLabCounterpartyCross,
   syncLabBalancesAndBook,
   useLabMatching,
+  isLabSessionStale,
 } from "./adapters/labMatching";
 import {
   DEFAULT_TRADING_GUARDS,
@@ -415,6 +416,12 @@ function paperGuardsOrWarn(
   amountBase: number,
   price: number,
 ): boolean {
+  if (isLabSessionStale()) {
+    const msg = "Lab session stale — reconnect fixture (paper matching frozen)";
+    setOrderMsg(side, msg, "err");
+    toast(msg, "warn");
+    return false;
+  }
   const pair = pairById(state.activePair);
   const mid =
     (useLabMatching() ? labBookMid(state.activePair) : 0) ||
@@ -800,7 +807,7 @@ function renderActivityBody(): string {
         const p = pairById(t.pairId);
         return `<div class="act-row">
         <div class="act-line">
-          <span class="${t.side === "buy" ? "up" : "down"}">${t.side.toUpperCase()}</span>
+          <span class="${t.side === "buy" ? "up" : "down"}">${escapeHtml(t.side).toUpperCase()}</span>
           <span class="dim">${p.label}</span>
           <span class="role-badge ${t.feeRole}">${t.feeRole}</span>
         </div>
@@ -830,8 +837,8 @@ function renderActivityBody(): string {
       const p = pairById(o.pairId);
       return `<div class="act-row">
       <div class="act-line">
-        <span class="${o.side === "buy" ? "up" : "down"}">${o.side.toUpperCase()}</span>
-        <span>${orderTypeLabel(o.kind, o)}${o.postOnly ? " PO" : ""}</span>
+        <span class="${o.side === "buy" ? "up" : "down"}">${escapeHtml(o.side).toUpperCase()}</span>
+        <span>${escapeHtml(orderTypeLabel(o.kind, o))}${o.postOnly ? " PO" : ""}</span>
         <span class="dim">${p.label}</span>
       </div>
       <div class="act-line mono">
