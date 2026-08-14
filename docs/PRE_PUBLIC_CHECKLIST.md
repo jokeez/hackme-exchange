@@ -23,6 +23,13 @@ EXCHANGE_TRUSTED_PROXIES=127.0.0.1
 EXCHANGE_ADMIN_TOKEN=
 EXCHANGE_LAB_ENDPOINTS=0
 EXCHANGE_LAB_MM=0
+EXCHANGE_DEPOSIT_ENABLED=0
 ```
 
-**Verdict:** Lab GO for localhost with `LAB_*=1`. Public HOLD until VPS + checklist.
+API smoke (no VPS):
+
+```bash
+cd ~/Desktop/hackme-exchange-api && bash scripts/pre_public_dry_run.sh
+```
+
+**Verdict:** Lab GO for localhost with `LAB_*=1`. Public HOLD until VPS + checklist. Evidence lives in the API repo `docs/PRE_PUBLIC_EVIDENCE.md`.

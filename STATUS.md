@@ -1,6 +1,6 @@
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-14  
+**Updated:** 2026-08-15  
 **Public:** **NO** — private lab / localhost only.  
 **Soft-public target:** **D0 Paper · 2026-09-15** (`exchange.hackme.tech` static).  
 **Go / no-go:** **2026-09-10**.
@@ -55,16 +55,17 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 # → http://127.0.0.1:18443/health
 ```
 
-## QA snapshot (2026-08-14)
+## QA snapshot (2026-08-15)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **473** pass |
-| `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, no lab fixture seed in bundle |
-| G10 visual pass | **ok** — Spot/Convert/Account/Pool · roadmap stays open · Mine HMC → hackme.tech · P0=0 |
+| `npm test` | **478** pass |
+| `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443`, no lab fixture seed |
+| G10 visual pass | **ok** — 2026-08-14 · P0=0 (re-run before 09-10 if UI churn) |
 | D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
 | API `go test ./...` | **ok** |
-| Red team P0 (2026-08-14) | **patched** + re-audit pass (H-NEW1, Cancel settle, TOTP, public-bind gates, stale lab) — public edge still **HOLD** |
+| Red team audit v3 (2026-08-15) | **H-OCO1 + M-TOTP-R closed** · FE harness green · public edge still **HOLD** |
+| PRE_PUBLIC dry-run | **ok** loopback `PUBLIC_EDGE` — see API `docs/PRE_PUBLIC_EVIDENCE.md` |
 | Public edge | **HOLD** |
 
 ## Roadmap ladder
@@ -79,6 +80,7 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 ## Docs
 
 - [`docs/D0_CHECKLIST.md`](docs/D0_CHECKLIST.md) — Sep 10 go/no-go  
+- [`docs/PRE_PUBLIC_CHECKLIST.md`](docs/PRE_PUBLIC_CHECKLIST.md) — mirror; full detail in API repo  
 - [`docs/SCOPE.md`](docs/SCOPE.md) — boundaries  
 - [`docs/TG_POST_DRAFT.md`](docs/TG_POST_DRAFT.md) — draft only  
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup and PR notes  

@@ -21,18 +21,19 @@
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit/UI suite | `npm test` | ✅ 473 (2026-08-14) |
+| G1 | Unit/UI suite | `npm test` | ✅ **478** (2026-08-15) |
 | G2 | UI smoke | `npm run test:ui-smoke` | ✅ (covered in suite) |
 | G3 | Production build | `npm run build` | ✅ paper via `prepare_d0_static.sh` |
-| G4 | XSS / sanitize / redteam | `vitest` sanitize + stress_redteam + hardening | ✅ |
+| G4 | XSS / sanitize / redteam | `vitest` sanitize + stress_redteam + hardening + stateSanitize | ✅ |
 | G5 | Paper/abuse/econ honest | `abuse_econ_latency` | ✅ |
 | G6 | STATUS disclaimer visible | root `STATUS.md` + in-app PAPER badges | ✅ |
 | G7 | Live mode blocked | `isLiveMode()` false | ✅ |
-| G8 | Lab API (optional) | `go test ./...` + live custody e2e | ✅ 2026-08-14 |
+| G8 | Lab API (optional) | `go test ./...` + live custody e2e | ✅ 2026-08-15 · audit v3 |
 | G9 | Mirror restore drill | hub ops | ✅ earlier Aug |
 | G10 | Visual pass (human + script) | `node scripts/g10_visual_pass.mjs` desktop+mobile | ✅ 2026-08-14 · P0=0 P1=0 |
-| G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` → tarball; **no DNS** | ✅ 2026-08-14 |
+| G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` → tarball; **no DNS** | ✅ 2026-08-15 (CSP no `:18443`, no fixture seed) |
 | G12 | TG copy drafted (not posted) | `docs/TG_POST_DRAFT.md` | ✅ draft ready |
+| G13 | PRE_PUBLIC API smoke | API `bash scripts/pre_public_dry_run.sh` | ✅ 2026-08-15 · public still **HOLD** |
 
 ## Explicitly NOT required for D0
 
@@ -49,4 +50,7 @@ cd ~/Desktop/hackme-exchange-demo
 npm test && npm run test:ui-smoke && npm run build
 npx vitest run src/stress_redteam.test.ts src/sanitize.test.ts src/abuse_econ_latency.test.ts src/hardening.ui.test.ts
 bash scripts/prepare_d0_static.sh
+
+cd ~/Desktop/hackme-exchange-api
+bash scripts/pre_public_dry_run.sh
 ```
