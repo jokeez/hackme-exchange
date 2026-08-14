@@ -1,0 +1,26 @@
+{
+  "name": "hackme-exchange-demo",
+  "private": true,
+  "version": "0.1.0-demo",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui-smoke": "vitest run src/ui.smoke.test.ts src/pro.features.test.ts",
+    "test:all": "vitest run"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.10.6",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.2.3",
+    "@noble/hashes": "^1.8.0",
+    "lightweight-charts": "^5.2.0"
+  }
+}

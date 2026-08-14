@@ -1,0 +1,160 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  applyMarketTrade,
+  cancelAllOpenOrders,
+  cancelOrder,
+  ensureCandles,
+  placeLimitOrder,
+  toggleFavorite,
+  updateOrderPrice,
+  walletEquityFromMarket,
+  walletEquityUsdt,
+} from "./store";
+import { baseState, installMemoryLocalStorage, sampleMarket } from "./testFixtures";
+import { STATE_VERSION } from "./types";
+
+describe("store wallet helpers", () => {
+  it("walletEquityUsdt sums legs", () => {
+    const eq = walletEquityUsdt({ usdt: 100, hmc: 1000, sup: 1000, btc: 0.1 }, 0.5, 0.2, 50_000);
+    expect(eq).toBeCloseTo(100 + 500 + 200 + 5000, 6);
+  });
+
+  it("walletEquityFromMarket uses snapshot prices", () => {
+    const m = sampleMarket();
+    const w = { usdt: 10, hmc: 0, sup: 0, btc: 0 };
+    expect(walletEquityFromMarket(w, m)).toBe(10);
+  });
+});
+
+describe("store order mutations", () => {
+  beforeEach(() => {
+    installMemoryLocalStorage();
+  });
+
+  it("applyMarketTrade mutates wallet without duplicating trades", () => {
+    const s = baseState();
+    const res = applyMarketTrade(s, "HMC_USDT", "buy", 0.0004, 100, 0.04);
+    expect(res.ok).toBe(true);
+    expect(s.trades).toHaveLength(0);
+    expect(s.wallet.hmc).toBe(50_100);
+  });
+
+  it("placeLimitOrder / cancelOrder / cancelAllOpenOrders", () => {
+    const s = baseState();
+    const o = placeLimitOrder(s, "HMC_USDT", "buy", 0.0004, 100);
+    expect(o.status).toBe("open");
+    expect(s.orders).toHaveLength(1);
+    cancelOrder(s, o.id);
+    expect(s.orders[0].status).toBe("cancelled");
+
+    placeLimitOrder(s, "HMC_USDT", "sell", 0.0005, 50);
+    placeLimitOrder(s, "SUP_USDT", "buy", 0.00004, 10);
+    const n = cancelAllOpenOrders(s);
+    expect(n).toBe(2);
+    expect(s.orders.filter((x) => x.status === "open")).toHaveLength(0);
+  });
+
+  it("cancelOrder cancels sibling OCO legs", () => {
+    const s = baseState();
+    const gid = "g1";
+    s.orders = [
+      {
+        id: "tp",
+        pairId: "HMC_USDT",
+        side: "sell",
+        kind: "oco",
+        price: 0.0005,
+        amountBase: 10,
+        filledBase: 0,
+        status: "open",
+        ocoGroupId: gid,
+        ocoRole: "tp",
+        createdAt: Date.now(),
+      },
+      {
+        id: "sl",
+        pairId: "HMC_USDT",
+        side: "sell",
+        kind: "oco",
+        price: 0.0003,
+        stopPrice: 0.00035,
+        amountBase: 10,
+        filledBase: 0,
+        status: "open",
+        ocoGroupId: gid,
+        ocoRole: "sl",
+        createdAt: Date.now(),
+      },
+    ];
+    cancelOrder(s, "tp");
+    expect(s.orders.every((o) => o.status === "cancelled")).toBe(true);
+  });
+
+  it("cancelOrder also cancels triggered OCO siblings", () => {
+    const s = baseState();
+    const gid = "g2";
+    s.orders = [
+      {
+        id: "tp",
+        pairId: "HMC_USDT",
+        side: "sell",
+        kind: "oco",
+        price: 0.0005,
+        amountBase: 10,
+        filledBase: 0,
+        status: "open",
+        ocoGroupId: gid,
+        ocoRole: "tp",
+        createdAt: Date.now(),
+      },
+      {
+        id: "sl",
+        pairId: "HMC_USDT",
+        side: "sell",
+        kind: "oco",
+        price: 0.0003,
+        stopPrice: 0.00035,
+        amountBase: 10,
+        filledBase: 0,
+        status: "triggered",
+        ocoGroupId: gid,
+        ocoRole: "sl",
+        createdAt: Date.now(),
+      },
+    ];
+    cancelOrder(s, "tp");
+    expect(s.orders.find((o) => o.id === "sl")!.status).toBe("cancelled");
+  });
+
+  it("updateOrderPrice only for open orders", () => {
+    const s = baseState();
+    const o = placeLimitOrder(s, "HMC_USDT", "buy", 0.0004, 1);
+    updateOrderPrice(s, o.id, 0.00041);
+    expect(s.orders[0].price).toBe(0.00041);
+    s.orders[0].status = "filled";
+    updateOrderPrice(s, o.id, 0.0005);
+    expect(s.orders[0].price).toBe(0.00041);
+  });
+
+  it("toggleFavorite adds and removes", () => {
+    const s = baseState({ favoritePairs: [] });
+    toggleFavorite(s, "HMC_BTC");
+    expect(s.favoritePairs[0]).toBe("HMC_BTC");
+    toggleFavorite(s, "HMC_BTC");
+    expect(s.favoritePairs).not.toContain("HMC_BTC");
+  });
+
+  it("ensureCandles fills TIMEFRAMES for all pairs", () => {
+    const s = baseState();
+    ensureCandles(s, sampleMarket());
+    expect(Object.keys(s.candles).length).toBeGreaterThanOrEqual(5);
+    expect(s.candles.HMC_USDT?.["15m"]?.length).toBeGreaterThan(10);
+  });
+
+  it("default-like state includes priceAlerts array", () => {
+    const s = baseState();
+    expect(Array.isArray(s.priceAlerts)).toBe(true);
+    expect(s.stateVersion).toBe(STATE_VERSION);
+    expect(s.drawingsLocked).toBe(false);
+  });
+});

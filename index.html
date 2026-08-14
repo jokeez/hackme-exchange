@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://hackme.tech; connect-src 'self' http://127.0.0.1:18443 http://127.0.0.1:8080 http://127.0.0.1:5199 http://localhost:18443 http://localhost:8080 http://localhost:5199 ws://127.0.0.1:5199 ws://localhost:5199 https://hackme.tech; frame-ancestors 'self' http://127.0.0.1:8080 http://localhost:8080; base-uri 'self'; form-action 'self'; object-src 'none'"
+    />
+    <title>HackMe Exchange — Spot · Pool Oracle</title>
+    <meta name="description" content="HackMe Network spot exchange demo — pool-oracle pricing, HMC SUP pairs, useful-PoW economics." />
+    <link rel="icon" href="https://hackme.tech/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Orbitron:wght@500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <script src="/theme-boot.js"></script>
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-a" aria-hidden="true"></div>
+    <div class="bg-glow bg-glow-b" aria-hidden="true"></div>
+    <div id="app"></div>
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

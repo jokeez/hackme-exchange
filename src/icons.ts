@@ -1,0 +1,82 @@
+/** Lucide-style inline icons — one stroke weight for the whole terminal. */
+const SW = 1.5;
+
+function svg(body: string, size = 14): string {
+  return `<svg class="ico" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${SW}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+}
+
+export const Ico = {
+  clock: () => svg(`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`),
+  activity: () => svg(`<path d="M22 12h-4l-3 8L9 4l-3 8H2"/>`),
+  list: () => svg(`<path d="M4 6h16M4 12h16M4 18h16"/>`),
+  layers: () => svg(`<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>`),
+  settings: () =>
+    svg(
+      `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`,
+    ),
+  camera: () =>
+    svg(
+      `<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>`,
+    ),
+  layout: () => svg(`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`),
+  square: () => svg(`<rect x="5" y="5" width="14" height="14" rx="1"/>`),
+  maximize: () => svg(`<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>`),
+  candlestick: () =>
+    svg(
+      `<path d="M8 4v3M8 17v3M16 2v4M16 16v6"/><rect x="6" y="7" width="4" height="10" rx="0.5"/><rect x="14" y="6" width="4" height="10" rx="0.5"/>`,
+    ),
+  chartLine: () => svg(`<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-5 5"/>`),
+  mousePointer: () => svg(`<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>`),
+  minus: () => svg(`<path d="M5 12h14"/>`),
+  trendUp: () => svg(`<path d="M3 17 9 11l4 4 8-8"/><path d="M14 7h7v7"/>`),
+  fib: () => svg(`<path d="M4 5h16M4 9h16M4 14h16M4 19h16"/>`),
+  typeA: () => svg(`<path d="M4 20 12 4l8 16"/><path d="M7.5 14h9"/>`),
+  ruler: () => svg(`<path d="M21.3 8.7 8.7 21.3a2.4 2.4 0 0 1-3.4 0L2.7 18.7a2.4 2.4 0 0 1 0-3.4L15.3 2.7a2.4 2.4 0 0 1 3.4 0l2.6 2.6a2.4 2.4 0 0 1 0 3.4Z"/><path d="m14.5 7.5 2 2M11 11l2 2M7.5 14.5l2 2"/>`),
+  trash: () => svg(`<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>`),
+  lock: () => svg(`<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`),
+  chevronDown: () => svg(`<path d="m6 9 6 6 6-6"/>`, 12),
+} as const;
+
+/** Markets list: one badge for the base asset only (no USDT/BTC stack). */
+export function assetBadge(symbol: string): string {
+  const key = symbol.toUpperCase();
+  if (key === "HMC") {
+    // No inline onerror — CSP script-src 'self' blocks event-handler XSS vectors.
+    return `<span class="asset-ico asset-hmc asset-hmc-logo" title="HMC" aria-hidden="true"><img src="/logo-hex.png" alt="" width="16" height="16" decoding="async" /></span>`;
+  }
+  if (key === "SUP") {
+    return `<span class="asset-ico asset-sup" title="SUP" aria-hidden="true">S</span>`;
+  }
+  const mark = key.slice(0, 1) || "?";
+  return `<span class="asset-ico asset-unk" title="${key}" aria-hidden="true">${mark}</span>`;
+}
+
+/** Pair row icon — base coin only (HMC or SUP), never quote $.₿ */
+export function pairAssetIcons(base: string, _quote?: string): string {
+  return `<span class="pair-icons" aria-hidden="true">${assetBadge(base)}</span>`;
+}
+
+export type DrawIconId = "cursor" | "hline" | "trend" | "fib" | "rect" | "text" | "measure" | "clear" | "lock";
+
+export function drawToolIcon(id: DrawIconId): string {
+  switch (id) {
+    case "cursor":
+      return Ico.mousePointer();
+    case "hline":
+      return Ico.minus();
+    case "trend":
+      return Ico.trendUp();
+    case "fib":
+      return Ico.fib();
+    case "rect":
+      return Ico.square();
+    case "text":
+      return Ico.typeA();
+    case "measure":
+      return Ico.ruler();
+    case "clear":
+      return Ico.trash();
+    case "lock":
+      return Ico.lock();
+  }
+}

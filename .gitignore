@@ -1,0 +1,37 @@
+# Dependencies & build
+node_modules/
+dist/
+dist-d0/
+hackme-exchange-d0-*.tar.gz
+*.tar.gz
+*.tgz
+*.local
+
+# Env / secrets — never commit tokens
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+.cursor-*/
+*.swp
+*.swo
+*.code-workspace
+
+# Logs / coverage / local reports
+*.log
+npm-debug.log*
+coverage/
+.vitest/
+SECURITY-REDTEAM-REPORT.html
+*.html.bak
+
+# Playwright / caches
+test-results/
+playwright-report/
+.cache/
