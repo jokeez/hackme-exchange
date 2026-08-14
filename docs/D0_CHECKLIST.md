@@ -30,7 +30,7 @@
 | G7 | Live mode blocked | `isLiveMode()` false | ✅ |
 | G8 | Lab API (optional) | `go test ./...` + live custody e2e | ✅ 2026-08-14 |
 | G9 | Mirror restore drill | hub ops | ✅ earlier Aug |
-| G10 | Visual pass (human) | 5–10 min Spot/Convert/Account desktop+mobile | ⬜ before 10 Sep |
+| G10 | Visual pass (human + script) | `node scripts/g10_visual_pass.mjs` desktop+mobile | ✅ 2026-08-14 · P0=0 P1=0 |
 | G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` → tarball; **no DNS** | ✅ 2026-08-14 |
 | G12 | TG copy drafted (not posted) | `docs/TG_POST_DRAFT.md` | ✅ draft ready |
 

@@ -61,7 +61,8 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 |------|--------|
 | `npm test` | **473** pass |
 | `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, no lab fixture seed in bundle |
-| D0 tarball (local only) | `hackme-exchange-d0-20260814T175433Z.tar.gz` (gitignored) |
+| G10 visual pass | **ok** — Spot/Convert/Account/Pool · roadmap stays open · Mine HMC → hackme.tech · P0=0 |
+| D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
 | API `go test ./...` | **ok** |
 | Public edge | **HOLD** |
 
