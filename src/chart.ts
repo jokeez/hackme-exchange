@@ -1044,15 +1044,16 @@ export function isOverPriceScale(clientX: number, hostRect: DOMRect, scaleWidth:
   return clientX >= hostRect.right - w - 4;
 }
 
-/** How many bars fit in the pane (TradingView-like default window). */
+/** How many bars fit in the pane (Binance/TV-like default window). */
 export function visibleBarBudget(hostWidth: number, barSpacing: number): number {
   const usable = Math.max(160, hostWidth - 80);
   const spacing = Math.max(3, barSpacing || 8);
-  return Math.max(30, Math.min(160, Math.floor(usable / spacing)));
+  // ~40–120 candles — exchange desks never open zoomed into 3–5 mega-bars.
+  return Math.max(40, Math.min(120, Math.floor(usable / spacing)));
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
-  const base = tf === "30s" || tf === "1m" ? 6 : tf === "1W" ? 12 : 8;
+  const base = tf === "30s" || tf === "1m" ? 6 : tf === "1D" || tf === "1W" ? 10 : 8;
   if (hostWidth < 480) return Math.max(4, base - 2);
   if (hostWidth < 720) return Math.max(5, base - 1);
   if (hostWidth > 1600) return base + 1;
@@ -1509,9 +1510,15 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
 }
 
 export function setChartMode(mode: ChartMode): void {
-  if (!mounted || mode === currentMode || !lastOpts) return;
+  if (!mounted || mode === currentMode || !lastOpts || !chart) return;
   currentMode = mode;
   showMode(mode);
+  priceScaleManual = false;
+  try {
+    chart.priceScale("right").setAutoScale(true);
+  } catch {
+    /* ignore */
+  }
   setCandleData(rawCandlesCache, { ...lastOpts, mode }, { preserveLogicalRange: true });
 }
 
@@ -1703,7 +1710,11 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   if (lastRaw && lastRaw.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
   else if (!lastRaw || c.time > lastRaw.time) {
     rawCandlesCache.push(c);
-    if (rawCandlesCache.length > MAX_CANDLES) rawCandlesCache = rawCandlesCache.slice(-MAX_CANDLES);
+    if (rawCandlesCache.length > MAX_CANDLES) {
+      // Trimmed left bar — series.update cannot drop it; force full setData.
+      rawCandlesCache = rawCandlesCache.slice(-MAX_CANDLES);
+      return false;
+    }
   } else return false;
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
@@ -2006,24 +2017,32 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   };
 }
 
-/** Pin the time scale so the latest candle sits at the right (TF/pair remount). */
+/** Pin the time scale so the latest candle sits at the right (TF/pair remount).
+ * CEX-like: keep fixed barSpacing — never stretch 2–4 bars across the whole pane.
+ */
 export function anchorToLatestCandle(barCount?: number): void {
   if (!chart || currentCandles.length < 2) return;
   const n = currentCandles.length;
   const hostW = hostEl?.clientWidth || 800;
-  const spacing = (() => {
-    try {
-      return chart!.timeScale().options().barSpacing || 8;
-    } catch {
-      return 8;
-    }
-  })();
-  const count = barCount ?? visibleBarBudget(hostW, spacing);
-  const visible = Math.min(Math.max(20, count), n);
-  const to = n - 1 + 3; // small right padding past the last bar
-  const from = to - visible;
+  const tf = (lastOpts?.tf ?? "15m") as Timeframe;
+  const spacing = barSpacingForWidth(hostW, tf);
+  const rightPad = hostW < 640 ? 4 : 8;
   try {
-    chart.timeScale().setVisibleLogicalRange({ from: Math.max(-1, from), to });
+    chart.timeScale().applyOptions({
+      barSpacing: spacing,
+      rightOffset: rightPad,
+      minBarSpacing: 2,
+    });
+  } catch {
+    /* ignore */
+  }
+  const budget = barCount ?? visibleBarBudget(hostW, spacing);
+  // Logical window is always ~budget bars wide. When history is short, `from`
+  // goes negative → empty left space (Binance/TV), not inflated candle bodies.
+  const to = n - 1 + rightPad;
+  const from = to - budget;
+  try {
+    chart.timeScale().setVisibleLogicalRange({ from, to });
   } catch {
     try {
       chart.timeScale().scrollToRealTime();

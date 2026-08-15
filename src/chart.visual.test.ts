@@ -80,8 +80,19 @@ describe("price scale wheel helpers", () => {
 
   it("visibleBarBudget scales with pane width", () => {
     expect(visibleBarBudget(400, 8)).toBeLessThan(visibleBarBudget(1400, 8));
-    expect(visibleBarBudget(800, 8)).toBeGreaterThanOrEqual(30);
-    expect(visibleBarBudget(800, 8)).toBeLessThanOrEqual(160);
+    expect(visibleBarBudget(800, 8)).toBeGreaterThanOrEqual(40);
+    expect(visibleBarBudget(800, 8)).toBeLessThanOrEqual(120);
+  });
+
+  it("anchor budget stays wide even when series is short (no mega-candle stretch)", async () => {
+    // Pure logic mirror of anchorToLatestCandle window
+    const n = 4;
+    const budget = visibleBarBudget(900, 10);
+    const to = n - 1 + 8;
+    const from = to - budget;
+    expect(budget).toBeGreaterThanOrEqual(40);
+    expect(from).toBeLessThan(0); // empty left — CEX behavior
+    expect(to - from).toBe(budget);
   });
 
   it("detects hover over right price scale strip", () => {

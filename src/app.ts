@@ -540,7 +540,7 @@ function placeOcoOrWarn(
 
 function chartOpts() {
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const mid = activeTicker().mid;
+  const mid = spotTradeMid();
   const prev = candles.length >= 2 ? candles[candles.length - 2]?.close : mid;
   return getChartMountOpts(state, state.activePair, state.activeTf, mid, {
     lastPriceUp: mid >= (prev ?? mid),
@@ -2640,7 +2640,7 @@ function mountChartPanel(): void {
       const nextBase = prependOlderCandles(base, pair, CANDLE_BASE_TF, baseBars);
       const addedBase = nextBase.length - base.length;
       if (addedBase <= 0) return 0;
-      const all = deriveAllTimeframes(nextBase);
+      const all = deriveAllTimeframes(nextBase, pair, state.candles[pair]);
       state.candles[pair] = all;
       saveState(state);
       const next = all[tf] ?? [];
@@ -4161,17 +4161,29 @@ function microTickPrices(): void {
   let changed = false;
   bookPhase += 0.38;
   liveTickN += 1;
+  const labLive = useLabMatching();
   for (const p of PAIRS) {
-    const target = midForPair(market, p.id);
+    const oracleTarget = midForPair(market, p.id);
+    const labMid = labLive ? labBookMid(p.id) : 0;
+    const target = labMid > 0 ? labMid : oracleTarget;
     const prev = prevMids[p.id] ?? target;
-    const blend = prev + (target - prev) * (0.38 + Math.random() * 0.22);
+    const blend = labLive && labMid > 0
+      ? target // snap to lab L2 mid — do not invent an oracle walk against the book
+      : prev + (target - prev) * (0.38 + Math.random() * 0.22);
     if (!state.candles[p.id]) state.candles[p.id] = {};
     state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, blend, prev);
     prevMids[p.id] = blend;
-    if (tickers[p.id]) tickers[p.id] = { ...tickers[p.id]!, mid: blend, bid: blend * 0.9995, ask: blend * 1.0005 };
+    if (tickers[p.id]) {
+      if (labLive && labMid > 0) {
+        // Keep bid/ask from lab book refresh; only sync mid for HUD/chart last-price.
+        tickers[p.id] = { ...tickers[p.id]!, mid: blend };
+      } else {
+        tickers[p.id] = { ...tickers[p.id]!, mid: blend, bid: blend * 0.9995, ask: blend * 1.0005 };
+      }
+    }
     changed = true;
   }
-  if (!useLabMatching() && Math.random() < 0.55) {
+  if (!labLive && Math.random() < 0.55) {
     publicTape = appendSyntheticTrade(publicTape, activeTicker());
   }
   // Match resting paper orders against live blended mids every ~1.4s.
@@ -4340,8 +4352,24 @@ async function refresh(): Promise<void> {
     tk.high24h = s.high;
     tk.low24h = s.low;
     tk.volume24hBase = s.vol;
-    tickers[p.id] = tk;
-    const mid = midForPair(market, p.id);
+    const labMid = useLabMatching() ? labBookMid(p.id) : 0;
+    if (labMid > 0) {
+      // Preserve lab L2 mid/bid/ask if we already have a book; only refresh 24h stats fields.
+      const prevTk = tickers[p.id];
+      if (prevTk && prevTk.bid > 0 && prevTk.ask > 0) {
+        tickers[p.id] = {
+          ...tk,
+          mid: labMid,
+          bid: prevTk.bid,
+          ask: prevTk.ask,
+        };
+      } else {
+        tickers[p.id] = { ...tk, mid: labMid };
+      }
+    } else {
+      tickers[p.id] = tk;
+    }
+    const mid = labMid > 0 ? labMid : midForPair(market, p.id);
     const prev = firstLiveAfterBoot ? undefined : prevMids[p.id];
     if (!firstLiveAfterBoot) {
       if (!state.candles[p.id]) state.candles[p.id] = {};

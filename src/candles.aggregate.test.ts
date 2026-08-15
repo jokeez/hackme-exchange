@@ -52,9 +52,16 @@ describe("multi-TF aggregation (one market)", () => {
     expect(Math.abs(tip1d.close - tip1d.open) / tip1d.open).toBeLessThan(0.08);
   });
 
+  it("deriveAllTimeframes pads 1D to a CEX-like history length", () => {
+    const base = seedCandles("HMC_USDT", CANDLE_BASE_TF, 0.0005, 60);
+    const all = deriveAllTimeframes(base, "HMC_USDT");
+    expect(all["1D"]!.length).toBeGreaterThan(30);
+    expect(all["1D"]![all["1D"]!.length - 1]!.close).toBeCloseTo(all["1m"]![all["1m"]!.length - 1]!.close, 10);
+  });
+
   it("deriveAllTimeframes covers every TIMEFRAMES key", () => {
     const base = seedCandles("HMC_USDT", CANDLE_BASE_TF, 0.0005, 60);
-    const all = deriveAllTimeframes(base);
+    const all = deriveAllTimeframes(base, "HMC_USDT");
     for (const tf of TIMEFRAMES) {
       expect(all[tf]?.length).toBeGreaterThan(0);
     }
@@ -73,10 +80,13 @@ describe("multi-TF aggregation (one market)", () => {
     let all = seedAllTimeframes("HMC_USDT", mid);
     const before5 = all["5m"]!.length;
     const tipBefore = all["5m"]![all["5m"]!.length - 1]!.close;
+    const first5Before = all["5m"]![0]!.time;
     const nextBase = prependOlderCandles(all[CANDLE_BASE_TF]!, "HMC_USDT", CANDLE_BASE_TF, 120);
     expect(nextBase.length).toBeGreaterThan(all[CANDLE_BASE_TF]!.length);
-    all = deriveAllTimeframes(nextBase);
-    expect(all["5m"]!.length).toBeGreaterThan(before5);
+    all = deriveAllTimeframes(nextBase, "HMC_USDT", all);
+    // Already padded to barCountForTf — length stays capped, tip must not jump.
+    expect(all["5m"]!.length).toBeGreaterThanOrEqual(before5);
     expect(all["5m"]![all["5m"]!.length - 1]!.close).toBeCloseTo(tipBefore, 8);
+    expect(all["5m"]![0]!.time).toBeLessThanOrEqual(first5Before);
   });
 });

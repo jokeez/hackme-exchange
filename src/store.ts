@@ -1,6 +1,7 @@
-import type { DemoState, MarketSnapshot, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
+import type { Candle, DemoState, MarketSnapshot, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES } from "./types";
 import { barCountForTf, ensureContiguousCandles, prependOlderCandles, sanitizeCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
+import { maxBodyFracForTf, clampTickMid } from "./chartScale";
 import { midForPair } from "./market";
 import { PAIRS } from "./pairs";
 import {
@@ -23,8 +24,8 @@ import { uid } from "./id";
 import { sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 
-/** Persisted candle tail per TF — full history stays in RAM during session. */
-const STORAGE_CANDLE_CAP = 120;
+/** Persist 1m base only — higher TFs re-derived (+ padded) on load. */
+const STORAGE_BASE_CAP = 2000;
 const STORAGE_TRADES_CAP = 120;
 const STORAGE_LEDGER_CAP = 80;
 const STORAGE_EQUITY_CAP = 72;
@@ -44,12 +45,10 @@ function compactForStorage(state: DemoState, aggressive = false): DemoState {
   for (const pid of Object.keys(s.candles)) {
     const byTf = s.candles[pid as PairId];
     if (!byTf) continue;
-    for (const tf of Object.keys(byTf) as Timeframe[]) {
-      const arr = byTf[tf];
-      if (arr && arr.length > STORAGE_CANDLE_CAP) {
-        byTf[tf] = arr.slice(-STORAGE_CANDLE_CAP);
-      }
-    }
+    const base = byTf[CANDLE_BASE_TF];
+    const next: Partial<Record<Timeframe, Candle[]>> = {};
+    if (base?.length) next[CANDLE_BASE_TF] = base.slice(-STORAGE_BASE_CAP);
+    s.candles[pid as PairId] = next;
   }
   return s;
 }
@@ -432,15 +431,17 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
     } else {
       healed = sanitizeCandlesForChart(healed, p.id);
     }
-    // Snap tip close toward live mid without inventing a cliff body.
+    // Snap tip toward live mid without inventing a cliff body.
     if (healed.length) {
       const tip = { ...healed[healed.length - 1]! };
-      tip.close = mid;
-      tip.high = Math.max(tip.high, tip.open, mid);
-      tip.low = Math.min(tip.low, tip.open, mid);
+      const maxBody = maxBodyFracForTf(CANDLE_BASE_TF);
+      const safe = clampTickMid(mid, tip.close, maxBody);
+      tip.close = safe;
+      tip.high = Math.max(tip.high, tip.open, safe);
+      tip.low = Math.min(tip.low, tip.open, safe);
       healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id)[0] ?? tip;
     }
-    const all = deriveAllTimeframes(healed);
+    const all = deriveAllTimeframes(healed, p.id, state.candles[p.id]);
     for (const tf of TIMEFRAMES) {
       state.candles[p.id]![tf] = all[tf] ?? [];
     }

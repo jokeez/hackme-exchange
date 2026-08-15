@@ -128,27 +128,32 @@ function bindResize(slot: Slot): void {
   requestAnimationFrame(apply);
 }
 
-function setSecondaryData(slot: Slot, candles: Candle[], fit = false): void {
+function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended = 0): void {
   if (candles.length < 2) return;
   if (!fit) rememberRange(slot);
+  if (prepended > 0 && slot.savedRange) {
+    slot.savedRange = {
+      from: ((slot.savedRange.from as number) + prepended) as LogicalRange["from"],
+      to: ((slot.savedRange.to as number) + prepended) as LogicalRange["to"],
+    };
+  }
   const cleaned = sanitizeCandleExtremes(candles);
   slot.candles = cleaned;
   slot.series.setData(candlePoints(cleaned));
   if (fit) {
     const n = cleaned.length;
     const w = slot.shell.clientWidth || 320;
-    const spacing = (() => {
-      try {
-        return slot.chart.timeScale().options().barSpacing || 8;
-      } catch {
-        return 8;
-      }
-    })();
-    const visible = Math.min(visibleBarBudget(w, spacing), n);
-    const to = n - 1 + 2;
-    const from = to - visible;
+    const spacing = barSpacingForWidth(w, slot.tf);
     try {
-      slot.chart.timeScale().setVisibleLogicalRange({ from: Math.max(-1, from), to });
+      slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: 2 });
+    } catch {
+      /* ignore */
+    }
+    const budget = visibleBarBudget(w, spacing);
+    const to = n - 1 + 4;
+    const from = to - budget;
+    try {
+      slot.chart.timeScale().setVisibleLogicalRange({ from, to });
     } catch {
       slot.chart.timeScale().fitContent();
     }
@@ -305,10 +310,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     "wheel",
     (e: WheelEvent) => {
       const overScale = overPriceScale(e.clientX, e.clientY);
-      if (!overScale) {
-        e.stopPropagation();
-        return;
-      }
+      if (!overScale) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       let dy = e.deltaY;
@@ -408,25 +410,66 @@ export function updateSecondaryChart(candles: Candle[], hostId?: string): void {
   if (candles.length < 2) return;
   const last = candles[candles.length - 1]!;
   const apply = (slot: Slot) => {
-    const prev = slot.candles[slot.candles.length - 1];
+    const prevN = slot.candles.length;
+    const prev = slot.candles[prevN - 1];
     const tfSec = TF_SEC[slot.tf] ?? 900;
-    if (!prev || last.time > prev.time + tfSec || last.time < prev.time || candles.length !== slot.candles.length) {
-      setSecondaryData(slot, candles, false);
+    const lenDelta = candles.length - prevN;
+    const wasLive =
+      slot.savedRange != null && prevN > 0 && (slot.savedRange.to as number) >= prevN - 1 - 1.5;
+
+    // Same tip bucket — series.update only
+    if (prev && last.time === prev.time && lenDelta === 0) {
+      try {
+        slot.series.update({
+          time: last.time as UTCTimestamp,
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          close: last.close,
+        });
+        slot.candles = candles;
+      } catch {
+        setSecondaryData(slot, candles, false);
+      }
       return;
     }
-    const point = {
-      time: last.time as UTCTimestamp,
-      open: last.open,
-      high: last.high,
-      low: last.low,
-      close: last.close,
-    };
-    try {
-      slot.series.update(point);
-      slot.candles = candles;
-    } catch {
-      setSecondaryData(slot, candles, false);
+
+    // Adjacent new bar (+1)
+    if (prev && last.time === prev.time + tfSec && lenDelta === 1) {
+      try {
+        slot.series.update({
+          time: last.time as UTCTimestamp,
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          close: last.close,
+        });
+        slot.candles = candles;
+        if (wasLive && slot.savedRange) {
+          const span = Math.max(1, (slot.savedRange.to as number) - (slot.savedRange.from as number));
+          const to = candles.length - 1 + 2;
+          const from = Math.max(-1, to - span);
+          const next: LogicalRange = {
+            from: from as LogicalRange["from"],
+            to: to as LogicalRange["to"],
+          };
+          slot.chart.timeScale().setVisibleLogicalRange(next);
+          slot.savedRange = next;
+        }
+      } catch {
+        setSecondaryData(slot, candles, wasLive);
+      }
+      return;
     }
+
+    // Left history prepend (tip unchanged, length grew)
+    if (prev && last.time === prev.time && lenDelta > 0) {
+      setSecondaryData(slot, candles, false, lenDelta);
+      return;
+    }
+
+    // Gap / rewind / multi-bar — full replace; follow tip if user was live
+    setSecondaryData(slot, candles, wasLive);
   };
   if (hostId) {
     const slot = slots.get(hostId);

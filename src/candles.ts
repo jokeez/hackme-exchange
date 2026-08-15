@@ -236,20 +236,34 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   return out;
 }
 
-/** Recompute all TFs from a 1m base series. */
+/** Recompute all TFs from a 1m base series.
+ * Higher TFs only cover the 1m window (~1–2 days) — pad left with synthetic
+ * history (and keep prior older bars) so 1D/1W look like a real CEX desk, not 2–4 mega-candles.
+ */
 export function deriveAllTimeframes(
   base1m: Candle[],
+  pairId?: PairId,
+  prev?: Partial<Record<Timeframe, Candle[]>>,
 ): Partial<Record<Timeframe, Candle[]>> {
   const out: Partial<Record<Timeframe, Candle[]>> = {
     [CANDLE_BASE_TF]: base1m.slice(-MAX_CANDLES),
   };
   for (const tf of TIMEFRAMES) {
     if (tf === CANDLE_BASE_TF) continue;
-    if (TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]) {
-      out[tf] = aggregateCandles(base1m, CANDLE_BASE_TF, tf);
-    } else {
-      out[tf] = expandToFinerTf(base1m, CANDLE_BASE_TF, tf);
+    let series: Candle[] =
+      TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]
+        ? aggregateCandles(base1m, CANDLE_BASE_TF, tf)
+        : expandToFinerTf(base1m, CANDLE_BASE_TF, tf);
+    const firstT = series[0]?.time;
+    if (prev?.[tf]?.length && firstT != null) {
+      const older = prev[tf]!.filter((c) => c.time < firstT);
+      if (older.length) series = [...older, ...series];
     }
+    const need = barCountForTf(tf);
+    if (pairId && series.length > 0 && series.length < need) {
+      series = prependOlderCandles(series, pairId, tf, need - series.length);
+    }
+    out[tf] = series.slice(-MAX_CANDLES);
   }
   return out;
 }
@@ -260,7 +274,7 @@ export function seedAllTimeframes(
   mid: number,
 ): Partial<Record<Timeframe, Candle[]>> {
   const base = seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF));
-  return deriveAllTimeframes(base);
+  return deriveAllTimeframes(base, pairId);
 }
 
 /** Grow history to the left — never before CHART_GENESIS_UNIX. */
@@ -453,7 +467,7 @@ export function applyMidToPairCandles(
 ): Partial<Record<Timeframe, Candle[]>> {
   const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
   const nextBase = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid);
-  return deriveAllTimeframes(nextBase);
+  return deriveAllTimeframes(nextBase, pairId, candlesByTf);
 }
 
 function finiteMid(n: number | undefined): n is number {
