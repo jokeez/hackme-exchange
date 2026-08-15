@@ -433,6 +433,17 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
   }
 }
 
+/** Drop boot-fallback history and reseed around live mid — avoids fake cliff candle. */
+export function reseedCandlesFromMarket(state: DemoState, market: MarketSnapshot): void {
+  for (const p of PAIRS) {
+    if (!state.candles[p.id]) state.candles[p.id] = {};
+    const mid = midForPair(market, p.id);
+    for (const tf of TIMEFRAMES) {
+      state.candles[p.id]![tf] = seedCandles(p.id, tf, mid, barCountForTf(tf));
+    }
+  }
+}
+
 export function pnlPct(state: DemoState, m: MarketSnapshot): number {
   const eq = walletEquityFromMarket(state.wallet, m);
   const base = state.initialEquityUsdt;

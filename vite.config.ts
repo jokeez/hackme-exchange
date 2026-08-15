@@ -1,3 +1,4 @@
+import https from "node:https";
 import { defineConfig, type Plugin } from "vite";
 
 /**
@@ -25,6 +26,15 @@ function cspPaperProdPlugin(): Plugin {
   };
 }
 
+/** Prefer IPv4 — some hosts resolve AAAA first and Node hits EHOSTUNREACH. */
+const hubHttpsAgent = new https.Agent({ family: 4, keepAlive: true });
+
+const hubProxy = {
+  target: "https://hackme.tech",
+  changeOrigin: true,
+  agent: hubHttpsAgent,
+} as const;
+
 /**
  * Dev proxies for hub/oracle same-origin reads.
  *
@@ -45,24 +55,16 @@ export default defineConfig({
     open: true,
     proxy: {
       "/pool-proxy": {
-        target: "https://hackme.tech",
-        changeOrigin: true,
+        ...hubProxy,
         rewrite: (p) => p.replace(/^\/pool-proxy/, "/pool/coordinator"),
       },
       "/hub-proxy": {
-        target: "https://hackme.tech",
-        changeOrigin: true,
+        ...hubProxy,
         rewrite: (p) => p.replace(/^\/hub-proxy/, ""),
       },
       // Root-absolute paths used by hub pages loaded via /hub-proxy (explorer-lite).
-      "/pool": {
-        target: "https://hackme.tech",
-        changeOrigin: true,
-      },
-      "/api": {
-        target: "https://hackme.tech",
-        changeOrigin: true,
-      },
+      "/pool": { ...hubProxy },
+      "/api": { ...hubProxy },
       // Optional same-origin proxy for lab cookies / CORS debugging (loopback API).
       "/exchange-api": {
         target: "http://127.0.0.1:18443",

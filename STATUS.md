@@ -55,17 +55,17 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 # → http://127.0.0.1:18443/health
 ```
 
-## QA snapshot (2026-08-15)
+## QA snapshot (2026-08-15 final gate)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **478** pass |
+| `npm test` | **480** pass |
 | `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443`, no lab fixture seed |
-| G10 visual pass | **ok** — 2026-08-14 · P0=0 (re-run before 09-10 if UI churn) |
+| G10 visual pass | **ok** — Spot/Convert/Account/Pool · desktop+mobile · **P0=0 P1=0** · oracle live + pool workers |
 | D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
 | API `go test ./...` | **ok** |
-| Red team audit v3 (2026-08-15) | **H-OCO1 + M-TOTP-R closed** · FE harness green · public edge still **HOLD** |
-| PRE_PUBLIC dry-run | **ok** loopback `PUBLIC_EDGE` — see API `docs/PRE_PUBLIC_EVIDENCE.md` |
+| PRE_PUBLIC dry-run | **ok** — `docs/PRE_PUBLIC_EVIDENCE.md` · public still **HOLD** |
+| Oracle UX | Instant boot + warm-up await + IPv4 vite proxy + sticky live mids |
 | Public edge | **HOLD** |
 
 ## Roadmap ladder

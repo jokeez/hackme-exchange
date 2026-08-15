@@ -173,6 +173,7 @@ import {
   ensureCandles,
   loadState,
   pnlPct,
+  reseedCandlesFromMarket,
   resetDemo,
   saveState,
   toggleFavorite,
@@ -4184,8 +4185,14 @@ async function refresh(): Promise<void> {
     : await Promise.all([raceMs(marketP, 2_500), raceMs(liveP, 2_500)]);
 
   if (mRes) {
-    m = mRes.market;
-    source = mRes.source;
+    // Don't let a single failed poll overwrite live mids with boot fallback (chart cliff).
+    if (mRes.source === "live" || !prevMarket || oracleMeta.source !== "live") {
+      m = mRes.market;
+      source = mRes.source;
+    } else {
+      m = prevMarket;
+      source = "live";
+    }
   } else if (!m) {
     m = localFallbackMarket(state.oracleAnchor);
     source = "fallback";
@@ -4194,14 +4201,28 @@ async function refresh(): Promise<void> {
   }
   // else keep previous live mids on a slow tick
 
-  if (liveRes) live = liveRes;
-  else if (!live || live.status === "pending") live = offlinePoolLive();
+  if (liveRes) {
+    if (liveRes.status === "ok" || !prevLive || prevLive.status !== "ok") {
+      live = liveRes;
+    } else {
+      live = prevLive;
+    }
+  } else if (!live || live.status === "pending") {
+    live = offlinePoolLive();
+  }
   // else keep previous live telemetry on a slow tick
+
+  const firstLiveAfterBoot =
+    warming && source === "live" && (oracleMeta.fetchedAt === 0 || oracleMeta.source === "fallback");
 
   market = m!;
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
-  ensureCandles(state, market);
+  if (firstLiveAfterBoot) {
+    reseedCandlesFromMarket(state, market);
+  } else {
+    ensureCandles(state, market);
+  }
   seedEquitySnapshots(state, market);
   snapshotEquity(state, market);
 
@@ -4216,10 +4237,12 @@ async function refresh(): Promise<void> {
     tk.volume24hBase = s.vol;
     tickers[p.id] = tk;
     const mid = midForPair(market, p.id);
-    const prev = prevMids[p.id];
+    const prev = firstLiveAfterBoot ? undefined : prevMids[p.id];
     for (const tf of TIMEFRAMES) {
       const arr = state.candles[p.id]?.[tf] ?? [];
-      state.candles[p.id]![tf] = upsertTick(arr, tf, mid, p.id, prev);
+      state.candles[p.id]![tf] = firstLiveAfterBoot
+        ? arr
+        : upsertTick(arr, tf, mid, p.id, prev);
     }
     prevMids[p.id] = mid;
   }
@@ -4260,6 +4283,11 @@ export async function boot(): Promise<void> {
   render();
   try {
     await refresh();
+    // One soft retry — first paint / aborted navigations can miss a healthy proxy.
+    if (oracleMeta.source !== "live" || poolLive?.status !== "ok") {
+      await new Promise((r) => window.setTimeout(r, 400));
+      await refresh();
+    }
   } catch (err) {
     console.warn("[hackme-exchange] initial oracle sync failed — using fallback", err);
     if (!market || !poolLive || poolLive.status === "pending") {
@@ -4272,14 +4300,15 @@ export async function boot(): Promise<void> {
     }
   }
   if (!isHubEmbed()) {
-    toast(
-      oracleMeta.source === "live"
-        ? isPaperMode()
-          ? "Paper mode · pool oracle connected"
-          : "Pool oracle connected"
-        : "Pool oracle offline — local fallback mids",
-      oracleMeta.source === "live" ? "ok" : "info",
-    );
+    // Don't claim "offline" while still pending / first paint — only after confirmed miss.
+    if (oracleMeta.source === "live" && oracleMeta.poolStatus === "ok") {
+      toast(
+        isPaperMode() ? "Paper mode · pool oracle connected" : "Pool oracle connected",
+        "ok",
+      );
+    } else if (oracleMeta.poolStatus === "offline") {
+      toast("Pool oracle offline — local fallback mids", "info");
+    }
   }
   maybeShowTour();
   void refreshTradingGuardsFromHealth();
