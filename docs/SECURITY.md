@@ -1,8 +1,10 @@
 # Security Model — Exchange Demo → Production
 
-> Phase 2 hosting / lab / full threat model (canonical):  
-> `hackme-exchange-api/docs/` — [`THREAT_MODEL.md`](../../hackme-exchange-api/docs/THREAT_MODEL.md), [`HOSTING.md`](../../hackme-exchange-api/docs/HOSTING.md), [`PRIVATE_LAB.md`](../../hackme-exchange-api/docs/PRIVATE_LAB.md).  
-> This file stays the **demo SPA** checklist + production principles.
+> Canonical API threat model / hosting / lab ops:  
+> [THREAT_MODEL](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/THREAT_MODEL.md) ·
+> [HOSTING](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/HOSTING.md) ·
+> [PRIVATE_LAB](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRIVATE_LAB.md)  
+> This file is the **demo SPA** checklist + production principles.
 
 ## Demo (current) — threat model
 

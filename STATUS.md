@@ -5,6 +5,14 @@
 **Soft-public target:** **D0 Paper · 2026-09-15** (`exchange.hackme.tech` static).  
 **Go / no-go:** **2026-09-10**.
 
+## Ecosystem
+
+| Project | Link |
+|---------|------|
+| HackMe hub | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
+| Exchange SPA | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
+| Exchange API | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
+
 ## Messaging (locked)
 
 Own HMC market — **not** a third-party listing claim:
@@ -15,7 +23,7 @@ Own HMC market — **not** a third-party listing claim:
 | **Soft** | Static paper UI ~mid-September — **no** public matching API |
 | **Live deposits / foreign CEX** | Only after custody + security gates |
 
-Pool: useful-PoW live → [https://hackme.tech/](https://hackme.tech/)  
+Pool: useful-PoW live → [hackme.tech](https://hackme.tech/)  
 No ROI promises. No fake “Tier-1 tomorrow.”
 
 ## Modes
@@ -23,8 +31,8 @@ No ROI promises. No fake “Tier-1 tomorrow.”
 | Mode | Meaning |
 |------|---------|
 | **paper** (default) | localStorage balances · oracle mids — **not** real custody |
-| **lab** | Loopback `exchange-api` (`127.0.0.1:18443`) — real matching DB, still **not** public |
-| **live** | **Blocked** in the SPA until an explicit public go-live |
+| **lab** | Loopback `exchange-api` (`127.0.0.1:18443`) — still **not** public |
+| **live** | **Blocked** until an explicit public go-live |
 
 ## Locked decisions
 
@@ -34,7 +42,7 @@ No ROI promises. No fake “Tier-1 tomorrow.”
 | D0 | Static SPA + this STATUS — **no** public API/custody |
 | D1 DB | **Postgres** (lab SQLite stays private) |
 | Live mode | Blocked until explicit go-live |
-| Repos | Split: `hackme-exchange` + `hackme-exchange-api` (private) |
+| Repos | Split: SPA + API (not merged into HackMe hub) |
 
 ## What this is NOT
 
@@ -55,20 +63,18 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 # → http://127.0.0.1:18443/health
 ```
 
-## QA snapshot (2026-08-15 final gate)
+## QA snapshot (2026-08-15)
 
 | Gate | Result |
 |------|--------|
 | `npm test` | **486** pass |
-| `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443`, no lab fixture seed |
-| G10 visual pass | **ok** — Spot/Convert/Account/Pool · desktop+mobile · **P0=0 P1=0** · oracle live + pool workers |
-| D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
+| `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443` |
+| G10 visual pass | **ok** — P0=0 P1=0 · oracle live |
 | API `go test ./...` | **ok** |
-| PRE_PUBLIC dry-run | **ok** — `docs/PRE_PUBLIC_EVIDENCE.md` · public still **HOLD** |
-| Oracle UX | Instant boot + buffered hub proxy (retry) + pool-only live if work/stats flakes |
+| PRE_PUBLIC dry-run | **ok** · public still **HOLD** |
 | Public edge | **HOLD** |
 
-## Roadmap ladder
+## Roadmap
 
 | Gate | Date | Public |
 |------|------|--------|
@@ -80,11 +86,10 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 ## Docs
 
 - [`docs/D0_CHECKLIST.md`](docs/D0_CHECKLIST.md) — Sep 10 go/no-go  
-- [`docs/PRE_PUBLIC_CHECKLIST.md`](docs/PRE_PUBLIC_CHECKLIST.md) — mirror; full detail in API repo  
 - [`docs/SCOPE.md`](docs/SCOPE.md) — boundaries  
-- [`docs/TG_POST_DRAFT.md`](docs/TG_POST_DRAFT.md) — draft only  
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup and PR notes  
+- [API PRE_PUBLIC checklist](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRE_PUBLIC_CHECKLIST.md)  
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
-## Contact / incidents
+## Contact
 
 Private lab — HackMe ops channel. No public withdrawal support until D1.

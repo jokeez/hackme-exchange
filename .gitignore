@@ -30,6 +30,8 @@ coverage/
 .vitest/
 SECURITY-REDTEAM-REPORT.html
 *.html.bak
+docs/.local/
+/tmp/
 
 # Playwright / caches
 test-results/

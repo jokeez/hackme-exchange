@@ -4,9 +4,9 @@
 
 | Location | What belongs here |
 |----------|-------------------|
-| **`~/Desktop/hackme-exchange-demo/`** | Exchange UI (Spot / Convert / Account), adapters, tests, docs |
-| **`~/Desktop/hackme-exchange-api/`** | Private loopback matching API (orders, cancel, convert, custody stubs) |
-| **`~/Desktop/HackMe/`** (hub) | Node, pool, dashboard — Exchange is a **sidecar tab** (iframe), not merged product code |
+| **[hackme-exchange](https://github.com/jokeez/hackme-exchange)** (this SPA) | Spot / Convert / Account / Pool UI, adapters, tests |
+| **[hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api)** | Private loopback matching API |
+| **[hackme](https://github.com/jokeez/hackme)** hub | Node, pool, dashboard — Exchange is a **sidecar tab** (iframe), not merged product code |
 
 **Do not merge** the TS SPA into the HackMe git tree. Hub may host `#exchange` iframe + `#wallet` deep links only.
 

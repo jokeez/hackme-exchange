@@ -1,14 +1,14 @@
 # HackMe Exchange — Future Architecture
 
-> **Plan document only.** Nothing here is implemented in the main HackMe repo.  
-> All exchange work stays in `hackme-exchange-demo/` until Phase 2 is explicitly started.  
+> **Plan document only.** Nothing here is implemented in the main [HackMe](https://github.com/jokeez/hackme) repo.  
+> Exchange work stays in [hackme-exchange](https://github.com/jokeez/hackme-exchange) + [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api).  
 > See [`SCOPE.md`](SCOPE.md).
 
 ## Current state (demo)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  hackme-exchange-demo (Vite SPA, static dist/)              │
+│  hackme-exchange (Vite SPA, static dist/)                   │
 │  • UI: spot terminal, charts, orders                        │
 │  • Balances: localStorage (paper USDT/BTC + optional sync)  │
 │  • Oracle: GET hackme.tech/pool/coordinator + /api/sup/...  │
@@ -19,11 +19,11 @@
 │ hackme.tech (nginx)       │    │ hackme-node :8080          │
 │ • static site             │    │ dashboard.html #wallet     │
 │ • public GET APIs         │    │ POST /api/tx/send (HMC)    │
-│ • coordinator :18081      │    │ POST /api/sup/tx/send      │
+│ • pool coordinator        │    │ POST /api/sup/tx/send      │
 └───────────────────────────┘    └────────────────────────────┘
 ```
 
-**No matching engine, no custodial backend, no on-chain settlement for trades yet.**
+**No public matching engine / custodial backend on the edge yet.** Lab matching is private loopback API only.
 
 ---
 

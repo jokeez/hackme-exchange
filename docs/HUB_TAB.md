@@ -8,7 +8,7 @@ Thin integration: HackMe node dashboard (`http://127.0.0.1:8080/#exchange`) embe
 Hub :8080  --tab Exchange-->  iframe  :5199/?embed=hub  -->  API :18443
 ```
 
-- SPA code stays in `hackme-exchange-demo` (not inside the HackMe git tree).
+- SPA code stays in [hackme-exchange](https://github.com/jokeez/hackme-exchange) (not inside the HackMe git tree).
 - Hub tab is **Exchange**, not Market (`#orders` = useful-PoW/fuzz market; HMS Market = storage).
 - Node Wallet remains `#wallet` (hub chrome + SPA System → Hub wallet via `postMessage`).
 
@@ -26,9 +26,9 @@ With `?embed=hub` (or nested iframe):
 
 ## Requirements
 
-1. `hackme-exchange-demo` on `127.0.0.1:5199`
-2. `hackme-exchange-api` on `127.0.0.1:18443`
-3. Hub node with rebuilt `dashboard.html` on `:8080`
+1. [hackme-exchange](https://github.com/jokeez/hackme-exchange) on `127.0.0.1:5199`
+2. [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) on `127.0.0.1:18443`
+3. Hub node ([hackme](https://github.com/jokeez/hackme)) with rebuilt `dashboard.html` on `:8080`
 
 ## CSP
 
