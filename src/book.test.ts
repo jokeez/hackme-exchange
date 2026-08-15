@@ -82,4 +82,15 @@ describe("matchMarket", () => {
     expect(Number.isFinite(res.avgPrice)).toBe(true);
     expect(Number.isFinite(res.slippageBps)).toBe(true);
   });
+
+  it("walks lab book override instead of synthetic ladder", () => {
+    const tk = sampleTicker({ mid: 1, bid: 0.99, ask: 1.01 });
+    const lab = {
+      bids: [{ price: 0.95, amountBase: 1000, totalQuote: 950 }],
+      asks: [{ price: 1.1, amountBase: 50, totalQuote: 55 }],
+    };
+    const res = matchMarket(tk, "buy", 40, lab);
+    expect(res.avgPrice).toBeCloseTo(1.1, 8);
+    expect(res.quote).toBeCloseTo(44, 8);
+  });
 });

@@ -41,12 +41,19 @@ export function renderDepthSvgSized(bids: BookLevel[], asks: BookLevel[], width:
   </svg>`;
 }
 
-export function renderDepthPanel(bids: BookLevel[], asks: BookLevel[], base: string, quote: string): string {
+export function renderDepthPanel(
+  bids: BookLevel[],
+  asks: BookLevel[],
+  base: string,
+  quote: string,
+  opts?: { labLive?: boolean },
+): string {
+  const labLive = !!opts?.labLive;
   if (!bids.length && !asks.length) {
     return `
   <div class="depth-panel depth-empty">
     <p class="empty-title">No depth</p>
-    <p class="muted small">Waiting for oracle mid to build the book.</p>
+    <p class="muted small">${labLive ? "Waiting for lab book depth…" : "Waiting for oracle mid to build the book."}</p>
   </div>`;
   }
   let bidCum = 0;
@@ -60,6 +67,9 @@ export function renderDepthPanel(bids: BookLevel[], asks: BookLevel[], base: str
     return { ...a, cum: askCum };
   });
   const maxCum = Math.max(bidCum, askCum, 1);
+  const note = labLive
+    ? `Cumulative market depth · ${base}/${quote} · lab matching L2`
+    : `Cumulative market depth · ${base}/${quote} · demo liquidity from pool oracle`;
 
   return `
   <div class="depth-panel">
@@ -71,7 +81,7 @@ export function renderDepthPanel(bids: BookLevel[], asks: BookLevel[], base: str
           .slice()
           .reverse()
           .map(
-            (r) => `<div class="depth-row bid">
+            (r) => `<div class="depth-row bid" data-book-price="${r.price}" data-book-side="bid" role="button">
               <div class="depth-bar" style="width:${(r.cum / maxCum) * 100}%"></div>
               <span>${formatPrice(r.price)}</span>
               <span>${formatNum(r.amountBase, 0)}</span>
@@ -84,7 +94,7 @@ export function renderDepthPanel(bids: BookLevel[], asks: BookLevel[], base: str
         <div class="depth-head"><span>Asks</span><span>Cum ${base}</span></div>
         ${askRows
           .map(
-            (r) => `<div class="depth-row ask">
+            (r) => `<div class="depth-row ask" data-book-price="${r.price}" data-book-side="ask" role="button">
               <div class="depth-bar" style="width:${(r.cum / maxCum) * 100}%"></div>
               <span>${formatPrice(r.price)}</span>
               <span>${formatNum(r.amountBase, 0)}</span>
@@ -94,6 +104,6 @@ export function renderDepthPanel(bids: BookLevel[], asks: BookLevel[], base: str
           .join("")}
       </div>
     </div>
-    <p class="muted small depth-note">Cumulative market depth · ${base}/${quote} · demo liquidity from pool oracle</p>
+    <p class="muted small depth-note">${note}</p>
   </div>`;
 }

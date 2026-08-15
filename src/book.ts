@@ -65,6 +65,7 @@ export function matchMarket(
   ticker: Ticker,
   side: "buy" | "sell",
   amountBase: number,
+  bookOverride?: { bids: BookLevel[]; asks: BookLevel[] } | null,
 ): { avgPrice: number; quote: number; slippageBps: number } {
   if (!Number.isFinite(amountBase) || amountBase <= 0) {
     return { avgPrice: Number.isFinite(ticker.mid) ? ticker.mid : 0, quote: 0, slippageBps: 0 };
@@ -72,7 +73,7 @@ export function matchMarket(
   if (!Number.isFinite(ticker.mid) || ticker.mid <= 0) {
     return { avgPrice: 0, quote: 0, slippageBps: 0 };
   }
-  const { bids, asks } = buildOrderBook(ticker, 18);
+  const { bids, asks } = bookOverride ?? buildOrderBook(ticker, 18);
   const book = side === "buy" ? asks : bids;
   let left = amountBase;
   let quote = 0;

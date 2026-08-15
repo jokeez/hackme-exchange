@@ -4,7 +4,13 @@ import { validateLabWithdrawDestination } from "./labCustody";
 import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
 import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
-import { stats24h, applyMidToPairCandles } from "./candles";
+import {
+  applyMidToPairCandles,
+  CANDLE_BASE_TF,
+  deriveAllTimeframes,
+  prependOlderCandles,
+  stats24h,
+} from "./candles";
 import {
   applyOverlays,
   chartScreenshot,
@@ -126,7 +132,6 @@ import {
   volume30dUsdt,
 } from "./fees";
 import { executeFill } from "./execution";
-import { prependOlderCandles } from "./candles";
 import {
   showChartStyleModal,
   showGoToDateModal,
@@ -137,6 +142,7 @@ import {
 import {
   readOrderForm,
   renderDualOrderPanel,
+  applyRestingLimitPrices,
   setFormPrice,
   setOrderMsg,
   setOrderPreview,
@@ -158,7 +164,7 @@ import {
   pctTone,
   tickerFromMarket,
 } from "./market";
-import { orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
+import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { LANES, PAIRS, pairById } from "./pairs";
 import {
   seedEquitySnapshots,
@@ -202,7 +208,7 @@ import type {
   TimeInForce,
   Wallet,
 } from "./types";
-import { QUICK_TFS, TIMEFRAMES } from "./types";
+import { QUICK_TFS, TIMEFRAMES, TF_SEC } from "./types";
 
 let state = loadState();
 let theme: ThemeId = loadTheme();
@@ -338,6 +344,7 @@ function applyHashToState(): void {
 }
 
 function ensurePublicTape(force = false): void {
+  if (useLabMatching()) return;
   const tk = tickers[state.activePair] ?? (market ? tickerFromMarket(market, state.activePair) : null);
   if (!tk) return;
   if (force || !publicTape.some((t) => t.pairId === state.activePair)) {
@@ -637,12 +644,9 @@ function renderMarketsList(): string {
 }
 
 function bookGroupStep(): number {
-  const pair = pairById(state.activePair);
+  // Auto (0) = raw L2 levels — do not invent a bucket size (wrong click prices).
   if (state.bookGrouping > 0) return state.bookGrouping;
-  if (pair.quote === "BTC") return 1e-10;
-  if (pair.id === "SUP_USDT") return 0.00000001;
-  if (pair.id === "HMC_USDT") return 0.00000001;
-  return 0.0001;
+  return 0;
 }
 
 function renderVolumeRatio(): string {
@@ -665,28 +669,34 @@ function renderVolumeRatio(): string {
 function renderBook(): string {
   const t = activeTicker();
   const group = bookGroupStep();
-  const lab = useLabMatching() ? getLabBookCache(state.activePair) : null;
-  const raw = lab
-    ? { bids: lab.bids, asks: lab.asks }
+  const labLive = useLabMatching();
+  const lab = labLive ? getLabBookCache(state.activePair) : null;
+  // Lab mode must never fall back to synthetic oracle book — empty until L2 arrives.
+  const raw = labLive
+    ? lab
+      ? { bids: lab.bids, asks: lab.asks }
+      : { bids: [], asks: [] }
     : buildOrderBook(t, 24, { phase: bookPhase });
   const bids = aggregateBookLevels(raw.bids, group, "bid");
   const asks = aggregateBookLevels(raw.asks, group, "ask");
   const pair = pairById(state.activePair);
   const bookView = state.bookView;
   if (!bids.length && !asks.length) {
-    const emptyHint = lab
-      ? "Lab book empty — place a limit or wait for resting depth"
+    const emptyHint = labLive
+      ? lab
+        ? "Lab book empty — place a limit or wait for resting depth"
+        : "Loading lab book…"
       : "Waiting for oracle mid…";
     return `<div class="book-view-tabs segmented">
       <button type="button" class="bv ${bookView !== "depth" ? "active" : ""}" data-bv="book">Book</button>
       <button type="button" class="bv ${bookView === "depth" ? "active" : ""}" data-bv="depth">Depth</button>
-    </div><div class="markets-empty"><p class="empty-title">${lab ? "Lab book empty" : "Order book unavailable"}</p><p class="muted small">${emptyHint}</p></div>`;
+    </div><div class="markets-empty"><p class="empty-title">${labLive ? (lab ? "Lab book empty" : "Loading lab book") : "Order book unavailable"}</p><p class="muted small">${emptyHint}</p></div>`;
   }
   if (bookView === "depth") {
     return `<div class="book-view-tabs segmented">
       <button type="button" class="bv" data-bv="book">Book</button>
       <button type="button" class="bv active" data-bv="depth">Depth</button>
-    </div>${renderVolumeRatio()}${renderDepthPanel(bids, asks, pair.base, pair.quote)}`;
+    </div>${renderVolumeRatio()}${renderDepthPanel(bids, asks, pair.base, pair.quote, { labLive })}`;
   }
   const max = Math.max(...bids.map((b) => b.amountBase), ...asks.map((a) => a.amountBase), 1);
   const row = (l: (typeof bids)[0], side: "bid" | "ask") => {
@@ -728,16 +738,18 @@ function renderBook(): string {
 
 function renderTape(): string {
   ensurePublicTape();
-  const rows = mergeTapeRows(state.trades, publicTape, state.activePair, 18);
+  const rows = useLabMatching()
+    ? mergeTapeRows(state.trades, [], state.activePair, 18)
+    : mergeTapeRows(state.trades, publicTape, state.activePair, 18);
   if (!rows.length) {
     return `<div class="tape-empty">
       <p class="empty-title">No trades yet</p>
-      <p class="muted small">Synthetic tape fills in as the oracle ticks.</p>
+      <p class="muted small">${useLabMatching() ? "Lab fills will appear here." : "Synthetic tape fills in as the oracle ticks."}</p>
     </div>`;
   }
   return rows
     .map(
-      (t) => `<div class="tape-row ${t.synthetic ? "syn" : "you"}" title="${t.synthetic ? "Synthetic public tape (simulated)" : "Your paper fill"}">
+      (t) => `<div class="tape-row ${t.synthetic ? "syn" : "you"}" title="${t.synthetic ? "Synthetic public tape (simulated)" : useLabMatching() ? "Your lab fill" : "Your paper fill"}">
         <span class="${t.side === "buy" ? "up" : "down"}">${formatPrice(t.price)}</span>
         <span class="mono">${formatNum(t.amountBase, 2)}</span>
         <span class="role-badge sm ${t.synthetic ? "syn-badge" : t.feeRole}">${t.synthetic ? "SYN" : t.feeRole === "maker" ? "M" : "T"}</span>
@@ -2619,15 +2631,31 @@ function mountChartPanel(): void {
       if (!market) return 0;
       const pair = state.activePair;
       const tf = state.activeTf;
-      const arr = state.candles[pair]?.[tf] ?? [];
-      const before = arr.length;
-      const next = prependOlderCandles(arr, pair, tf, bars);
+      const before = (state.candles[pair]?.[tf] ?? []).length;
+      const base = state.candles[pair]?.[CANDLE_BASE_TF] ?? [];
+      const baseBars = Math.max(
+        1,
+        Math.ceil(bars * (TF_SEC[tf] / TF_SEC[CANDLE_BASE_TF])),
+      );
+      const nextBase = prependOlderCandles(base, pair, CANDLE_BASE_TF, baseBars);
+      const addedBase = nextBase.length - base.length;
+      if (addedBase <= 0) return 0;
+      const all = deriveAllTimeframes(nextBase);
+      state.candles[pair] = all;
+      saveState(state);
+      const next = all[tf] ?? [];
       const added = next.length - before;
       if (added <= 0) return 0;
-      state.candles[pair]![tf] = next;
-      saveState(state);
       const refreshed = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
       setCandleData(next, refreshed, { preserveLogicalRange: true, prepended: added });
+      if (state.multiChartLayout !== "1") {
+        const n = state.multiChartLayout === "4" ? 4 : 2;
+        for (let i = 2; i <= n; i++) {
+          const ptf = paneTf(i);
+          const c2 = all[ptf] ?? [];
+          if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
+        }
+      }
       return added;
     },
   };
@@ -2781,7 +2809,9 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
   if (form.amt <= 0) { setOrderPreview(side, ""); return; }
   if (uiType === "limit" || uiType === "stop_limit") {
     const total = form.amt * form.price;
-    const role = previewFeeRole(uiType);
+    const mid = spotTradeMid();
+    const role =
+      uiType === "limit" && isMarketableLimit(side, form.price, mid) ? "taker" : previewFeeRole(uiType);
     const fee = calcFee(state, market, state.activePair, total, role);
     setOrderPreview(side, `${formatNum(form.amt, 0)} @ ${formatPriceCompact(form.price)} · ${previewFeeLabel(fee, pair.quote)}`);
     return;
@@ -2792,6 +2822,17 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
   }
   if (uiType === "oco") {
     setOrderPreview(side, `OCO TP ${formatPriceCompact(form.tp)} · SL ${formatPriceCompact(form.stop)}`);
+    return;
+  }
+  if (useLabMatching()) {
+    const lab = getLabBookCache(state.activePair);
+    if (!lab || (!lab.bids.length && !lab.asks.length)) {
+      setOrderPreview(side, "Waiting for lab book…");
+      return;
+    }
+    const m = matchMarket(t, side, form.amt, lab);
+    const fee = calcFee(state, market, state.activePair, m.quote, "taker");
+    setOrderPreview(side, `≈ ${formatPriceCompact(m.avgPrice)} · ${formatNum(m.quote, 4)} ${pair.quote} · ${previewFeeLabel(fee, pair.quote)}`);
     return;
   }
   const m = matchMarket(t, side, form.amt);
@@ -3731,18 +3772,27 @@ function wireEvents(): void {
 
   document.querySelectorAll("#type-tabs .type").forEach((btn) => {
     btn.addEventListener("click", () => {
-      uiType = (btn as HTMLElement).dataset.type as OrderKind;
+      const next = (btn as HTMLElement).dataset.type as OrderKind;
+      const prev = uiType;
+      uiType = next;
       syncOrderTypeTabs(uiType);
       toggleOrderFields();
+      if ((next === "limit" || next === "stop_limit") && prev !== next) {
+        applyRestingLimitPrices(spotTradeMid(), state.activePair);
+      }
       updatePreview();
     });
   });
   document.getElementById("order-type-adv")?.addEventListener("change", (e) => {
     const v = (e.target as HTMLSelectElement).value as OrderKind;
     if (!v) return;
+    const prev = uiType;
     uiType = v;
     syncOrderTypeTabs(uiType);
     toggleOrderFields();
+    if ((v === "limit" || v === "stop_limit") && prev !== v) {
+      applyRestingLimitPrices(spotTradeMid(), state.activePair);
+    }
     updatePreview();
   });
 
@@ -3818,11 +3868,17 @@ function wireEvents(): void {
     btn.addEventListener("click", () => {
       const side = (btn as HTMLElement).dataset.bbo as "buy" | "sell";
       const t = activeTicker();
-      const lab = useLabMatching() ? getLabBookCache(state.activePair) : null;
+      const labLive = useLabMatching();
+      const lab = labLive ? getLabBookCache(state.activePair) : null;
+      if (labLive && (!lab || (!lab.bids.length && !lab.asks.length))) {
+        toast("Lab book not ready", "warn");
+        return;
+      }
       const ask = lab?.asks[0]?.price || t.ask;
       const bid = lab?.bids[0]?.price || t.bid;
+      // Resting BBO: buy→bid, sell→ask (does not instantly cross).
       const inp = document.getElementById(`${side}-price`) as HTMLInputElement;
-      if (inp) inp.value = tickInputValue(side === "buy" ? ask : bid, state.activePair);
+      if (inp) inp.value = tickInputValue(side === "buy" ? bid : ask, state.activePair);
       updatePreviewForSide(side);
     });
   });
@@ -4115,7 +4171,7 @@ function microTickPrices(): void {
     if (tickers[p.id]) tickers[p.id] = { ...tickers[p.id]!, mid: blend, bid: blend * 0.9995, ask: blend * 1.0005 };
     changed = true;
   }
-  if (Math.random() < 0.55) {
+  if (!useLabMatching() && Math.random() < 0.55) {
     publicTape = appendSyntheticTrade(publicTape, activeTicker());
   }
   // Match resting paper orders against live blended mids every ~1.4s.
@@ -4135,6 +4191,14 @@ function microTickPrices(): void {
     chartNeedsFullReplace = false;
   } else if (!updateLastCandle(last, opts)) {
     setCandleData(candles, opts, { preserveLogicalRange: true });
+  }
+  if (state.multiChartLayout !== "1") {
+    const n = state.multiChartLayout === "4" ? 4 : 2;
+    for (let i = 2; i <= n; i++) {
+      const tf = paneTf(i);
+      const c2 = state.candles[state.activePair]?.[tf] ?? [];
+      if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
+    }
   }
   const mid = useLabMatching()
     ? spotTradeMid()

@@ -27,6 +27,7 @@ import { chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
 import { computeMeasureStats, isMeaningfulMeasure, resolvePaintDrawings } from "./chartDraw";
+import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 
 const SCHEMES = {
@@ -1600,6 +1601,7 @@ export function setCandleData(
   lastOpts = mergeMountOpts(lastOpts, opts);
   syncDrawingsStore(lastOpts.drawings);
   const prevRange = flags?.preserveLogicalRange ? chart.timeScale().getVisibleLogicalRange() : null;
+  const prevN = currentCandles.length;
   const sorted = [...candles].sort((a, b) => a.time - b.time);
   rawCandlesCache = [];
   for (const c of sorted) {
@@ -1607,6 +1609,7 @@ export function setCandleData(
     if (last && last.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
     else rawCandlesCache.push(c);
   }
+  if (rawCandlesCache.length > MAX_CANDLES) rawCandlesCache = rawCandlesCache.slice(-MAX_CANDLES);
   currentCandles = prepCandles(rawCandlesCache, opts.mode, opts.tf);
   if (currentCandles.length < 2) {
     candleSeries.setData([]);
@@ -1660,12 +1663,32 @@ export function setCandleData(
 
   if (flags?.preserveLogicalRange && prevRange) {
     const shift = flags.prepended ?? 0;
-    chart.timeScale().setVisibleLogicalRange({
-      from: prevRange.from + shift,
-      to: prevRange.to + shift,
-    });
+    const n = currentCandles.length;
+    let from = prevRange.from + shift;
+    let to = prevRange.to + shift;
+    const span = Math.max(1, prevRange.to - prevRange.from);
+    const wasLive = prevN > 0 && prevRange.to >= prevN - 1 - 1.5;
+    const rightGrowth = n > prevN && shift === 0;
+    if (rightGrowth && wasLive) {
+      anchorToLatestCandle();
+    } else {
+      const maxTo = n - 1 + 3;
+      if (to > maxTo || from > n - 1) {
+        to = Math.min(to, maxTo);
+        from = to - span;
+      }
+      if (from < -1) {
+        to += -1 - from;
+        from = -1;
+      }
+      try {
+        chart.timeScale().setVisibleLogicalRange({ from, to });
+      } catch {
+        anchorToLatestCandle();
+      }
+    }
   } else if (flags?.scrollToLive) {
-    chart.timeScale().scrollToRealTime();
+    anchorToLatestCandle();
   }
 }
 
@@ -1678,8 +1701,10 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   if (lastRaw && c.time > lastRaw.time + tfSec) return false;
 
   if (lastRaw && lastRaw.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
-  else if (!lastRaw || c.time > lastRaw.time) rawCandlesCache.push(c);
-  else return false;
+  else if (!lastRaw || c.time > lastRaw.time) {
+    rawCandlesCache.push(c);
+    if (rawCandlesCache.length > MAX_CANDLES) rawCandlesCache = rawCandlesCache.slice(-MAX_CANDLES);
+  } else return false;
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
   currentCandles = prepCandles(rawCandlesCache, mode, tf);

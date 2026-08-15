@@ -62,8 +62,8 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
   } = ctx;
   const midTick = tickInputValue(mid, pairId);
   /** Slightly off mid so default Limit rests on the book (shows under Open orders). Market still fills instantly. */
-  const buyLimitTick = tickInputValue(mid * 0.9985, pairId);
-  const sellLimitTick = tickInputValue(mid * 1.0015, pairId);
+  const buyLimitTick = restingLimitPrice(mid, "buy", pairId);
+  const sellLimitTick = restingLimitPrice(mid, "sell", pairId);
   const showTpsl = uiType === "market" || uiType === "limit";
   const advanced = isAdvancedOrderType(uiType);
   const mmBadge = labMmSeeded
@@ -240,6 +240,18 @@ export function setOrderMsg(side: "buy" | "sell", text: string, kind: "ok" | "er
 export function setFormPrice(side: "buy" | "sell", price: number, pairId: PairId): void {
   const inp = document.getElementById(`${side}-price`) as HTMLInputElement | null;
   if (inp) inp.value = tickInputValue(price, pairId);
+}
+
+/** Resting limit defaults — slightly off mid so GTC does not instantly take. */
+export function restingLimitPrice(mid: number, side: "buy" | "sell", pairId: PairId): string {
+  return tickInputValue(mid * (side === "buy" ? 0.9985 : 1.0015), pairId);
+}
+
+/** Apply resting limit prices into both side inputs (Market → Limit type switch). */
+export function applyRestingLimitPrices(mid: number, pairId: PairId): void {
+  if (!(mid > 0)) return;
+  setFormPrice("buy", mid * 0.9985, pairId);
+  setFormPrice("sell", mid * 1.0015, pairId);
 }
 
 export function syncPctMarks(side: "buy" | "sell"): void {

@@ -4,6 +4,7 @@ import {
   applyMidToPairCandles,
   CANDLE_BASE_TF,
   deriveAllTimeframes,
+  prependOlderCandles,
   seedAllTimeframes,
   seedCandles,
 } from "./candles";
@@ -65,5 +66,17 @@ describe("multi-TF aggregation (one market)", () => {
     const max = Math.max(...closes);
     const min = Math.min(...closes);
     expect((max - min) / min).toBeLessThan(1e-9);
+  });
+
+  it("prepend on 1m then derive keeps higher-TF history + tip", () => {
+    const mid = 0.0005;
+    let all = seedAllTimeframes("HMC_USDT", mid);
+    const before5 = all["5m"]!.length;
+    const tipBefore = all["5m"]![all["5m"]!.length - 1]!.close;
+    const nextBase = prependOlderCandles(all[CANDLE_BASE_TF]!, "HMC_USDT", CANDLE_BASE_TF, 120);
+    expect(nextBase.length).toBeGreaterThan(all[CANDLE_BASE_TF]!.length);
+    all = deriveAllTimeframes(nextBase);
+    expect(all["5m"]!.length).toBeGreaterThan(before5);
+    expect(all["5m"]![all["5m"]!.length - 1]!.close).toBeCloseTo(tipBefore, 8);
   });
 });

@@ -25,6 +25,18 @@ describe("depth", () => {
     expect(html).toContain("Bids");
     expect(html).toContain("Asks");
     expect(html).toContain("HMC/USDT");
+    expect(html).toContain("pool oracle");
+  });
+
+  it("renderDepthPanel lab note when labLive", () => {
+    const html = renderDepthPanel(bids, asks, "HMC", "USDT", { labLive: true });
+    expect(html).toContain("lab matching L2");
+    expect(html).not.toContain("pool oracle");
+  });
+
+  it("empty lab depth copy", () => {
+    const html = renderDepthPanel([], [], "HMC", "USDT", { labLive: true });
+    expect(html).toContain("lab book");
   });
 
   it("empty books still produce svg", () => {

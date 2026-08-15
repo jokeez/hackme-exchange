@@ -7,7 +7,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Timeframe } from "./types";
-import { TIMEFRAMES } from "./types";
+import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartPriceFormatter } from "./format";
 import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 import { barSpacingForWidth, clampVisiblePriceRange, priceRangeNeedsHeal, visibleBarBudget, wheelZoomStep, zoomPriceRange } from "./chart";
@@ -65,8 +65,24 @@ function rememberRange(slot: Slot): void {
 
 function restoreRange(slot: Slot): void {
   if (!slot.savedRange) return;
+  const n = slot.candles.length;
+  if (n < 2) return;
   try {
-    slot.chart.timeScale().setVisibleLogicalRange(slot.savedRange);
+    let from = slot.savedRange.from as number;
+    let to = slot.savedRange.to as number;
+    const span = Math.max(1, to - from);
+    const maxTo = n - 1 + 2;
+    if (to > maxTo || from > n - 1) {
+      to = Math.min(to, maxTo);
+      from = to - span;
+    }
+    if (from < -1) {
+      to += -1 - from;
+      from = -1;
+    }
+    const next: LogicalRange = { from: from as LogicalRange["from"], to: to as LogicalRange["to"] };
+    slot.chart.timeScale().setVisibleLogicalRange(next);
+    slot.savedRange = next;
   } catch {
     /* ignore */
   }
@@ -390,17 +406,24 @@ export function destroySecondaryChart(): void {
 
 export function updateSecondaryChart(candles: Candle[], hostId?: string): void {
   if (candles.length < 2) return;
-  const last = candles[candles.length - 1];
-  const point = {
-    time: last.time as UTCTimestamp,
-    open: last.open,
-    high: last.high,
-    low: last.low,
-    close: last.close,
-  };
+  const last = candles[candles.length - 1]!;
   const apply = (slot: Slot) => {
+    const prev = slot.candles[slot.candles.length - 1];
+    const tfSec = TF_SEC[slot.tf] ?? 900;
+    if (!prev || last.time > prev.time + tfSec || last.time < prev.time || candles.length !== slot.candles.length) {
+      setSecondaryData(slot, candles, false);
+      return;
+    }
+    const point = {
+      time: last.time as UTCTimestamp,
+      open: last.open,
+      high: last.high,
+      low: last.low,
+      close: last.close,
+    };
     try {
       slot.series.update(point);
+      slot.candles = candles;
     } catch {
       setSecondaryData(slot, candles, false);
     }
