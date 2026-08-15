@@ -1,6 +1,12 @@
 import type { Candle, PairId, Timeframe } from "./types";
 import { TF_SEC } from "./types";
-import { clampTickMid, clipBarWicks, sanitizeCandleExtremes } from "./chartScale";
+import {
+  clampTickMid,
+  clipBarWicks,
+  isPriceDiscontinuity,
+  maxJumpFracForTf,
+  sanitizeCandleExtremes,
+} from "./chartScale";
 
 /** Soft cap — allows deep left-pan without unbounded growth. */
 export const MAX_CANDLES = 5000;
@@ -214,22 +220,49 @@ export function upsertTick(
 ): Candle[] {
   const t = bucket(Date.now(), tf);
   const sec = TF_SEC[tf];
+  const maxJump = maxJumpFracForTf(tf);
   const copy = [...candles];
   const last = copy[copy.length - 1];
   const ref = last?.close ?? (finiteMid(prevMid) ? prevMid! : mid);
-  const safeMid = clampTickMid(mid, ref);
+  const disc = isPriceDiscontinuity(mid, ref, maxJump);
+  const safeMid = clampTickMid(mid, ref, maxJump);
   const tickVol = 150 + Math.random() * 2200;
-  const w = wickSpread(safeMid, pairId);
+  const w = disc
+    ? { high: safeMid, low: safeMid }
+    : wickSpread(safeMid, pairId);
+
+  const applyTip = (tip: Candle): Candle => {
+    if (disc) {
+      // Oracle discontinuity — flat print at clamped mid (no mile-long body).
+      return clipBarWicks({
+        ...tip,
+        open: safeMid,
+        high: safeMid,
+        low: safeMid,
+        close: safeMid,
+        volume: tip.volume + tickVol,
+      });
+    }
+    tip.close = safeMid;
+    tip.high = Math.max(tip.high, w.high, safeMid);
+    tip.low = Math.min(tip.low, w.low, safeMid);
+    tip.volume += tickVol;
+    return clipBarWicks(tip);
+  };
 
   if (prevMid !== undefined && last && last.time === t) {
     const tip = { ...last };
-    const step = (safeMid - clampTickMid(prevMid, ref)) * 0.45;
-    const blended = tip.close + step;
-    tip.close = safeMid;
-    tip.high = Math.max(tip.high, w.high, safeMid, blended);
-    tip.low = Math.min(tip.low, w.low, safeMid, blended);
-    tip.volume += tickVol;
-    Object.assign(tip, clipBarWicks(tip));
+    if (!disc) {
+      const step = (safeMid - clampTickMid(prevMid, ref, maxJump)) * 0.45;
+      const blended = tip.close + step;
+      tip.close = safeMid;
+      tip.high = Math.max(tip.high, w.high, safeMid, blended);
+      tip.low = Math.min(tip.low, w.low, safeMid, blended);
+      tip.volume += tickVol;
+      Object.assign(tip, clipBarWicks(tip));
+    } else {
+      Object.assign(tip, applyTip(tip));
+    }
     copy[copy.length - 1] = tip;
     return copy.slice(-MAX_CANDLES);
   }
@@ -243,7 +276,7 @@ export function upsertTick(
         if (copy.length >= MAX_CANDLES) break;
       }
     }
-    const open = copy[copy.length - 1]?.close ?? last?.close ?? safeMid;
+    const open = disc ? safeMid : (copy[copy.length - 1]?.close ?? last?.close ?? safeMid);
     const bar = clipBarWicks({
       time: t,
       open,
@@ -257,12 +290,7 @@ export function upsertTick(
   }
 
   if (last.time === t) {
-    const tip = { ...last };
-    tip.close = safeMid;
-    tip.high = Math.max(tip.high, w.high, safeMid);
-    tip.low = Math.min(tip.low, w.low, safeMid);
-    tip.volume += tickVol;
-    Object.assign(tip, clipBarWicks(tip));
+    const tip = applyTip({ ...last });
     copy[copy.length - 1] = tip;
     return copy.slice(-MAX_CANDLES);
   }
@@ -288,15 +316,11 @@ export function upsertTick(
   }
   const tip = healed[healed.length - 1]!;
   if (tip.time === t) {
-    tip.close = safeMid;
-    tip.high = Math.max(tip.high, w.high, safeMid);
-    tip.low = Math.min(tip.low, w.low, safeMid);
-    tip.volume += tickVol;
-    Object.assign(tip, clipBarWicks(tip));
+    Object.assign(tip, applyTip({ ...tip }));
     return healed.slice(-MAX_CANDLES);
   }
   // Still behind after heal — append one live bar (gaps already filled by ensureContiguous).
-  const open = tip.close;
+  const open = disc ? safeMid : tip.close;
   healed.push(
     clipBarWicks({
       time: t,

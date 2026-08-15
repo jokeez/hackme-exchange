@@ -2580,8 +2580,18 @@ function mountChartPanel(): void {
       const el = document.getElementById("ohlc-legend");
       if (!el) return;
       const ha = state.chartMode === "heikin" ? "HA " : "";
-      if (c) el.textContent = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
-      else el.textContent = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
+      if (c) {
+        el.textContent = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
+        return;
+      }
+      // Idle: last bar OHLC — never fake C=ticker.mid with empty O/H/L.
+      const tip =
+        state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null;
+      if (tip) {
+        el.textContent = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
+      } else {
+        el.textContent = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
+      }
     },
     onOrderPriceDrag: (id, price) => {
       updateOrderPrice(state, id, price);

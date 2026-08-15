@@ -133,23 +133,32 @@ export function mergeMountOpts(prev: ChartMountOpts | null, next: ChartMountOpts
   };
 }
 
+let historyLoadTimer = 0;
+
 function maybeLoadHistory(range: { from: number; to: number }): void {
   if (!chart || historyLoading || !lastOpts?.onNeedHistory) return;
   if (range.from >= HISTORY_LEFT_EDGE) return;
-  historyLoading = true;
-  try {
-    let guard = 0;
-    let r: { from: number; to: number } | null = range;
-    while (r && r.from < HISTORY_LEFT_EDGE && guard++ < HISTORY_LOAD_GUARD) {
-      const need = historyBarsToFetch(r.from);
-      if (need <= 0) break;
-      const added = lastOpts.onNeedHistory(need);
-      if (!added) break;
-      r = chart.timeScale().getVisibleLogicalRange();
+  if (historyLoadTimer) return;
+  historyLoadTimer = window.setTimeout(() => {
+    historyLoadTimer = 0;
+    if (!chart || historyLoading || !lastOpts?.onNeedHistory) return;
+    const live = chart.timeScale().getVisibleLogicalRange();
+    if (!live || live.from >= HISTORY_LEFT_EDGE) return;
+    historyLoading = true;
+    try {
+      let guard = 0;
+      let r: { from: number; to: number } | null = live;
+      while (r && r.from < HISTORY_LEFT_EDGE && guard++ < HISTORY_LOAD_GUARD) {
+        const need = historyBarsToFetch(r.from);
+        if (need <= 0) break;
+        const added = lastOpts.onNeedHistory(need);
+        if (!added) break;
+        r = chart.timeScale().getVisibleLogicalRange();
+      }
+    } finally {
+      historyLoading = false;
     }
-  } finally {
-    historyLoading = false;
-  }
+  }, 80);
 }
 let ghostPreview: { tool: Drawing["tool"]; a: { time: number; price: number }; b: { time: number; price: number } } | null =
   null;
@@ -1315,6 +1324,12 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       pinch: true,
       axisDoubleClickReset: { time: true, price: true },
     },
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
     timeScale: {
       borderColor: "rgba(255,255,255,0.08)",
       timeVisible: true,
@@ -1408,21 +1423,43 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
 
   if (opts.onCrosshair) {
     chart.subscribeCrosshairMove((param) => {
-      if (!param.time || !candleSeries) {
+      if (!param.time) {
         opts.onCrosshair?.(null);
         return;
       }
-      const raw = param.seriesData.get(candleSeries) as { open?: number; high?: number; low?: number; close?: number } | undefined;
-      if (raw?.close == null || !Number.isFinite(raw.close)) {
+      const t = param.time as number;
+      // Prefer raw (pre-HA) bar by time — works for candles/bars/line/area/heikin.
+      const fromRaw = rawCandlesCache.find((c) => c.time === t);
+      const fromSeries = currentCandles.find((c) => c.time === t);
+      const hit =
+        param.seriesData.get(candleSeries!) ??
+        (barSeries ? param.seriesData.get(barSeries) : undefined) ??
+        (lineSeries ? param.seriesData.get(lineSeries) : undefined) ??
+        (areaSeries ? param.seriesData.get(areaSeries) : undefined);
+      const seriesHit = hit as { open?: number; high?: number; low?: number; close?: number; value?: number } | undefined;
+      const bar = fromRaw ?? fromSeries;
+      if (bar) {
+        opts.onCrosshair?.({
+          time: t,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume ?? 0,
+        });
+        return;
+      }
+      const close = seriesHit?.close ?? seriesHit?.value;
+      if (close == null || !Number.isFinite(close)) {
         opts.onCrosshair?.(null);
         return;
       }
       opts.onCrosshair?.({
-        time: param.time as number,
-        open: raw.open ?? raw.close,
-        high: raw.high ?? raw.close,
-        low: raw.low ?? raw.close,
-        close: raw.close,
+        time: t,
+        open: seriesHit?.open ?? close,
+        high: seriesHit?.high ?? close,
+        low: seriesHit?.low ?? close,
+        close,
         volume: 0,
       });
     });
@@ -1831,15 +1868,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   priceWheelResidual = 0;
   priceWheelLastApplyMs = 0;
   let axisPointerDown = false;
-  let axisHealRaf = 0;
-
-  const scheduleAxisHeal = () => {
-    if (axisHealRaf) return;
-    axisHealRaf = requestAnimationFrame(() => {
-      axisHealRaf = 0;
-      healVisiblePriceScale();
-    });
-  };
 
   const onWheel = (e: WheelEvent) => {
     if (!chart || !candleSeries || !hostEl) return;
@@ -1914,7 +1942,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     chart.priceScale("right").setAutoScale(true);
   };
   // LWC axisPressedMouseMove.price can collapse the window without our wheel
-  // path — heal during / after drag so labels never all print the same price.
+  // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
     axisPointerDown = true;
@@ -1924,9 +1952,8 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     if ((e.buttons & 1) === 0) {
       axisPointerDown = false;
       healVisiblePriceScale();
-      return;
     }
-    scheduleAxisHeal();
+    // Intentionally no heal-while-dragging — that made vertical scale feel sticky/broken.
   };
   const onPointerUp = () => {
     if (!axisPointerDown) return;
@@ -1946,8 +1973,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     window.removeEventListener("pointermove", onPointerMove, true);
     window.removeEventListener("pointerup", onPointerUp, true);
     window.removeEventListener("pointercancel", onPointerUp, true);
-    if (axisHealRaf) cancelAnimationFrame(axisHealRaf);
-    axisHealRaf = 0;
     axisPointerDown = false;
     priceWheelCleanup = null;
     priceWheelResidual = 0;
@@ -2114,6 +2139,10 @@ export function destroyChart(): void {
     liveDrawings = [];
     firstDataApplied = false;
     historyLoading = false;
+    if (historyLoadTimer) {
+      clearTimeout(historyLoadTimer);
+      historyLoadTimer = 0;
+    }
     priceScaleManual = false;
     if (hudPulseTimer) {
       clearTimeout(hudPulseTimer);

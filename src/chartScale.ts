@@ -1,4 +1,4 @@
-import type { Candle } from "./types";
+import type { Candle, Timeframe } from "./types";
 
 /**
  * TradingView / LWC practice: never let a single wick or corrupt print
@@ -9,11 +9,42 @@ import type { Candle } from "./types";
 /** Max wick beyond body as fraction of body mid (e.g. 0.06 = ±6%). */
 export const MAX_WICK_FRAC = 0.06;
 
-/** Max close jump vs previous close per bar (fraction). Allows catch-up after idle gaps. */
-export const MAX_BAR_JUMP_FRAC = 0.35;
+/**
+ * Legacy default jump — prefer {@link maxJumpFracForTf}.
+ * Kept for callers that pass an explicit maxJump.
+ */
+export const MAX_BAR_JUMP_FRAC = 0.08;
 
 /** Soft absolute band around series median close (± fraction). */
 export const MAX_SERIES_DEV_FRAC = 0.45;
+
+/** Per-timeframe max close jump vs previous close (fraction). */
+export function maxJumpFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.012;
+    case "1m":
+      return 0.015;
+    case "3m":
+      return 0.025;
+    case "5m":
+      return 0.03;
+    case "15m":
+      return 0.05;
+    case "1H":
+      return 0.07;
+    case "2H":
+      return 0.09;
+    case "4H":
+      return 0.12;
+    case "1D":
+      return 0.18;
+    case "1W":
+      return 0.25;
+    default:
+      return MAX_BAR_JUMP_FRAC;
+  }
+}
 
 function finitePos(n: number): boolean {
   return Number.isFinite(n) && n > 0;
@@ -25,13 +56,23 @@ function median(sorted: number[]): number {
   return sorted.length % 2 ? sorted[m]! : (sorted[m - 1]! + sorted[m]!) / 2;
 }
 
-/** Clamp a live tick mid so one oracle glitch cannot paint a mile-long wick. */
+/** Clamp a live tick mid so one oracle glitch cannot paint a mile-long body. */
 export function clampTickMid(mid: number, refClose: number, maxJump = MAX_BAR_JUMP_FRAC): number {
   if (!finitePos(mid)) return refClose > 0 ? refClose : mid;
   if (!finitePos(refClose)) return mid;
   const lo = refClose * (1 - maxJump);
   const hi = refClose * (1 + maxJump);
   return Math.min(hi, Math.max(lo, mid));
+}
+
+/** True when |mid−ref|/ref exceeds the allowed jump (oracle discontinuity). */
+export function isPriceDiscontinuity(
+  mid: number,
+  refClose: number,
+  maxJump = MAX_BAR_JUMP_FRAC,
+): boolean {
+  if (!finitePos(mid) || !finitePos(refClose)) return false;
+  return Math.abs(mid - refClose) / refClose > maxJump;
 }
 
 /** Clip one bar's high/low to a sane wick around the body. */
@@ -51,10 +92,10 @@ export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
 }
 
 /**
- * Heal series: clip insane wicks and absolute outliers vs median close.
- * Live tick jumps are clamped in upsertTick; here we fix corrupt storage / seeds.
+ * Heal series: clip insane wicks, absolute outliers vs median, and
+ * bar-to-bar body jumps (stops a ±35%-class cliff from surviving into LWC).
  */
-export function sanitizeCandleExtremes(candles: Candle[]): Candle[] {
+export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.12): Candle[] {
   if (!candles.length) return candles;
   if (candles.length === 1) return [clipBarWicks(candles[0]!)];
 
@@ -64,7 +105,9 @@ export function sanitizeCandleExtremes(candles: Candle[]): Candle[] {
   const absLo = med * (1 - MAX_SERIES_DEV_FRAC);
   const absHi = med * (1 + MAX_SERIES_DEV_FRAC);
 
-  return candles.map((raw) => {
+  const out: Candle[] = [];
+  let prevClose = 0;
+  for (const raw of candles) {
     let c = { ...raw };
     if (finitePos(c.close) && (c.close < absLo || c.close > absHi)) {
       c.close = Math.min(absHi, Math.max(absLo, c.close));
@@ -74,20 +117,33 @@ export function sanitizeCandleExtremes(candles: Candle[]): Candle[] {
     }
     if (!finitePos(c.open)) c.open = finitePos(c.close) ? c.close : med;
     if (!finitePos(c.close)) c.close = finitePos(c.open) ? c.open : med;
+
+    if (finitePos(prevClose)) {
+      const cappedClose = clampTickMid(c.close, prevClose, maxBodyJump);
+      if (cappedClose !== c.close) {
+        // Discontinuity: flatten — do not keep a mile-long body from prior open.
+        c = { ...c, open: cappedClose, high: cappedClose, low: cappedClose, close: cappedClose };
+      } else if (isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
+        c.open = prevClose;
+      }
+    }
+
     c = clipBarWicks(c);
     c.high = Math.min(c.high, absHi * 1.02);
     c.low = Math.max(c.low, absLo * 0.98);
     if (c.high < Math.max(c.open, c.close)) c.high = Math.max(c.open, c.close);
     if (c.low > Math.min(c.open, c.close)) c.low = Math.min(c.open, c.close);
-    return c;
-  });
+    out.push(c);
+    prevClose = c.close;
+  }
+  return out;
 }
 
 export type PriceRange = { minValue: number; maxValue: number };
 
 /**
  * Robust visible range: use percentiles of OHLC so extreme wicks don't squash the pane.
- * Mirrors common TradingView "ignore outliers" / scale-to-body behaviour.
+ * Last close is included only when it sits near the percentile band (no cliff expansion).
  */
 export function robustPriceRange(
   candles: Candle[],
@@ -128,17 +184,20 @@ export function robustPriceRange(
   };
   let minValue = at(loPct);
   let maxValue = at(hiPct);
-  // Always include last close so live price stays on-scale
   const last = candles[end]!;
   if (finitePos(last.close)) {
-    minValue = Math.min(minValue, last.close);
-    maxValue = Math.max(maxValue, last.close);
+    const span = Math.max(maxValue - minValue, maxValue * 0.002);
+    const bandLo = minValue - span * 0.25;
+    const bandHi = maxValue + span * 0.25;
+    if (last.close >= bandLo && last.close <= bandHi) {
+      minValue = Math.min(minValue, last.close);
+      maxValue = Math.max(maxValue, last.close);
+    }
   }
   if (!(maxValue > minValue)) {
     const pad = Math.max(Math.abs(maxValue) * 0.002, 1e-12);
     return { minValue: maxValue - pad, maxValue: maxValue + pad };
   }
-  // Small pad so candles aren't flush with the edge
   const pad = (maxValue - minValue) * 0.04;
   return { minValue: minValue - pad, maxValue: maxValue + pad };
 }

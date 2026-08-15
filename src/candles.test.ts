@@ -119,17 +119,21 @@ describe("upsertTick", () => {
   it("updates last candle in same bucket", () => {
     const seeded = seedCandles("HMC_USDT", "15m", 0.0004, 5);
     const before = seeded.length;
-    const next = upsertTick(seeded, "15m", 0.00045, "HMC_USDT");
+    const ref = seeded[seeded.length - 1]!.close;
+    const target = ref * 1.02; // within 15m jump band
+    const next = upsertTick(seeded, "15m", target, "HMC_USDT");
     expect(next.length).toBeGreaterThanOrEqual(before);
-    expect(next[next.length - 1].close).toBe(0.00045);
-    expect(next[next.length - 1].high).toBeGreaterThanOrEqual(0.00045);
+    expect(next[next.length - 1].close).toBeCloseTo(target, 12);
+    expect(next[next.length - 1].high).toBeGreaterThanOrEqual(target);
   });
 
   it("blends when prevMid provided", () => {
     const seeded = seedCandles("SUP_USDT", "1m", 0.00005, 3);
-    const a = upsertTick(seeded, "1m", 0.000051, "SUP_USDT", 0.00005);
+    const ref = seeded[seeded.length - 1]!.close;
+    const target = ref * 1.01;
+    const a = upsertTick(seeded, "1m", target, "SUP_USDT", ref);
     const last = a[a.length - 1];
-    expect(last.close).toBe(0.000051);
+    expect(last.close).toBeCloseTo(target, 12);
     expect(last.volume).toBeGreaterThan(0);
   });
 });
@@ -212,10 +216,12 @@ describe("1D contiguity / gap abuse", () => {
         volume: 100,
       },
     ];
-    const next = upsertTick(old, "1D", 0.00063, "HMC_USDT");
+    // 1D allows ~18% — 0.00059 is within band from 0.0005
+    const target = 0.00059;
+    const next = upsertTick(old, "1D", target, "HMC_USDT");
     expect(candlesAreContiguous(next, "1D")).toBe(true);
     expect(next[next.length - 1].time).toBe(nowB);
-    expect(next[next.length - 1].close).toBe(0.00063);
+    expect(next[next.length - 1].close).toBeCloseTo(target, 12);
     expect(next.length).toBeGreaterThanOrEqual(6); // 5 gap days + live (or bridged)
   });
 
