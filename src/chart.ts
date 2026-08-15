@@ -22,7 +22,7 @@ import type {
   Trade,
   Timeframe,
 } from "./types";
-import { DEFAULT_INDICATOR_CONFIG } from "./types";
+import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
@@ -1631,17 +1631,22 @@ export function setCandleData(
   }
 }
 
-export function updateLastCandle(c: Candle, opts: ChartMountOpts): void {
-  if (!candleSeries || !lineSeries || !areaSeries || !volumeSeries) return;
+export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
+  if (!candleSeries || !lineSeries || !areaSeries || !volumeSeries) return false;
   const lastRaw = rawCandlesCache[rawCandlesCache.length - 1];
+  const tf = (opts.tf ?? lastOpts?.tf ?? "15m") as Timeframe;
+  const tfSec = TF_SEC[tf] ?? 900;
+  // Gap / multi-bar advance — caller must full-replace series (bridge bars would be dropped).
+  if (lastRaw && c.time > lastRaw.time + tfSec) return false;
+
   if (lastRaw && lastRaw.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
   else if (!lastRaw || c.time > lastRaw.time) rawCandlesCache.push(c);
-  else return;
+  else return false;
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
   currentCandles = prepCandles(rawCandlesCache, mode);
   const d = currentCandles[currentCandles.length - 1];
-  if (!d) return;
+  if (!d) return false;
   const t = d.time as UTCTimestamp;
   candleSeries.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
   barSeries?.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
@@ -1652,6 +1657,7 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): void {
     value: lastOpts?.overlays.showVolume === false ? 0 : d.volume,
     color: d.close >= d.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
   });
+  return true;
 }
 
 export function refreshDrawings(drawings: Drawing[]): void {

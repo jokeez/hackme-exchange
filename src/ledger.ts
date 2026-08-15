@@ -113,7 +113,7 @@ export function recordConvert(
     ts,
     pairId,
   });
-  if (fee && fee.feeQuote > 0) {
+  if (fee && (fee.feeQuote > 0 || fee.feeHmc > 0)) {
     const feeAsset = fee.paidInHmc ? "HMC" : pairId ? pairById(pairId).quote : to === "USDT" || from === "USDT" ? "USDT" : to;
     appendLedger(state, {
       kind: "fee",

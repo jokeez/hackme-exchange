@@ -121,6 +121,18 @@ export function assertOrderFunds(
     if (free < amountBase) {
       return { ok: false, reason: `Insufficient ${pair.base} (reserved in open orders)` };
     }
+    if (state.feeConfig.payFeesInHmc) {
+      const quoteGross = price * amountBase;
+      const fee = calcFee(state, m, pairId, quoteGross, liquidityRole(kind));
+      if (fee.paidInHmc) {
+        // Selling HMC reduces free HMC — fee must fit in leftover (or other free HMC).
+        const hmcFree = freeBalance(state, "hmc", m);
+        const leftover = baseK === "hmc" ? hmcFree - amountBase : hmcFree;
+        if (leftover < fee.feeHmc) {
+          return { ok: false, reason: "Insufficient HMC for fee (reserved in open orders)" };
+        }
+      }
+    }
     return { ok: true };
   }
   const quoteK = balKey(pair.quote);

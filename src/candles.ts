@@ -222,13 +222,15 @@ export function upsertTick(
   const w = wickSpread(safeMid, pairId);
 
   if (prevMid !== undefined && last && last.time === t) {
+    const tip = { ...last };
     const step = (safeMid - clampTickMid(prevMid, ref)) * 0.45;
-    const blended = last.close + step;
-    last.close = safeMid;
-    last.high = Math.max(last.high, w.high, safeMid, blended);
-    last.low = Math.min(last.low, w.low, safeMid, blended);
-    last.volume += tickVol;
-    Object.assign(last, clipBarWicks(last));
+    const blended = tip.close + step;
+    tip.close = safeMid;
+    tip.high = Math.max(tip.high, w.high, safeMid, blended);
+    tip.low = Math.min(tip.low, w.low, safeMid, blended);
+    tip.volume += tickVol;
+    Object.assign(tip, clipBarWicks(tip));
+    copy[copy.length - 1] = tip;
     return copy.slice(-MAX_CANDLES);
   }
 
@@ -255,11 +257,13 @@ export function upsertTick(
   }
 
   if (last.time === t) {
-    last.close = safeMid;
-    last.high = Math.max(last.high, w.high, safeMid);
-    last.low = Math.min(last.low, w.low, safeMid);
-    last.volume += tickVol;
-    Object.assign(last, clipBarWicks(last));
+    const tip = { ...last };
+    tip.close = safeMid;
+    tip.high = Math.max(tip.high, w.high, safeMid);
+    tip.low = Math.min(tip.low, w.low, safeMid);
+    tip.volume += tickVol;
+    Object.assign(tip, clipBarWicks(tip));
+    copy[copy.length - 1] = tip;
     return copy.slice(-MAX_CANDLES);
   }
 

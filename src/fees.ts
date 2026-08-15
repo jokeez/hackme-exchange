@@ -99,7 +99,8 @@ export function calcFee(
   quoteAmount: number,
   role: LiquidityRole,
 ): FeeQuote {
-  const tier = activeVipTier(state);
+  // Pass market so BTC/SUP quote volume converts to USDT for VIP (matches UI progress).
+  const tier = activeVipTier(state, m);
   const bps = role === "maker" ? tier.makerBps : tier.takerBps;
   // Match server QuoteFee: ceil to 1e8-scale minor, then back to display.
   let feeQuote = Math.ceil(quoteAmount * (bps / 10_000) * 1e8) / 1e8;
@@ -135,7 +136,8 @@ export function applyFeeToWallet(
   pairId: PairId,
   fee: FeeQuote,
 ): { ok: true } | { ok: false; reason: string } {
-  if (fee.feeQuote <= 0) return { ok: true };
+  const due = fee.paidInHmc ? fee.feeHmc : fee.feeQuote;
+  if (!(due > 0)) return { ok: true };
   if (fee.paidInHmc) {
     if (state.wallet.hmc < fee.feeHmc) {
       return { ok: false, reason: "Insufficient HMC for fee" };
@@ -155,8 +157,8 @@ export function formatBps(bps: number): string {
   return `${(bps / 100).toFixed(3)}%`;
 }
 
-export function feeScheduleLabel(state: DemoState): string {
-  const tier = activeVipTier(state);
+export function feeScheduleLabel(state: DemoState, market?: MarketSnapshot | null): string {
+  const tier = activeVipTier(state, market);
   return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name}`;
 }
 

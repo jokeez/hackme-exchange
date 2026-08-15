@@ -192,4 +192,17 @@ describe("convert", () => {
     expect(convertChipDefaultAmount("SUP_BTC")).toBe("500");
     expect(convertChipDefaultAmount("BTC_HMC")).toBe("0.001");
   });
+
+  it("USDT→HMC at 100% balance fails without fee buffer; slightly less succeeds", () => {
+    const s = baseState({
+      wallet: { usdt: 100, hmc: 0, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    expect(convert(s, market, "USDT_HMC", 100).ok).toBe(false);
+    expect(s.wallet.usdt).toBe(100);
+    const okAmt = 100 / (1 + 10 / 10_000) * 0.999;
+    expect(convert(s, market, "USDT_HMC", okAmt).ok).toBe(true);
+    expect(s.wallet.usdt).toBeLessThan(100);
+    expect(s.wallet.hmc).toBeGreaterThan(0);
+  });
 });

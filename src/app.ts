@@ -232,6 +232,10 @@ function gotoMainView(view: MainView): void {
 let marketSearch = "";
 let marketLane = "all";
 let chartMounted = false;
+/** After reseed / multi-bar gap — next patchLive must full-replace candle series. */
+let chartNeedsFullReplace = false;
+let refreshGen = 0;
+let refreshInFlight: Promise<void> | null = null;
 let hotkeysWired = false;
 let lastOhlc: Candle | null = null;
 let prevMids: Partial<Record<PairId, number>> = {};
@@ -858,7 +862,7 @@ function renderActivityBody(): string {
 }
 
 function renderConvert(): string {
-  const vip = activeVipTier(state);
+  const vip = activeVipTier(state, market ?? undefined);
   const labReady = tradingGuards.convertFeeServer && useLabMatching();
   const labAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useLabMatching();
   const feeNote = labReady
@@ -1134,16 +1138,26 @@ async function refreshConvertPreviewAsync(): Promise<void> {
   });
 }
 
-/** Max convertible amount reserving HMC fee buffer when pay-fees-in-HMC. */
+/** Max convertible amount reserving fee buffer (HMC pay or quote-fee on invert routes). */
 function maxConvertibleFrom(): number {
   const avail = freeBalance(state, convertFrom, market ?? undefined);
   if (!(avail > 0) || !market) return 0;
-  if (!state.feeConfig.payFeesInHmc || convertFrom !== "hmc") return avail;
   const route = routeForAssets(convertFrom, convertTo);
   if (!route) return avail;
-  // Leave ~0.2% headroom for HMC fee on rough quote notional.
-  const headroom = avail * 0.002;
-  return Math.max(0, avail - Math.max(headroom, 1e-6));
+  const def = convertRouteDef(route);
+  if (!def) return avail;
+  if (state.feeConfig.payFeesInHmc) {
+    if (convertFrom !== "hmc") return avail;
+    // Leave ~0.2% headroom for HMC fee on rough quote notional.
+    const headroom = avail * 0.002;
+    return Math.max(0, avail - Math.max(headroom, 1e-6));
+  }
+  // Invert spends quote then pays fee from leftover quote — Max must leave fee room.
+  if (def.invert) {
+    const vip = activeVipTier(state, market);
+    return Math.max(0, (avail / (1 + vip.takerBps / 10_000)) * 0.999);
+  }
+  return avail;
 }
 
 async function runConvertDesk(): Promise<void> {
@@ -1193,7 +1207,7 @@ async function runConvertDesk(): Promise<void> {
         apiRes.net_to != null ? minorToDisplay(apiRes.net_to) : got;
       const feeQuoteDisplay = minorToDisplay(Number(apiRes.fee_quote ?? 0));
       const feeHmcDisplay = minorToDisplay(Number(apiRes.fee_hmc ?? 0));
-      const vip = activeVipTier(state);
+      const vip = activeVipTier(state, market);
       const labFee = feeQuoteFromLabConvert(apiRes, {
         feeQuoteDisplay,
         feeHmcDisplay,
@@ -1299,11 +1313,11 @@ function softPatchConvertDesk(): void {
 
 /** Update VIP / pay-in-HMC copy on Account + Convert without remount. */
 function softPatchFeePayChrome(): void {
-  const vip = activeVipTier(state);
+  const vip = activeVipTier(state, market ?? undefined);
   const feeCard = document.querySelector("#acct-fees .muted.small");
   if (feeCard && feeCard.querySelector("strong.mono")) {
     const vol = volume30dUsdt(state, market ?? undefined);
-    feeCard.innerHTML = `30d <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}`;
+    feeCard.innerHTML = `30d <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state, market ?? undefined)}`;
   }
   const mode = document.querySelector(".convert-fee-mode");
   if (mode) {
@@ -2699,8 +2713,12 @@ function patchLive(): void {
     const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
     const opts = chartOpts();
     const last = candles[candles.length - 1];
-    if (last) updateLastCandle(last, opts);
-    else setCandleData(candles, opts);
+    if (chartNeedsFullReplace || !last) {
+      setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
+      chartNeedsFullReplace = false;
+    } else if (!updateLastCandle(last, opts)) {
+      setCandleData(candles, opts, { preserveLogicalRange: true });
+    }
     refreshOrderLines(opts.orders, opts.alerts);
     updateLivePriceHud(tradeMid, ch >= 0, candleCountdown(state.activeTf));
     if (state.multiChartLayout !== "1") {
@@ -2708,7 +2726,10 @@ function patchLive(): void {
       for (let i = 2; i <= n; i++) {
         const tf = paneTf(i);
         const c2 = state.candles[state.activePair]?.[tf] ?? [];
-        if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
+        if (c2.length) {
+          // Secondary gap recovery is inside updateSecondaryChart try/catch → full set.
+          updateSecondaryChart(c2, `chart-host-${i}`);
+        }
       }
     }
   }
@@ -4104,7 +4125,12 @@ function microTickPrices(): void {
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
   const last = candles[candles.length - 1];
   const opts = chartOpts();
-  if (last) updateLastCandle(last, opts);
+  if (chartNeedsFullReplace || !last) {
+    setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
+    chartNeedsFullReplace = false;
+  } else if (!updateLastCandle(last, opts)) {
+    setCandleData(candles, opts, { preserveLogicalRange: true });
+  }
   const mid = useLabMatching()
     ? spotTradeMid()
     : (prevMids[state.activePair] ?? activeTicker().mid);
@@ -4154,6 +4180,12 @@ function microTickPrices(): void {
 }
 
 async function refresh(): Promise<void> {
+  if (refreshInFlight) {
+    await refreshInFlight;
+    return;
+  }
+  const myGen = ++refreshGen;
+  refreshInFlight = (async () => {
   markPerf("oracle-refresh-start");
   const prevMarket = market;
   const prevLive = poolLive;
@@ -4184,13 +4216,16 @@ async function refresh(): Promise<void> {
     ? await Promise.all([marketP, liveP])
     : await Promise.all([raceMs(marketP, 2_500), raceMs(liveP, 2_500)]);
 
+  if (myGen !== refreshGen) return;
+
   if (mRes) {
     // Don't let a single failed poll overwrite live mids with boot fallback (chart cliff).
-    if (mRes.source === "live" || !prevMarket || oracleMeta.source !== "live") {
+    if (mRes.source === "live" || !market || oracleMeta.source !== "live") {
       m = mRes.market;
       source = mRes.source;
     } else {
-      m = prevMarket;
+      // Keep newest live — not the start-of-call snapshot (overlapping refresh race).
+      m = market;
       source = "live";
     }
   } else if (!m) {
@@ -4202,10 +4237,10 @@ async function refresh(): Promise<void> {
   // else keep previous live mids on a slow tick
 
   if (liveRes) {
-    if (liveRes.status === "ok" || !prevLive || prevLive.status !== "ok") {
+    if (liveRes.status === "ok" || !poolLive || poolLive.status !== "ok") {
       live = liveRes;
     } else {
-      live = prevLive;
+      live = poolLive;
     }
   } else if (!live || live.status === "pending") {
     live = offlinePoolLive();
@@ -4220,6 +4255,7 @@ async function refresh(): Promise<void> {
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
   if (firstLiveAfterBoot) {
     reseedCandlesFromMarket(state, market);
+    chartNeedsFullReplace = true;
   } else {
     ensureCandles(state, market);
   }
@@ -4262,6 +4298,12 @@ async function refresh(): Promise<void> {
   }
   const ms = measurePerf("oracle-refresh", "oracle-refresh-start", "oracle-refresh-end");
   if (ms != null && ms > 100) console.debug(`[perf] oracle refresh ${ms.toFixed(0)}ms (${source})`);
+  })();
+  try {
+    await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
 }
 
 export async function boot(): Promise<void> {

@@ -74,4 +74,15 @@ describe("balance reservation", () => {
     expect(amt).toBe(Math.floor(40 / price));
     expect(assertOrderFunds(s, market, "HMC_USDT", "buy", amt, price, "market")).toEqual({ ok: true });
   });
+
+  it("sell + payFeesInHmc rejects when leftover HMC cannot cover fee", () => {
+    const s = baseState({
+      wallet: { usdt: 1000, hmc: 100, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    // Selling all HMC leaves 0 for fee
+    const check = assertOrderFunds(s, market, "HMC_USDT", "sell", 100, 0.0005, "market");
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.reason).toMatch(/HMC for fee/i);
+  });
 });

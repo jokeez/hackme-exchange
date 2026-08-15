@@ -50,6 +50,31 @@ export function placeOrder(
     if (mid > 0) {
       const check = validateLimitOrder(side, price, mid, timeInForce, postOnly);
       if (!check.ok) return check;
+      // Marketable GTC limit must take liquidity — never rest as maker (fee undercharge).
+      if (kind === "limit" && check.immediate && timeInForce === "GTC" && !postOnly) {
+        const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind);
+        if (!funds.ok) return funds;
+        const quoteGross = price * amountBase;
+        const fill = executeFill(state, m, pairId, side, price, amountBase, quoteGross, "limit", false, true);
+        if (!fill.ok) return fill;
+        const order: Order = {
+          id: uid(),
+          pairId,
+          side,
+          kind,
+          price,
+          amountBase,
+          filledBase: amountBase,
+          status: "filled",
+          timeInForce,
+          postOnly,
+          source: "paper",
+          createdAt: Date.now(),
+        };
+        state.orders.unshift(order);
+        state.orders = state.orders.slice(0, 80);
+        return order;
+      }
     }
   }
   if (m && (kind === "limit" || kind === "stop_limit" || kind === "stop_market" || kind === "oco" || kind === "trailing_stop")) {

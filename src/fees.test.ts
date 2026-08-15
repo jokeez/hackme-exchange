@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeVipTier,
+  applyFeeToWallet,
   calcFee,
   formatBps,
   liquidityRole,
@@ -195,6 +196,49 @@ describe("nextVipProgress", () => {
     expect(p.next?.name).toBe("VIP 1");
     expect(p.pct).toBeGreaterThanOrEqual(0);
     expect(p.remaining).toBeGreaterThan(0);
+  });
+});
+
+describe("VIP FX + fee wallet edge cases", () => {
+  it("calcFee uses BTC quote volume FX for VIP (not raw BTC as USDT)", () => {
+    const s = baseState();
+    const m = sampleMarket({ btcUsd: 67_500, hmcUsdt: 0.00043 });
+    // ~150k USDT equivalent on HMC_BTC → VIP 1
+    s.trades.push({
+      id: "t1",
+      pairId: "HMC_BTC",
+      side: "buy",
+      price: 1e-8,
+      amountBase: 1,
+      amountQuote: 150_000 / 67_500,
+      feeQuote: 0,
+      feeHmc: 0,
+      feeRole: "taker",
+      feePaidInHmc: false,
+      ts: Date.now(),
+    });
+    expect(activeVipTier(s, m).name).toBe("VIP 1");
+    const withFx = calcFee(s, m, "HMC_USDT", 1000, "taker");
+    expect(withFx.vipName).toBe("VIP 1");
+    expect(withFx.bps).toBe(8);
+    // Without FX the same trade would look like ~2.2 "USDT" → Regular
+    expect(activeVipTier(s).name).toBe("Regular");
+  });
+
+  it("applyFeeToWallet debits HMC when feeQuote is 0 but feeHmc > 0", () => {
+    const s = baseState();
+    const before = s.wallet.hmc;
+    const res = applyFeeToWallet(s, "HMC_USDT", {
+      role: "taker",
+      bps: 10,
+      feeQuote: 0,
+      feeHmc: 1.5,
+      paidInHmc: true,
+      vipName: "Regular",
+      hmcDiscountPct: 25,
+    });
+    expect(res.ok).toBe(true);
+    expect(s.wallet.hmc).toBeCloseTo(before - 1.5, 8);
   });
 });
 

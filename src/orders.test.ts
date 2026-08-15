@@ -90,6 +90,16 @@ describe("placeOrder / OCO", () => {
     expect(s.orders[0].id).toBe(o.id);
   });
 
+  it("marketable GTC limit with market fills as taker (not resting maker)", () => {
+    const s = baseState();
+    const before = s.wallet.usdt;
+    // sample mid ~0.00043 — buy @ 0.0005 crosses
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0005, undefined, undefined, "GTC", false, market);
+    expect("id" in o && o.status === "filled").toBe(true);
+    expect(s.trades[0]?.feeRole).toBe("taker");
+    expect(s.wallet.usdt).toBeLessThan(before);
+  });
+
   it("rejects second buy limit when funds reserved by first", () => {
     const s = baseState({ wallet: { usdt: 50, hmc: 0, sup: 0, btc: 0 } });
     const first = placeOrder(s, "HMC_USDT", "buy", "limit", 100_000, 0.0004, undefined, undefined, "GTC", false, market);
