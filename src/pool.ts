@@ -16,28 +16,35 @@ const PUBLIC_POOL_DOCS = "https://github.com/jokeez/hackme/blob/main/docs/SETUP.
 
 export async function fetchPoolLive(): Promise<PoolLive> {
   try {
-    const t = 3_500;
-    const [p, w] = await Promise.all([
-      fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, t),
-      fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, t),
-    ]);
-    if (!p.ok || !w.ok) throw new Error(`pool HTTP ${p.status}/${w.status}`);
+    // Pool is enough for "live"; work/stats is best-effort (vite proxy can stall mid-body).
+    const poolT = 4_000;
+    const workT = 6_000;
+    const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
+    const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
+    const p = await poolP;
+    if (!p.ok) throw new Error(`pool HTTP ${p.status}`);
     const pool = (await p.json()) as PoolStats;
-    const work = (await w.json()) as WorkStats;
+    const w = await workP;
+    let work: WorkStats = {};
+    if (w?.ok) {
+      try {
+        work = (await w.json()) as WorkStats;
+      } catch {
+        work = {};
+      }
+    }
+    const poolGh = work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : 0);
+    const workers = work.workers_online ?? work.workers_count ?? pool.workers ?? 0;
     return {
-      poolGh: work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : 0),
-      workers: work.workers_online ?? work.workers_count ?? pool.workers ?? 0,
+      poolGh,
+      workers,
       miners: pool.miners ?? pool.workers ?? 0,
       blockHeight: pool.block_height ?? pool.tip_height ?? 0,
       rewardPerM: work.reward_per_m ?? 0,
       totalPayoutHmc: work.total_payout_hmc ?? 0,
       targetMod: work.target_mod ?? 0,
       status:
-        pool.status === "ok" ||
-        (pool.hashrate ?? 0) > 0 ||
-        (work.workers_online ?? work.workers_count ?? 0) > 0
-          ? "ok"
-          : "degraded",
+        pool.status === "ok" || (pool.hashrate ?? 0) > 0 || workers > 0 ? "ok" : "degraded",
     };
   } catch {
     return offlinePoolLive();

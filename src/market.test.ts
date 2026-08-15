@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { buildMarket, localFallbackMarket, midForPair, tickerFromMarket } from "./market";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildMarket, fetchMarket, localFallbackMarket, midForPair, tickerFromMarket } from "./market";
 import { sampleMarket } from "./testFixtures";
 
 describe("buildMarket", () => {
@@ -29,6 +29,40 @@ describe("buildMarket", () => {
     expect(m.hmcUsdt).toBeGreaterThan(0);
     expect(m.poolGh).toBe(35);
   });
+
+  it("fetchMarket stays live when work/stats fails but pool/stats ok", async () => {
+    const poolBody = JSON.stringify({
+      hashrate: 88e9,
+      workers: 5,
+      tip_height: 155000,
+      status: "ok",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/pool/stats")) {
+          return new Response(poolBody, { status: 200, headers: { "content-type": "application/json" } });
+        }
+        if (url.includes("/api/work/stats")) {
+          throw new Error("proxy stall");
+        }
+        if (url.includes("/api/sup/economics")) {
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("nope", { status: 404 });
+      }),
+    );
+    const { market, source } = await fetchMarket(0.00042);
+    expect(source).toBe("live");
+    expect(market.poolGh).toBeCloseTo(88, 5);
+    expect(market.hmcUsdt).toBeGreaterThan(0);
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("midForPair / tickerFromMarket", () => {

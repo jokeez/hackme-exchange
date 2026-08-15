@@ -114,17 +114,33 @@ export async function fetchMarket(anchor = 0.00042): Promise<{
   source: "live" | "fallback";
 }> {
   try {
-    // Bound oracle RTT — boot must not sit on default 10s hangs (VPN/CORS).
-    const t = 3_500;
-    const [poolRes, workRes, supRes] = await Promise.all([
-      fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, t),
-      fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, t),
-      fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, t),
-    ]);
-    if (!poolRes.ok || !workRes.ok) throw new Error("pool");
+    // Pool is required; work/sup are best-effort — flaky proxy must not zero the desk.
+    const poolT = 4_000;
+    const workT = 6_000;
+    const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
+    const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
+    const supP = fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, poolT).catch(() => null);
+    const poolRes = await poolP;
+    if (!poolRes.ok) throw new Error("pool");
     const pool = (await poolRes.json()) as PoolStats;
-    const work = (await workRes.json()) as WorkStats;
-    const sup = supRes.ok ? ((await supRes.json()) as SupEconomics) : {};
+    const workRes = await workP;
+    let work: WorkStats = {};
+    if (workRes?.ok) {
+      try {
+        work = (await workRes.json()) as WorkStats;
+      } catch {
+        work = {};
+      }
+    }
+    const supRes = await supP;
+    let sup: SupEconomics = {};
+    if (supRes?.ok) {
+      try {
+        sup = (await supRes.json()) as SupEconomics;
+      } catch {
+        sup = {};
+      }
+    }
     return { market: buildMarket(pool, work, sup, anchor), source: "live" };
   } catch {
     return { market: localFallbackMarket(anchor), source: "fallback" };

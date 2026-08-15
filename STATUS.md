@@ -59,13 +59,13 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **480** pass |
+| `npm test` | **486** pass |
 | `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443`, no lab fixture seed |
 | G10 visual pass | **ok** — Spot/Convert/Account/Pool · desktop+mobile · **P0=0 P1=0** · oracle live + pool workers |
 | D0 tarball (local only) | `hackme-exchange-d0-*.tar.gz` (gitignored) |
 | API `go test ./...` | **ok** |
 | PRE_PUBLIC dry-run | **ok** — `docs/PRE_PUBLIC_EVIDENCE.md` · public still **HOLD** |
-| Oracle UX | Instant boot + warm-up await + IPv4 vite proxy + sticky live mids |
+| Oracle UX | Instant boot + buffered hub proxy (retry) + pool-only live if work/stats flakes |
 | Public edge | **HOLD** |
 
 ## Roadmap ladder
