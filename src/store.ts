@@ -1,6 +1,6 @@
 import type { DemoState, MarketSnapshot, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES } from "./types";
-import { barCountForTf, ensureContiguousCandles, prependOlderCandles, sanitizeCandlesForChart, seedCandles, trimCandlesToGenesis } from "./candles";
+import { barCountForTf, ensureContiguousCandles, prependOlderCandles, sanitizeCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
 import { midForPair } from "./market";
 import { PAIRS } from "./pairs";
 import {
@@ -412,23 +412,37 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
   for (const p of PAIRS) {
     if (!state.candles[p.id]) state.candles[p.id] = {};
     const mid = midForPair(market, p.id);
-    for (const tf of TIMEFRAMES) {
-      const existing = state.candles[p.id]![tf];
-      const need = barCountForTf(tf);
-      if (!existing?.length) {
-        state.candles[p.id]![tf] = seedCandles(p.id, tf, mid, need);
-      } else {
-        const trimmed = trimCandlesToGenesis(existing, tf);
-        const healed = ensureContiguousCandles(trimmed, tf, {
-          pairId: p.id,
-          fillToNow: true,
-        });
-        if (healed.length < need) {
-          state.candles[p.id]![tf] = prependOlderCandles(healed, p.id, tf, need - healed.length);
-        } else {
-          state.candles[p.id]![tf] = sanitizeCandlesForChart(healed, p.id);
-        }
+    const existingBase = state.candles[p.id]![CANDLE_BASE_TF];
+    if (!existingBase?.length) {
+      const all = seedAllTimeframes(p.id, mid);
+      for (const tf of TIMEFRAMES) {
+        state.candles[p.id]![tf] = all[tf] ?? [];
       }
+      continue;
+    }
+    // Heal / extend base, then re-derive every TF so resolutions stay aligned.
+    const need = barCountForTf(CANDLE_BASE_TF);
+    const trimmed = trimCandlesToGenesis(existingBase, CANDLE_BASE_TF);
+    let healed = ensureContiguousCandles(trimmed, CANDLE_BASE_TF, {
+      pairId: p.id,
+      fillToNow: true,
+    });
+    if (healed.length < need) {
+      healed = prependOlderCandles(healed, p.id, CANDLE_BASE_TF, need - healed.length);
+    } else {
+      healed = sanitizeCandlesForChart(healed, p.id);
+    }
+    // Snap tip close toward live mid without inventing a cliff body.
+    if (healed.length) {
+      const tip = { ...healed[healed.length - 1]! };
+      tip.close = mid;
+      tip.high = Math.max(tip.high, tip.open, mid);
+      tip.low = Math.min(tip.low, tip.open, mid);
+      healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id)[0] ?? tip;
+    }
+    const all = deriveAllTimeframes(healed);
+    for (const tf of TIMEFRAMES) {
+      state.candles[p.id]![tf] = all[tf] ?? [];
     }
   }
 }
@@ -438,8 +452,9 @@ export function reseedCandlesFromMarket(state: DemoState, market: MarketSnapshot
   for (const p of PAIRS) {
     if (!state.candles[p.id]) state.candles[p.id] = {};
     const mid = midForPair(market, p.id);
+    const all = seedAllTimeframes(p.id, mid);
     for (const tf of TIMEFRAMES) {
-      state.candles[p.id]![tf] = seedCandles(p.id, tf, mid, barCountForTf(tf));
+      state.candles[p.id]![tf] = all[tf] ?? [];
     }
   }
 }

@@ -4,7 +4,7 @@ import { validateLabWithdrawDestination } from "./labCustody";
 import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
 import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
-import { stats24h, upsertTick } from "./candles";
+import { stats24h, applyMidToPairCandles } from "./candles";
 import {
   applyOverlays,
   chartScreenshot,
@@ -4095,10 +4095,8 @@ function onKeydown(e: KeyboardEvent): void {
 function upsertAllCandles(mid: number): void {
   if (!state.candles[state.activePair]) return;
   const prev = prevMids[state.activePair];
-  for (const tf of TIMEFRAMES) {
-    const arr = state.candles[state.activePair]![tf] ?? [];
-    state.candles[state.activePair]![tf] = upsertTick(arr, tf, mid, state.activePair, prev);
-  }
+  const next = applyMidToPairCandles(state.candles[state.activePair]!, state.activePair, mid, prev);
+  state.candles[state.activePair] = next;
   prevMids[state.activePair] = mid;
 }
 
@@ -4111,11 +4109,8 @@ function microTickPrices(): void {
     const target = midForPair(market, p.id);
     const prev = prevMids[p.id] ?? target;
     const blend = prev + (target - prev) * (0.38 + Math.random() * 0.22);
-    for (const tf of TIMEFRAMES) {
-      const arr = state.candles[p.id]?.[tf] ?? [];
-      if (!arr.length) continue;
-      state.candles[p.id]![tf] = upsertTick(arr, tf, blend, p.id, prev);
-    }
+    if (!state.candles[p.id]) state.candles[p.id] = {};
+    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, blend, prev);
     prevMids[p.id] = blend;
     if (tickers[p.id]) tickers[p.id] = { ...tickers[p.id]!, mid: blend, bid: blend * 0.9995, ask: blend * 1.0005 };
     changed = true;
@@ -4284,11 +4279,9 @@ async function refresh(): Promise<void> {
     tickers[p.id] = tk;
     const mid = midForPair(market, p.id);
     const prev = firstLiveAfterBoot ? undefined : prevMids[p.id];
-    for (const tf of TIMEFRAMES) {
-      const arr = state.candles[p.id]?.[tf] ?? [];
-      state.candles[p.id]![tf] = firstLiveAfterBoot
-        ? arr
-        : upsertTick(arr, tf, mid, p.id, prev);
+    if (!firstLiveAfterBoot) {
+      if (!state.candles[p.id]) state.candles[p.id] = {};
+      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
     }
     prevMids[p.id] = mid;
   }

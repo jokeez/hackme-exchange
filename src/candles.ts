@@ -1,5 +1,5 @@
 import type { Candle, PairId, Timeframe } from "./types";
-import { TF_SEC } from "./types";
+import { TF_SEC, TIMEFRAMES } from "./types";
 import {
   clampTickMid,
   clipBarWicks,
@@ -12,6 +12,13 @@ import {
 
 /** Soft cap — allows deep left-pan without unbounded growth. */
 export const MAX_CANDLES = 5000;
+
+/**
+ * Finest *source* TF. Higher TFs aggregate from this series so 1m/5m/1D
+ * show the same market — not independent random walks.
+ * 30s is derived by splitting 1m bars (demo finer resolution).
+ */
+export const CANDLE_BASE_TF: Timeframe = "1m";
 
 /**
  * HackMe / HMC public listing era — MiningPoolStats + ops notes point to May 2026;
@@ -51,13 +58,13 @@ export function barCountForTf(tf: Timeframe, nowMs = Date.now()): number {
       want = 1200;
       break;
     case "1m":
-      want = 1440;
+      want = 1000;
       break;
     case "3m":
-      want = 960;
+      want = 800;
       break;
     case "5m":
-      want = 864;
+      want = 800;
       break;
     case "15m":
       want = 960;
@@ -92,29 +99,97 @@ function candleVolume(pairId: PairId, tf: Timeframe): number {
   return base * tfScale;
 }
 
-/** Micro-wick so candles are visible (fixes flat dot / circle look). */
-function wickSpread(mid: number, pairId: PairId): { high: number; low: number } {
-  const bps = pairId.includes("BTC") ? 12 : pairId === "SUP_USDT" ? 10 : 8;
+/** Micro-wick scaled to TF — same look language on 1m and 1D. */
+function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF): { high: number; low: number } {
+  const bpsBase = pairId.includes("BTC") ? 10 : pairId === "SUP_USDT" ? 8 : 6;
+  const bps = bpsBase * Math.sqrt(TF_SEC[tf] / 60);
   const half = (bps / 10_000) * mid;
+  const bodyCap = maxBodyFracForTf(tf);
   return {
-    high: mid + half * (0.55 + Math.random() * 0.7),
-    // Never allow a 50% dump wick — that alone squashes the Y-axis.
-    low: Math.max(mid * 0.985, mid - half * (0.55 + Math.random() * 0.7)),
+    high: Math.min(mid * (1 + bodyCap), mid + half * (0.55 + Math.random() * 0.7)),
+    low: Math.max(mid * (1 - bodyCap), mid * 0.985, mid - half * (0.55 + Math.random() * 0.7)),
   };
 }
 
-function makeBar(pairId: PairId, t: number, open: number, close: number): Candle {
+function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Timeframe): Candle {
   const bodyHigh = Math.max(open, close);
   const bodyLow = Math.min(open, close);
-  const wick = wickSpread((open + close) / 2, pairId);
-  return {
-    time: t,
-    open,
-    high: Math.max(bodyHigh, wick.high),
-    low: Math.min(bodyLow, wick.low),
-    close,
-    volume: candleVolume(pairId, "1m"),
-  };
+  const wick = wickSpread((open + close) / 2, pairId, tf);
+  return constrainBarToOpen(
+    {
+      time: t,
+      open,
+      high: Math.max(bodyHigh, wick.high),
+      low: Math.min(bodyLow, wick.low),
+      close,
+      volume: candleVolume(pairId, tf),
+    },
+    maxBodyFracForTf(tf),
+  );
+}
+
+/**
+ * Aggregate finer candles into a coarser TF (exchange-correct OHLC).
+ * `sourceTf` must be strictly finer than `targetTf`.
+ */
+export function aggregateCandles(
+  source: Candle[],
+  sourceTf: Timeframe,
+  targetTf: Timeframe,
+): Candle[] {
+  const srcSec = TF_SEC[sourceTf];
+  const dstSec = TF_SEC[targetTf];
+  if (!(dstSec > srcSec) || !source.length) return [];
+  const map = new Map<number, Candle>();
+  for (const c of source) {
+    const bt = Math.floor(c.time / dstSec) * dstSec;
+    if (bt < CHART_GENESIS_UNIX) continue;
+    const prev = map.get(bt);
+    if (!prev) {
+      map.set(bt, {
+        time: bt,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      });
+    } else {
+      prev.high = Math.max(prev.high, c.high);
+      prev.low = Math.min(prev.low, c.low);
+      prev.close = c.close;
+      prev.volume += c.volume;
+    }
+  }
+  return [...map.values()].sort((a, b) => a.time - b.time).slice(-MAX_CANDLES);
+}
+
+/** Build 30s from 1m by splitting each bar (demo-only finer resolution). */
+export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf: Timeframe): Candle[] {
+  const srcSec = TF_SEC[sourceTf];
+  const dstSec = TF_SEC[targetTf];
+  if (!(dstSec < srcSec) || !source.length) return [];
+  const ratio = Math.round(srcSec / dstSec);
+  if (ratio < 2) return [];
+  const out: Candle[] = [];
+  for (const c of source) {
+    const step = (c.close - c.open) / ratio;
+    for (let i = 0; i < ratio; i++) {
+      const t = c.time + i * dstSec;
+      if (t < CHART_GENESIS_UNIX) continue;
+      const open = c.open + step * i;
+      const close = i === ratio - 1 ? c.close : c.open + step * (i + 1);
+      out.push({
+        time: t,
+        open,
+        high: Math.max(open, close, i === 0 ? c.high : Math.max(open, close)),
+        low: Math.min(open, close, i === 0 ? c.low : Math.min(open, close)),
+        close,
+        volume: c.volume / ratio,
+      });
+    }
+  }
+  return out.slice(-MAX_CANDLES);
 }
 
 export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: number): Candle[] {
@@ -124,28 +199,68 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   const maxN = Math.max(1, Math.floor((now - genesis) / sec) + 1);
   const n = Math.min(count ?? barCountForTf(tf), maxN, MAX_CANDLES);
   const out: Candle[] = [];
-  let price = mid * (0.992 + Math.random() * 0.016);
-  const volScale = Math.max(mid, 1e-12);
+  const maxBody = maxBodyFracForTf(tf);
+  // Mild path — sqrt(time) scale so 1D isn't a different universe than 1m.
+  const driftAmp = 10 * Math.sqrt(sec / 60);
+  let price = mid * (0.998 + Math.random() * 0.004);
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
     if (t < genesis) continue;
-    const driftBps = (Math.random() - 0.48) * 28;
+    const driftBps = (Math.random() - 0.48) * driftAmp;
     const open = price;
-    const close = Math.max(volScale * 0.85, Math.min(volScale * 1.15, open * (1 + driftBps / 10_000)));
-    const bar = makeBar(pairId, t, open, close);
-    bar.volume = candleVolume(pairId, tf);
-    out.push(bar);
+    const rawClose = open * (1 + driftBps / 10_000);
+    const close = clampTickMid(rawClose, open, maxBody);
+    out.push(makeBar(pairId, t, open, close, tf));
     price = close;
   }
   if (out.length) {
-    const last = out[out.length - 1];
-    const w = wickSpread(mid, pairId);
-    last.close = mid;
-    last.high = Math.max(last.high, w.high, mid);
-    last.low = Math.min(last.low, w.low, mid);
+    const last = out[out.length - 1]!;
+    // Tip must print the live mid exactly — re-anchor open if body would clip it.
+    if (Math.abs(mid - last.open) / Math.max(last.open, 1e-18) > maxBody) {
+      last.open = mid;
+      last.high = mid;
+      last.low = mid;
+      last.close = mid;
+    } else {
+      const w = wickSpread(mid, pairId, tf);
+      last.close = mid;
+      last.high = Math.max(last.open, mid, w.high);
+      last.low = Math.min(last.open, mid, w.low);
+      Object.assign(last, constrainBarToOpen(last, maxBody));
+      last.close = mid; // constrain may nudge; force mid on tip
+      last.high = Math.max(last.high, mid, last.open);
+      last.low = Math.min(last.low, mid, last.open);
+    }
   }
   return out;
+}
+
+/** Recompute all TFs from a 1m base series. */
+export function deriveAllTimeframes(
+  base1m: Candle[],
+): Partial<Record<Timeframe, Candle[]>> {
+  const out: Partial<Record<Timeframe, Candle[]>> = {
+    [CANDLE_BASE_TF]: base1m.slice(-MAX_CANDLES),
+  };
+  for (const tf of TIMEFRAMES) {
+    if (tf === CANDLE_BASE_TF) continue;
+    if (TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]) {
+      out[tf] = aggregateCandles(base1m, CANDLE_BASE_TF, tf);
+    } else {
+      out[tf] = expandToFinerTf(base1m, CANDLE_BASE_TF, tf);
+    }
+  }
+  return out;
+}
+
+/** Seed base TF then derive every other TF — one market, all resolutions. */
+export function seedAllTimeframes(
+  pairId: PairId,
+  mid: number,
+): Partial<Record<Timeframe, Candle[]>> {
+  const base = seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF));
+  return deriveAllTimeframes(base);
 }
 
 /** Grow history to the left — never before CHART_GENESIS_UNIX. */
@@ -174,7 +289,7 @@ export function prependOlderCandles(
 
   const sec = TF_SEC[tf];
   const genesis = genesisBucket(tf);
-  const first = existing[0];
+  const first = existing[0]!;
   if (first.time <= genesis) return existing;
 
   const maxAdd = Math.floor((first.time - genesis) / sec);
@@ -182,32 +297,30 @@ export function prependOlderCandles(
   const n = Math.min(count, room, maxAdd);
   if (n <= 0) return existing;
 
+  const maxBody = maxBodyFracForTf(tf);
+  const driftAmp = 10 * Math.sqrt(sec / 60);
   const older: Candle[] = [];
   let price = first.open;
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const driftBps = (Math.random() - 0.5) * 26;
+    const driftBps = (Math.random() - 0.5) * driftAmp;
     const close = price;
-    const open = Math.max(close * 0.85, Math.min(close * 1.15, close / (1 + driftBps / 10_000)));
-    const bar = makeBar(pairId, t, open, close);
-    bar.volume = candleVolume(pairId, tf);
-    older.push(bar);
+    const open = clampTickMid(close / (1 + driftBps / 10_000), close, maxBody);
+    older.push(makeBar(pairId, t, open, close, tf));
     price = open;
   }
   if (!older.length) return existing;
 
-  // Walk forward so path lands near first.open
-  let p = older[0].open;
+  let p = older[0]!.open;
   for (let i = 0; i < older.length; i++) {
-    const driftBps = (Math.random() - 0.48) * 26;
+    const driftBps = (Math.random() - 0.48) * driftAmp;
     const open = p;
     const close =
       i === older.length - 1
         ? first.open
-        : Math.max(open * 0.88, Math.min(open * 1.12, open * (1 + driftBps / 10_000)));
-    older[i] = makeBar(pairId, older[i].time, open, close);
-    older[i].volume = candleVolume(pairId, tf);
+        : clampTickMid(open * (1 + driftBps / 10_000), open, maxBody);
+    older[i] = makeBar(pairId, older[i]!.time, open, close, tf);
     p = close;
   }
   return [...older, ...existing];
@@ -228,22 +341,18 @@ export function upsertTick(
   const last = copy[copy.length - 1];
   const ref = last?.close ?? (finiteMid(prevMid) ? prevMid! : mid);
   const disc = isPriceDiscontinuity(mid, ref, maxJump);
-  // First clamp vs last close (tick), then vs bar open (body) — stops 1D multi-tick cliffs.
   let safeMid = clampTickMid(mid, ref, maxJump);
   const openRef = last && last.time === t ? last.open : ref;
   if (finiteMid(openRef) && !disc) {
     safeMid = clampTickMid(safeMid, openRef, maxBody);
   }
   const tickVol = 150 + Math.random() * 2200;
-  const w = disc
-    ? { high: safeMid, low: safeMid }
-    : wickSpread(safeMid, pairId);
+  const w = disc ? { high: safeMid, low: safeMid } : wickSpread(safeMid, pairId, tf);
 
   const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar), maxBody);
 
   const applyTip = (tip: Candle): Candle => {
     if (disc) {
-      // Hard tick discontinuity vs last close — flat re-anchor (paper).
       const px = clampTickMid(mid, tip.close || tip.open, maxJump);
       return finish({
         ...tip,
@@ -254,7 +363,6 @@ export function upsertTick(
         volume: tip.volume + tickVol,
       });
     }
-    // Body vs open already limited via safeMid — never rewrite open mid-bar.
     tip.close = safeMid;
     tip.high = Math.max(tip.high, w.high, safeMid);
     tip.low = Math.min(tip.low, w.low, safeMid);
@@ -333,6 +441,21 @@ export function upsertTick(
   return healed.slice(-MAX_CANDLES);
 }
 
+/**
+ * Live mid update: tick the 1m base, then refresh every TF from it.
+ * Guarantees 5m/1D tips match 1m — no independent cliffs per TF.
+ */
+export function applyMidToPairCandles(
+  candlesByTf: Partial<Record<Timeframe, Candle[]>>,
+  pairId: PairId,
+  mid: number,
+  prevMid?: number,
+): Partial<Record<Timeframe, Candle[]>> {
+  const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
+  const nextBase = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid);
+  return deriveAllTimeframes(nextBase);
+}
+
 function finiteMid(n: number | undefined): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
@@ -371,7 +494,6 @@ export function ensureContiguousCandles(
         volume: c.volume,
       });
     } else {
-      // Merge duplicates in same bucket (abuse / double-write).
       prev.high = Math.max(prev.high, c.high, c.open, c.close);
       prev.low = Math.min(prev.low, c.low, c.open, c.close);
       prev.close = c.close;
@@ -382,29 +504,27 @@ export function ensureContiguousCandles(
   const times = [...byBucket.keys()].sort((a, b) => a - b);
   if (!times.length) return candles.slice(-1);
 
-  let end = times[times.length - 1];
+  let end = times[times.length - 1]!;
   if (opts?.fillToNow) {
     const nowB = bucket(opts.nowMs ?? Date.now(), tf);
     if (nowB > end) end = nowB;
   }
 
-  let start = times[0];
+  let start = times[0]!;
   const spanBars = Math.floor((end - start) / sec) + 1;
   if (spanBars > MAX_CANDLES) {
     start = end - (MAX_CANDLES - 1) * sec;
     if (start < g) start = g;
-    // Align to bucket
     start = Math.floor(start / sec) * sec;
   }
 
   const out: Candle[] = [];
   let px =
     byBucket.get(start)?.open ??
-    byBucket.get(times.find((x) => x >= start) ?? times[0])!.close;
-  // Carry price from last known bar before start if we clipped the window.
+    byBucket.get(times.find((x) => x >= start) ?? times[0]!)!.close;
   for (let i = times.length - 1; i >= 0; i--) {
-    if (times[i] <= start) {
-      px = byBucket.get(times[i])!.close;
+    if (times[i]! <= start) {
+      px = byBucket.get(times[i]!)!.close;
       break;
     }
   }
@@ -427,7 +547,7 @@ export function candlesAreContiguous(candles: Candle[], tf: Timeframe): boolean 
   if (candles.length < 2) return true;
   const sec = TF_SEC[tf];
   for (let i = 1; i < candles.length; i++) {
-    if (candles[i].time - candles[i - 1].time !== sec) return false;
+    if (candles[i]!.time - candles[i - 1]!.time !== sec) return false;
   }
   return true;
 }
@@ -440,10 +560,12 @@ export function trimCandlesToGenesis(candles: Candle[], tf: Timeframe): Candle[]
   return filtered.length ? filtered : candles.slice(-1);
 }
 
-export function stats24h(candles: Candle[], tf: Timeframe = "15m"): { changePct: number; high: number; low: number; vol: number } {
+export function stats24h(
+  candles: Candle[],
+  tf: Timeframe = "15m",
+): { changePct: number; high: number; low: number; vol: number } {
   if (candles.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
   const bars24 = Math.min(candles.length, Math.max(2, Math.ceil(86_400 / TF_SEC[tf])));
-  // Heal cliff storage before header stats — otherwise 24h% / high-low look insane.
   const slice = sanitizeCandleExtremes(candles.slice(-bars24), maxBodyFracForTf(tf));
   if (slice.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
   const first = slice[0]!.open;
@@ -474,5 +596,5 @@ export function sanitizeCandleVolumes(candles: Candle[], pairId: PairId): Candle
 
 /** Heal OHLC spikes after load / before chart paint (does not rewrite volumes). */
 export function sanitizeCandlesForChart(candles: Candle[], pairId: PairId): Candle[] {
-  return sanitizeCandleExtremes(sanitizeCandleVolumes(candles, pairId));
+  return sanitizeCandleExtremes(sanitizeCandleVolumes(candles, pairId), maxBodyFracForTf(CANDLE_BASE_TF));
 }
