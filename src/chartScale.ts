@@ -13,36 +13,67 @@ export const MAX_WICK_FRAC = 0.06;
  * Legacy default jump — prefer {@link maxJumpFracForTf}.
  * Kept for callers that pass an explicit maxJump.
  */
-export const MAX_BAR_JUMP_FRAC = 0.08;
+export const MAX_BAR_JUMP_FRAC = 0.04;
 
 /** Soft absolute band around series median close (± fraction). */
-export const MAX_SERIES_DEV_FRAC = 0.45;
+export const MAX_SERIES_DEV_FRAC = 0.35;
 
-/** Per-timeframe max close jump vs previous close (fraction). */
+/** Per-tick max close jump vs previous close (fraction). */
 export function maxJumpFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.008;
+    case "1m":
+      return 0.01;
+    case "3m":
+      return 0.015;
+    case "5m":
+      return 0.02;
+    case "15m":
+      return 0.025;
+    case "1H":
+      return 0.03;
+    case "2H":
+      return 0.035;
+    case "4H":
+      return 0.04;
+    case "1D":
+      return 0.03;
+    case "1W":
+      return 0.05;
+    default:
+      return MAX_BAR_JUMP_FRAC;
+  }
+}
+
+/**
+ * Max |close−open|/open inside one bar.
+ * Stops multi-tick walks (esp. 1D) from painting −30% bodies that squash the pane.
+ */
+export function maxBodyFracForTf(tf: Timeframe | string): number {
   switch (tf) {
     case "30s":
       return 0.012;
     case "1m":
       return 0.015;
     case "3m":
-      return 0.025;
+      return 0.02;
     case "5m":
-      return 0.03;
+      return 0.025;
     case "15m":
-      return 0.05;
+      return 0.03;
     case "1H":
-      return 0.07;
+      return 0.04;
     case "2H":
-      return 0.09;
+      return 0.045;
     case "4H":
-      return 0.12;
+      return 0.05;
     case "1D":
-      return 0.18;
+      return 0.05;
     case "1W":
-      return 0.25;
+      return 0.08;
     default:
-      return MAX_BAR_JUMP_FRAC;
+      return 0.03;
   }
 }
 
@@ -75,6 +106,26 @@ export function isPriceDiscontinuity(
   return Math.abs(mid - refClose) / refClose > maxJump;
 }
 
+/**
+ * Keep OHLC coherent with open: close/high/low cannot run away and squash the chart.
+ * Used after each tip update and during sanitize.
+ */
+export function constrainBarToOpen(c: Candle, maxBody = 0.05): Candle {
+  if (!finitePos(c.open)) return clipBarWicks(c);
+  const open = c.open;
+  const close = clampTickMid(finitePos(c.close) ? c.close : open, open, maxBody);
+  const wickPad = maxBody * 1.25;
+  const hiCap = open * (1 + wickPad);
+  const loCap = open * Math.max(1e-6, 1 - wickPad);
+  let high = Math.max(open, close, finitePos(c.high) ? c.high : close);
+  let low = Math.min(open, close, finitePos(c.low) ? c.low : close);
+  high = Math.min(high, hiCap);
+  low = Math.max(low, loCap);
+  high = Math.max(high, open, close);
+  low = Math.min(low, open, close);
+  return clipBarWicks({ ...c, open, high, low, close });
+}
+
 /** Clip one bar's high/low to a sane wick around the body. */
 export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
   if (!finitePos(c.open) || !finitePos(c.close)) return c;
@@ -92,16 +143,16 @@ export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
 }
 
 /**
- * Heal series: clip insane wicks, absolute outliers vs median, and
- * bar-to-bar body jumps (stops a ±35%-class cliff from surviving into LWC).
+ * Heal series: clip insane wicks, absolute outliers vs median, body vs open,
+ * and bar-to-bar jumps (stops multi-tick 1D cliffs from surviving into LWC).
  */
-export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.12): Candle[] {
+export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.08): Candle[] {
   if (!candles.length) return candles;
-  if (candles.length === 1) return [clipBarWicks(candles[0]!)];
+  if (candles.length === 1) return [constrainBarToOpen(clipBarWicks(candles[0]!), maxBodyJump)];
 
   const closes = candles.map((c) => c.close).filter(finitePos).sort((a, b) => a - b);
   const med = median(closes) || candles[candles.length - 1]!.close;
-  if (!finitePos(med)) return candles.map((c) => clipBarWicks(c));
+  if (!finitePos(med)) return candles.map((c) => constrainBarToOpen(clipBarWicks(c), maxBodyJump));
   const absLo = med * (1 - MAX_SERIES_DEV_FRAC);
   const absHi = med * (1 + MAX_SERIES_DEV_FRAC);
 
@@ -118,17 +169,10 @@ export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.12): C
     if (!finitePos(c.open)) c.open = finitePos(c.close) ? c.close : med;
     if (!finitePos(c.close)) c.close = finitePos(c.open) ? c.open : med;
 
-    if (finitePos(prevClose)) {
-      const cappedClose = clampTickMid(c.close, prevClose, maxBodyJump);
-      if (cappedClose !== c.close) {
-        // Discontinuity: flatten — do not keep a mile-long body from prior open.
-        c = { ...c, open: cappedClose, high: cappedClose, low: cappedClose, close: cappedClose };
-      } else if (isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
-        c.open = prevClose;
-      }
+    if (finitePos(prevClose) && isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
+      c.open = prevClose;
     }
-
-    c = clipBarWicks(c);
+    c = constrainBarToOpen(c, maxBodyJump);
     c.high = Math.min(c.high, absHi * 1.02);
     c.low = Math.max(c.low, absLo * 0.98);
     if (c.high < Math.max(c.open, c.close)) c.high = Math.max(c.open, c.close);

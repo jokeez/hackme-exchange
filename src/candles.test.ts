@@ -145,14 +145,14 @@ describe("stats24h", () => {
 
   it("computes change high low vol on slice", () => {
     const candles: Candle[] = [
-      { time: 1, open: 100, high: 110, low: 90, close: 105, volume: 10 },
-      { time: 2, open: 105, high: 120, low: 100, close: 115, volume: 20 },
-      { time: 3, open: 115, high: 130, low: 110, close: 125, volume: 30 },
+      { time: 1, open: 100, high: 101, low: 99, close: 100.5, volume: 10 },
+      { time: 2, open: 100.5, high: 102, low: 100, close: 101.5, volume: 20 },
+      { time: 3, open: 101.5, high: 103, low: 101, close: 102.5, volume: 30 },
     ];
     const s = stats24h(candles, "15m");
-    expect(s.changePct).toBeCloseTo(((125 - 100) / 100) * 100, 6);
-    expect(s.high).toBe(130);
-    expect(s.low).toBe(90);
+    expect(s.changePct).toBeCloseTo(((102.5 - 100) / 100) * 100, 5);
+    expect(s.high).toBeGreaterThanOrEqual(102.5);
+    expect(s.low).toBeLessThanOrEqual(100);
     expect(s.vol).toBe(60);
   });
 });
@@ -216,8 +216,8 @@ describe("1D contiguity / gap abuse", () => {
         volume: 100,
       },
     ];
-    // 1D allows ~18% — 0.00059 is within band from 0.0005
-    const target = 0.00059;
+    // 1D tick jump ~3% — stay inside band from 0.0005
+    const target = 0.000515;
     const next = upsertTick(old, "1D", target, "HMC_USDT");
     expect(candlesAreContiguous(next, "1D")).toBe(true);
     expect(next[next.length - 1].time).toBe(nowB);

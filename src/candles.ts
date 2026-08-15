@@ -3,7 +3,9 @@ import { TF_SEC } from "./types";
 import {
   clampTickMid,
   clipBarWicks,
+  constrainBarToOpen,
   isPriceDiscontinuity,
+  maxBodyFracForTf,
   maxJumpFracForTf,
   sanitizeCandleExtremes,
 } from "./chartScale";
@@ -221,54 +223,51 @@ export function upsertTick(
   const t = bucket(Date.now(), tf);
   const sec = TF_SEC[tf];
   const maxJump = maxJumpFracForTf(tf);
+  const maxBody = maxBodyFracForTf(tf);
   const copy = [...candles];
   const last = copy[copy.length - 1];
   const ref = last?.close ?? (finiteMid(prevMid) ? prevMid! : mid);
   const disc = isPriceDiscontinuity(mid, ref, maxJump);
-  const safeMid = clampTickMid(mid, ref, maxJump);
+  // First clamp vs last close (tick), then vs bar open (body) — stops 1D multi-tick cliffs.
+  let safeMid = clampTickMid(mid, ref, maxJump);
+  const openRef = last && last.time === t ? last.open : ref;
+  if (finiteMid(openRef) && !disc) {
+    safeMid = clampTickMid(safeMid, openRef, maxBody);
+  }
   const tickVol = 150 + Math.random() * 2200;
   const w = disc
     ? { high: safeMid, low: safeMid }
     : wickSpread(safeMid, pairId);
 
+  const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar), maxBody);
+
   const applyTip = (tip: Candle): Candle => {
     if (disc) {
-      // Oracle discontinuity — flat print at clamped mid (no mile-long body).
-      return clipBarWicks({
+      // Hard tick discontinuity vs last close — flat re-anchor (paper).
+      const px = clampTickMid(mid, tip.close || tip.open, maxJump);
+      return finish({
         ...tip,
-        open: safeMid,
-        high: safeMid,
-        low: safeMid,
-        close: safeMid,
+        open: px,
+        high: px,
+        low: px,
+        close: px,
         volume: tip.volume + tickVol,
       });
     }
+    // Body vs open already limited via safeMid — never rewrite open mid-bar.
     tip.close = safeMid;
     tip.high = Math.max(tip.high, w.high, safeMid);
     tip.low = Math.min(tip.low, w.low, safeMid);
     tip.volume += tickVol;
-    return clipBarWicks(tip);
+    return finish(tip);
   };
 
   if (prevMid !== undefined && last && last.time === t) {
-    const tip = { ...last };
-    if (!disc) {
-      const step = (safeMid - clampTickMid(prevMid, ref, maxJump)) * 0.45;
-      const blended = tip.close + step;
-      tip.close = safeMid;
-      tip.high = Math.max(tip.high, w.high, safeMid, blended);
-      tip.low = Math.min(tip.low, w.low, safeMid, blended);
-      tip.volume += tickVol;
-      Object.assign(tip, clipBarWicks(tip));
-    } else {
-      Object.assign(tip, applyTip(tip));
-    }
-    copy[copy.length - 1] = tip;
+    copy[copy.length - 1] = applyTip({ ...last });
     return copy.slice(-MAX_CANDLES);
   }
 
   if (!last || last.time < t) {
-    // Fill skipped buckets (e.g. 1D offline 23→31 Jul) so the chart stays contiguous.
     if (last && last.time + sec < t) {
       const bridgePx = last.close;
       for (let bt = last.time + sec; bt < t; bt += sec) {
@@ -277,25 +276,25 @@ export function upsertTick(
       }
     }
     const open = disc ? safeMid : (copy[copy.length - 1]?.close ?? last?.close ?? safeMid);
-    const bar = clipBarWicks({
-      time: t,
-      open,
-      high: Math.max(open, safeMid, w.high),
-      low: Math.min(open, safeMid, w.low),
-      close: safeMid,
-      volume: tickVol,
-    });
-    copy.push(bar);
+    const close = clampTickMid(safeMid, open, maxBody);
+    copy.push(
+      finish({
+        time: t,
+        open,
+        high: Math.max(open, close, w.high),
+        low: Math.min(open, close, w.low),
+        close,
+        volume: tickVol,
+      }),
+    );
     return copy.slice(-MAX_CANDLES);
   }
 
   if (last.time === t) {
-    const tip = applyTip({ ...last });
-    copy[copy.length - 1] = tip;
+    copy[copy.length - 1] = applyTip({ ...last });
     return copy.slice(-MAX_CANDLES);
   }
 
-  // last.time > t — clock skew / corrupt storage: drop future bars, heal, apply tick.
   const clipped = copy.filter((c) => c.time <= t);
   const healed = ensureContiguousCandles(clipped.length ? clipped : copy.slice(0, 1), tf, {
     pairId,
@@ -304,7 +303,7 @@ export function upsertTick(
   });
   if (!healed.length) {
     return [
-      clipBarWicks({
+      finish({
         time: t,
         open: safeMid,
         high: Math.max(safeMid, w.high),
@@ -316,18 +315,18 @@ export function upsertTick(
   }
   const tip = healed[healed.length - 1]!;
   if (tip.time === t) {
-    Object.assign(tip, applyTip({ ...tip }));
+    healed[healed.length - 1] = applyTip({ ...tip });
     return healed.slice(-MAX_CANDLES);
   }
-  // Still behind after heal — append one live bar (gaps already filled by ensureContiguous).
   const open = disc ? safeMid : tip.close;
+  const close = clampTickMid(safeMid, open, maxBody);
   healed.push(
-    clipBarWicks({
+    finish({
       time: t,
       open,
-      high: Math.max(open, safeMid, w.high),
-      low: Math.min(open, safeMid, w.low),
-      close: safeMid,
+      high: Math.max(open, close, w.high),
+      low: Math.min(open, close, w.low),
+      close,
       volume: tickVol,
     }),
   );
@@ -444,9 +443,11 @@ export function trimCandlesToGenesis(candles: Candle[], tf: Timeframe): Candle[]
 export function stats24h(candles: Candle[], tf: Timeframe = "15m"): { changePct: number; high: number; low: number; vol: number } {
   if (candles.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
   const bars24 = Math.min(candles.length, Math.max(2, Math.ceil(86_400 / TF_SEC[tf])));
-  const slice = candles.slice(-bars24);
-  const first = slice[0].open;
-  const last = slice[slice.length - 1].close;
+  // Heal cliff storage before header stats — otherwise 24h% / high-low look insane.
+  const slice = sanitizeCandleExtremes(candles.slice(-bars24), maxBodyFracForTf(tf));
+  if (slice.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
+  const first = slice[0]!.open;
+  const last = slice[slice.length - 1]!.close;
   let high = -Infinity;
   let low = Infinity;
   let vol = 0;

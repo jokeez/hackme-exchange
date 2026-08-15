@@ -27,7 +27,7 @@ import { chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
 import { computeMeasureStats, isMeaningfulMeasure, resolvePaintDrawings } from "./chartDraw";
-import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 
 const SCHEMES = {
   classic: { up: "#00e676", down: "#ff5252" },
@@ -246,7 +246,7 @@ function syncDrawingsStore(drawings: Drawing[]): void {
   if (lastOpts) lastOpts = { ...lastOpts, drawings: [...drawings] };
 }
 
-function prepCandles(raw: Candle[], mode: ChartMode): Candle[] {
+function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
   const sorted = [...raw].sort((a, b) => a.time - b.time);
   const deduped: Candle[] = [];
   for (const c of sorted) {
@@ -254,7 +254,8 @@ function prepCandles(raw: Candle[], mode: ChartMode): Candle[] {
     if (last && last.time === c.time) deduped[deduped.length - 1] = c;
     else deduped.push(c);
   }
-  const cleaned = sanitizeCandleExtremes(deduped);
+  const bodyCap = maxBodyFracForTf(tf ?? lastOpts?.tf ?? "15m");
+  const cleaned = sanitizeCandleExtremes(deduped, bodyCap);
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 
@@ -1606,7 +1607,7 @@ export function setCandleData(
     if (last && last.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
     else rawCandlesCache.push(c);
   }
-  currentCandles = prepCandles(rawCandlesCache, opts.mode);
+  currentCandles = prepCandles(rawCandlesCache, opts.mode, opts.tf);
   if (currentCandles.length < 2) {
     candleSeries.setData([]);
     barSeries.setData([]);
@@ -1681,7 +1682,7 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   else return false;
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
-  currentCandles = prepCandles(rawCandlesCache, mode);
+  currentCandles = prepCandles(rawCandlesCache, mode, tf);
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
   const t = d.time as UTCTimestamp;

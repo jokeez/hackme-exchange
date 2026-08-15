@@ -29,7 +29,7 @@ describe("clampTickMid", () => {
     expect(clampTickMid(0.0001, 0.0004, 0.18)).toBeCloseTo(0.0004 * 0.82, 10);
     expect(clampTickMid(0.00041, 0.0004, 0.18)).toBeCloseTo(0.00041, 10);
     // Default jump is tight — large catch-up is clamped
-    expect(clampTickMid(0.00063, 0.0005)).toBeCloseTo(0.0005 * 1.08, 10);
+    expect(clampTickMid(0.00063, 0.0005)).toBeCloseTo(0.0005 * 1.04, 10);
   });
 
   it("detects discontinuity past max jump", () => {
