@@ -136,6 +136,21 @@ describe("upsertTick", () => {
     expect(last.close).toBeCloseTo(target, 12);
     expect(last.volume).toBeGreaterThan(0);
   });
+
+  it("keeps open continuous with previous close on oracle jump", () => {
+    const seeded = seedCandles("HMC_USDT", "1m", 0.0006, 8);
+    const prev = seeded[seeded.length - 1]!.close;
+    // Force a multi-step walk with a large target (discontinuity path).
+    let series = seeded;
+    let mid = prev;
+    for (const step of [0.92, 0.9, 0.88]) {
+      mid = prev * step;
+      series = upsertTick(series, "1m", mid, "HMC_USDT", series[series.length - 1]!.close);
+    }
+    for (let i = 1; i < series.length; i++) {
+      expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 10);
+    }
+  });
 });
 
 describe("stats24h", () => {

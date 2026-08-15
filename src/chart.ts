@@ -2039,7 +2039,8 @@ export function anchorToLatestCandle(barCount?: number): void {
   const budget = barCount ?? visibleBarBudget(hostW, spacing);
   // Logical window is always ~budget bars wide. When history is short, `from`
   // goes negative → empty left space (Binance/TV), not inflated candle bodies.
-  const to = n - 1 + rightPad;
+  // rightOffset already reserved whitespace — do not also push `to` far past tip.
+  const to = n - 1 + 2;
   const from = to - budget;
   try {
     chart.timeScale().setVisibleLogicalRange({ from, to });

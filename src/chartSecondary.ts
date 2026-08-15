@@ -150,7 +150,7 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
       /* ignore */
     }
     const budget = visibleBarBudget(w, spacing);
-    const to = n - 1 + 4;
+    const to = n - 1 + 2;
     const from = to - budget;
     try {
       slot.chart.timeScale().setVisibleLogicalRange({ from, to });

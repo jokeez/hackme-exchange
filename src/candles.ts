@@ -367,12 +367,12 @@ export function upsertTick(
 
   const applyTip = (tip: Candle): Candle => {
     if (disc) {
+      // Walk close toward mid in capped steps — never rewrite open (CEX continuity).
       const px = clampTickMid(mid, tip.close || tip.open, maxJump);
       return finish({
         ...tip,
-        open: px,
-        high: px,
-        low: px,
+        high: Math.max(tip.open, tip.high, px),
+        low: Math.min(tip.open, tip.low, px),
         close: px,
         volume: tip.volume + tickVol,
       });
@@ -397,14 +397,15 @@ export function upsertTick(
         if (copy.length >= MAX_CANDLES) break;
       }
     }
-    const open = disc ? safeMid : (copy[copy.length - 1]?.close ?? last?.close ?? safeMid);
+    // Always continue from previous close — never leave a visual gap between bars.
+    const open = copy[copy.length - 1]?.close ?? last?.close ?? safeMid;
     const close = clampTickMid(safeMid, open, maxBody);
     copy.push(
       finish({
         time: t,
         open,
-        high: Math.max(open, close, w.high),
-        low: Math.min(open, close, w.low),
+        high: Math.max(open, close, disc ? close : w.high),
+        low: Math.min(open, close, disc ? close : w.low),
         close,
         volume: tickVol,
       }),
@@ -440,14 +441,14 @@ export function upsertTick(
     healed[healed.length - 1] = applyTip({ ...tip });
     return healed.slice(-MAX_CANDLES);
   }
-  const open = disc ? safeMid : tip.close;
+  const open = tip.close;
   const close = clampTickMid(safeMid, open, maxBody);
   healed.push(
     finish({
       time: t,
       open,
-      high: Math.max(open, close, w.high),
-      low: Math.min(open, close, w.low),
+      high: Math.max(open, close, disc ? close : w.high),
+      low: Math.min(open, close, disc ? close : w.low),
       close,
       volume: tickVol,
     }),
