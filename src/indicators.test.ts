@@ -33,26 +33,36 @@ describe("indicators", () => {
     expect(out[out.length - 1].value).toBeGreaterThan(100);
   });
 
+  it("macd emits only after slow EMA warmup", () => {
+    const m = macd(candles, 12, 26, 9);
+    expect(m.macd.length).toBe(candles.length - 25);
+    expect(m.signal.length).toBe(m.macd.length - 8);
+    expect(m.hist.length).toBe(m.signal.length);
+    const lastMacd = m.macd[m.macd.length - 1]!;
+    const lastSig = m.signal[m.signal.length - 1]!;
+    const lastHist = m.hist[m.hist.length - 1]!;
+    expect(lastHist.time).toBe(lastSig.time);
+    expect(lastHist.value).toBeCloseTo(lastMacd.value - lastSig.value, 8);
+  });
+
+  it("rsi is 100 when avgLoss is zero (all gains)", () => {
+    const rising = linearCandles(30, 100, 1, 1000);
+    const out = rsi(rising, 14);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out[out.length - 1]!.value).toBe(100);
+  });
+
   it("rsi stays in 0..100", () => {
-    const out = rsi(candles, 14);
+    const mixed = linearCandles(40, 100, 0.2, 1000);
+    // Add a down bar so RSI is not stuck at 100 for the whole series
+    mixed[20]!.close = mixed[19]!.close * 0.98;
+    mixed[20]!.low = mixed[20]!.close;
+    const out = rsi(mixed, 14);
     expect(out.length).toBeGreaterThan(0);
     for (const p of out) {
       expect(p.value).toBeGreaterThanOrEqual(0);
       expect(p.value).toBeLessThanOrEqual(100);
     }
-    // rising series → rsi generally high
-    expect(out[out.length - 1].value).toBeGreaterThan(50);
-  });
-
-  it("macd produces related series", () => {
-    const m = macd(candles);
-    expect(m.macd).toHaveLength(candles.length);
-    expect(m.signal).toHaveLength(candles.length);
-    expect(m.hist).toHaveLength(candles.length);
-    expect(m.hist[m.hist.length - 1].value).toBeCloseTo(
-      m.macd[m.macd.length - 1].value - m.signal[m.signal.length - 1].value,
-      8,
-    );
   });
 
   it("stochastic k/d in range", () => {

@@ -145,8 +145,16 @@ export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
 /**
  * Heal series: clip insane wicks, absolute outliers vs median, body vs open,
  * and bar-to-bar jumps (stops multi-tick 1D cliffs from surviving into LWC).
+ *
+ * For future live matching fills, pass `{ clipJumps: false }` so real large
+ * moves are not silently squashed — clip stays on for synthetic oracle history.
  */
-export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.08): Candle[] {
+export function sanitizeCandleExtremes(
+  candles: Candle[],
+  maxBodyJump = 0.08,
+  opts?: { clipJumps?: boolean },
+): Candle[] {
+  const clipJumps = opts?.clipJumps !== false;
   if (!candles.length) return candles;
   if (candles.length === 1) return [constrainBarToOpen(clipBarWicks(candles[0]!), maxBodyJump)];
 
@@ -160,21 +168,23 @@ export function sanitizeCandleExtremes(candles: Candle[], maxBodyJump = 0.08): C
   let prevClose = 0;
   for (const raw of candles) {
     let c = { ...raw };
-    if (finitePos(c.close) && (c.close < absLo || c.close > absHi)) {
+    if (clipJumps && finitePos(c.close) && (c.close < absLo || c.close > absHi)) {
       c.close = Math.min(absHi, Math.max(absLo, c.close));
     }
-    if (finitePos(c.open) && (c.open < absLo || c.open > absHi)) {
+    if (clipJumps && finitePos(c.open) && (c.open < absLo || c.open > absHi)) {
       c.open = Math.min(absHi, Math.max(absLo, c.open));
     }
     if (!finitePos(c.open)) c.open = finitePos(c.close) ? c.close : med;
     if (!finitePos(c.close)) c.close = finitePos(c.open) ? c.open : med;
 
-    if (finitePos(prevClose) && isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
+    if (clipJumps && finitePos(prevClose) && isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
       c.open = prevClose;
     }
     c = constrainBarToOpen(c, maxBodyJump);
-    c.high = Math.min(c.high, absHi * 1.02);
-    c.low = Math.max(c.low, absLo * 0.98);
+    if (clipJumps) {
+      c.high = Math.min(c.high, absHi * 1.02);
+      c.low = Math.max(c.low, absLo * 0.98);
+    }
     if (c.high < Math.max(c.open, c.close)) c.high = Math.max(c.open, c.close);
     if (c.low > Math.min(c.open, c.close)) c.low = Math.min(c.open, c.close);
     out.push(c);

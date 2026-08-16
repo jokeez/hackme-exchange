@@ -65,6 +65,17 @@ describe("snapshotEquity / dailyPnlCalendar", () => {
     ]);
     expect(html).toContain("pnl-calendar");
     expect(html).toContain("pnl-cal-cell");
+    expect(html).toContain("Paper equity");
+  });
+
+  it("empty calendar does not invent a sine-wave history", () => {
+    const s = baseState();
+    s.equitySnapshots = [];
+    const eq = walletEquityFromMarket(s.wallet, market);
+    s.initialEquityUsdt = eq;
+    const days = dailyPnlCalendar(s, market, 14);
+    expect(days.every((d) => Math.abs(d.pnl) < 1e-9)).toBe(true);
+    expect(renderPnlCalendarHtml(days)).toContain("no day history yet");
   });
 });
 

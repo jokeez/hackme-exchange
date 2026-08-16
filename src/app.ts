@@ -2797,8 +2797,9 @@ const throttledBookTapePatch = throttle(() => {
 }, 350);
 
 function previewFeeLabel(fee: { feeQuote: number; feeHmc: number; paidInHmc: boolean }, quote: string): string {
-  if (fee.paidInHmc) return `fee ≈ ${formatNum(fee.feeHmc, 4)} HMC`;
-  return `fee ≈ ${formatPrice(fee.feeQuote)} ${quote}`;
+  // Client float estimate — server quotes in minor units; label as estimate.
+  if (fee.paidInHmc) return `est. fee ≈ ${formatNum(fee.feeHmc, 4)} HMC`;
+  return `est. fee ≈ ${formatPrice(fee.feeQuote)} ${quote}`;
 }
 
 function updatePreviewForSide(side: "buy" | "sell"): void {

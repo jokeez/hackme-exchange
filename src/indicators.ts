@@ -76,7 +76,12 @@ export function rsi(candles: Candle[], period = 14): LinePoint[] {
     const loss = d < 0 ? -d : 0;
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    // Canonical: no losses → RSI = 100 (not 100 - 100/(1+100) ≈ 99.01).
+    if (avgLoss === 0) {
+      out.push({ time: candles[i].time, value: avgGain === 0 ? 50 : 100 });
+      continue;
+    }
+    const rs = avgGain / avgLoss;
     out.push({ time: candles[i].time, value: 100 - 100 / (1 + rs) });
   }
   return out;
@@ -85,19 +90,18 @@ export function rsi(candles: Candle[], period = 14): LinePoint[] {
 export function macd(candles: Candle[], fast = 12, slow = 26, signal = 9): { macd: LinePoint[]; signal: LinePoint[]; hist: LinePoint[] } {
   const emaFast = emaFull(candles, fast);
   const emaSlow = emaFull(candles, slow);
+  // Only emit after slow EMA is settled — early emaFull slots are raw closes, not EMA.
   const macdLine: LinePoint[] = [];
-  for (let i = 0; i < candles.length; i++) {
-    macdLine.push({ time: candles[i].time, value: emaFast[i] - emaSlow[i] });
+  for (let i = slow - 1; i < candles.length; i++) {
+    macdLine.push({ time: candles[i]!.time, value: emaFast[i]! - emaSlow[i]! });
   }
-  const signalLine: LinePoint[] = [];
-  const sigArr = emaFromPoints(macdLine, signal);
-  for (let i = 0; i < macdLine.length; i++) {
-    signalLine.push({ time: macdLine[i].time, value: sigArr[i] ?? 0 });
-  }
+  const signalLine = emaFromPointsSettled(macdLine, signal);
+  const sigByTime = new Map(signalLine.map((p) => [p.time, p.value]));
   const hist: LinePoint[] = [];
-  for (let i = 0; i < macdLine.length; i++) {
-    const sig = signalLine[i]?.value ?? 0;
-    hist.push({ time: macdLine[i].time, value: macdLine[i].value - sig });
+  for (const p of macdLine) {
+    const sig = sigByTime.get(p.time);
+    if (sig === undefined) continue;
+    hist.push({ time: p.time, value: p.value - sig });
   }
   return { macd: macdLine, signal: signalLine, hist };
 }
@@ -149,13 +153,16 @@ function emaFull(candles: Candle[], period: number): number[] {
   return out;
 }
 
-function emaFromPoints(points: LinePoint[], period: number): number[] {
-  const out: number[] = [];
+function emaFromPointsSettled(points: LinePoint[], period: number): LinePoint[] {
+  if (period < 1 || points.length < period) return [];
   const k = 2 / (period + 1);
-  let prev = points[0]?.value ?? 0;
-  for (let i = 0; i < points.length; i++) {
-    prev = i === 0 ? points[i].value : points[i].value * k + prev * (1 - k);
-    out.push(prev);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += points[i]!.value;
+  let prev = sum / period;
+  const out: LinePoint[] = [{ time: points[period - 1]!.time, value: prev }];
+  for (let i = period; i < points.length; i++) {
+    prev = points[i]!.value * k + prev * (1 - k);
+    out.push({ time: points[i]!.time, value: prev });
   }
   return out;
 }

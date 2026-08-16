@@ -38,15 +38,10 @@ export function pnlWindows(state: DemoState, m: MarketSnapshot): PnlWindow[] {
 }
 
 export function seedEquitySnapshots(state: DemoState, m: MarketSnapshot): void {
-  if (state.equitySnapshots.length >= 48) return;
+  // Honest baseline only — never invent a sine-wave equity history.
+  if (state.equitySnapshots.length > 0) return;
   const eq = walletEquityFromMarket(state.wallet, m);
-  const now = Date.now();
-  const pts: { ts: number; equityUsdt: number }[] = [];
-  for (let i = 47; i >= 0; i--) {
-    const drift = 1 + Math.sin(i / 6) * 0.012 + (Math.random() - 0.5) * 0.006;
-    pts.push({ ts: now - i * 3_600_000, equityUsdt: eq * drift });
-  }
-  state.equitySnapshots = [...pts, ...state.equitySnapshots].slice(0, 5000);
+  state.equitySnapshots = [{ ts: Date.now(), equityUsdt: eq }];
 }
 
 /** Last ~28 calendar days of net equity day-change for heat map. */
@@ -87,14 +82,7 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
       pnl,
     });
   }
-  // If almost all zeros, synthesize mild day deltas from equity curve for demo readability
-  if (out.every((x) => Math.abs(x.pnl) < 1e-9) && snaps.length > 1) {
-    const eq = walletEquityFromMarket(state.wallet, m);
-    for (let i = 0; i < out.length; i++) {
-      const drift = Math.sin(i / 3.2) * eq * 0.004 + (i % 5 === 0 ? eq * 0.006 : -eq * 0.002);
-      out[i].pnl = drift;
-    }
-  }
+  // Do not synthesize fake day deltas — empty calendar is honest for paper.
   return out;
 }
 
@@ -118,8 +106,14 @@ export function volumeRatio5m(
 
 export function renderPnlCalendarHtml(days: DayPnl[]): string {
   const maxAbs = Math.max(...days.map((d) => Math.abs(d.pnl)), 1);
+  const hasAny = days.some((d) => Math.abs(d.pnl) > 1e-9);
   return `<div class="pnl-calendar">
     <h4>Daily PnL · last ${days.length}d</h4>
+    <p class="muted small pnl-cal-note">${
+      hasAny
+        ? "Paper equity day-change · local snapshots"
+        : "Paper equity · no day history yet (trade or wait for snapshots)"
+    }</p>
     <div class="pnl-cal-grid">
       ${days.map((d) => {
         const strong = Math.abs(d.pnl) / maxAbs > 0.55;

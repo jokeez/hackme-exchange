@@ -37,7 +37,16 @@ const slots = new Map<string, Slot>();
 const CHART_BG = "#05070d";
 
 function slotKey(el: HTMLElement): string {
-  return el.id || `anon-${slots.size}`;
+  if (el.id) return el.id;
+  let id = el.dataset.chartSlotId;
+  if (!id) {
+    id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    el.dataset.chartSlotId = id;
+  }
+  return id;
 }
 
 function candlePoints(candles: Candle[]) {
