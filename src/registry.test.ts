@@ -1,22 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { allPairs, getPair, midForPairId, walletKeyForPair } from "./registry";
+import { sampleMarket } from "./testFixtures";
 
-const market = {
-  hmcUsdt: 0.00043,
-  supUsdt: 0.000047,
-  hmcSup: 9.1,
-  hmcBtc: 6.4e-9,
-  supBtc: 7e-10,
-  poolGh: 88,
-  rewardPerM: 0.00021,
-  workers: 5,
-  supMinted: 0.05,
-  supMax: 21_000_000,
-  blockHeight: 155000,
-  btcUsd: 67_500,
-  targetMod: 1,
-  totalPayoutHmc: 1000,
-};
+const market = sampleMarket();
 
 describe("registry", () => {
   it("lists all pairs", () => {
@@ -26,7 +12,7 @@ describe("registry", () => {
 
   it("resolves mid prices from oracle snapshot", () => {
     expect(midForPairId(market, "HMC_USDT")).toBe(0.00043);
-    expect(midForPairId(market, "HMC_BTC")).toBe(6.4e-9);
+    expect(midForPairId(market, "HMC_BTC")).toBeCloseTo(market.hmcBtc, 14);
   });
 
   it("maps wallet keys per pair leg", () => {

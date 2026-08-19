@@ -1,10 +1,19 @@
 import type { MarketSnapshot, PairId, PairMeta, Wallet } from "./types";
 
-/** Single source of truth for tradable pairs — add new coins here only. */
+/**
+ * Single source of truth for tradable pairs and asset USD pricing model.
+ * Goal: adding a new pair/coin should not require hunting hardcoded mid logic.
+ */
+export type RegistryAsset = {
+  id: string;
+  usdPrice: (m: Omit<MarketSnapshot, "assetUsd">) => number;
+};
+
 export type RegistryPair = PairMeta & {
-  midPrice: (m: MarketSnapshot) => number;
-  baseWallet: keyof Wallet;
-  quoteWallet: keyof Wallet;
+  // Wallet keys are optional because this registry is also used for chart-only pairs.
+  // If wallet support is added later, these fields can be filled for the new asset(s).
+  baseWallet?: keyof Wallet;
+  quoteWallet?: keyof Wallet;
   bookStepPreset: "micro" | "cross" | "btc";
 };
 
@@ -18,7 +27,6 @@ const REGISTRY: RegistryPair[] = [
     lane: "primary",
     decimals: 8,
     color: "#4de4ff",
-    midPrice: (m) => m.hmcUsdt,
     baseWallet: "hmc",
     quoteWallet: "usdt",
     bookStepPreset: "micro",
@@ -32,7 +40,6 @@ const REGISTRY: RegistryPair[] = [
     lane: "companion",
     decimals: 8,
     color: "#6effad",
-    midPrice: (m) => m.supUsdt,
     baseWallet: "sup",
     quoteWallet: "usdt",
     bookStepPreset: "micro",
@@ -46,7 +53,6 @@ const REGISTRY: RegistryPair[] = [
     lane: "cross",
     decimals: 4,
     color: "#9bb8d4",
-    midPrice: (m) => m.hmcSup,
     baseWallet: "hmc",
     quoteWallet: "sup",
     bookStepPreset: "cross",
@@ -60,7 +66,6 @@ const REGISTRY: RegistryPair[] = [
     lane: "btc",
     decimals: 10,
     color: "#f7931a",
-    midPrice: (m) => m.hmcBtc,
     baseWallet: "hmc",
     quoteWallet: "btc",
     bookStepPreset: "btc",
@@ -74,11 +79,18 @@ const REGISTRY: RegistryPair[] = [
     lane: "btc",
     decimals: 10,
     color: "#6effad",
-    midPrice: (m) => m.supBtc,
     baseWallet: "sup",
     quoteWallet: "btc",
     bookStepPreset: "btc",
   },
+];
+
+const ASSETS: RegistryAsset[] = [
+  { id: "HMC", usdPrice: (m) => m.hmcUsdt },
+  { id: "SUP", usdPrice: (m) => m.supUsdt },
+  // Demo assumes USDT is pegged to USD.
+  { id: "USDT", usdPrice: () => 1 },
+  { id: "BTC", usdPrice: (m) => m.btcUsd },
 ];
 
 const byId = new Map<PairId, RegistryPair>(REGISTRY.map((p) => [p.id, p]));
@@ -92,19 +104,43 @@ export function getPair(id: PairId): RegistryPair {
 }
 
 export function pairMeta(id: PairId): PairMeta {
-  const { midPrice: _m, baseWallet: _b, quoteWallet: _q, bookStepPreset: _s, ...meta } = getPair(id);
+  const { baseWallet: _b, quoteWallet: _q, bookStepPreset: _s, ...meta } = getPair(id);
   return meta;
 }
 
 export function midForPairId(m: MarketSnapshot, id: PairId): number {
-  return getPair(id).midPrice(m);
+  const p = getPair(id);
+  // Some unit tests use a partial/oracle snapshot without `assetUsd`.
+  // Keep a safe fallback for the classic demo assets.
+  const assetUsd =
+    m.assetUsd ??
+    ({
+      HMC: m.hmcUsdt,
+      SUP: m.supUsdt,
+      USDT: 1,
+      BTC: m.btcUsd,
+    } as Record<string, number>);
+  const base = assetUsd[p.base] ?? 0;
+  const quote = assetUsd[p.quote] ?? 1;
+  if (!Number.isFinite(base) || !Number.isFinite(quote) || quote === 0) return 0;
+  return base / quote;
 }
 
 export function walletKeyForPair(id: PairId, leg: "base" | "quote"): keyof Wallet {
   const p = getPair(id);
-  return leg === "base" ? p.baseWallet : p.quoteWallet;
+  const fallback: Record<"base" | "quote", keyof Wallet> = { base: "hmc", quote: "usdt" };
+  return (leg === "base" ? p.baseWallet : p.quoteWallet) ?? fallback[leg];
 }
 
 export function isValidPairId(id: string): id is PairId {
   return byId.has(id as PairId);
+}
+
+export function computeAssetUsd(m: Omit<MarketSnapshot, "assetUsd">): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const a of ASSETS) {
+    const v = a.usdPrice(m);
+    out[a.id] = Number.isFinite(v) ? v : 0;
+  }
+  return out;
 }

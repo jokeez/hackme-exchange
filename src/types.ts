@@ -28,7 +28,9 @@ export type SupEconomics = {
   };
 };
 
-export type PairId = "HMC_USDT" | "SUP_USDT" | "HMC_SUP" | "HMC_BTC" | "SUP_BTC";
+// Pair IDs are driven by `src/registry.ts`.
+// Keep as string to allow adding new markets without touching TS unions.
+export type PairId = string;
 
 export type PairMeta = {
   id: PairId;
@@ -329,6 +331,9 @@ export type MarketSnapshot = {
   btcUsd: number;
   targetMod: number;
   totalPayoutHmc: number;
+  // USD price per asset id, used to derive mid for arbitrary pairs.
+  // For classic demo assets: { HMC: hmcUsdt, SUP: supUsdt, BTC: btcUsd }.
+  assetUsd: Record<string, number>;
 };
 
 export type PoolLive = {

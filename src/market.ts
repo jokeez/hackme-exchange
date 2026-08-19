@@ -1,7 +1,7 @@
 import type { MarketSnapshot, PairId, PoolStats, SupEconomics, Ticker, WorkStats } from "./types";
 
 import { INTEGRATION } from "./config/integration";
-import { midForPairId } from "./registry";
+import { computeAssetUsd, midForPairId } from "./registry";
 import { fetchWithTimeout } from "./fetchTimeout";
 
 export {
@@ -55,7 +55,7 @@ export function buildMarket(
   const hmcBtc = hmcUsdt / btcUsd;
   const supBtc = supUsdt / btcUsd;
 
-  return {
+  const base: Omit<MarketSnapshot, "assetUsd"> = {
     hmcUsdt,
     supUsdt,
     hmcSup,
@@ -71,6 +71,8 @@ export function buildMarket(
     targetMod: work.target_mod ?? 0,
     totalPayoutHmc: work.total_payout_hmc ?? 0,
   };
+
+  return { ...base, assetUsd: computeAssetUsd(base) };
 }
 
 export function midForPair(m: MarketSnapshot, pairId: PairId): number {

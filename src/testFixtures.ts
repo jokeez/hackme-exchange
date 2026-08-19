@@ -10,23 +10,42 @@ import {
 import type { MultiPaneTfs } from "./types";
 
 export function sampleMarket(over: Partial<MarketSnapshot> = {}): MarketSnapshot {
-  return {
-    hmcUsdt: 0.00043,
-    supUsdt: 0.000047,
-    hmcSup: 9.1,
-    hmcBtc: 6.4e-9,
-    supBtc: 7e-10,
+  const baseHmcUsdt = 0.00043;
+  const baseSupUsdt = 0.000047;
+  const baseBtcUsd = 67_500;
+
+  const base: Omit<MarketSnapshot, "assetUsd"> = {
+    hmcUsdt: baseHmcUsdt,
+    supUsdt: baseSupUsdt,
+    hmcSup: baseHmcUsdt / baseSupUsdt,
+    hmcBtc: baseHmcUsdt / baseBtcUsd,
+    supBtc: baseSupUsdt / baseBtcUsd,
     poolGh: 88,
     rewardPerM: 0.00021,
     workers: 5,
     supMinted: 0.05,
     supMax: 21_000_000,
     blockHeight: 155000,
-    btcUsd: 67_500,
+    btcUsd: baseBtcUsd,
     targetMod: 1,
     totalPayoutHmc: 1000,
-    ...over,
   };
+
+  const merged = { ...base, ...over } as Omit<MarketSnapshot, "assetUsd">;
+
+  const hmcSup = over.hmcSup ?? merged.hmcUsdt / Math.max(merged.supUsdt, 1e-12);
+  const hmcBtc = over.hmcBtc ?? merged.hmcUsdt / Math.max(merged.btcUsd, 1e-12);
+  const supBtc = over.supBtc ?? merged.supUsdt / Math.max(merged.btcUsd, 1e-12);
+
+  const assetUsd = over.assetUsd ?? {
+    HMC: merged.hmcUsdt,
+    SUP: merged.supUsdt,
+    BTC: merged.btcUsd,
+    // USDT is pegged to USD in this demo.
+    USDT: 1,
+  };
+
+  return { ...merged, hmcSup, hmcBtc, supBtc, assetUsd };
 }
 
 export function baseState(over: Partial<DemoState> = {}): DemoState {

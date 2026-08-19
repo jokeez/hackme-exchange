@@ -81,9 +81,9 @@ describe("midForPair / tickerFromMarket", () => {
   it("resolves each pair mid", () => {
     expect(midForPair(m, "HMC_USDT")).toBe(0.00043);
     expect(midForPair(m, "SUP_USDT")).toBe(0.000047);
-    expect(midForPair(m, "HMC_SUP")).toBe(9.1);
-    expect(midForPair(m, "HMC_BTC")).toBe(6.4e-9);
-    expect(midForPair(m, "SUP_BTC")).toBe(7e-10);
+    expect(midForPair(m, "HMC_SUP")).toBeCloseTo(m.hmcSup, 12);
+    expect(midForPair(m, "HMC_BTC")).toBeCloseTo(m.hmcBtc, 14);
+    expect(midForPair(m, "SUP_BTC")).toBeCloseTo(m.supBtc, 14);
   });
 
   it("builds ticker with bid < mid < ask", () => {
