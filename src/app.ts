@@ -20,6 +20,7 @@ import {
   countActiveIndicators,
   deleteSelectedDrawing,
   destroyChart,
+  getDisplayedLastCandle,
   getChartMountOpts,
   getSelectedDrawingId,
   mountChart,
@@ -1474,8 +1475,10 @@ function renderSpot(): string {
   const ch = s24.changePct;
   const pnl = market ? pnlPct(state, market) : 0;
   const av = availBalance(pair);
-  const ohlc = lastOhlc
-    ? `${state.chartMode === "heikin" ? "HA " : ""}O ${formatPrice(lastOhlc.open)} H ${formatPrice(lastOhlc.high)} L ${formatPrice(lastOhlc.low)} C ${formatPrice(lastOhlc.close)}`
+  const displayTip = state.chartMode === "heikin" ? (getDisplayedLastCandle() ?? candles.slice(-1)[0] ?? null) : (candles.slice(-1)[0] ?? null);
+  const ohlcSource = lastOhlc ?? displayTip;
+  const ohlc = ohlcSource
+    ? `${state.chartMode === "heikin" ? "HA " : ""}O ${formatPrice(ohlcSource.open)} H ${formatPrice(ohlcSource.high)} L ${formatPrice(ohlcSource.low)} C ${formatPrice(ohlcSource.close)}`
     : `${state.chartMode === "heikin" ? "HA " : ""}O — H — L — C ${formatPrice(t.mid)}`;
   const chartModes: { id: ChartMode; label: string }[] = [
     { id: "candles", label: "Candles" },
@@ -2597,8 +2600,9 @@ function mountChartPanel(): void {
         return;
       }
       // Idle: last bar OHLC — never fake C=ticker.mid with empty O/H/L.
-      const tip =
-        state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null;
+      const tip = state.chartMode === "heikin"
+        ? getDisplayedLastCandle()
+        : (state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null);
       if (tip) {
         el.textContent = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
       } else {
@@ -2870,6 +2874,10 @@ function submitOrder(side: "buy" | "sell"): void {
   const pair = pairById(state.activePair);
   if (form.amt <= 0) { setOrderMsg(side, "Enter amount", "err"); return; }
   const exitSide: "buy" | "sell" = side === "buy" ? "sell" : "buy";
+  if (useLabMatching() && form.tpslEnabled) {
+    setOrderMsg(side, "TP/SL attachments are paper-only right now", "err");
+    return;
+  }
 
   if (uiType === "market") {
     if (useLabMatching()) {
@@ -4168,9 +4176,7 @@ function microTickPrices(): void {
     const labMid = labLive ? labBookMid(p.id) : 0;
     const target = labMid > 0 ? labMid : oracleTarget;
     const prev = prevMids[p.id] ?? target;
-    const blend = labLive && labMid > 0
-      ? target // snap to lab L2 mid — do not invent an oracle walk against the book
-      : prev + (target - prev) * (0.38 + Math.random() * 0.22);
+    const blend = target;
     if (!state.candles[p.id]) state.candles[p.id] = {};
     state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, blend, prev);
     prevMids[p.id] = blend;
@@ -4184,7 +4190,7 @@ function microTickPrices(): void {
     }
     changed = true;
   }
-  if (!labLive && Math.random() < 0.55) {
+  if (!labLive && liveTickN % 2 === 0) {
     publicTape = appendSyntheticTrade(publicTape, activeTicker());
   }
   // Match resting paper orders against live blended mids every ~1.4s.

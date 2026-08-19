@@ -152,4 +152,27 @@ describe("demoIo", () => {
       expect(Object.keys(parsed.candles)).toEqual([]);
     }).not.toThrow();
   });
+
+  it("sanitizes chart overlay booleans on import", () => {
+    const state = baseState();
+    const parsed = parseDemoImport(
+      JSON.stringify({
+        state: {
+          ...state,
+          chartOverlays: {
+            showVolume: "false",
+            showOrderLines: false,
+            showLastPrice: 1,
+            orderPreview: true,
+            quickOrder: null,
+          },
+        },
+      }),
+    );
+    expect(parsed.chartOverlays.showVolume).toBe(true);
+    expect(parsed.chartOverlays.showOrderLines).toBe(false);
+    expect(parsed.chartOverlays.showLastPrice).toBe(true);
+    expect(parsed.chartOverlays.orderPreview).toBe(true);
+    expect(parsed.chartOverlays.quickOrder).toBe(false);
+  });
 });

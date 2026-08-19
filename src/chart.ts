@@ -260,6 +260,10 @@ function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 
+export function getDisplayedLastCandle(): Candle | null {
+  return currentCandles[currentCandles.length - 1] ?? null;
+}
+
 /** LWC autoscale override — ignore extreme wicks (TV-style scale to body). */
 function makeRobustAutoscaleProvider() {
   return (original: () => { priceRange: { minValue: number; maxValue: number } | null; margins?: { above: number; below: number } } | null) => {
@@ -1431,7 +1435,6 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         return;
       }
       const t = param.time as number;
-      // Prefer raw (pre-HA) bar by time — works for candles/bars/line/area/heikin.
       const fromRaw = rawCandlesCache.find((c) => c.time === t);
       const fromSeries = currentCandles.find((c) => c.time === t);
       const hit =
@@ -1440,7 +1443,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         (lineSeries ? param.seriesData.get(lineSeries) : undefined) ??
         (areaSeries ? param.seriesData.get(areaSeries) : undefined);
       const seriesHit = hit as { open?: number; high?: number; low?: number; close?: number; value?: number } | undefined;
-      const bar = fromRaw ?? fromSeries;
+      const bar = currentMode === "heikin" ? (fromSeries ?? fromRaw) : (fromRaw ?? fromSeries);
       if (bar) {
         opts.onCrosshair?.({
           time: t,

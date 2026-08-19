@@ -61,6 +61,29 @@ const VIP_VOLUME_WINDOW_MS = 30 * 86_400_000;
 
 const PAIR_IDS = new Set<PairId>(["HMC_USDT", "SUP_USDT", "HMC_SUP", "HMC_BTC", "SUP_BTC"]);
 
+function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
+  const incoming = raw && typeof raw === "object" ? (raw as Partial<DemoState["chartOverlays"]>) : {};
+  return {
+    showVolume: typeof incoming.showVolume === "boolean" ? incoming.showVolume : DEFAULT_CHART_OVERLAYS.showVolume,
+    showOrderLines:
+      typeof incoming.showOrderLines === "boolean"
+        ? incoming.showOrderLines
+        : DEFAULT_CHART_OVERLAYS.showOrderLines,
+    showLastPrice:
+      typeof incoming.showLastPrice === "boolean"
+        ? incoming.showLastPrice
+        : DEFAULT_CHART_OVERLAYS.showLastPrice,
+    orderPreview:
+      typeof incoming.orderPreview === "boolean"
+        ? incoming.orderPreview
+        : DEFAULT_CHART_OVERLAYS.orderPreview,
+    quickOrder:
+      typeof incoming.quickOrder === "boolean"
+        ? incoming.quickOrder
+        : DEFAULT_CHART_OVERLAYS.quickOrder,
+  };
+}
+
 function sanitizePairId(raw: unknown, fallback: PairId = "HMC_USDT"): PairId {
   return typeof raw === "string" && PAIR_IDS.has(raw as PairId) ? (raw as PairId) : fallback;
 }
@@ -171,10 +194,7 @@ export function parseDemoImport(raw: string): DemoState {
           typeof (e as { equityUsdt?: unknown }).equityUsdt === "number",
       )
     : [];
-  state.chartOverlays = {
-    ...DEFAULT_CHART_OVERLAYS,
-    ...(incoming.chartOverlays && typeof incoming.chartOverlays === "object" ? incoming.chartOverlays : {}),
-  };
+  state.chartOverlays = sanitizeChartOverlays(incoming.chartOverlays);
   state.activePair = sanitizePairId(incoming.activePair);
   state.activeTf = sanitizeTf(incoming.activeTf);
   state.secondaryTf = sanitizeTf(incoming.secondaryTf, "4H");

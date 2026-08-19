@@ -27,6 +27,26 @@ export const CANDLE_BASE_TF: Timeframe = "1m";
 export const CHART_GENESIS_ISO = "2026-05-18T00:00:00.000Z";
 export const CHART_GENESIS_UNIX = Math.floor(Date.parse(CHART_GENESIS_ISO) / 1000);
 
+function stableHash(parts: Array<string | number>): number {
+  let h = 2166136261;
+  for (const part of parts) {
+    const s = String(part);
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+  }
+  return h >>> 0;
+}
+
+function stableUnit(parts: Array<string | number>): number {
+  return stableHash(parts) / 0xffffffff;
+}
+
+function stableSigned(parts: Array<string | number>, center = 0.5): number {
+  return stableUnit(parts) - center;
+}
+
 function bucket(tsMs: number, tf: Timeframe): number {
   const sec = TF_SEC[tf];
   return Math.floor(tsMs / 1000 / sec) * sec;
@@ -94,8 +114,8 @@ function candleVolume(pairId: PairId, tf: Timeframe): number {
   const tfScale = Math.sqrt(TF_SEC[tf] / 60);
   const base =
     pairId === "HMC_USDT" || pairId === "HMC_SUP" || pairId === "HMC_BTC"
-      ? 4000 + Math.random() * 80_000
-      : 1500 + Math.random() * 25_000;
+      ? 4000 + stableUnit([pairId, tf, "volume"]) * 80_000
+      : 1500 + stableUnit([pairId, tf, "volume"]) * 25_000;
   return base * tfScale;
 }
 
@@ -105,9 +125,11 @@ function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF)
   const bps = bpsBase * Math.sqrt(TF_SEC[tf] / 60);
   const half = (bps / 10_000) * mid;
   const bodyCap = maxBodyFracForTf(tf);
+  const hiSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-high"]);
+  const loSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-low"]);
   return {
-    high: Math.min(mid * (1 + bodyCap), mid + half * (0.55 + Math.random() * 0.7)),
-    low: Math.max(mid * (1 - bodyCap), mid * 0.985, mid - half * (0.55 + Math.random() * 0.7)),
+    high: Math.min(mid * (1 + bodyCap), mid + half * (0.55 + hiSeed * 0.7)),
+    low: Math.max(mid * (1 - bodyCap), mid * 0.985, mid - half * (0.55 + loSeed * 0.7)),
   };
 }
 
@@ -202,12 +224,12 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   const maxBody = maxBodyFracForTf(tf);
   // Mild path — sqrt(time) scale so 1D isn't a different universe than 1m.
   const driftAmp = 10 * Math.sqrt(sec / 60);
-  let price = mid * (0.998 + Math.random() * 0.004);
+  let price = mid * (0.998 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.004);
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
     if (t < genesis) continue;
-    const driftBps = (Math.random() - 0.48) * driftAmp;
+    const driftBps = stableSigned([pairId, tf, t, "seed-drift"], 0.48) * driftAmp;
     const open = price;
     const rawClose = open * (1 + driftBps / 10_000);
     const close = clampTickMid(rawClose, open, maxBody);
@@ -318,7 +340,7 @@ export function prependOlderCandles(
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const driftBps = (Math.random() - 0.5) * driftAmp;
+    const driftBps = stableSigned([pairId, tf, t, "prepend-open"], 0.5) * driftAmp;
     const close = price;
     const open = clampTickMid(close / (1 + driftBps / 10_000), close, maxBody);
     older.push(makeBar(pairId, t, open, close, tf));
@@ -328,7 +350,7 @@ export function prependOlderCandles(
 
   let p = older[0]!.open;
   for (let i = 0; i < older.length; i++) {
-    const driftBps = (Math.random() - 0.48) * driftAmp;
+    const driftBps = stableSigned([pairId, tf, older[i]!.time, "prepend-close"], 0.48) * driftAmp;
     const open = p;
     const close =
       i === older.length - 1
@@ -360,7 +382,7 @@ export function upsertTick(
   if (finiteMid(openRef) && !disc) {
     safeMid = clampTickMid(safeMid, openRef, maxBody);
   }
-  const tickVol = 150 + Math.random() * 2200;
+  const tickVol = 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200;
   const w = disc ? { high: safeMid, low: safeMid } : wickSpread(safeMid, pairId, tf);
 
   const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar), maxBody);

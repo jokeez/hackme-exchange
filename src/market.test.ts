@@ -30,6 +30,16 @@ describe("buildMarket", () => {
     expect(m.poolGh).toBe(35);
   });
 
+  it("does not drift with client clock for the same inputs", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
+    const a = buildMarket({}, {}, {}, 0.00042);
+    vi.setSystemTime(new Date("2026-08-16T23:45:00.000Z"));
+    const b = buildMarket({}, {}, {}, 0.00042);
+    expect(b).toEqual(a);
+    vi.useRealTimers();
+  });
+
   it("fetchMarket stays live when work/stats fails but pool/stats ok", async () => {
     const poolBody = JSON.stringify({
       hashrate: 88e9,

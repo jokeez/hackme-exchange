@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   barCountForTf,
   candlesAreContiguous,
@@ -77,6 +77,14 @@ describe("seedCandles", () => {
       expect(candles[i].time).toBeGreaterThan(candles[i - 1].time);
     }
   });
+
+  it("is deterministic for the same pair/tf/time/mid", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
+    const a = seedCandles("HMC_USDT", "15m", 0.00043, 20);
+    const b = seedCandles("HMC_USDT", "15m", 0.00043, 20);
+    expect(b).toEqual(a);
+  });
 });
 
 describe("prependOlderCandles", () => {
@@ -88,6 +96,15 @@ describe("prependOlderCandles", () => {
     for (let i = 1; i < grown.length; i++) {
       expect(grown[i].time).toBeGreaterThan(grown[i - 1].time);
     }
+  });
+
+  it("is deterministic for the same existing history", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
+    const base = seedCandles("HMC_USDT", "15m", 0.0004, 10);
+    const first = prependOlderCandles(base, "HMC_USDT", "15m", 5);
+    const second = prependOlderCandles(base, "HMC_USDT", "15m", 5);
+    expect(second).toEqual(first);
   });
 
   it("respects MAX_CANDLES cap", () => {
@@ -291,4 +308,8 @@ describe("1D contiguity / gap abuse", () => {
     expect(candlesAreContiguous(healed, "1m")).toBe(true);
     expect(healed[healed.length - 1].time).toBe(end);
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });

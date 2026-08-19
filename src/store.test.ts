@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyMarketTrade,
   cancelAllOpenOrders,
   cancelOrder,
   ensureCandles,
+  loadState,
   placeLimitOrder,
   toggleFavorite,
   updateOrderPrice,
@@ -11,6 +12,7 @@ import {
   walletEquityUsdt,
 } from "./store";
 import { baseState, installMemoryLocalStorage, sampleMarket } from "./testFixtures";
+import { STORAGE_KEY } from "./theme";
 import { STATE_VERSION } from "./types";
 
 describe("store wallet helpers", () => {
@@ -149,6 +151,36 @@ describe("store order mutations", () => {
     ensureCandles(s, sampleMarket());
     expect(Object.keys(s.candles).length).toBeGreaterThanOrEqual(5);
     expect(s.candles.HMC_USDT?.["15m"]?.length).toBeGreaterThan(10);
+  });
+
+  it("ensureCandles is deterministic across fresh clients at the same time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
+    const a = baseState();
+    const b = baseState();
+    const market = sampleMarket();
+    ensureCandles(a, market);
+    ensureCandles(b, market);
+    expect(b.candles.HMC_USDT?.["1m"]).toEqual(a.candles.HMC_USDT?.["1m"]);
+    expect(b.candles.HMC_USDT?.["15m"]).toEqual(a.candles.HMC_USDT?.["15m"]);
+    vi.useRealTimers();
+  });
+
+  it("drops old persisted candles after state version bump", () => {
+    const map = installMemoryLocalStorage();
+    const stale = {
+      ...baseState(),
+      stateVersion: STATE_VERSION - 1,
+      candles: {
+        HMC_USDT: {
+          "1m": [{ time: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 }],
+        },
+      },
+    };
+    map.set(STORAGE_KEY, JSON.stringify(stale));
+    const loaded = loadState();
+    expect(loaded.stateVersion).toBe(STATE_VERSION);
+    expect(loaded.candles).toEqual({});
   });
 
   it("default-like state includes priceAlerts array", () => {

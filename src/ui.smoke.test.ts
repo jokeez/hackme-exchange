@@ -116,6 +116,12 @@ describe("orderPanel HTML & controls", () => {
     expect(mkt).not.toMatch(/class="tpsl-block field-tpsl hidden"/);
   });
 
+  it("hides TP/SL attachments in lab mode", () => {
+    const html = renderDualOrderPanel(orderCtx({ uiType: "market", labLive: true }));
+    expect(html).toMatch(/field-tpsl[^>]*hidden/);
+    expect(html).toMatch(/id="buy-tpsl"[^>]*disabled/);
+  });
+
   it("limit defaults rest off mid (buy below, sell above)", () => {
     const mid = 0.00041177652319212107;
     const html = renderDualOrderPanel(orderCtx({ mid, uiType: "limit" }));

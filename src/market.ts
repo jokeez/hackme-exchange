@@ -45,8 +45,7 @@ export function buildMarket(
   const hf = clamp(Math.pow(poolGh / REF_GH, 0.38), 0.55, 1.85);
   const rf = clamp(Math.pow(rewardPerM / 0.00021, 0.22), 0.75, 1.25);
   const wf = 1 + Math.log10(Math.max(workers, 1)) * 0.06;
-  const jitter = 1 + Math.sin((Date.now() / 3_600_000) * 2.1) * 0.004;
-  const hmcUsdt = anchor * hf * rf * wf * jitter;
+  const hmcUsdt = anchor * hf * rf * wf;
 
   const minted = sup.economics?.total_minted_sup ?? 0.05;
   const max = sup.economics?.max_supply_sup ?? 21_000_000;

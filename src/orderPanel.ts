@@ -64,7 +64,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
   /** Slightly off mid so default Limit rests on the book (shows under Open orders). Market still fills instantly. */
   const buyLimitTick = restingLimitPrice(mid, "buy", pairId);
   const sellLimitTick = restingLimitPrice(mid, "sell", pairId);
-  const showTpsl = uiType === "market" || uiType === "limit";
+  const showTpsl = (uiType === "market" || uiType === "limit") && !labLive;
   const advanced = isAdvancedOrderType(uiType);
   const mmBadge = labMmSeeded
     ? `<span class="demo-badge sm muted-badge" data-lab-mm-badge="1" title="Live book levels seeded by lab market-maker">LAB MM</span>`
@@ -139,7 +139,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
         </div>
       </div>
       <div class="tpsl-block field-tpsl ${showTpsl ? "" : "hidden"}">
-        <label class="fee-toggle mono tpsl-toggle"><input type="checkbox" id="${side}-tpsl" data-tpsl-side="${side}" /> TP/SL</label>
+        <label class="fee-toggle mono tpsl-toggle"><input type="checkbox" id="${side}-tpsl" data-tpsl-side="${side}" ${labLive ? "disabled" : ""} /> TP/SL</label>
         <div class="tpsl-fields hidden" id="${side}-tpsl-fields">
           ${fld("TP", pair.quote, `<input id="${side}-tp" class="inp mono" type="text" inputmode="decimal" value="${tpDefault}" />`)}
           ${fld("SL", pair.quote, `<input id="${side}-sl" class="inp mono" type="text" inputmode="decimal" value="${slDefault}" />`)}

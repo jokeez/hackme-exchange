@@ -102,6 +102,10 @@ function apiLevelsToBook(levels: ApiBookLevel[]): BookLevel[] {
   return out;
 }
 
+function sortBookLevels(levels: BookLevel[], side: "bids" | "asks"): BookLevel[] {
+  return [...levels].sort((a, b) => side === "bids" ? b.price - a.price : a.price - b.price);
+}
+
 function bookFingerprint(bids: ApiBookLevel[], asks: ApiBookLevel[]): string {
   const fmt = (xs: ApiBookLevel[]) => xs.map((l) => `${l.price}:${l.qty}:${l.n ?? 0}`).join(",");
   return `${fmt(bids)}|${fmt(asks)}`;
@@ -116,8 +120,8 @@ export async function refreshLabBook(pairId: PairId): Promise<{ ok: boolean; cha
   const changed = !labBookCache || labBookCache.pairId !== pairId || labBookCache.fingerprint !== fp;
   labBookCache = {
     pairId,
-    bids: apiLevelsToBook(res.bids),
-    asks: apiLevelsToBook(res.asks),
+    bids: sortBookLevels(apiLevelsToBook(res.bids), "bids"),
+    asks: sortBookLevels(apiLevelsToBook(res.asks), "asks"),
     ts: res.ts ? Date.parse(res.ts) || Date.now() : Date.now(),
     fingerprint: fp,
   };

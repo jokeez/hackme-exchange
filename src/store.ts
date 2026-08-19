@@ -74,6 +74,29 @@ function sanitizeWallet(w: Partial<Wallet> | undefined, fallback: Wallet): Walle
   };
 }
 
+function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
+  const incoming = raw && typeof raw === "object" ? (raw as Partial<DemoState["chartOverlays"]>) : {};
+  return {
+    showVolume: typeof incoming.showVolume === "boolean" ? incoming.showVolume : DEFAULT_CHART_OVERLAYS.showVolume,
+    showOrderLines:
+      typeof incoming.showOrderLines === "boolean"
+        ? incoming.showOrderLines
+        : DEFAULT_CHART_OVERLAYS.showOrderLines,
+    showLastPrice:
+      typeof incoming.showLastPrice === "boolean"
+        ? incoming.showLastPrice
+        : DEFAULT_CHART_OVERLAYS.showLastPrice,
+    orderPreview:
+      typeof incoming.orderPreview === "boolean"
+        ? incoming.orderPreview
+        : DEFAULT_CHART_OVERLAYS.orderPreview,
+    quickOrder:
+      typeof incoming.quickOrder === "boolean"
+        ? incoming.quickOrder
+        : DEFAULT_CHART_OVERLAYS.quickOrder,
+  };
+}
+
 const DEFAULT: DemoState = {
   wallet: { usdt: 10_000, hmc: 50_000, sup: 8_000, btc: 0.15 },
   orders: [],
@@ -147,11 +170,17 @@ export function loadState(): DemoState {
         ...DEFAULT_CHART_SETTINGS,
         ...parsed.chartSettings,
       }),
-      equityBaselineV: parsed.equityBaselineV ?? 0,
+      equityBaselineV:
+        typeof parsed.equityBaselineV === "number" && Number.isFinite(parsed.equityBaselineV)
+          ? parsed.equityBaselineV
+          : 0,
       chartMode: sanitizeChartMode(parsed.chartMode),
       activeTf: migrateTf(parsed.activeTf),
       activePair: PAIRS.some((p) => p.id === parsed.activePair) ? parsed.activePair : DEFAULT.activePair,
-      stateVersion: parsed.stateVersion ?? 0,
+      stateVersion:
+        typeof parsed.stateVersion === "number" && Number.isFinite(parsed.stateVersion)
+          ? parsed.stateVersion
+          : 0,
       feeConfig: sanitizeFeeConfig({ ...DEFAULT_FEE_CONFIG, ...parsed.feeConfig }),
       secondaryTf: migrateTf(parsed.secondaryTf === parsed.activeTf ? "4H" : parsed.secondaryTf),
       multiPaneTfs: sanitizeMultiPaneTfs(
@@ -180,7 +209,7 @@ export function loadState(): DemoState {
         ["cursor", "hline", "trend", "fib", "rect", "text", "measure"].includes(parsed.activeDrawTool)
           ? parsed.activeDrawTool
           : "cursor",
-      chartOverlays: { ...DEFAULT_CHART_OVERLAYS, ...parsed.chartOverlays },
+      chartOverlays: sanitizeChartOverlays(parsed.chartOverlays),
       indicatorConfig: sanitizeIndicatorConfig(parsed.indicatorConfig),
       multiChartLayout: sanitizeMultiChartLayout(
         parsed.multiChartLayout ?? (parsed.multiChart ? "2v" : "1"),

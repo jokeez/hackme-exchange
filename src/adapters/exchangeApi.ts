@@ -684,7 +684,7 @@ export async function fetchDepositAddress(
 
 /** POST /withdraw — request only; admin complete is CLI/API (never SPA admin token). */
 export async function requestWithdraw(
-  body: { asset: string; amount: number; destination: string; totp_code?: string },
+  body: { asset: string; amount: number; destination: string; totp_code?: string; client_withdraw_id?: string },
   timeoutMs = 8_000,
   baseOverride?: string,
 ): Promise<
@@ -694,20 +694,40 @@ export async function requestWithdraw(
   if (!url) return disabled();
   try {
     const headers = csrfHeaders(true);
-    if (body.totp_code) headers["X-2FA-Code"] = body.totp_code;
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        mode: "cors",
-        credentials: "include",
-        headers,
-        body: JSON.stringify(body),
-      },
-      timeoutMs,
-    );
-    const parsed = await parseJson(res);
-    if (!res.ok) return asError(res.status, parsed, "withdraw failed");
+    const payload = {
+      ...body,
+      client_withdraw_id:
+        body.client_withdraw_id?.trim() ||
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `withdraw-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    };
+    if (payload.totp_code) headers["X-2FA-Code"] = payload.totp_code;
+    const send = async (outgoing: typeof payload | typeof body) =>
+      fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          mode: "cors",
+          credentials: "include",
+          headers,
+          body: JSON.stringify(outgoing),
+        },
+        timeoutMs,
+      );
+    let res = await send(payload);
+    let parsed = await parseJson(res);
+    if (!res.ok) {
+      const err = asError(res.status, parsed, "withdraw failed");
+      const legacyServer =
+        "client_withdraw_id" in payload &&
+        err.code === "invalid_json" &&
+        /invalid request body/i.test(err.message);
+      if (!legacyServer) return err;
+      res = await send(body);
+      parsed = await parseJson(res);
+      if (!res.ok) return asError(res.status, parsed, "withdraw failed");
+    }
     const data = parsed as { withdraw: ApiWithdraw; fee_quote?: CustodyFeeQuote; warning?: string };
     return { ok: true, withdraw: data.withdraw, fee_quote: data.fee_quote, warning: data.warning };
   } catch (e) {
