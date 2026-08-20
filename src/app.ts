@@ -218,7 +218,8 @@ let market: MarketSnapshot | null = null;
 let poolLive: PoolLive | null = null;
 let tickers: Record<PairId, Ticker> = {} as Record<PairId, Ticker>;
 let pollTimer: number | undefined;
-let uiType: OrderKind = "market";
+/** Default Limit so price fields are visible (Market still one click away). */
+let uiType: OrderKind = "limit";
 let uiTif: TimeInForce = "GTC";
 let uiPostOnly = false;
 let activityTab: "tape" | "orders" | "history" | "alerts" = "orders";
@@ -3342,11 +3343,12 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
 }
 
 function showSettings(): void {
+  document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
   const bd = document.createElement("div");
   bd.className = "modal-backdrop";
   const anchor = sanitizeOracleAnchor(state.oracleAnchor);
-  bd.innerHTML = `<div class="modal glass">
-    <h3>Oracle settings</h3>
+  bd.innerHTML = `<div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="oracle-settings-title">
+    <h3 id="oracle-settings-title">Oracle settings</h3>
     <label>Anchor USDT per HMC
       <input class="inp mono" id="anchor-inp" type="number" step="0.000001" value="${anchor}" />
     </label>
@@ -3356,21 +3358,36 @@ function showSettings(): void {
       <button type="button" class="btn-primary" id="modal-save">Apply</button>
     </div>
   </div>`;
+  const close = () => {
+    window.removeEventListener("keydown", onKey);
+    bd.remove();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
   document.body.appendChild(bd);
-  bd.querySelector("#modal-close")?.addEventListener("click", () => bd.remove());
-  bd.addEventListener("click", (e) => { if (e.target === bd) bd.remove(); });
+  window.addEventListener("keydown", onKey);
+  bd.querySelector("#modal-close")?.addEventListener("click", close);
+  bd.addEventListener("click", (e) => {
+    if (e.target === bd) close();
+  });
   bd.querySelector("#modal-save")?.addEventListener("click", () => {
     const v = sanitizeOracleAnchor(Number((bd.querySelector("#anchor-inp") as HTMLInputElement).value), 0);
     if (v > 0) {
       state.oracleAnchor = v;
       saveState(state);
       toast(`Anchor → ${v} USDT/HMC`, "ok");
-      bd.remove();
+      close();
       refresh();
     } else {
       toast("Anchor must be a positive number", "warn");
     }
   });
+  (bd.querySelector("#anchor-inp") as HTMLInputElement | null)?.focus();
 }
 
 function applyLayoutToDom(): void {
