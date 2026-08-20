@@ -159,7 +159,7 @@ export function formatBps(bps: number): string {
 
 export function feeScheduleLabel(state: DemoState, market?: MarketSnapshot | null): string {
   const tier = activeVipTier(state, market);
-  return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name}`;
+  return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name} (demo VIP · local history)`;
 }
 
 export function nextVipProgress(

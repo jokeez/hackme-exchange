@@ -23,6 +23,16 @@ describe("tape", () => {
     expect(next.length).toBe(4);
   });
 
+  it("appendSyntheticTrade is deterministic for same inputs", () => {
+    const tk = sampleTicker();
+    const seeded = seedPublicTape("HMC_USDT", tk, 2, 1_700_000_000_000);
+    const a = appendSyntheticTrade(seeded, tk, 1_700_000_000_500);
+    const b = appendSyntheticTrade(seeded, tk, 1_700_000_000_500);
+    expect(a[0].id).toBe(b[0].id);
+    expect(a[0].price).toBe(b[0].price);
+    expect(a[0].side).toBe(b[0].side);
+  });
+
   it("merges user fills ahead of public by timestamp", () => {
     const tk = sampleTicker();
     const pub = seedPublicTape("HMC_USDT", tk, 5, 1_000);

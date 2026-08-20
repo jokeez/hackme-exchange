@@ -45,7 +45,8 @@ export function appendSyntheticTrade(
   now = Date.now(),
   maxKeep = 48,
 ): TapePrint[] {
-  const r = Math.random();
+  // Deterministic given (pair, mid, now, prior length) — no Math.random across devices.
+  const r = rnd(now * 0.001 + ticker.mid * 1e6 + tape.length * 31);
   const side: OrderSide = r > 0.5 ? "buy" : "sell";
   const slip = (r - 0.5) * ticker.mid * 0.0018;
   const print: TapePrint = {

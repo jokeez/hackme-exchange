@@ -700,10 +700,13 @@ function renderBook(): string {
     </div>${renderVolumeRatio()}${renderDepthPanel(bids, asks, pair.base, pair.quote, { labLive })}`;
   }
   const max = Math.max(...bids.map((b) => b.amountBase), ...asks.map((a) => a.amountBase), 1);
+  const rowTitle = labLive
+    ? (side: "bid" | "ask") => `Set ${side === "ask" ? "Buy" : "Sell"} limit to this lab price`
+    : () => "Paper demo · synthetic depth (not a live fill)";
   const row = (l: (typeof bids)[0], side: "bid" | "ask") => {
     const pct = (l.amountBase / max) * 100;
     const price = l.price;
-    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" title="Fill ${side === "ask" ? "Buy" : "Sell"} price">
+    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" title="${rowTitle(side)}">
       <div class="ob-bar" style="width:${pct}%"></div>
       <span class="ob-price">${formatPrice(price)}</span>
       <span>${formatNum(l.amountBase, 1)}</span>
@@ -716,6 +719,9 @@ function renderBook(): string {
   const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : lab ? bestBid || bestAsk || t.mid : t.mid;
   const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : Math.max(0, t.ask - t.bid);
   const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
+  const midHint = labLive
+    ? "Lab L2 mid"
+    : "Oracle · indicative (not tradeable L2)";
   return `
     <div class="book-view-tabs segmented">
       <button type="button" class="bv active" data-bv="book">Book</button>
@@ -730,9 +736,10 @@ function renderBook(): string {
     </div>
     <div class="ob-head"><span>Price (${pair.quote})</span><span>Amount (${pair.base})</span><span class="ob-total">Total</span></div>
     <div class="ob-asks">${asks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
-    <div class="ob-mid">
+    <div class="ob-mid" title="${midHint}">
       <div class="ob-mid-price">${formatPrice(midPx)}</div>
       <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
+      <div class="ob-mid-src muted small">${midHint}</div>
     </div>
     <div class="ob-bids">${bids.map((l) => row(l, "bid")).join("")}</div>`;
 }
@@ -1547,7 +1554,8 @@ function renderSpot(): string {
     </div>
     <div class="tb-right">
       <div class="vip-badge mono" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">
-        <span class="vip-name">${vip.name}</span>
+        <span class="vip-name" title="Demo VIP from local trade history — not server volume">${vip.name}</span>
+        <span class="vip-demo muted small">demo</span>
         <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
         <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
       </div>

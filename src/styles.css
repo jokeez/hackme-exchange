@@ -1287,6 +1287,7 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   background: var(--panel-strip); font-family: var(--mono); color: var(--text);
 }
 .ob-mid-price { font-weight: 700; font-size: 0.78rem; line-height: 1.15; }
+.ob-mid-src { margin-top: 0.15rem; line-height: 1.2; opacity: 0.85; }
 .ob-mid-spread {
   font-size: 0.52rem; font-weight: 500; color: var(--muted); margin-top: 0;
   letter-spacing: 0.01em;
@@ -2239,6 +2240,7 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   border: 1px solid rgba(77,228,255,.35); color: var(--primary);
 }
 .vip-badge .vip-name { color: var(--primary); }
+.vip-badge .vip-demo { margin-left: 0.35rem; text-transform: lowercase; letter-spacing: 0.02em; }
 .vip-badge .vip-rates { color: var(--muted); font-weight: 500; }
 .vip-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.1); overflow: hidden; margin-top: 1px; }
 .vip-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-strong)); }

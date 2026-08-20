@@ -77,9 +77,10 @@ describe("fees extras", () => {
     expect(volume30dUsdt(s)).toBe(50);
   });
 
-  it("feeScheduleLabel includes Maker/Taker", () => {
+  it("feeScheduleLabel includes Maker/Taker and demo VIP mark", () => {
     expect(feeScheduleLabel(baseState())).toMatch(/Maker/);
     expect(feeScheduleLabel(baseState())).toMatch(/Taker/);
+    expect(feeScheduleLabel(baseState())).toMatch(/demo VIP/);
   });
 });
 

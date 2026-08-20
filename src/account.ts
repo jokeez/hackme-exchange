@@ -110,7 +110,11 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         <p class="account-eq mono">${formatNum(eq, 2)} <span class="muted">USDT</span></p>
         <p class="${pnl >= 0 ? "up" : "down"} mono acct-alltime">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
         <div class="acct-vip-row">
-          <span class="vip-badge lg"><span class="vip-name">${vip.name}</span><span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span></span>
+          <span class="vip-badge lg" title="Demo VIP from local trade history — farmable offline; server volume applies in live lab/API">
+            <span class="vip-name">${vip.name}</span>
+            <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
+            <span class="vip-demo muted small">demo</span>
+          </span>
           <div class="vip-progress">
             <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
             <p class="muted small">${
