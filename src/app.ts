@@ -2580,6 +2580,21 @@ function handleChartContextAction(action: string, price: number): void {
   }
 }
 
+function refreshOhlcLegendIdle(): void {
+  const el = document.getElementById("ohlc-legend");
+  if (!el) return;
+  const ha = state.chartMode === "heikin" ? "HA " : "";
+  const tip =
+    state.chartMode === "heikin"
+      ? getDisplayedLastCandle()
+      : (state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null);
+  if (tip) {
+    el.textContent = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
+  } else {
+    el.textContent = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
+  }
+}
+
 function mountChartPanel(): void {
   const host = document.getElementById("chart-host");
   if (!host) return;
@@ -2600,14 +2615,7 @@ function mountChartPanel(): void {
         return;
       }
       // Idle: last bar OHLC — never fake C=ticker.mid with empty O/H/L.
-      const tip = state.chartMode === "heikin"
-        ? getDisplayedLastCandle()
-        : (state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null);
-      if (tip) {
-        el.textContent = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
-      } else {
-        el.textContent = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
-      }
+      refreshOhlcLegendIdle();
     },
     onOrderPriceDrag: (id, price) => {
       updateOrderPrice(state, id, price);
@@ -2671,6 +2679,8 @@ function mountChartPanel(): void {
   chartMounted = true;
   setActiveDrawTool(state.activeDrawTool);
   syncMultiCharts();
+  // Mode / remount must refresh idle OHLC (incl. HA prefix) without waiting for crosshair.
+  refreshOhlcLegendIdle();
 }
 
 function paneTf(pane: number): Timeframe {

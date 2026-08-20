@@ -83,7 +83,8 @@ export const TF_SEC: Record<Timeframe, number> = {
 };
 
 export const TIMEFRAMES: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1H", "2H", "4H", "1D", "1W"];
-export const QUICK_TFS: Timeframe[] = ["1m", "5m", "1H", "1D"];
+/** Default desk TF is 15m — keep it on the quick bar so users can return after switching. */
+export const QUICK_TFS: Timeframe[] = ["1m", "15m", "1H", "1D"];
 
 export type ChartMode = "candles" | "bars" | "line" | "area" | "heikin";
 
