@@ -169,10 +169,18 @@ const LEDGER_KINDS = new Set<LedgerKind>(["trade", "deposit", "withdrawal", "tra
 const LEDGER_ASSETS = new Set(["USDT", "HMC", "SUP", "BTC"]);
 const INDICATOR_IDS = Object.keys(DEFAULT_CHART_SETTINGS.indicators) as IndicatorId[];
 
-/** Oracle anchor used in `value="${…}"` — must be a finite positive number. */
-export function sanitizeOracleAnchor(raw: unknown, fallback = 0.00042): number {
+/** Oracle / reference mid used in `value="${…}"` — must be a finite positive number. */
+export function sanitizeOracleAnchor(raw: unknown, fallback = 0.05): number {
   const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
   if (!Number.isFinite(n) || n <= 0 || n > 1e9) return fallback;
+  return n;
+}
+
+/** Migrate pre-D0 micro anchors (~0.00042) up to operator reference mid. */
+export function migrateOracleAnchor(raw: unknown, fallback = 0.05): number {
+  const n = sanitizeOracleAnchor(raw, fallback);
+  // Old demo scale was ~4e-4; anything below 0.001 is treated as legacy and lifted.
+  if (n > 0 && n < 0.001) return fallback;
   return n;
 }
 

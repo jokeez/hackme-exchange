@@ -19,6 +19,7 @@ import {
   sanitizeMainView,
   sanitizeMultiChartLayout,
   sanitizeOracleAnchor,
+  migrateOracleAnchor,
   sanitizePlainNote,
 } from "./sanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
@@ -199,7 +200,7 @@ export function parseDemoImport(raw: string): DemoState {
   state.activeTf = sanitizeTf(incoming.activeTf);
   state.secondaryTf = sanitizeTf(incoming.secondaryTf, "4H");
   state.multiPaneTfs = sanitizeImportedMultiPaneTfs(incoming.multiPaneTfs, state.secondaryTf);
-  state.oracleAnchor = sanitizeOracleAnchor(incoming.oracleAnchor);
+  state.oracleAnchor = migrateOracleAnchor(incoming.oracleAnchor);
   state.mainView = sanitizeMainView(incoming.mainView);
   state.chartMode = sanitizeChartMode(incoming.chartMode);
   state.multiChartLayout = sanitizeMultiChartLayout(

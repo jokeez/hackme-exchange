@@ -10,8 +10,8 @@ import {
 import type { MultiPaneTfs } from "./types";
 
 export function sampleMarket(over: Partial<MarketSnapshot> = {}): MarketSnapshot {
-  const baseHmcUsdt = 0.00043;
-  const baseSupUsdt = 0.000047;
+  const baseHmcUsdt = 0.05;
+  const baseSupUsdt = 0.0055;
   const baseBtcUsd = 67_500;
 
   const base: Omit<MarketSnapshot, "assetUsd"> = {
@@ -65,7 +65,7 @@ export function baseState(over: Partial<DemoState> = {}): DemoState {
     mainView: "spot",
     bookGrouping: 0,
     bookView: "book",
-    oracleAnchor: 0.00042,
+    oracleAnchor: 0.05,
     initialEquityUsdt: 10_000,
     priceAlerts: [],
     equityBaselineV: 2,
@@ -85,7 +85,7 @@ export function baseState(over: Partial<DemoState> = {}): DemoState {
 }
 
 export function sampleTicker(over: Partial<Ticker> = {}): Ticker {
-  const mid = over.mid ?? 0.00043;
+  const mid = over.mid ?? 0.05;
   return {
     pairId: "HMC_USDT",
     mid,
@@ -96,7 +96,7 @@ export function sampleTicker(over: Partial<Ticker> = {}): Ticker {
     high24h: mid * 1.01,
     low24h: mid * 0.99,
     volume24hBase: 1_000_000,
-    volume24hQuote: 430,
+    volume24hQuote: mid * 1_000_000,
     source: "live",
     fetchedAt: Date.now(),
     ...over,

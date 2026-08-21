@@ -3349,10 +3349,10 @@ function showSettings(): void {
   const anchor = sanitizeOracleAnchor(state.oracleAnchor);
   bd.innerHTML = `<div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="oracle-settings-title">
     <h3 id="oracle-settings-title">Oracle settings</h3>
-    <label>Anchor USDT per HMC
-      <input class="inp mono" id="anchor-inp" type="number" step="0.000001" value="${anchor}" />
+    <label>Reference mid (USDT per HMC)
+      <input class="inp mono" id="anchor-inp" type="number" step="0.001" value="${anchor}" />
     </label>
-    <p class="muted small">Demo only — simulates operator fair-launch reference price.</p>
+    <p class="muted small">Operator reference for paper charts — not scaled by pool GH/s. D0 default 0.05.</p>
     <div class="modal-actions">
       <button type="button" class="btn-sm" id="modal-close">Cancel</button>
       <button type="button" class="btn-primary" id="modal-save">Apply</button>

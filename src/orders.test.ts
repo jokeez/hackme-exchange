@@ -76,14 +76,15 @@ describe("orders validation", () => {
 describe("placeOrder / OCO", () => {
   it("placeOrder rejects post-only that would take", () => {
     const s = baseState();
-    const bad = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0005, undefined, undefined, "GTC", true, market);
+    // sample mid 0.05 — buy @ 0.051 crosses ask → post-only must reject
+    const bad = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.051, undefined, undefined, "GTC", true, market);
     expect(bad).toMatchObject({ ok: false });
     if ("ok" in bad && bad.ok === false) expect(bad.reason).toContain("Post-only");
   });
 
   it("placeOrder prepends open order", () => {
     const s = baseState();
-    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0004, undefined, undefined, "GTC", true);
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.049, undefined, undefined, "GTC", true);
     expect(o.postOnly).toBe(true);
     expect(o.status).toBe("open");
     expect(o.source).toBe("paper");
@@ -93,8 +94,8 @@ describe("placeOrder / OCO", () => {
   it("marketable GTC limit with market fills as taker (not resting maker)", () => {
     const s = baseState();
     const before = s.wallet.usdt;
-    // sample mid ~0.00043 — buy @ 0.0005 crosses
-    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0005, undefined, undefined, "GTC", false, market);
+    // sample mid 0.05 — buy @ 0.051 crosses
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.051, undefined, undefined, "GTC", false, market);
     expect("id" in o && o.status === "filled").toBe(true);
     expect(s.trades[0]?.feeRole).toBe("taker");
     expect(s.wallet.usdt).toBeLessThan(before);
@@ -102,9 +103,9 @@ describe("placeOrder / OCO", () => {
 
   it("rejects second buy limit when funds reserved by first", () => {
     const s = baseState({ wallet: { usdt: 50, hmc: 0, sup: 0, btc: 0 } });
-    const first = placeOrder(s, "HMC_USDT", "buy", "limit", 100_000, 0.0004, undefined, undefined, "GTC", false, market);
+    const first = placeOrder(s, "HMC_USDT", "buy", "limit", 1000, 0.04, undefined, undefined, "GTC", false, market);
     expect("id" in first).toBe(true);
-    const second = placeOrder(s, "HMC_USDT", "buy", "limit", 100_000, 0.0004, undefined, undefined, "GTC", false, market);
+    const second = placeOrder(s, "HMC_USDT", "buy", "limit", 1000, 0.04, undefined, undefined, "GTC", false, market);
     expect(second).toMatchObject({ ok: false });
     if ("reason" in second) expect(second.reason).toMatch(/reserved|Insufficient/i);
   });

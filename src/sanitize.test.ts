@@ -10,11 +10,12 @@ import {
   sanitizeHttpUrl,
   sanitizeIndicatorConfig,
   sanitizeOracleAnchor,
+  migrateOracleAnchor,
 } from "./sanitize";
 
 describe("sanitizeOracleAnchor / sanitizeChartSettings", () => {
   it("coerces XSS oracleAnchor and gridOpacity payloads", () => {
-    expect(sanitizeOracleAnchor(`"><img src=x onerror=alert(1)>`)).toBe(0.00042);
+    expect(sanitizeOracleAnchor(`"><img src=x onerror=alert(1)>`)).toBe(0.05);
     expect(sanitizeOracleAnchor(0.5)).toBe(0.5);
     const settings = sanitizeChartSettings({
       gridOpacity: `"><img src=x onerror=alert(1)>` as unknown as number,
@@ -22,6 +23,12 @@ describe("sanitizeOracleAnchor / sanitizeChartSettings", () => {
     });
     expect(settings.gridOpacity).toBe(0.07);
     expect(settings.candleScheme).toBe("classic");
+  });
+
+  it("migrateOracleAnchor lifts legacy micro mids", () => {
+    expect(migrateOracleAnchor(0.00042)).toBe(0.05);
+    expect(migrateOracleAnchor(0.05)).toBe(0.05);
+    expect(migrateOracleAnchor(0.03)).toBe(0.03);
   });
 });
 

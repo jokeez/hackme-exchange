@@ -1,41 +1,57 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildMarket, fetchMarket, localFallbackMarket, midForPair, tickerFromMarket } from "./market";
+import {
+  DEFAULT_REFERENCE_MID,
+  buildMarket,
+  fetchMarket,
+  localFallbackMarket,
+  midForPair,
+  tickerFromMarket,
+} from "./market";
 import { sampleMarket } from "./testFixtures";
 
 describe("buildMarket", () => {
-  it("derives mids from pool/work/sup inputs", () => {
-    const m = buildMarket(
-      { hashrate: 88e9, workers: 5, block_height: 155000, status: "ok" },
-      { pool_hashrate_gh_s: 88, reward_per_m: 0.00021, workers_online: 5 },
+  it("uses operator reference mid — pool GH does not scale price", () => {
+    const low = buildMarket(
+      { hashrate: 10e9, workers: 2, tip_height: 155000, status: "ok" },
+      { pool_hashrate_gh_s: 10, reward_per_m: 0.00001, workers_online: 2 },
       { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
-      0.00042,
+      DEFAULT_REFERENCE_MID,
       67_500,
     );
-    expect(m.hmcUsdt).toBeGreaterThan(0);
-    expect(m.supUsdt).toBeGreaterThan(0);
-    expect(m.hmcSup).toBeCloseTo(m.hmcUsdt / m.supUsdt, 8);
-    expect(m.hmcBtc).toBeCloseTo(m.hmcUsdt / 67_500, 12);
-    expect(m.blockHeight).toBe(155000);
+    const high = buildMarket(
+      { hashrate: 800e9, workers: 40, tip_height: 155000, status: "ok" },
+      { pool_hashrate_gh_s: 800, reward_per_m: 0.00001, workers_online: 40 },
+      { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
+      DEFAULT_REFERENCE_MID,
+      67_500,
+    );
+    expect(low.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
+    expect(high.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
+    expect(high.poolGh).toBeGreaterThan(low.poolGh);
+    expect(low.supUsdt).toBeGreaterThan(0);
+    expect(low.hmcSup).toBeCloseTo(low.hmcUsdt / low.supUsdt, 8);
+    expect(low.hmcBtc).toBeCloseTo(low.hmcUsdt / 67_500, 12);
+    expect(low.blockHeight).toBe(155000);
   });
 
   it("uses fallbacks when optional fields missing", () => {
-    const m = buildMarket({}, {}, {}, 0.00042);
+    const m = buildMarket({}, {}, {}, DEFAULT_REFERENCE_MID);
     expect(m.poolGh).toBeGreaterThan(0);
-    expect(m.hmcUsdt).toBeGreaterThan(0);
+    expect(m.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
   });
 
   it("localFallbackMarket is sync and positive", () => {
-    const m = localFallbackMarket(0.00042);
-    expect(m.hmcUsdt).toBeGreaterThan(0);
+    const m = localFallbackMarket(DEFAULT_REFERENCE_MID);
+    expect(m.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
     expect(m.poolGh).toBe(35);
   });
 
   it("does not drift with client clock for the same inputs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
-    const a = buildMarket({}, {}, {}, 0.00042);
+    const a = buildMarket({}, {}, {}, DEFAULT_REFERENCE_MID);
     vi.setSystemTime(new Date("2026-08-16T23:45:00.000Z"));
-    const b = buildMarket({}, {}, {}, 0.00042);
+    const b = buildMarket({}, {}, {}, DEFAULT_REFERENCE_MID);
     expect(b).toEqual(a);
     vi.useRealTimers();
   });
@@ -63,10 +79,10 @@ describe("buildMarket", () => {
         return new Response("nope", { status: 404 });
       }),
     );
-    const { market, source } = await fetchMarket(0.00042);
+    const { market, source } = await fetchMarket(DEFAULT_REFERENCE_MID);
     expect(source).toBe("live");
     expect(market.poolGh).toBeCloseTo(88, 5);
-    expect(market.hmcUsdt).toBeGreaterThan(0);
+    expect(market.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
   });
 });
 
@@ -79,8 +95,8 @@ describe("midForPair / tickerFromMarket", () => {
   const m = sampleMarket();
 
   it("resolves each pair mid", () => {
-    expect(midForPair(m, "HMC_USDT")).toBe(0.00043);
-    expect(midForPair(m, "SUP_USDT")).toBe(0.000047);
+    expect(midForPair(m, "HMC_USDT")).toBe(0.05);
+    expect(midForPair(m, "SUP_USDT")).toBe(0.0055);
     expect(midForPair(m, "HMC_SUP")).toBeCloseTo(m.hmcSup, 12);
     expect(midForPair(m, "HMC_BTC")).toBeCloseTo(m.hmcBtc, 14);
     expect(midForPair(m, "SUP_BTC")).toBeCloseTo(m.supBtc, 14);

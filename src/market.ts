@@ -25,8 +25,15 @@ function hubBase(): string {
   return INTEGRATION.hubOrigin.replace(/\/$/, "");
 }
 
+/** Pool GH reference for spread / fallback telemetry only — not for mid pricing. */
 const REF_GH = 35;
 const DEFAULT_BTC_USD = 67_500;
+
+/**
+ * Operator reference mid (USDT per 1 HMC) for D0 paper / soft-launch.
+ * Chain emission is fixed (~0.01 HMC/block); pool hashrate must NOT scale this price.
+ */
+export const DEFAULT_REFERENCE_MID = 0.05;
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
@@ -36,16 +43,16 @@ export function buildMarket(
   pool: PoolStats,
   work: WorkStats,
   sup: SupEconomics,
-  anchor = 0.00042,
+  /** Operator reference mid USDT/HMC (Settings). */
+  referenceMid = DEFAULT_REFERENCE_MID,
   btcUsd = DEFAULT_BTC_USD,
 ): MarketSnapshot {
   const poolGh = work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : REF_GH);
   const rewardPerM = work.reward_per_m ?? 0.00021;
   const workers = work.workers_online ?? work.workers_count ?? pool.workers ?? 3;
-  const hf = clamp(Math.pow(poolGh / REF_GH, 0.38), 0.55, 1.85);
-  const rf = clamp(Math.pow(rewardPerM / 0.00021, 0.22), 0.75, 1.25);
-  const wf = 1 + Math.log10(Math.max(workers, 1)) * 0.06;
-  const hmcUsdt = anchor * hf * rf * wf;
+
+  // Reference mid only — no (GH)^n / reward / worker multipliers on price.
+  const hmcUsdt = Math.max(referenceMid, 1e-12);
 
   const minted = sup.economics?.total_minted_sup ?? 0.05;
   const max = sup.economics?.max_supply_sup ?? 21_000_000;
@@ -81,6 +88,7 @@ export function midForPair(m: MarketSnapshot, pairId: PairId): number {
 
 export function tickerFromMarket(m: MarketSnapshot, pairId: PairId): Ticker {
   const mid = midForPair(m, pairId);
+  // Wider spread when pool is thin — cosmetic paper book only.
   const spreadBps = clamp(8 + (REF_GH / Math.max(m.poolGh, 1)) * 6, 8, 36);
   const half = (spreadBps / 10_000 / 2) * mid;
   const wobble = mid * 0.012;
@@ -101,16 +109,16 @@ export function tickerFromMarket(m: MarketSnapshot, pairId: PairId): Ticker {
 }
 
 /** Sync local mids when pool API is slow/unreachable — instant boot paint. */
-export function localFallbackMarket(anchor = 0.00042): MarketSnapshot {
+export function localFallbackMarket(referenceMid = DEFAULT_REFERENCE_MID): MarketSnapshot {
   return buildMarket(
     { hashrate: REF_GH * 1e9, workers: 4, tip_height: 155000, status: "ok" },
     { pool_hashrate_gh_s: REF_GH, reward_per_m: 0.00021, workers_online: 4 },
     { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
-    anchor,
+    referenceMid,
   );
 }
 
-export async function fetchMarket(anchor = 0.00042): Promise<{
+export async function fetchMarket(referenceMid = DEFAULT_REFERENCE_MID): Promise<{
   market: MarketSnapshot;
   source: "live" | "fallback";
 }> {
@@ -142,8 +150,8 @@ export async function fetchMarket(anchor = 0.00042): Promise<{
         sup = {};
       }
     }
-    return { market: buildMarket(pool, work, sup, anchor), source: "live" };
+    return { market: buildMarket(pool, work, sup, referenceMid), source: "live" };
   } catch {
-    return { market: localFallbackMarket(anchor), source: "fallback" };
+    return { market: localFallbackMarket(referenceMid), source: "fallback" };
   }
 }

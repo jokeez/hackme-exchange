@@ -16,7 +16,7 @@
 | **VIP tiers** | Regular 8/10 → VIP1 6/8 (100k) → VIP2 4/6 (1M) → VIP3 2/4 (10M) 30d USDT | Server-side volume ledger | Client 30d from local trades is farmable in demo (import sanitization helps) |
 | **Pay fees in HMC** | Optional; **−25%** discount (cap 0–25%) | Keep; settle in HMC at mid | Discount applies to quote-notional fee, then ÷ `hmcUsdt` |
 | **Spread** | **8–36 bps** from pool GH/s | Real book + MM / external refs | `tickerFromMarket` synthetic bid/ask |
-| **Oracle mid** | `anchor × hf^0.38 × rf^0.22 × wf × jitter` | Keep as **reference**; trades need real liquidity | Anchor default `0.00042` USDT/HMC |
+| **Oracle mid** | **Operator reference mid** (default **0.05** USDT/HMC); pool GH/rpm/workers are **telemetry only** | Keep as **reference**; trades need real liquidity | Not scaled by hashrate (fixed chain emission) |
 | **Order book** | Synthetic ladder (~600+ base/level) | Matching engine + MM | Not real depth — UI only |
 | **Convert** | **Taker fee** at mid (VIP schedule; optional HMC −25%) | Same; `POST /convert` when `/health` has `fees.convert_fee` | Paper path mirrors spot taker; lab SPA prefers API when session + flag |
 | **Settlement** | `localStorage` wallet | Internal ledger + HMC/SUP deposit watch | See `adapters/settlement.ts` |
@@ -85,13 +85,16 @@ Demo paper mode (no lab API) **burns nothing** — fees vanish from the paper wa
 ### Demo oracle (`market.ts`)
 
 ```
-hmcUsdt = oracleAnchor × (poolGh/35)^0.38 × (rewardPerM/0.00021)^0.22
-          × (1 + log10(workers)×0.06) × jitter(±0.4%)
+hmcUsdt = oracleAnchor   // operator reference mid (default 0.05 USDT/HMC)
 supUsdt = hmcUsdt × 0.11 × scarcity(minted, max_supply_sup)
-spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)
+spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)   // cosmetic book only
 ```
 
-Sources: `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`.
+**Do not** scale mid by `(poolGh/35)^n` or `reward_per_m` — chain emission is fixed (~0.01 HMC/block); hashrate is network health, not valuation.
+
+Sources (telemetry): `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`.
+
+D0/D1 soft reference: **0.05 USDT/HMC** (circ mcap ~$2.6k at ~53k circulating). Lab MM soft mid matches (`5_000_000` quote-minor).
 
 ### Demo book (`book.ts`)
 
@@ -143,7 +146,7 @@ Demo **Sync HMC/SUP** merges node balances into paper wallet — **not** custodi
 |-----------|-------|-------|
 | Starting wallet | 10k USDT · 50k HMC · 8k SUP · 0.15 BTC | `store.ts` |
 | Demo top-up buttons | **Removed** — use node Sync / lab custody | Account · Funds |
-| Oracle anchor | 0.00042 | Settings |
+| Oracle / reference mid | **0.05** USDT/HMC | Settings · `DEFAULT_REFERENCE_MID` |
 | BTC ref | 67_500 USD | `market.ts` |
 | Fee discount default | 25% | `DEFAULT_FEE_CONFIG` |
 

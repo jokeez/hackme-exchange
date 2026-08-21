@@ -34,7 +34,7 @@ function baseState(): DemoState {
     mainView: "spot",
     bookGrouping: 0,
     bookView: "book",
-    oracleAnchor: 0.00042,
+    oracleAnchor: 0.05,
     initialEquityUsdt: 10_000,
     priceAlerts: [],
     equityBaselineV: 2,

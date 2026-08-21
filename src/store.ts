@@ -16,6 +16,7 @@ import {
   sanitizeMainView,
   sanitizeMultiChartLayout,
   sanitizeOracleAnchor,
+  migrateOracleAnchor,
   sanitizePlainNote,
 } from "./sanitize";
 import { sanitizeFeeConfig } from "./fees";
@@ -113,7 +114,7 @@ const DEFAULT: DemoState = {
   mainView: "spot",
   bookGrouping: 0,
   bookView: "book",
-  oracleAnchor: 0.00042,
+  oracleAnchor: 0.05,
   initialEquityUsdt: 0,
   priceAlerts: [],
   equityBaselineV: 2,
@@ -215,7 +216,7 @@ export function loadState(): DemoState {
         parsed.multiChartLayout ?? (parsed.multiChart ? "2v" : "1"),
       ),
       drawingsLocked: parsed.drawingsLocked ?? false,
-      oracleAnchor: sanitizeOracleAnchor(parsed.oracleAnchor, DEFAULT.oracleAnchor),
+      oracleAnchor: migrateOracleAnchor(parsed.oracleAnchor, DEFAULT.oracleAnchor),
       mainView: sanitizeMainView(parsed.mainView),
       orders: Array.isArray(parsed.orders)
         ? parsed.orders
@@ -243,7 +244,7 @@ export function loadState(): DemoState {
       .slice(0, STORAGE_TRADES_CAP)
       .map((t) => sanitizeImportedTrade(t));
     if (s.equityBaselineV < 2) {
-      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.00042, 0.000046, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.0055, 67_500);
       s.equityBaselineV = 2;
     }
     if (s.stateVersion < STATE_VERSION) {
@@ -258,7 +259,7 @@ export function loadState(): DemoState {
 
 function freshState(): DemoState {
   const s = structuredClone(DEFAULT);
-  s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.00042, 0.000046, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.0055, 67_500);
   s.equityBaselineV = 2;
   return s;
 }

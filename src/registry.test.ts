@@ -11,7 +11,7 @@ describe("registry", () => {
   });
 
   it("resolves mid prices from oracle snapshot", () => {
-    expect(midForPairId(market, "HMC_USDT")).toBe(0.00043);
+    expect(midForPairId(market, "HMC_USDT")).toBe(0.05);
     expect(midForPairId(market, "HMC_BTC")).toBeCloseTo(market.hmcBtc, 14);
   });
 
