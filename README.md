@@ -21,6 +21,7 @@
 [![Go%2Fno--go](https://img.shields.io/badge/go%2Fno--go-2026--09--10-7fe7ff?style=for-the-badge)](docs/D0_CHECKLIST.md)
 [![Tests](https://img.shields.io/badge/tests-544_PASS-39ff14?style=for-the-badge&logo=vitest&logoColor=white)](package.json)
 [![Public API](https://img.shields.io/badge/public_API-HOLD-ff6b9d?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/jokeez/hackme-exchange-api)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
 [![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.01-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
 [![Site](https://img.shields.io/badge/hackme.tech-hub-ff6b9d?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](https://hackme.tech)
 
@@ -170,4 +171,8 @@ Canonical **API** security / hosting / pre-public:
 
 ## License
 
-Internal HackMe Network tooling — demo / private lab. Not a licensed exchange.
+[GNU Affero General Public License v3.0](LICENSE) — same family as the [main HackMe](https://github.com/jokeez/hackme) network.
+
+Paper / private-lab tooling only. **Not** a licensed exchange · **not** production custody.
+
+<sub>Copyright © 2026 HackMe contributors · <a href="LICENSE">AGPL-3.0</a></sub>
