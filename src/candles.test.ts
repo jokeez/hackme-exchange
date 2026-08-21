@@ -64,7 +64,7 @@ describe("chart genesis floor", () => {
 
 describe("seedCandles", () => {
   it("seeds contiguous OHLC with last close ≈ mid", () => {
-    const mid = 0.00043;
+    const mid = 0.05;
     const candles = seedCandles("HMC_USDT", "15m", mid, 20);
     expect(candles).toHaveLength(20);
     expect(candles[candles.length - 1].close).toBeCloseTo(mid, 12);
@@ -76,6 +76,16 @@ describe("seedCandles", () => {
     for (let i = 1; i < candles.length; i++) {
       expect(candles[i].time).toBeGreaterThan(candles[i - 1].time);
     }
+  });
+
+  it("24h change stays mild around reference mid (no fake −12% dump)", () => {
+    const mid = 0.05;
+    const candles = seedCandles("HMC_USDT", "15m", mid, 200);
+    const s = stats24h(candles, "15m");
+    expect(candles[candles.length - 1]!.close).toBeCloseTo(mid, 12);
+    expect(Math.abs(s.changePct)).toBeLessThan(5);
+    expect(s.high / mid).toBeLessThan(1.08);
+    expect(s.low / mid).toBeGreaterThan(0.92);
   });
 
   it("is deterministic for the same pair/tf/time/mid", () => {

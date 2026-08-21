@@ -222,16 +222,19 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   const n = Math.min(count ?? barCountForTf(tf), maxN, MAX_CANDLES);
   const out: Candle[] = [];
   const maxBody = maxBodyFracForTf(tf);
-  // Mild path — sqrt(time) scale so 1D isn't a different universe than 1m.
-  const driftAmp = 10 * Math.sqrt(sec / 60);
-  let price = mid * (0.998 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.004);
+  // Mild OU noise around mid — paper reference desk, not a multi-day dump/pump.
+  // Previous open random-walk drifted ~10%+ over 24h and painted fake −chg + red tip.
+  const noiseAmp = 3.2 * Math.sqrt(sec / 60);
+  const reversion = 0.42;
+  let price = mid * (0.999 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.002);
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
     if (t < genesis) continue;
-    const driftBps = stableSigned([pairId, tf, t, "seed-drift"], 0.48) * driftAmp;
+    const shockBps = stableSigned([pairId, tf, t, "seed-drift"], 0.48) * noiseAmp;
     const open = price;
-    const rawClose = open * (1 + driftBps / 10_000);
+    const meanPull = (mid - open) * reversion;
+    const rawClose = open + meanPull + open * (shockBps / 10_000);
     const close = clampTickMid(rawClose, open, maxBody);
     out.push(makeBar(pairId, t, open, close, tf));
     price = close;
@@ -310,14 +313,16 @@ export function prependOlderCandles(
   if (!existing.length) {
     const seedMid =
       pairId === "HMC_USDT"
-        ? 0.00043
+        ? 0.05
         : pairId === "SUP_USDT"
-          ? 0.000047
+          ? 0.0055
           : pairId === "HMC_SUP"
-            ? 9.1
-            : pairId.endsWith("_BTC")
-              ? 6.4e-9
-              : 0.00043;
+            ? 9.09
+            : pairId === "HMC_BTC"
+              ? 0.05 / 67_500
+              : pairId === "SUP_BTC"
+                ? 0.0055 / 67_500
+                : 0.05;
     return seedCandles(pairId, tf, seedMid, Math.min(count, MAX_CANDLES));
   }
   const room = MAX_CANDLES - existing.length;
@@ -334,15 +339,18 @@ export function prependOlderCandles(
   if (n <= 0) return existing;
 
   const maxBody = maxBodyFracForTf(tf);
-  const driftAmp = 10 * Math.sqrt(sec / 60);
+  const noiseAmp = 3.2 * Math.sqrt(sec / 60);
+  const reversion = 0.42;
   const older: Candle[] = [];
   let price = first.open;
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const driftBps = stableSigned([pairId, tf, t, "prepend-open"], 0.5) * driftAmp;
+    const shockBps = stableSigned([pairId, tf, t, "prepend-open"], 0.5) * noiseAmp;
     const close = price;
-    const open = clampTickMid(close / (1 + driftBps / 10_000), close, maxBody);
+    const meanPull = (first.open - close) * reversion;
+    const rawOpen = close - meanPull - close * (shockBps / 10_000);
+    const open = clampTickMid(rawOpen, close, maxBody);
     older.push(makeBar(pairId, t, open, close, tf));
     price = open;
   }
@@ -350,12 +358,13 @@ export function prependOlderCandles(
 
   let p = older[0]!.open;
   for (let i = 0; i < older.length; i++) {
-    const driftBps = stableSigned([pairId, tf, older[i]!.time, "prepend-close"], 0.48) * driftAmp;
+    const shockBps = stableSigned([pairId, tf, older[i]!.time, "prepend-close"], 0.48) * noiseAmp;
     const open = p;
+    const meanPull = (first.open - open) * reversion;
     const close =
       i === older.length - 1
         ? first.open
-        : clampTickMid(open * (1 + driftBps / 10_000), open, maxBody);
+        : clampTickMid(open + meanPull + open * (shockBps / 10_000), open, maxBody);
     older[i] = makeBar(pairId, older[i]!.time, open, close, tf);
     p = close;
   }
