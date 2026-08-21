@@ -15,7 +15,6 @@ import {
   sanitizeLedgerKind,
   sanitizeMainView,
   sanitizeMultiChartLayout,
-  sanitizeOracleAnchor,
   migrateOracleAnchor,
   sanitizePlainNote,
 } from "./sanitize";
