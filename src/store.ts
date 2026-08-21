@@ -243,7 +243,7 @@ export function loadState(): DemoState {
       .slice(0, STORAGE_TRADES_CAP)
       .map((t) => sanitizeImportedTrade(t));
     if (s.equityBaselineV < 2) {
-      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.0055, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.01, 67_500);
       s.equityBaselineV = 2;
     }
     if (s.stateVersion < STATE_VERSION) {
@@ -258,7 +258,7 @@ export function loadState(): DemoState {
 
 function freshState(): DemoState {
   const s = structuredClone(DEFAULT);
-      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.0055, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.01, 67_500);
   s.equityBaselineV = 2;
   return s;
 }

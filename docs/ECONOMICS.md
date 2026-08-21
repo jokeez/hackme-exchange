@@ -86,15 +86,16 @@ Demo paper mode (no lab API) **burns nothing** — fees vanish from the paper wa
 
 ```
 hmcUsdt = oracleAnchor   // operator reference mid (default 0.05 USDT/HMC)
-supUsdt = hmcUsdt × 0.11 × scarcity(minted, max_supply_sup)
+supUsdt = DEFAULT_SUP_REFERENCE_MID   // operator reference (default 0.01 USDT/SUP)
+hmcSup  = hmcUsdt / supUsdt           // 5.0 at defaults
 spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)   // cosmetic book only
 ```
 
-**Do not** scale mid by `(poolGh/35)^n` or `reward_per_m` — chain emission is fixed (~0.01 HMC/block); hashrate is network health, not valuation.
+**Do not** scale mid by `(poolGh/35)^n`, `reward_per_m`, or SUP scarcity — chain emission is fixed; hashrate / mint stats are network health, not valuation.
 
 Sources (telemetry): `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`.
 
-D0/D1 soft reference: **0.05 USDT/HMC** (circ mcap ~$2.6k at ~53k circulating). Lab MM soft mid matches (`5_000_000` quote-minor).
+D0/D1 soft reference: **0.05 USDT/HMC**, **0.01 USDT/SUP** (circ HMC mcap ~$2.6k at ~53k circulating). Lab MM soft mids match.
 
 ### Demo book (`book.ts`)
 
@@ -146,7 +147,7 @@ Demo **Sync HMC/SUP** merges node balances into paper wallet — **not** custodi
 |-----------|-------|-------|
 | Starting wallet | 10k USDT · 50k HMC · 8k SUP · 0.15 BTC | `store.ts` |
 | Demo top-up buttons | **Removed** — use node Sync / lab custody | Account · Funds |
-| Oracle / reference mid | **0.05** USDT/HMC | Settings · `DEFAULT_REFERENCE_MID` |
+| Oracle / reference mid | **0.05** USDT/HMC · **0.01** USDT/SUP | Settings · `DEFAULT_REFERENCE_MID` / `DEFAULT_SUP_REFERENCE_MID` |
 | BTC ref | 67_500 USD | `market.ts` |
 | Fee discount default | 25% | `DEFAULT_FEE_CONFIG` |
 

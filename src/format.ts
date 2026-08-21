@@ -1,14 +1,30 @@
 /** Human-readable numbers — never scientific notation in UI. */
 
+/**
+ * Format with maxFrac precision but keep at least minFrac digits
+ * so mids like 0.05 show as 0.050000 (not stripped to "0.05").
+ */
+function formatFixed(n: number, maxFrac: number, minFrac: number): string {
+  const s = n.toFixed(maxFrac);
+  const dot = s.indexOf(".");
+  if (dot < 0) return s;
+  const intPart = s.slice(0, dot);
+  let frac = s.slice(dot + 1);
+  while (frac.length > minFrac && frac.endsWith("0")) frac = frac.slice(0, -1);
+  if (frac.length < minFrac) frac = frac.padEnd(minFrac, "0");
+  return `${intPart}.${frac}`;
+}
+
 export function formatPrice(n: number, quote?: string): string {
   if (!Number.isFinite(n) || n <= 0) return "—";
   const abs = Math.abs(n);
 
-  if (abs >= 1000) return trimZeros(n.toFixed(2));
-  if (abs >= 1) return trimZeros(n.toFixed(4));
-  if (abs >= 0.01) return trimZeros(n.toFixed(6));
-  if (abs >= 0.0001) return trimZeros(n.toFixed(8));
-  if (abs >= 0.00000001) return trimZeros(n.toFixed(10));
+  if (abs >= 1000) return formatFixed(n, 2, 2);
+  if (abs >= 1) return formatFixed(n, 4, 2);
+  // Spot desk: always show tick depth so 0.05 → 0.050000, not "0.05"
+  if (abs >= 0.01) return formatFixed(n, 6, 6);
+  if (abs >= 0.0001) return formatFixed(n, 8, 6);
+  if (abs >= 0.00000001) return formatFixed(n, 10, 8);
   if (abs >= 1e-12) {
     const s = n.toFixed(16);
     const m = s.match(/^0\.(0*)([1-9]\d{0,5})/);
@@ -26,11 +42,11 @@ export function formatPrice(n: number, quote?: string): string {
 export function formatPriceCompact(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "—";
   const abs = Math.abs(n);
-  if (abs >= 1000) return trimZeros(n.toFixed(2));
-  if (abs >= 1) return trimZeros(n.toFixed(4));
-  if (abs >= 0.01) return trimZeros(n.toFixed(5));
-  if (abs >= 0.0001) return trimZeros(n.toFixed(6));
-  if (abs >= 1e-6) return trimZeros(n.toFixed(8));
+  if (abs >= 1000) return formatFixed(n, 2, 2);
+  if (abs >= 1) return formatFixed(n, 4, 2);
+  if (abs >= 0.01) return formatFixed(n, 5, 5);
+  if (abs >= 0.0001) return formatFixed(n, 6, 5);
+  if (abs >= 1e-6) return formatFixed(n, 8, 6);
   // Binance-style 0.0₈905 — keeps width stable without "e-9"
   const fixed = n.toFixed(16);
   const m = fixed.match(/^0\.(0+)([1-9]\d{0,3})/);
@@ -66,9 +82,9 @@ export function pctTone(n: number): "up" | "down" | "flat" {
 
 export function formatRewardPerM(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "—";
-  if (n >= 0.0001) return trimZeros(n.toFixed(6));
-  if (n >= 0.000001) return trimZeros(n.toFixed(8));
-  return trimZeros(n.toFixed(10));
+  if (n >= 0.0001) return formatFixed(n, 6, 4);
+  if (n >= 0.000001) return formatFixed(n, 8, 6);
+  return formatFixed(n, 10, 8);
 }
 
 export function formatGh(n: number): string {

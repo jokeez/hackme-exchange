@@ -25,9 +25,16 @@ describe("formatPrice", () => {
   });
 
   it("shows more decimals for micro prices", () => {
-    expect(formatPrice(0.05)).toMatch(/^0\.05/);
+    expect(formatPrice(0.05)).toBe("0.050000");
+    expect(formatPrice(0.050051)).toBe("0.050051");
+    expect(formatPrice(0.01)).toBe("0.010000");
     expect(formatPrice(0.00043)).toMatch(/^0\.00043/);
     expect(formatPrice(6.4e-9).length).toBeGreaterThan(8);
+  });
+
+  it("formatPriceCompact keeps min tick depth on reference mids", () => {
+    expect(formatPriceCompact(0.05)).toBe("0.05000");
+    expect(formatPriceCompact(0.01)).toBe("0.01000");
   });
 
   it("formatPriceCompact keeps market rows shorter than full precision", () => {

@@ -119,17 +119,18 @@ function candleVolume(pairId: PairId, tf: Timeframe): number {
   return base * tfScale;
 }
 
-/** Micro-wick scaled to TF — same look language on 1m and 1D. */
+/** Micro-wick scaled to TF — capped so 1D does not look like a crash tape. */
 function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF): { high: number; low: number } {
   const bpsBase = pairId.includes("BTC") ? 10 : pairId === "SUP_USDT" ? 8 : 6;
-  const bps = bpsBase * Math.sqrt(TF_SEC[tf] / 60);
+  // Cap TF scale (~1H equivalent) — daily bars stay calm around reference mid.
+  const bps = bpsBase * Math.min(Math.sqrt(TF_SEC[tf] / 60), 8);
   const half = (bps / 10_000) * mid;
   const bodyCap = maxBodyFracForTf(tf);
   const hiSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-high"]);
   const loSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-low"]);
   return {
     high: Math.min(mid * (1 + bodyCap), mid + half * (0.55 + hiSeed * 0.7)),
-    low: Math.max(mid * (1 - bodyCap), mid * 0.985, mid - half * (0.55 + loSeed * 0.7)),
+    low: Math.max(mid * (1 - bodyCap), mid - half * (0.55 + loSeed * 0.7)),
   };
 }
 
@@ -315,13 +316,13 @@ export function prependOlderCandles(
       pairId === "HMC_USDT"
         ? 0.05
         : pairId === "SUP_USDT"
-          ? 0.0055
+          ? 0.01
           : pairId === "HMC_SUP"
-            ? 9.09
+            ? 5
             : pairId === "HMC_BTC"
               ? 0.05 / 67_500
               : pairId === "SUP_BTC"
-                ? 0.0055 / 67_500
+                ? 0.01 / 67_500
                 : 0.05;
     return seedCandles(pairId, tf, seedMid, Math.min(count, MAX_CANDLES));
   }
