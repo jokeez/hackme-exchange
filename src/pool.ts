@@ -204,11 +204,12 @@ export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
         </article>
         <article class="pool-card glass-inset">
           <h4>How mids are built</h4>
-          <p class="formula mono">mid = anchor × hashrate^0.38 × reward^0.22 × workers^0.06 × jitter</p>
+          <p class="formula mono">hmc = ref±drift · sup = ref±drift · ×BTC = usdt/btcUsd</p>
           <ul class="pool-list muted small pool-formula-notes">
-            <li><span>SUP scarcity</span><strong>minted / max</strong></li>
+            <li><span>HMC ref</span><strong>0.05 USDT (Settings)</strong></li>
+            <li><span>SUP ref</span><strong>0.01 USDT</strong></li>
+            <li><span>BTC crosses</span><strong>synced from live BTC/USD</strong></li>
             <li><span>Spread</span><strong>8–36 bps from pool GH/s</strong></li>
-            <li><span>Fallback</span><strong>local anchors if offline</strong></li>
           </ul>
         </article>
         <article class="pool-card glass-inset">

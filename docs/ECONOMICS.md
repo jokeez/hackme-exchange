@@ -85,17 +85,19 @@ Demo paper mode (no lab API) **burns nothing** — fees vanish from the paper wa
 ### Demo oracle (`market.ts`)
 
 ```
-hmcUsdt = oracleAnchor   // operator reference mid (default 0.05 USDT/HMC)
-supUsdt = DEFAULT_SUP_REFERENCE_MID   // operator reference (default 0.01 USDT/SUP)
-hmcSup  = hmcUsdt / supUsdt           // 5.0 at defaults
+hmcUsdt = liveReferenceMid(oracleAnchor)   // ~0.05 ±0.35% paper drift
+supUsdt = liveReferenceMid(0.01)           // ~0.01 ±0.35%
+hmcSup  = hmcUsdt / supUsdt
+hmcBtc  = hmcUsdt / btcUsd                 // btcUsd from Binance BTCUSDT (fallback 67500)
+supBtc  = supUsdt / btcUsd
 spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)   // cosmetic book only
 ```
 
-**Do not** scale mid by `(poolGh/35)^n`, `reward_per_m`, or SUP scarcity — chain emission is fixed; hashrate / mint stats are network health, not valuation.
+**Do not** scale mid by `(poolGh/35)^n`, `reward_per_m`, or SUP scarcity — chain emission is fixed; hashrate / mint stats are network health, not valuation. Paper drift is cosmetic only (mean-reverting around the operator refs).
 
-Sources (telemetry): `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`.
+Sources (telemetry): `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`, BTCUSDT mark.
 
-D0/D1 soft reference: **0.05 USDT/HMC**, **0.01 USDT/SUP** (circ HMC mcap ~$2.6k at ~53k circulating). Lab MM soft mids match.
+D0/D1 soft reference: **0.05 USDT/HMC**, **0.01 USDT/SUP**. Lab MM soft mids match the refs (exact); SPA breathes around them.
 
 ### Demo book (`book.ts`)
 

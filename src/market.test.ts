@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_REFERENCE_MID,
+  DEFAULT_SUP_REFERENCE_MID,
+  PAPER_MID_BAND,
+  applyLivePaperMids,
   buildMarket,
   fetchMarket,
+  liveReferenceMid,
   localFallbackMarket,
   midForPair,
+  resyncCrossMids,
   tickerFromMarket,
 } from "./market";
 import { sampleMarket } from "./testFixtures";
@@ -56,6 +61,18 @@ describe("buildMarket", () => {
     vi.useRealTimers();
   });
 
+  it("resyncs BTC crosses when btcUsd changes", () => {
+    const m = resyncCrossMids({
+      ...buildMarket({}, {}, {}, 0.05, 67_500),
+      btcUsd: 100_000,
+      hmcUsdt: 0.05,
+      supUsdt: 0.01,
+    });
+    expect(m.hmcBtc).toBeCloseTo(0.05 / 100_000, 14);
+    expect(m.supBtc).toBeCloseTo(0.01 / 100_000, 14);
+    expect(m.hmcSup).toBeCloseTo(5, 12);
+  });
+
   it("fetchMarket stays live when work/stats fails but pool/stats ok", async () => {
     const poolBody = JSON.stringify({
       hashrate: 88e9,
@@ -76,13 +93,44 @@ describe("buildMarket", () => {
         if (url.includes("/api/sup/economics")) {
           return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
         }
+        if (url.includes("BTCUSDT")) {
+          return new Response(JSON.stringify({ price: "97500.12" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return new Response("nope", { status: 404 });
       }),
     );
     const { market, source } = await fetchMarket(DEFAULT_REFERENCE_MID);
     expect(source).toBe("live");
     expect(market.poolGh).toBeCloseTo(88, 5);
-    expect(market.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
+    expect(market.btcUsd).toBeCloseTo(97_500.12, 2);
+    expect(market.hmcUsdt).toBeGreaterThan(DEFAULT_REFERENCE_MID * (1 - PAPER_MID_BAND - 1e-9));
+    expect(market.hmcUsdt).toBeLessThan(DEFAULT_REFERENCE_MID * (1 + PAPER_MID_BAND + 1e-9));
+    expect(market.hmcBtc).toBeCloseTo(market.hmcUsdt / market.btcUsd, 14);
+    expect(market.supBtc).toBeCloseTo(market.supUsdt / market.btcUsd, 14);
+  });
+});
+
+describe("liveReferenceMid / applyLivePaperMids", () => {
+  it("walks within band and changes over time", () => {
+    const a = liveReferenceMid(0.05, "hmc", 1_700_000_000_000);
+    const b = liveReferenceMid(0.05, "hmc", 1_700_000_000_000 + 700 * 40);
+    expect(a).toBeGreaterThan(0.05 * (1 - PAPER_MID_BAND));
+    expect(a).toBeLessThan(0.05 * (1 + PAPER_MID_BAND));
+    expect(b).not.toBe(a);
+    expect(Math.abs(a - 0.05) / 0.05).toBeLessThanOrEqual(PAPER_MID_BAND + 1e-12);
+  });
+
+  it("keeps HMC/SUP/BTC legs synchronized", () => {
+    const base = buildMarket({}, {}, {}, 0.05, 90_000);
+    const live = applyLivePaperMids(base, 0.05, DEFAULT_SUP_REFERENCE_MID, 1_700_000_123_000);
+    expect(live.hmcSup).toBeCloseTo(live.hmcUsdt / live.supUsdt, 12);
+    expect(live.hmcBtc).toBeCloseTo(live.hmcUsdt / 90_000, 14);
+    expect(live.supBtc).toBeCloseTo(live.supUsdt / 90_000, 14);
+    expect(midForPair(live, "HMC_BTC")).toBe(live.hmcBtc);
+    expect(midForPair(live, "SUP_BTC")).toBe(live.supBtc);
   });
 });
 
