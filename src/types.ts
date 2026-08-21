@@ -292,7 +292,7 @@ export const DEFAULT_FEE_CONFIG: FeeConfig = {
   hmcDiscountPct: 25,
 };
 
-export const STATE_VERSION = 18;
+export const STATE_VERSION = 19;
 
 export type DemoState = {
   wallet: Wallet;

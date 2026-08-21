@@ -7,6 +7,7 @@ import {
   MAX_CANDLES,
   maxBarsSinceGenesis,
   prependOlderCandles,
+  relativeClosePath,
   sanitizeCandleVolumes,
   seedCandles,
   stats24h,
@@ -94,6 +95,33 @@ describe("seedCandles", () => {
     const a = seedCandles("HMC_USDT", "15m", 0.00043, 20);
     const b = seedCandles("HMC_USDT", "15m", 0.00043, 20);
     expect(b).toEqual(a);
+  });
+
+  it("all pairs share one relative candle silhouette (only mid scale differs)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T12:00:00.000Z"));
+    const mids: Record<string, number> = {
+      HMC_USDT: 0.05,
+      SUP_USDT: 0.01,
+      HMC_SUP: 5,
+      HMC_BTC: 0.05 / 67_500,
+      SUP_BTC: 0.01 / 67_500,
+    };
+    const n = 120;
+    const ref = relativeClosePath(seedCandles("HMC_USDT", "1m", mids.HMC_USDT, n));
+    expect(ref.length).toBe(n);
+    for (const [pair, mid] of Object.entries(mids)) {
+      if (pair === "HMC_USDT") continue;
+      const path = relativeClosePath(seedCandles(pair as "HMC_BTC", "1m", mid, n));
+      expect(path.length).toBe(n);
+      for (let i = 0; i < n; i++) {
+        expect(path[i]).toBeCloseTo(ref[i]!, 8);
+      }
+      // Times align too (same buckets)
+      const a = seedCandles("HMC_USDT", "1m", mids.HMC_USDT, n);
+      const b = seedCandles(pair as "SUP_USDT", "1m", mid, n);
+      expect(b.map((c) => c.time)).toEqual(a.map((c) => c.time));
+    }
   });
 });
 

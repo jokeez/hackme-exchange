@@ -121,15 +121,23 @@ function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
   return base * tfScale * jitter;
 }
 
-/** Micro-wick scaled to TF — paper desk, not a barcode of ±6% spikes. */
-function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF): { high: number; low: number } {
+/** Micro-wick scaled to TF — paper desk, not a barcode of ±6% spikes.
+ * Wick RNG is shared across pairs (time+tf only) so silhouettes match; only bps width may differ by quote.
+ */
+function wickSpread(
+  mid: number,
+  pairId: PairId,
+  tf: Timeframe = CANDLE_BASE_TF,
+  t = 0,
+): { high: number; low: number } {
   // ~2–4 bps base; TF scale capped so 1H/1D stay calm around reference mid.
   const bpsBase = pairId.includes("BTC") ? 3.5 : pairId === "SUP_USDT" ? 3 : 2.5;
   const bps = bpsBase * Math.min(Math.sqrt(TF_SEC[tf] / 60), 3);
   const half = (bps / 10_000) * mid;
   const bodyCap = Math.min(maxBodyFracForTf(tf) * 0.35, 0.008);
-  const hiSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-high"]);
-  const loSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-low"]);
+  // Shared market wick phase — NOT pairId (otherwise HMC/BTC paints a different forest).
+  const hiSeed = stableUnit([tf, t, "wick-high"]);
+  const loSeed = stableUnit([tf, t, "wick-low"]);
   return {
     high: Math.min(mid * (1 + bodyCap), mid + half * (0.4 + hiSeed * 0.6)),
     low: Math.max(mid * (1 - bodyCap), mid - half * (0.4 + loSeed * 0.6)),
@@ -139,7 +147,7 @@ function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF)
 function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Timeframe): Candle {
   const bodyHigh = Math.max(open, close);
   const bodyLow = Math.min(open, close);
-  const wick = wickSpread((open + close) / 2, pairId, tf);
+  const wick = wickSpread((open + close) / 2, pairId, tf, t);
   return constrainBarToOpen(
     {
       time: t,
@@ -225,15 +233,15 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   const n = Math.min(count ?? barCountForTf(tf), maxN, MAX_CANDLES);
   const out: Candle[] = [];
   const maxBody = maxBodyFracForTf(tf);
-  // Mild OU noise around mid — paper reference desk, not a multi-day dump/pump.
+  // Mild OU noise around mid — shared market path (no pairId) so all pairs share one silhouette.
   const noiseAmp = 2.0 * Math.sqrt(sec / 60);
   const reversion = 0.48;
-  let price = mid * (0.9995 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.001);
+  let price = mid * (0.9995 + stableUnit([tf, now, n, "seed-start"]) * 0.001);
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
     if (t < genesis) continue;
-    const shockBps = stableSigned([pairId, tf, t, "seed-drift"], 0.48) * noiseAmp;
+    const shockBps = stableSigned([tf, t, "seed-drift"], 0.48) * noiseAmp;
     const open = price;
     const meanPull = (mid - open) * reversion;
     const rawClose = open + meanPull + open * (shockBps / 10_000);
@@ -251,7 +259,7 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
       last.close = mid;
     } else {
       last.close = clampTickMid(mid, last.open, maxBody);
-      const w = wickSpread(last.close, pairId, tf);
+      const w = wickSpread(last.close, pairId, tf, last.time);
       last.high = Math.max(last.open, last.close, w.high);
       last.low = Math.min(last.open, last.close, w.low);
       Object.assign(last, constrainBarToOpen(last, maxBody));
@@ -355,7 +363,7 @@ export function prependOlderCandles(
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const shockBps = stableSigned([pairId, tf, t, "prepend-open"], 0.5) * noiseAmp;
+    const shockBps = stableSigned([tf, t, "prepend-open"], 0.5) * noiseAmp;
     const close = price;
     const meanPull = (first.open - close) * reversion;
     const rawOpen = close - meanPull - close * (shockBps / 10_000);
@@ -367,7 +375,7 @@ export function prependOlderCandles(
 
   let p = older[0]!.open;
   for (let i = 0; i < older.length; i++) {
-    const shockBps = stableSigned([pairId, tf, older[i]!.time, "prepend-close"], 0.48) * noiseAmp;
+    const shockBps = stableSigned([tf, older[i]!.time, "prepend-close"], 0.48) * noiseAmp;
     const open = p;
     const meanPull = (first.open - open) * reversion;
     const close =
@@ -401,7 +409,7 @@ export function upsertTick(
     safeMid = clampTickMid(safeMid, openRef, maxBody);
   }
   const tickVol = 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200;
-  const w = disc ? { high: safeMid, low: safeMid } : wickSpread(safeMid, pairId, tf);
+  const w = disc ? { high: safeMid, low: safeMid } : wickSpread(safeMid, pairId, tf, t);
 
   const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar), maxBody);
 
@@ -544,6 +552,14 @@ function finiteMid(n: number | undefined): n is number {
 
 function flatGapBar(t: number, px: number): Candle {
   return { time: t, open: px, high: px, low: px, close: px, volume: 0 };
+}
+
+/** Close ÷ tip close — shared silhouette check across pairs (scale-invariant). */
+export function relativeClosePath(candles: Candle[]): number[] {
+  if (!candles.length) return [];
+  const tip = candles[candles.length - 1]!.close;
+  if (!(tip > 0) || !Number.isFinite(tip)) return candles.map(() => 1);
+  return candles.map((c) => c.close / tip);
 }
 
 /**
