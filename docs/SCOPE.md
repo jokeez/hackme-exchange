@@ -18,7 +18,8 @@
 - Soft D0 = **static paper UI** only — no public `exchange-api`
 - Lab custody: mint / bridge / withdraw **request** (admin complete = CLI — no SPA admin token)
 - Hub iframe embed (`?embed=hub`) — loopback / private only until D0 static host
-- Read-only oracle from public `hackme.tech` APIs
+- Read-only oracle from public `hackme.tech` APIs  
+- Operator reference mids (**0.05** HMC · **0.01** SUP); pool GH is telemetry only
 
 ---
 

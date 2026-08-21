@@ -10,23 +10,38 @@ Paper / private-lab UI docs. Canonical **API** security & hosting live in the si
 | This SPA | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
 | Exchange API | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) · [API docs](https://github.com/jokeez/hackme-exchange-api/tree/main/docs) |
 
-## SPA docs
+## Start here
 
 | Doc | Purpose |
 |-----|---------|
-| [../STATUS.md](../STATUS.md) | Soft / live ladder · messaging |
-| [../README.md](../README.md) | Quick start |
-| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Setup · PRs |
-| [D0_CHECKLIST.md](D0_CHECKLIST.md) | Sep 10 go/no-go |
+| [../README.md](../README.md) | Quick start · modes · QA |
+| [../STATUS.md](../STATUS.md) | Soft / live ladder · messaging · reference mids |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Setup · PRs · secrets |
+
+## Launch & scope
+
+| Doc | Purpose |
+|-----|---------|
+| [D0_CHECKLIST.md](D0_CHECKLIST.md) | Sep 10 go/no-go gates |
 | [SCOPE.md](SCOPE.md) | Boundaries vs HackMe hub |
-| [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
-| [ECONOMICS.md](ECONOMICS.md) | Fees · VIP · convert |
+| [BOARD.md](BOARD.md) | Matching / deposits board |
+
+## Product & economics
+
+| Doc | Purpose |
+|-----|---------|
+| [ECONOMICS.md](ECONOMICS.md) | Fees · VIP · **0.05 / 0.01** reference mids |
+| [WALLET_ASSETS.md](WALLET_ASSETS.md) | Asset registry notes |
+| [HUB_TAB.md](HUB_TAB.md) | Hub `#exchange` embed |
+
+## Engineering
+
+| Doc | Purpose |
+|-----|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | SPA structure |
 | [INTEGRATION.md](INTEGRATION.md) | Origins · proxies · modes |
-| [BOARD.md](BOARD.md) | Matching / deposits board |
-| [HUB_TAB.md](HUB_TAB.md) | Hub `#exchange` embed |
-| [WALLET_ASSETS.md](WALLET_ASSETS.md) | Asset registry notes |
-| [SECURITY.md](SECURITY.md) | SPA checklist |
+| [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
+| [SECURITY.md](SECURITY.md) | SPA threat checklist |
 
 ## API docs (canonical)
 

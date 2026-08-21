@@ -22,7 +22,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit / UI suite | `npm test` | ✅ **528+** (2026-08-16) |
+| G1 | Unit / UI suite | `npm test` | ✅ **544** (2026-08-21) |
 | G2 | UI smoke | `npm run test:ui-smoke` | ✅ |
 | G3 | Production build | `npm run build` / `prepare_d0_static.sh` | ✅ |
 | G4 | XSS / sanitize / redteam | vitest sanitize + stress_redteam | ✅ |
@@ -35,6 +35,8 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 | G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` · **no DNS** | ✅ |
 | G12 | Comms draft | ops channel (not in repo) | ✅ |
 | G13 | PRE_PUBLIC API smoke | API `bash scripts/pre_public_dry_run.sh` | ✅ · **HOLD** |
+| G14 | Full UI/UX + B-chart | `full_ui_ux_pass` · `b_chart_manual_pass` | ✅ P0=0 (2026-08-21) |
+| G15 | Reference mids | HMC **0.05** · SUP **0.01** · no GH price scale | ✅ |
 
 ## Explicitly NOT required for D0
 
