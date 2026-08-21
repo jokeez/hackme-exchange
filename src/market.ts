@@ -35,6 +35,9 @@ const DEFAULT_BTC_USD = 67_500;
  */
 export const DEFAULT_REFERENCE_MID = 0.05;
 
+/** Operator reference mid (USDT per 1 SUP) — fair paper desk, not dust × scarcity. */
+export const DEFAULT_SUP_REFERENCE_MID = 0.01;
+
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -46,18 +49,18 @@ export function buildMarket(
   /** Operator reference mid USDT/HMC (Settings). */
   referenceMid = DEFAULT_REFERENCE_MID,
   btcUsd = DEFAULT_BTC_USD,
+  /** Operator reference mid USDT/SUP. */
+  supReferenceMid = DEFAULT_SUP_REFERENCE_MID,
 ): MarketSnapshot {
   const poolGh = work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : REF_GH);
   const rewardPerM = work.reward_per_m ?? 0.00021;
   const workers = work.workers_online ?? work.workers_count ?? pool.workers ?? 3;
 
-  // Reference mid only — no (GH)^n / reward / worker multipliers on price.
+  // Reference mids only — no GH / reward / scarcity multipliers on price.
   const hmcUsdt = Math.max(referenceMid, 1e-12);
-
   const minted = sup.economics?.total_minted_sup ?? 0.05;
   const max = sup.economics?.max_supply_sup ?? 21_000_000;
-  const scarcity = 1 + Math.log10(max / Math.max(minted, 0.001)) * 0.018;
-  const supUsdt = hmcUsdt * 0.11 * scarcity;
+  const supUsdt = Math.max(supReferenceMid, 1e-12);
   const hmcSup = hmcUsdt / Math.max(supUsdt, 1e-12);
   const hmcBtc = hmcUsdt / btcUsd;
   const supBtc = supUsdt / btcUsd;
