@@ -76,6 +76,11 @@ export function terminalGridColumns(prefs: LayoutPrefs): string {
   return parts.join(" ");
 }
 
+/** Chart fullscreen collapses side columns — must win over inline 3-col grid. */
+export function terminalGridColumnsForView(prefs: LayoutPrefs, chartFullscreen: boolean): string {
+  return chartFullscreen ? "minmax(0, 1fr)" : terminalGridColumns(prefs);
+}
+
 export function togglePanelCollapsed(prefs: LayoutPrefs, id: SidePanelId): LayoutPrefs {
   if (id === "book") return { ...prefs, bookCollapsed: !prefs.bookCollapsed };
   if (id === "tools") return { ...prefs, toolsCollapsed: !prefs.toolsCollapsed };

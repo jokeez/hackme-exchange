@@ -13,6 +13,7 @@ import {
   setPanelWidth,
   setBottomHeight,
   terminalGridColumns,
+  terminalGridColumnsForView,
   toggleBottomCollapsed,
   togglePanelCollapsed,
 } from "./layoutPrefs";
@@ -57,6 +58,11 @@ describe("layoutPrefs", () => {
     expect(
       terminalGridColumns({ ...LAYOUT_DEFAULTS, bookCollapsed: true, rightCollapsed: true }),
     ).toBe("minmax(0, 1fr)");
+  });
+
+  it("fullscreen grid is a single flexible track", () => {
+    expect(terminalGridColumnsForView(LAYOUT_DEFAULTS, true)).toBe("minmax(0, 1fr)");
+    expect(terminalGridColumnsForView(LAYOUT_DEFAULTS, false)).toBe(terminalGridColumns(LAYOUT_DEFAULTS));
   });
 
   it("toggles tools panel collapse", () => {

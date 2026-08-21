@@ -3,6 +3,8 @@ import {
   computeMeasureStats,
   formatDuration,
   isMeaningfulMeasure,
+  extendRayToBounds,
+  measureHudLines,
   sanitizeDrawing,
   sanitizeDrawings,
   stripPollutionKeys,
@@ -10,6 +12,7 @@ import {
   removeDrawingById,
   drawingsForPair,
   resolvePaintDrawings,
+  FIB_LEVELS,
 } from "./chartDraw";
 import type { Drawing } from "./types";
 
@@ -77,6 +80,37 @@ describe("isMeaningfulMeasure", () => {
   });
 });
 
+describe("extendRayToBounds", () => {
+  it("extends past p1 in the same direction", () => {
+    const end = extendRayToBounds({ x: 10, y: 10 }, { x: 20, y: 10 }, 400, 300);
+    expect(end.x).toBeGreaterThan(20);
+    expect(end.y).toBeCloseTo(10, 5);
+  });
+  it("handles zero-length without NaN", () => {
+    const end = extendRayToBounds({ x: 5, y: 5 }, { x: 5, y: 5 }, 100, 100);
+    expect(Number.isFinite(end.x)).toBe(true);
+    expect(Number.isFinite(end.y)).toBe(true);
+  });
+});
+
+describe("measureHudLines", () => {
+  it("formats three readout lines", () => {
+    const st = computeMeasureStats({ time: 0, price: 100 }, { time: 600, price: 110 }, "1m");
+    const lines = measureHudLines(st);
+    expect(lines[0]).toMatch(/^\+/);
+    expect(lines[1]).toContain("%");
+    expect(lines[2]).toMatch(/bars/);
+  });
+});
+
+describe("FIB_LEVELS", () => {
+  it("includes 0.786 retracement", () => {
+    expect(FIB_LEVELS).toContain(0.786);
+    expect(FIB_LEVELS[0]).toBe(0);
+    expect(FIB_LEVELS[FIB_LEVELS.length - 1]).toBe(1);
+  });
+});
+
 describe("sanitizeDrawings", () => {
   it("drops invalid tools and bad points", () => {
     const out = sanitizeDrawings([
@@ -116,6 +150,44 @@ describe("sanitizeDrawings", () => {
         pairId: "HMC_USDT",
         points: [{ time: 1, price: 1 }],
         color: "#ffb347",
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts vline/cross with one point and ray with two", () => {
+    expect(
+      sanitizeDrawing({
+        tool: "vline",
+        pairId: "HMC_USDT",
+        points: [{ time: 1, price: 1 }],
+        color: "#4de4ff",
+      })?.tool,
+    ).toBe("vline");
+    expect(
+      sanitizeDrawing({
+        tool: "cross",
+        pairId: "HMC_USDT",
+        points: [{ time: 2, price: 3 }],
+        color: "#81d4fa",
+      })?.tool,
+    ).toBe("cross");
+    expect(
+      sanitizeDrawing({
+        tool: "ray",
+        pairId: "HMC_USDT",
+        points: [
+          { time: 1, price: 1 },
+          { time: 5, price: 2 },
+        ],
+        color: "#26c6da",
+      })?.tool,
+    ).toBe("ray");
+    expect(
+      sanitizeDrawing({
+        tool: "ray",
+        pairId: "HMC_USDT",
+        points: [{ time: 1, price: 1 }],
+        color: "#26c6da",
       }),
     ).toBeNull();
   });

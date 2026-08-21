@@ -110,27 +110,29 @@ export function barCountForTf(tf: Timeframe, nowMs = Date.now()): number {
   return Math.min(want, maxBarsSinceGenesis(tf, nowMs), MAX_CANDLES);
 }
 
-function candleVolume(pairId: PairId, tf: Timeframe): number {
+function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
   const tfScale = Math.sqrt(TF_SEC[tf] / 60);
   const base =
     pairId === "HMC_USDT" || pairId === "HMC_SUP" || pairId === "HMC_BTC"
-      ? 4000 + stableUnit([pairId, tf, "volume"]) * 80_000
-      : 1500 + stableUnit([pairId, tf, "volume"]) * 25_000;
-  return base * tfScale;
+      ? 3500 + stableUnit([pairId, tf, t, "volume-base"]) * 55_000
+      : 1200 + stableUnit([pairId, tf, t, "volume-base"]) * 18_000;
+  // Per-bar jitter so volume hist is not a flat “barcode”.
+  const jitter = 0.45 + stableUnit([pairId, tf, t, "volume-j"]) * 1.1;
+  return base * tfScale * jitter;
 }
 
-/** Micro-wick scaled to TF — capped so 1D does not look like a crash tape. */
+/** Micro-wick scaled to TF — paper desk, not a barcode of ±6% spikes. */
 function wickSpread(mid: number, pairId: PairId, tf: Timeframe = CANDLE_BASE_TF): { high: number; low: number } {
-  const bpsBase = pairId.includes("BTC") ? 10 : pairId === "SUP_USDT" ? 8 : 6;
-  // Cap TF scale (~1H equivalent) — daily bars stay calm around reference mid.
-  const bps = bpsBase * Math.min(Math.sqrt(TF_SEC[tf] / 60), 8);
+  // ~2–4 bps base; TF scale capped so 1H/1D stay calm around reference mid.
+  const bpsBase = pairId.includes("BTC") ? 3.5 : pairId === "SUP_USDT" ? 3 : 2.5;
+  const bps = bpsBase * Math.min(Math.sqrt(TF_SEC[tf] / 60), 3);
   const half = (bps / 10_000) * mid;
-  const bodyCap = maxBodyFracForTf(tf);
+  const bodyCap = Math.min(maxBodyFracForTf(tf) * 0.35, 0.008);
   const hiSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-high"]);
   const loSeed = stableUnit([pairId, tf, mid.toPrecision(12), "wick-low"]);
   return {
-    high: Math.min(mid * (1 + bodyCap), mid + half * (0.55 + hiSeed * 0.7)),
-    low: Math.max(mid * (1 - bodyCap), mid - half * (0.55 + loSeed * 0.7)),
+    high: Math.min(mid * (1 + bodyCap), mid + half * (0.4 + hiSeed * 0.6)),
+    low: Math.max(mid * (1 - bodyCap), mid - half * (0.4 + loSeed * 0.6)),
   };
 }
 
@@ -145,7 +147,7 @@ function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Tim
       high: Math.max(bodyHigh, wick.high),
       low: Math.min(bodyLow, wick.low),
       close,
-      volume: candleVolume(pairId, tf),
+      volume: candleVolume(pairId, tf, t),
     },
     maxBodyFracForTf(tf),
   );
@@ -224,10 +226,9 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   const out: Candle[] = [];
   const maxBody = maxBodyFracForTf(tf);
   // Mild OU noise around mid — paper reference desk, not a multi-day dump/pump.
-  // Previous open random-walk drifted ~10%+ over 24h and painted fake −chg + red tip.
-  const noiseAmp = 3.2 * Math.sqrt(sec / 60);
-  const reversion = 0.42;
-  let price = mid * (0.999 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.002);
+  const noiseAmp = 2.0 * Math.sqrt(sec / 60);
+  const reversion = 0.48;
+  let price = mid * (0.9995 + stableUnit([pairId, tf, now, n, "seed-start"]) * 0.001);
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
@@ -242,21 +243,18 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
   }
   if (out.length) {
     const last = out[out.length - 1]!;
-    // Tip must print the live mid exactly — re-anchor open if body would clip it.
+    // Tip prints live mid, but NEVER expand past body/wick caps (screenshot spike).
     if (Math.abs(mid - last.open) / Math.max(last.open, 1e-18) > maxBody) {
       last.open = mid;
       last.high = mid;
       last.low = mid;
       last.close = mid;
     } else {
-      const w = wickSpread(mid, pairId, tf);
-      last.close = mid;
-      last.high = Math.max(last.open, mid, w.high);
-      last.low = Math.min(last.open, mid, w.low);
+      last.close = clampTickMid(mid, last.open, maxBody);
+      const w = wickSpread(last.close, pairId, tf);
+      last.high = Math.max(last.open, last.close, w.high);
+      last.low = Math.min(last.open, last.close, w.low);
       Object.assign(last, constrainBarToOpen(last, maxBody));
-      last.close = mid; // constrain may nudge; force mid on tip
-      last.high = Math.max(last.high, mid, last.open);
-      last.low = Math.min(last.low, mid, last.open);
     }
   }
   return out;
@@ -299,8 +297,18 @@ export function seedAllTimeframes(
   pairId: PairId,
   mid: number,
 ): Partial<Record<Timeframe, Candle[]>> {
-  const base = seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF));
-  return deriveAllTimeframes(base, pairId);
+  const base = sanitizeCandlesForChart(
+    seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF)),
+    pairId,
+  );
+  const all = deriveAllTimeframes(base, pairId);
+  for (const tf of Object.keys(all) as Timeframe[]) {
+    const series = all[tf];
+    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId);
+  }
+  const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
+  if (tipClose != null) alignDerivedTips(all, tipClose);
+  return all;
 }
 
 /** Grow history to the left — never before CHART_GENESIS_UNIX. */
@@ -340,8 +348,8 @@ export function prependOlderCandles(
   if (n <= 0) return existing;
 
   const maxBody = maxBodyFracForTf(tf);
-  const noiseAmp = 3.2 * Math.sqrt(sec / 60);
-  const reversion = 0.42;
+  const noiseAmp = 2.0 * Math.sqrt(sec / 60);
+  const reversion = 0.48;
   const older: Candle[] = [];
   let price = first.open;
   for (let i = n; i >= 1; i--) {
@@ -492,6 +500,23 @@ export function upsertTick(
  * Live mid update: tick the 1m base, then refresh every TF from it.
  * Guarantees 5m/1D tips match 1m — no independent cliffs per TF.
  */
+function alignDerivedTips(
+  all: Partial<Record<Timeframe, Candle[]>>,
+  tipClose: number,
+): void {
+  if (!(tipClose > 0) || !Number.isFinite(tipClose)) return;
+  for (const tf of Object.keys(all) as Timeframe[]) {
+    if (tf === CANDLE_BASE_TF) continue;
+    const series = all[tf];
+    if (!series?.length) continue;
+    const tip = { ...series[series.length - 1]! };
+    tip.close = tipClose;
+    tip.high = Math.max(tip.high, tip.open, tipClose);
+    tip.low = Math.min(tip.low, tip.open, tipClose);
+    series[series.length - 1] = clipBarWicks(tip);
+  }
+}
+
 export function applyMidToPairCandles(
   candlesByTf: Partial<Record<Timeframe, Candle[]>>,
   pairId: PairId,
@@ -499,8 +524,18 @@ export function applyMidToPairCandles(
   prevMid?: number,
 ): Partial<Record<Timeframe, Candle[]>> {
   const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
-  const nextBase = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid);
-  return deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  const nextBase = sanitizeCandlesForChart(
+    upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid),
+    pairId,
+  );
+  const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  for (const tf of Object.keys(all) as Timeframe[]) {
+    const series = all[tf];
+    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId);
+  }
+  const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
+  if (tipClose != null) alignDerivedTips(all, tipClose);
+  return all;
 }
 
 function finiteMid(n: number | undefined): n is number {

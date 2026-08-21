@@ -179,7 +179,18 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   },
 };
 
-export type DrawTool = "cursor" | "hline" | "trend" | "fib" | "rect" | "text" | "measure";
+export type DrawTool =
+  | "cursor"
+  | "hline"
+  | "vline"
+  | "cross"
+  | "trend"
+  | "ray"
+  | "fib"
+  | "rect"
+  | "text"
+  | "measure";
+
 
 export type Drawing = {
   id: string;
@@ -281,7 +292,7 @@ export const DEFAULT_FEE_CONFIG: FeeConfig = {
   hmcDiscountPct: 25,
 };
 
-export const STATE_VERSION = 16;
+export const STATE_VERSION = 18;
 
 export type DemoState = {
   wallet: Wallet;

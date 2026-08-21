@@ -26,7 +26,13 @@ import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
-import { computeMeasureStats, isMeaningfulMeasure, resolvePaintDrawings } from "./chartDraw";
+import {
+  computeMeasureStats,
+  extendRayToBounds,
+  FIB_LEVELS,
+  isMeaningfulMeasure,
+  resolvePaintDrawings,
+} from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 
@@ -536,6 +542,39 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, selecte
   ctx.stroke();
 }
 
+function paintMeasureBox(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  up: boolean,
+): void {
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const rw = Math.abs(x2 - x1);
+  const rh = Math.abs(y2 - y1);
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = up ? "#00c073" : "#db4455";
+  ctx.fillRect(left, top, rw, rh);
+  ctx.globalAlpha = 0.85;
+  ctx.strokeStyle = up ? "rgba(0,192,115,0.75)" : "rgba(219,68,85,0.75)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.strokeRect(left, top, rw, rh);
+  // Price & time legs (TV-style L guides)
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y1);
+  ctx.moveTo(x2, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function measureHud(
   ctx: CanvasRenderingContext2D,
   a: { time: number; price: number },
@@ -547,15 +586,15 @@ function measureHud(
   tf: Timeframe,
 ): void {
   const st = computeMeasureStats(a, b, tf);
-  const boxW = 148;
-  const boxH = 72;
+  paintMeasureBox(ctx, x1, y1, x2, y2, st.up);
+  const boxW = 156;
+  const boxH = 86;
   const mx = (x1 + x2) / 2 - boxW / 2;
   const my = Math.min(y1, y2) - boxH - 12;
   const left = Math.max(4, Math.min(mx, (hostEl?.clientWidth ?? 400) - boxW - 4));
   let top = my;
   if (top < 4) top = Math.max(y1, y2) + 12;
-  // Rounded pill (TradingView-like measure chip)
-  const r = 6;
+  const r = 7;
   ctx.beginPath();
   ctx.moveTo(left + r, top);
   ctx.arcTo(left + boxW, top, left + boxW, top + boxH, r);
@@ -563,20 +602,21 @@ function measureHud(
   ctx.arcTo(left, top + boxH, left, top, r);
   ctx.arcTo(left, top, left + boxW, top, r);
   ctx.closePath();
-  ctx.fillStyle = st.up ? "rgba(0,192,115,0.94)" : "rgba(219,68,85,0.94)";
+  ctx.fillStyle = st.up ? "rgba(0,192,115,0.95)" : "rgba(219,68,85,0.95)";
   ctx.fill();
   ctx.strokeStyle = st.up ? "rgba(110,255,173,0.55)" : "rgba(255,140,150,0.5)";
   ctx.lineWidth = 1;
   ctx.stroke();
+  const sign = st.up ? "+" : "";
   ctx.fillStyle = "#fff";
   ctx.font = "700 13px JetBrains Mono, monospace";
-  ctx.fillText(`${st.up ? "+" : ""}${chartPriceFormatter(st.dPrice)}`, left + 10, top + 20);
+  ctx.fillText(`${sign}${chartPriceFormatter(st.dPrice)}`, left + 10, top + 18);
   ctx.font = "600 12px JetBrains Mono, monospace";
-  ctx.fillText(`${st.up ? "+" : ""}${st.dPct.toFixed(2)}%`, left + 10, top + 38);
+  ctx.fillText(`${sign}${st.dPct.toFixed(2)}%`, left + 10, top + 36);
   ctx.font = "500 10px Space Grotesk, Inter, sans-serif";
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.fillText(`${st.bars} bars · ${st.timeLabel}`, left + 10, top + 56);
-  // Connecting guide ticks on the measure segment
+  ctx.fillText(`${st.bars} bars · ${st.timeLabel}`, left + 10, top + 54);
+  ctx.fillText(`${chartPriceFormatter(a.price)} → ${chartPriceFormatter(b.price)}`, left + 10, top + 72);
   ctx.setLineDash([]);
   ctx.strokeStyle = st.up ? "rgba(110,255,173,0.85)" : "rgba(255,140,150,0.85)";
   ctx.lineWidth = 1;
@@ -586,6 +626,40 @@ function measureHud(
   ctx.moveTo(x2, y2);
   ctx.lineTo(x2, y2 + (st.up ? -6 : 6));
   ctx.stroke();
+}
+
+function paintFibLevels(
+  ctx: CanvasRenderingContext2D,
+  a: { time: number; price: number },
+  b: { time: number; price: number },
+  w: number,
+  selected: boolean,
+  hovered: boolean,
+): void {
+  if (!candleSeries || !chart) return;
+  const ts = chart.timeScale();
+  const hi = Math.max(a.price, b.price);
+  const lo = Math.min(a.price, b.price);
+  const x0 = ts.timeToCoordinate(a.time as UTCTimestamp);
+  const x1 = ts.timeToCoordinate(b.time as UTCTimestamp);
+  for (const lv of FIB_LEVELS) {
+    const p = hi - (hi - lo) * lv;
+    const y = candleSeries.priceToCoordinate(p);
+    if (y == null) continue;
+    ctx.globalAlpha = selected || hovered ? 0.9 : 0.75;
+    ctx.beginPath();
+    if (x0 != null && x1 != null) {
+      ctx.moveTo(Math.min(x0, x1), y);
+      ctx.lineTo(Math.max(x0, x1), y);
+    } else {
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.fillText(`${(lv * 100).toFixed(1)}%  ${chartPriceFormatter(p)}`, 6, y - 3);
+  }
 }
 
 function redrawDrawings(drawings: Drawing[]): void {
@@ -632,17 +706,57 @@ function redrawDrawings(drawings: Drawing[]): void {
         if (selected || hovered) drawHandle(ctx, w * 0.5, y, selected);
       }
     }
-    if ((d.tool === "trend" || d.tool === "measure") && d.points.length >= 2) {
+    if (d.tool === "vline" && d.points[0]) {
+      const x = ts.timeToCoordinate(d.points[0].time as UTCTimestamp);
+      if (x != null) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+        if (selected || hovered) drawHandle(ctx, x, h * 0.5, selected);
+      }
+    }
+    if (d.tool === "cross" && d.points[0]) {
+      const y = candleSeries!.priceToCoordinate(d.points[0].price);
+      const x = ts.timeToCoordinate(d.points[0].time as UTCTimestamp);
+      if (y != null) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      if (x != null) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      if ((selected || hovered) && x != null && y != null) drawHandle(ctx, x, y, selected);
+    }
+    if ((d.tool === "trend" || d.tool === "ray" || d.tool === "measure") && d.points.length >= 2) {
       const p0 = xyOf(d.points[0]);
       const p1 = xyOf(d.points[1]);
       if (p0 && p1) {
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(p1.x, p1.y);
-        ctx.stroke();
         if (d.tool === "measure") {
           ctx.shadowBlur = 0;
+          const st = computeMeasureStats(d.points[0], d.points[1], tf);
+          ctx.strokeStyle = st.up ? "#00c073" : "#db4455";
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          ctx.lineTo(p1.x, p1.y);
+          ctx.stroke();
           measureHud(ctx, d.points[0], d.points[1], p0.x, p0.y, p1.x, p1.y, tf);
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          if (d.tool === "ray") {
+            const end = extendRayToBounds(p0, p1, w, h);
+            ctx.lineTo(end.x, end.y);
+          } else {
+            ctx.lineTo(p1.x, p1.y);
+          }
+          ctx.stroke();
         }
         if (selected || hovered || d.tool === "measure") {
           drawHandle(ctx, p0.x, p0.y, selected);
@@ -669,29 +783,7 @@ function redrawDrawings(drawings: Drawing[]): void {
       }
     }
     if (d.tool === "fib" && d.points.length >= 2) {
-      const hi = Math.max(d.points[0].price, d.points[1].price);
-      const lo = Math.min(d.points[0].price, d.points[1].price);
-      const x0 = ts.timeToCoordinate(d.points[0].time as UTCTimestamp);
-      const x1 = ts.timeToCoordinate(d.points[1].time as UTCTimestamp);
-      const levels = [0, 0.236, 0.382, 0.5, 0.618, 1];
-      for (const lv of levels) {
-        const p = hi - (hi - lo) * lv;
-        const y = candleSeries!.priceToCoordinate(p);
-        if (y == null) continue;
-        ctx.globalAlpha = 0.75;
-        ctx.beginPath();
-        if (x0 != null && x1 != null) {
-          ctx.moveTo(Math.min(x0, x1), y);
-          ctx.lineTo(Math.max(x0, x1), y);
-        } else {
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-        }
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.font = "10px JetBrains Mono, monospace";
-        ctx.fillText(`${(lv * 100).toFixed(1)}%`, 6, y - 3);
-      }
+      paintFibLevels(ctx, d.points[0], d.points[1], w, selected, hovered);
       if (selected || hovered) {
         const p0 = xyOf(d.points[0]);
         const p1 = xyOf(d.points[1]);
@@ -721,15 +813,24 @@ function redrawDrawings(drawings: Drawing[]): void {
       ctx.strokeStyle = ghostPreview.tool === "fib" ? "#ab47bc" : "#00e5ff";
       ctx.setLineDash([4, 3]);
       ctx.lineWidth = 1.5;
-      ctx.beginPath();
       if (ghostPreview.tool === "rect") {
+        ctx.beginPath();
         ctx.strokeRect(
           Math.min(p0.x, p1.x),
           Math.min(p0.y, p1.y),
           Math.abs(p1.x - p0.x),
           Math.abs(p1.y - p0.y),
         );
+      } else if (ghostPreview.tool === "fib") {
+        paintFibLevels(ctx, ghostPreview.a, ghostPreview.b, w, false, true);
+      } else if (ghostPreview.tool === "ray") {
+        const end = extendRayToBounds(p0, p1, w, h);
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
       } else {
+        ctx.beginPath();
         ctx.moveTo(p0.x, p0.y);
         ctx.lineTo(p1.x, p1.y);
         ctx.stroke();
@@ -782,12 +883,33 @@ function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | 
       const y = candleSeries?.priceToCoordinate(d.points[0].price);
       if (y != null && Math.abs(my - y) <= thresh) return { id: d.id, mode: "move" };
     }
-    if ((d.tool === "trend" || d.tool === "measure") && d.points.length >= 2) {
+    if (d.tool === "vline" && d.points[0]) {
+      const x = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
+      if (x != null && Math.abs(mx - x) <= thresh) return { id: d.id, mode: "move" };
+    }
+    if (d.tool === "cross" && d.points[0]) {
+      const y = candleSeries?.priceToCoordinate(d.points[0].price);
+      const x = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
+      const onH = y != null && Math.abs(my - y) <= thresh;
+      const onV = x != null && Math.abs(mx - x) <= thresh;
+      if (onH || onV) return { id: d.id, mode: "move" };
+      if (x != null && y != null && Math.hypot(mx - x, my - y) <= thresh + 4) {
+        return { id: d.id, mode: "move" };
+      }
+    }
+    if ((d.tool === "trend" || d.tool === "ray" || d.tool === "measure") && d.points.length >= 2) {
       const p0 = xyOf(d.points[0]);
       const p1 = xyOf(d.points[1]);
       if (p0 && Math.hypot(mx - p0.x, my - p0.y) <= thresh + 2) return { id: d.id, mode: "p0" };
       if (p1 && Math.hypot(mx - p1.x, my - p1.y) <= thresh + 2) return { id: d.id, mode: "p1" };
-      if (p0 && p1 && distToSegment(mx, my, p0, p1) <= thresh) return { id: d.id, mode: "move" };
+      if (p0 && p1) {
+        if (d.tool === "ray") {
+          const end = extendRayToBounds(p0, p1, hostEl?.clientWidth ?? 800, hostEl?.clientHeight ?? 400);
+          if (distToSegment(mx, my, p0, end) <= thresh) return { id: d.id, mode: "move" };
+        } else if (distToSegment(mx, my, p0, p1) <= thresh) {
+          return { id: d.id, mode: "move" };
+        }
+      }
     }
     if (d.tool === "rect" && d.points.length >= 2) {
       const p0 = xyOf(d.points[0]);
@@ -817,7 +939,7 @@ function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | 
       const lo = Math.min(d.points[0].price, d.points[1].price);
       const x0 = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
       const x1 = chart?.timeScale().timeToCoordinate(d.points[1].time as UTCTimestamp);
-      const levels = [0, 0.236, 0.382, 0.5, 0.618, 1];
+      const levels = FIB_LEVELS;
       for (const lv of levels) {
         const price = hi - (hi - lo) * lv;
         const y = candleSeries?.priceToCoordinate(price);
@@ -1153,6 +1275,10 @@ function setupDrawInteraction(
           if (npt) target.points[1] = npt;
         } else if (target.tool === "hline" && target.points[0]) {
           if (npt) target.points[0] = { ...target.points[0], price: npt.price };
+        } else if (target.tool === "vline" && target.points[0]) {
+          if (npt) target.points[0] = { ...target.points[0], time: npt.time };
+        } else if (target.tool === "cross" && target.points[0]) {
+          if (npt) target.points[0] = npt;
         } else {
           const dx = cmx - dragDraw.startMouse.x;
           const dy = cmy - dragDraw.startMouse.y;
@@ -1201,6 +1327,18 @@ function setupDrawInteraction(
       selectedDrawingId = id;
       return;
     }
+    if (activeTool === "vline") {
+      const id = `d-${Date.now()}`;
+      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "vline", points: [pt], color: "#4de4ff" });
+      selectedDrawingId = id;
+      return;
+    }
+    if (activeTool === "cross") {
+      const id = `d-${Date.now()}`;
+      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "cross", points: [pt], color: "#81d4fa" });
+      selectedDrawingId = id;
+      return;
+    }
     if (activeTool === "text") {
       const raw = prompt("Label", "Note") ?? "Note";
       const text =
@@ -1215,7 +1353,13 @@ function setupDrawInteraction(
       return;
     }
 
-    if (activeTool === "measure" || activeTool === "trend" || activeTool === "fib" || activeTool === "rect") {
+    if (
+      activeTool === "measure" ||
+      activeTool === "trend" ||
+      activeTool === "ray" ||
+      activeTool === "fib" ||
+      activeTool === "rect"
+    ) {
       drawPoints = [pt];
       measurePreview = activeTool === "measure" ? { a: pt, b: pt } : null;
       ghostPreview = activeTool !== "measure" ? { tool: activeTool, a: pt, b: pt } : null;
@@ -1249,16 +1393,20 @@ function setupDrawInteraction(
             redrawDrawings(liveDrawings);
             return;
           }
+          const st = computeMeasureStats(points[0], points[1], (lastOpts?.tf ?? "15m") as Timeframe);
           onAdd({
             id,
             pairId: pairId as Drawing["pairId"],
             tool: "measure",
             points,
-            color: "#ffb347",
+            color: st.up ? "#00c073" : "#db4455",
           });
           selectedDrawingId = id;
         } else if (activeTool === "trend") {
           onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "trend", points, color: "#00e5ff" });
+          selectedDrawingId = id;
+        } else if (activeTool === "ray") {
+          onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "ray", points, color: "#26c6da" });
           selectedDrawingId = id;
         } else if (activeTool === "fib") {
           onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "fib", points, color: "#ab47bc" });

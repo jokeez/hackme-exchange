@@ -90,6 +90,9 @@ describe("hardening UI contracts", () => {
     expect(css).toContain(".toast-info");
     expect(css).toContain(".tour-actions");
     expect(css).toContain(".terminal.book-collapsed:not(.tools-collapsed) .panel-rail.left");
+    expect(css).toContain(".terminal.chart-fullscreen");
+    expect(css).toContain('html[data-embed="hub"] .terminal.chart-fullscreen');
+    expect(css).toContain("grid-template-columns: minmax(0, 1fr) !important");
     expect(css).toContain(".ob-total { display: block;");
     expect(css).toContain("focus-visible");
     expect(css).toContain(".demo-badge");

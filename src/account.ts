@@ -95,7 +95,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <div>
         <p class="kicker">Wallet</p>
         <h2>Account</h2>
-        <p class="muted small acct-sub">${modeBlurb()} · <span class="mono">${INTEGRATION.mode}</span></p>
+        <p class="muted small acct-sub">${modeBlurb()} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span></p>
       </div>
       <div class="acct-head-actions">
         <a class="btn-sm btn-secondary" href="#acct-cash">Deposit / Withdraw</a>

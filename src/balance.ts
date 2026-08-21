@@ -1,10 +1,27 @@
 import { calcFee, liquidityRole } from "./fees";
 import { midForPair } from "./market";
 import { PAIRS } from "./pairs";
-import type { DemoState, MarketSnapshot, Order, PairId, Wallet } from "./types";
+import type { DemoState, MarketSnapshot, Order, OrderSide, PairId, Wallet } from "./types";
 
 function balKey(asset: string): keyof Wallet {
   return asset.toLowerCase() as keyof Wallet;
+}
+
+function isMarketable(side: OrderSide, price: number, mid: number): boolean {
+  return side === "buy" ? price >= mid : price <= mid;
+}
+
+/** Fee role for sizing / pre-trade checks — marketable limits take liquidity (taker). */
+export function fundsImmediateFill(
+  kind: Order["kind"],
+  side: OrderSide,
+  price: number,
+  mid?: number,
+): boolean {
+  if (kind === "market" || kind === "trailing_stop" || kind === "stop_market") return true;
+  if (mid == null || !(mid > 0) || !(price > 0)) return false;
+  if (kind === "limit" || kind === "oco") return isMarketable(side, price, mid);
+  return false;
 }
 
 function quoteNeedForLeg(
@@ -75,6 +92,7 @@ export function freeBalance(state: DemoState, asset: keyof Wallet, m?: MarketSna
 /**
  * Largest whole-base buy that still passes assertOrderFunds at `pct` of free quote.
  * Accounts for maker/taker fees (quote or HMC) so 100% / MAX never overshoots.
+ * Pass `mid` so marketable limits size against taker fees (matches immediate fill).
  */
 export function maxBuyBaseAmount(
   state: DemoState,
@@ -83,6 +101,7 @@ export function maxBuyBaseAmount(
   price: number,
   kind: Order["kind"],
   pct = 1,
+  mid?: number,
 ): number {
   if (!(price > 0) || !Number.isFinite(price)) return 0;
   const pair = PAIRS.find((p) => p.id === pairId);
@@ -92,14 +111,63 @@ export function maxBuyBaseAmount(
   const quoteK = balKey(pair.quote);
   const budget = freeBalance(state, quoteK, m) * p;
   if (budget <= 0) return 0;
+  const immediate = fundsImmediateFill(kind, "buy", price, mid);
   let lo = 0;
   let hi = Math.floor(budget / price);
   while (lo < hi) {
-    const mid = Math.ceil((lo + hi + 1) / 2);
-    if (assertOrderFunds(state, m, pairId, "buy", mid, price, kind).ok) lo = mid;
-    else hi = mid - 1;
+    const midAmt = Math.ceil((lo + hi + 1) / 2);
+    if (assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate).ok) lo = midAmt;
+    else hi = midAmt - 1;
   }
   return lo;
+}
+
+/**
+ * Largest whole-base sell at `pct` of free base — fee-aware when paying fees in HMC
+ * (selling HMC must leave leftover for the fee).
+ */
+export function maxSellBaseAmount(
+  state: DemoState,
+  m: MarketSnapshot,
+  pairId: PairId,
+  price: number,
+  kind: Order["kind"],
+  pct = 1,
+  mid?: number,
+): number {
+  if (!(price > 0) || !Number.isFinite(price)) return 0;
+  const pair = PAIRS.find((p) => p.id === pairId);
+  if (!pair) return 0;
+  const p = Math.min(1, Math.max(0, pct));
+  if (p <= 0) return 0;
+  const baseK = balKey(pair.base);
+  const budget = freeBalance(state, baseK, m) * p;
+  if (budget <= 0) return 0;
+  const immediate = fundsImmediateFill(kind, "sell", price, mid);
+  let lo = 0;
+  let hi = Math.floor(budget);
+  while (lo < hi) {
+    const midAmt = Math.ceil((lo + hi + 1) / 2);
+    if (assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate).ok) lo = midAmt;
+    else hi = midAmt - 1;
+  }
+  return lo;
+}
+
+/** Unified 100%/pct sizing for the dual order panel. */
+export function maxOrderBaseAmount(
+  state: DemoState,
+  m: MarketSnapshot,
+  pairId: PairId,
+  side: OrderSide,
+  price: number,
+  kind: Order["kind"],
+  pct = 1,
+  mid?: number,
+): number {
+  return side === "buy"
+    ? maxBuyBaseAmount(state, m, pairId, price, kind, pct, mid)
+    : maxSellBaseAmount(state, m, pairId, price, kind, pct, mid);
 }
 
 export function assertOrderFunds(
@@ -110,11 +178,13 @@ export function assertOrderFunds(
   amountBase: number,
   price: number,
   kind: Order["kind"] = "limit",
+  immediateFill = false,
 ): { ok: true } | { ok: false; reason: string } {
   if (!Number.isFinite(amountBase) || amountBase <= 0) {
     return { ok: false, reason: "Amount must be > 0" };
   }
   const pair = PAIRS.find((p) => p.id === pairId)!;
+  const role = liquidityRole(kind, false, immediateFill);
   if (side === "sell") {
     const baseK = balKey(pair.base);
     const free = freeBalance(state, baseK, m);
@@ -123,7 +193,7 @@ export function assertOrderFunds(
     }
     if (state.feeConfig.payFeesInHmc) {
       const quoteGross = price * amountBase;
-      const fee = calcFee(state, m, pairId, quoteGross, liquidityRole(kind));
+      const fee = calcFee(state, m, pairId, quoteGross, role);
       if (fee.paidInHmc) {
         // Selling HMC reduces free HMC — fee must fit in leftover (or other free HMC).
         const hmcFree = freeBalance(state, "hmc", m);
@@ -137,7 +207,7 @@ export function assertOrderFunds(
   }
   const quoteK = balKey(pair.quote);
   const quoteGross = price * amountBase;
-  const fee = calcFee(state, m, pairId, quoteGross, liquidityRole(kind));
+  const fee = calcFee(state, m, pairId, quoteGross, role);
   const quoteNeed = quoteGross + (fee.paidInHmc ? 0 : fee.feeQuote);
   const free = freeBalance(state, quoteK, m);
   if (free < quoteNeed) {

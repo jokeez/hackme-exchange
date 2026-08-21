@@ -12,13 +12,15 @@ export function buildOrderBook(
 ): { bids: BookLevel[]; asks: BookLevel[] } {
   const mid = ticker.mid;
   if (!Number.isFinite(mid) || mid <= 0) return { bids: [], asks: [] };
+  // Cap ladder depth — callers must not pass millions (CPU / DOM DoS).
+  const depth = Math.min(500, Math.max(1, Math.floor(Number(levels)) || 14));
   const bid0 = Number.isFinite(ticker.bid) && ticker.bid > 0 ? ticker.bid : mid * 0.999;
   const ask0 = Number.isFinite(ticker.ask) && ticker.ask > 0 ? ticker.ask : mid * 1.001;
   const step = mid * 0.0011;
   const phase = opts.phase ?? 0;
   const bids: BookLevel[] = [];
   const asks: BookLevel[] = [];
-  for (let i = 0; i < levels; i++) {
+  for (let i = 0; i < depth; i++) {
     const bidPrice = bid0 - step * i;
     const askPrice = ask0 + step * i;
     if (bidPrice <= 0 || askPrice <= 0) continue;

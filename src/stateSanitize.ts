@@ -1,12 +1,24 @@
-/** Shared order/trade enum sanitizers for loadState + parseDemoImport (FE-H01). */
-import type { Order, OrderKind, OrderSide, PairId, Trade } from "./types";
+/** Shared order/trade/candle sanitizers for loadState + parseDemoImport (FE-H01). */
+import type { Candle, DemoState, Order, OrderKind, OrderSide, PairId, Timeframe, Trade } from "./types";
+import { TIMEFRAMES } from "./types";
 import { sanitizeDomId } from "./sanitize";
 import { uid } from "./id";
+import { MAX_CANDLES } from "./candles";
 
 /** Cap per-trade notional on import — blocks VIP tier farming via fake history. */
 export const MAX_IMPORT_TRADE_QUOTE = 1_000_000;
 
+/** Per-series candle cap on import/load (matches chart soft cap). */
+export const MAX_IMPORT_CANDLES_PER_SERIES = MAX_CANDLES;
+
+/** Hard total across all pairs×TFs — stops nested candle bombs inside 2MB JSON. */
+export const MAX_IMPORT_CANDLE_TOTAL = 12_000;
+
+/** Max volume on a single imported bar. */
+export const MAX_IMPORT_CANDLE_VOLUME = 5_000_000;
+
 const PAIR_IDS = new Set<PairId>(["HMC_USDT", "SUP_USDT", "HMC_SUP", "HMC_BTC", "SUP_BTC"]);
+const TF_SET = new Set<string>(TIMEFRAMES);
 const ORDER_SIDES = new Set<OrderSide>(["buy", "sell"]);
 const ORDER_KINDS = new Set<OrderKind>([
   "market",
@@ -19,6 +31,77 @@ const ORDER_KINDS = new Set<OrderKind>([
 
 function sanitizePairId(raw: unknown, fallback: PairId = "HMC_USDT"): PairId {
   return typeof raw === "string" && PAIR_IDS.has(raw as PairId) ? (raw as PairId) : fallback;
+}
+
+function finitePos(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n > 0;
+}
+
+/** One OHLC bar — drop NaN/Infinity/negative spikes that would crash LWC. */
+export function sanitizeImportedCandle(raw: unknown): Candle | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const time = typeof o.time === "number" && Number.isFinite(o.time) ? o.time : NaN;
+  if (!(time > 0)) return null;
+  let open = finitePos(o.open) ? o.open : NaN;
+  let high = finitePos(o.high) ? o.high : NaN;
+  let low = finitePos(o.low) ? o.low : NaN;
+  let close = finitePos(o.close) ? o.close : NaN;
+  if (!Number.isFinite(open) && Number.isFinite(close)) open = close;
+  if (!Number.isFinite(close) && Number.isFinite(open)) close = open;
+  if (!Number.isFinite(open) || !Number.isFinite(close)) return null;
+  if (!Number.isFinite(high)) high = Math.max(open, close);
+  if (!Number.isFinite(low)) low = Math.min(open, close);
+  // Clamp absurd magnitudes (DoS via axis range).
+  const MAX_PX = 1e9;
+  open = Math.min(MAX_PX, open);
+  close = Math.min(MAX_PX, close);
+  high = Math.min(MAX_PX, Math.max(open, close, high));
+  low = Math.max(1e-12, Math.min(open, close, low));
+  if (high < Math.max(open, close)) high = Math.max(open, close);
+  if (low > Math.min(open, close)) low = Math.min(open, close);
+  const volume =
+    typeof o.volume === "number" && Number.isFinite(o.volume) && o.volume >= 0
+      ? Math.min(MAX_IMPORT_CANDLE_VOLUME, o.volume)
+      : 0;
+  return { time, open, high, low, close, volume };
+}
+
+/**
+ * Cap + heal candle maps from import / localStorage.
+ * Unknown pair/TF keys dropped; series truncated; total bars hard-capped.
+ */
+export function sanitizeImportedCandles(raw: unknown): DemoState["candles"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const src = raw as Record<string, unknown>;
+  const out: DemoState["candles"] = {};
+  let total = 0;
+  for (const pid of Object.keys(src)) {
+    if (!PAIR_IDS.has(pid as PairId)) continue;
+    if (total >= MAX_IMPORT_CANDLE_TOTAL) break;
+    const byTf = src[pid];
+    if (!byTf || typeof byTf !== "object" || Array.isArray(byTf)) continue;
+    const next: Partial<Record<Timeframe, Candle[]>> = {};
+    for (const tf of Object.keys(byTf as object)) {
+      if (!TF_SET.has(tf)) continue;
+      if (total >= MAX_IMPORT_CANDLE_TOTAL) break;
+      const arr = Array.isArray((byTf as Record<string, unknown>)[tf])
+        ? ((byTf as Record<string, unknown>)[tf] as unknown[])
+        : [];
+      const slice = arr.slice(-MAX_IMPORT_CANDLES_PER_SERIES);
+      const clean: Candle[] = [];
+      for (const item of slice) {
+        if (total >= MAX_IMPORT_CANDLE_TOTAL) break;
+        const c = sanitizeImportedCandle(item);
+        if (!c) continue;
+        clean.push(c);
+        total += 1;
+      }
+      if (clean.length) next[tf as Timeframe] = clean;
+    }
+    if (Object.keys(next).length) out[pid as PairId] = next;
+  }
+  return out;
 }
 
 export function sanitizeImportedTrade(t: Trade): Trade {

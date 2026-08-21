@@ -175,12 +175,12 @@ describe("latency: oracle / pool ping", () => {
     async () => {
       try {
         const snap = await fetchPoolLive();
-        expect(["ok", "degraded", "offline"]).toContain(snap.status);
+        expect(["ok", "degraded", "offline", "pending"]).toContain(snap.status);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.log(`[pool-live] skipped — ${err instanceof Error ? err.message : "network"}`);
       }
     },
-    10_000,
+    20_000,
   );
 });

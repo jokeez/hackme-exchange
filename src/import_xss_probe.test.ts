@@ -63,7 +63,7 @@ describe("import XSS / type coercion probes", () => {
     const e = parsed.ledger[0];
     expect(e.kind).not.toMatch(/<|>/);
     expect(e.asset).not.toMatch(/<|>/);
-    // note may retain text but must not execute; length-capped at import
+    expect(e.note).not.toMatch(/[<>]/);
     expect(e.note.length).toBeLessThanOrEqual(240);
   });
 

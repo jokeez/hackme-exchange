@@ -38,6 +38,7 @@ import {
   updateLastCandle,
   updateLivePriceHud,
 } from "./chart";
+import { MAX_DRAWINGS } from "./chartDraw";
 import { candleCountdown, fireBrowserAlert, yesterdayClose } from "./chartHud";
 import { isHubEmbed, postHubGotoTab } from "./embed";
 import { closeChartContextMenu, showChartContextMenu, showObjectTreeModal } from "./chartContextMenu";
@@ -45,7 +46,7 @@ import {
   loadLayoutPrefs,
   saveLayoutPrefs,
   setPanelWidth,
-  terminalGridColumns,
+  terminalGridColumnsForView,
   togglePanelCollapsed,
   type LayoutPrefs,
 } from "./layoutPrefs";
@@ -94,7 +95,7 @@ import {
   type TradingGuards,
 } from "./tradingGuards";
 import { INTEGRATION, isLabApiEnabled, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
-import { assertOrderFunds, freeBalance, maxBuyBaseAmount } from "./balance";
+import { assertOrderFunds, freeBalance, maxOrderBaseAmount } from "./balance";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
 import { markPerf, measurePerf, throttle } from "./perf";
@@ -1504,11 +1505,14 @@ function renderSpot(): string {
   ];
   const drawTools: { id: DrawTool | "clear" | "lock"; title: string }[] = [
     { id: "cursor", title: "Select / move drawings" },
-    { id: "hline", title: "Horizontal line" },
-    { id: "trend", title: "Trend line (drag)" },
-    { id: "fib", title: "Fibonacci (drag)" },
-    { id: "rect", title: "Rectangle (drag)" },
-    { id: "text", title: "Text" },
+    { id: "hline", title: "Horizontal line · click" },
+    { id: "vline", title: "Vertical line · click" },
+    { id: "cross", title: "Cross line · click" },
+    { id: "trend", title: "Trend line · drag" },
+    { id: "ray", title: "Ray · drag (extends forward)" },
+    { id: "fib", title: "Fibonacci retracement · drag" },
+    { id: "rect", title: "Rectangle · drag" },
+    { id: "text", title: "Text label · click" },
     { id: "measure", title: "Ruler · drag for Δprice / % / bars / time" },
     { id: "clear", title: "Delete selected (or clear all)" },
     { id: "lock", title: "Lock drawings (no edit)" },
@@ -1583,7 +1587,7 @@ function renderSpot(): string {
 
   <div class="mobile-panel-wrap">${renderMobilePanelTabs()}</div>
 
-  <div class="terminal mobile-stack ${state.chartFullscreen ? "chart-fullscreen" : ""} ${layoutPrefs.bookCollapsed ? "book-collapsed" : ""} ${layoutPrefs.rightCollapsed ? "right-collapsed" : ""} ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""}" id="terminal" data-mobile-panel="${mobilePanel}" style="grid-template-columns:${terminalGridColumns(layoutPrefs)}">
+  <div class="terminal mobile-stack ${state.chartFullscreen ? "chart-fullscreen" : ""} ${layoutPrefs.bookCollapsed ? "book-collapsed" : ""} ${layoutPrefs.rightCollapsed ? "right-collapsed" : ""} ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""}" id="terminal" data-mobile-panel="${mobilePanel}" style="grid-template-columns:${terminalGridColumnsForView(layoutPrefs, state.chartFullscreen)}">
     <aside class="col-book ${state.chartFullscreen || layoutPrefs.bookCollapsed ? "hidden" : ""}" id="col-book">
       <div class="col-title">
         <span>Order Book ${bookHeaderBadge()}</span>
@@ -1616,14 +1620,14 @@ function renderSpot(): string {
           <button type="button" class="btn-ico" id="btn-chart-settings" title="Chart style">${Ico.settings()}</button>
           <button type="button" class="btn-ico" id="btn-screenshot" title="Screenshot">${Ico.camera()}</button>
           <button type="button" class="btn-ico ${state.multiChartLayout !== "1" ? "active" : ""}" id="btn-multi" title="Multi chart">${Ico.layout()}</button>
-          <button type="button" class="btn-ico" id="btn-fullscreen" title="Fullscreen">${Ico.maximize()}</button>
+          <button type="button" class="btn-ico ${state.chartFullscreen ? "active" : ""}" id="btn-fullscreen" title="${state.chartFullscreen ? "Exit fullscreen" : "Fullscreen"}" aria-pressed="${state.chartFullscreen ? "true" : "false"}">${state.chartFullscreen ? Ico.minimize() : Ico.maximize()}</button>
         </div>
       </div>
       <div class="ind-tabs compact" id="ind-tabs">
         ${indicators.map((i) => `<button type="button" class="ind ${state.chartSettings.indicators[i.id] ? "active" : ""}" data-ind="${i.id}">${i.label}</button>`).join("")}
       </div>
       <div class="chart-body ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""}">
-        ${!state.chartFullscreen ? renderPanelRail("tools", "btn-expand-tools", "Tools", "Show drawing tools") : ""}
+        ${renderPanelRail("tools", "btn-expand-tools", "Tools", "Show drawing tools")}
         <aside class="draw-tools ${layoutPrefs.toolsCollapsed ? "hidden" : ""}" id="draw-tools">
           <button type="button" class="btn-panel-toggle btn-collapse-tools" id="btn-collapse-tools" title="Hide drawing tools" aria-label="Hide drawing tools">‹</button>
           ${drawTools.map((d) => `<button type="button" class="dt ${d.id === "lock" && state.drawingsLocked ? "active" : ""} ${state.activeDrawTool === d.id ? "active" : ""}" data-dt="${d.id}" title="${d.title}">${drawToolIcon(d.id as DrawIconId)}</button>`).join("")}
@@ -1683,14 +1687,10 @@ function renderSpot(): string {
         <div class="activity-body" id="activity-body">${renderActivityBody()}</div>
       </div>
     </aside>
-    ${
-      !state.chartFullscreen
-        ? `<div class="terminal-rails" id="terminal-rails">
+    <div class="terminal-rails" id="terminal-rails">
       ${renderPanelRail("left", "btn-expand-book", "Book", "Show order book")}
       ${renderPanelRail("right", "btn-expand-right", "Mkts", "Show markets panel")}
-    </div>`
-        : ""
-    }
+    </div>
   </div>
 
   <div class="mining-strip mono" id="mining-strip">
@@ -1735,7 +1735,7 @@ function render(): void {
     <div class="ex-actions">
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
       <div class="sys-menu-wrap">
-        <button type="button" class="btn-sm" id="btn-system-status">⚙ System</button>
+        <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false">⚙ System</button>
         <div class="sys-drop hidden" id="sys-drop">
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
@@ -1859,11 +1859,33 @@ function wireBookClicks(): void {
   });
 }
 
+let sysDropCloser: ((ev: MouseEvent) => void) | null = null;
+
 function showSystemDrop(show?: boolean): void {
   const drop = document.getElementById("sys-drop");
+  const btn = document.getElementById("btn-system-status");
   if (!drop) return;
-  if (show === undefined) drop.classList.toggle("hidden");
-  else drop.classList.toggle("hidden", !show);
+  const currentlyHidden = drop.classList.contains("hidden");
+  const willOpen = show === undefined ? currentlyHidden : show;
+  drop.classList.toggle("hidden", !willOpen);
+  btn?.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  if (sysDropCloser) {
+    document.removeEventListener("click", sysDropCloser);
+    sysDropCloser = null;
+  }
+  if (!willOpen) return;
+  window.setTimeout(() => {
+    sysDropCloser = (ev: MouseEvent) => {
+      const t = ev.target as Node | null;
+      if (!t) return;
+      if (drop.contains(t) || btn?.contains(t)) return;
+      drop.classList.add("hidden");
+      btn?.setAttribute("aria-expanded", "false");
+      if (sysDropCloser) document.removeEventListener("click", sysDropCloser);
+      sysDropCloser = null;
+    };
+    document.addEventListener("click", sysDropCloser);
+  }, 0);
 }
 
 function refreshAfterLabTrade(): void {
@@ -2392,9 +2414,13 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
   const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
   let amt = Number(amtInp?.value ?? 0);
   if (amt <= 0) {
-    const av = availBalance(pair);
-    if (side === "sell") amt = Math.floor(av.base * 0.25) || Math.min(1000, Math.floor(av.base));
-    else amt = price > 0 ? Math.floor((av.quote * 0.25) / price) : 0;
+    if (!market || !(price > 0)) {
+      toast("Insufficient balance — set amount", "warn");
+      fillOrderPanelAtPrice(side, kind, price);
+      return;
+    }
+    const mid = midForPair(market, state.activePair);
+    amt = maxOrderBaseAmount(state, market, state.activePair, side, price, kind, 0.25, mid);
   }
   if (amt <= 0) {
     toast("Insufficient balance — set amount", "warn");
@@ -2683,6 +2709,10 @@ function mountChartPanel(): void {
     },
   };
   mountChart(host, candles, opts, (d) => {
+    if (state.drawings.length >= MAX_DRAWINGS) {
+      toast(`Drawing limit (${MAX_DRAWINGS}) — delete some first`, "warn");
+      return;
+    }
     state.drawings.push(d);
     saveState(state);
     refreshDrawings(state.drawings.filter((x) => x.pairId === state.activePair));
@@ -3319,29 +3349,38 @@ function toggleOrderFields(): void {
 }
 
 function setAmountPct(side: "buy" | "sell", pct: number): void {
-  const pair = pairById(state.activePair);
   const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
   if (!amtInp || !market) return;
-  const av = availBalance(pair);
-  if (side === "sell") {
-    amtInp.value = String(Math.floor(av.base * pct));
-    return;
-  }
+  const mid = midForPair(market, state.activePair);
   const t = activeTicker();
-  let price = t.ask;
+  let price = side === "buy" ? t.ask : t.bid;
   if (useLabMatching()) {
     const lab = getLabBookCache(state.activePair);
-    if (lab?.asks[0]?.price) price = lab.asks[0].price;
+    if (side === "buy" && lab?.asks[0]?.price) price = lab.asks[0].price;
+    if (side === "sell" && lab?.bids[0]?.price) price = lab.bids[0].price;
   }
-  if (uiType === "limit" || uiType === "stop_limit") {
-    price = Number((document.getElementById(`${side}-price`) as HTMLInputElement)?.value ?? price);
+  if (uiType === "limit" || uiType === "stop_limit" || uiType === "oco" || (uiType === "stop_market" && side === "buy")) {
+    const fromInp = Number((document.getElementById(`${side}-price`) as HTMLInputElement)?.value ?? price);
+    if (fromInp > 0) price = fromInp;
   }
   if (!(price > 0)) {
     amtInp.value = "0";
     return;
   }
-  // Fee-aware: 100%/MAX must leave room for maker/taker quote (or HMC) fee.
-  amtInp.value = String(maxBuyBaseAmount(state, market, state.activePair, price, uiType, pct));
+  // Fee-aware + reserve-aware: 100%/MAX never exceeds free balance (buy quote fee / sell HMC fee).
+  amtInp.value = String(
+    maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid),
+  );
+}
+
+/** Re-apply pct slider sizing after price / fee-mode changes so 100% stays valid. */
+function resyncPctSizedAmounts(): void {
+  for (const side of ["buy", "sell"] as const) {
+    const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+    if (!slider) continue;
+    const pct = Number(slider.value);
+    if (pct > 0) setAmountPct(side, pct / 100);
+  }
 }
 
 function showSettings(): void {
@@ -3394,38 +3433,151 @@ function showSettings(): void {
 
 function applyLayoutToDom(): void {
   const term = document.getElementById("terminal");
-  if (term && !state.chartFullscreen) {
-    term.style.gridTemplateColumns = terminalGridColumns(layoutPrefs);
+  const fs = state.chartFullscreen;
+  document.documentElement.classList.toggle("ex-chart-fs", fs);
+  document.body.classList.toggle("ex-chart-fs", fs);
+  if (term) {
+    term.classList.toggle("chart-fullscreen", fs);
+    // Always keep collapse flags in sync — expand rails key off these classes (hub too).
     term.classList.toggle("book-collapsed", layoutPrefs.bookCollapsed);
     term.classList.toggle("right-collapsed", layoutPrefs.rightCollapsed);
     term.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
+    // Hub embed CSS uses !important on grid — setProperty('important') must match.
+    term.style.setProperty(
+      "grid-template-columns",
+      terminalGridColumnsForView(layoutPrefs, fs),
+      "important",
+    );
   }
+  ensurePanelRails();
   const book = document.getElementById("col-book");
   const right = document.getElementById("col-right");
   const tools = document.getElementById("draw-tools");
   const chartBody = document.querySelector(".chart-body");
+  const orderZone = document.getElementById("order-zone");
+  const rails = document.getElementById("terminal-rails");
+  const hideBook = fs || layoutPrefs.bookCollapsed;
+  const hideRight = fs || layoutPrefs.rightCollapsed;
   if (book) {
-    book.classList.toggle("hidden", state.chartFullscreen || layoutPrefs.bookCollapsed);
+    book.classList.toggle("hidden", hideBook);
+    if (fs) book.style.setProperty("display", "none", "important");
+    else book.style.removeProperty("display");
   }
   if (right) {
-    right.classList.toggle("hidden", state.chartFullscreen || layoutPrefs.rightCollapsed);
+    right.classList.toggle("hidden", hideRight);
+    if (fs) right.style.setProperty("display", "none", "important");
+    else right.style.removeProperty("display");
+  }
+  if (orderZone) {
+    orderZone.classList.toggle("hidden", fs);
+    if (fs) orderZone.style.setProperty("display", "none", "important");
+    else orderZone.style.removeProperty("display");
+  }
+  if (rails) {
+    // Rails stay in DOM; CSS hides them in fullscreen. Never leave .hidden stuck.
+    rails.classList.remove("hidden");
+    rails.style.removeProperty("display");
+    if (fs) rails.style.setProperty("display", "none", "important");
   }
   if (tools) {
-    tools.classList.toggle("hidden", layoutPrefs.toolsCollapsed);
+    tools.classList.toggle("hidden", layoutPrefs.toolsCollapsed || fs);
+    if (fs) tools.style.setProperty("display", "none", "important");
+    else tools.style.removeProperty("display");
   }
   if (chartBody) {
     chartBody.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
   }
-  if (chartMounted) {
+  // Expand rails: force visible when collapsed and not fullscreen (beats leftover !important).
+  syncExpandRail("btn-expand-book", !fs && layoutPrefs.bookCollapsed);
+  syncExpandRail("btn-expand-right", !fs && layoutPrefs.rightCollapsed);
+  syncExpandRail("btn-expand-tools", !fs && layoutPrefs.toolsCollapsed);
+  syncFullscreenButton();
+  scheduleChartResize();
+}
+
+/** Re-inject expand rails if a soft fullscreen path removed them from the tree. */
+function ensurePanelRails(): void {
+  const term = document.getElementById("terminal");
+  if (!term) return;
+  let rails = document.getElementById("terminal-rails");
+  if (!rails) {
+    rails = document.createElement("div");
+    rails.id = "terminal-rails";
+    rails.className = "terminal-rails";
+    rails.innerHTML =
+      renderPanelRail("left", "btn-expand-book", "Book", "Show order book") +
+      renderPanelRail("right", "btn-expand-right", "Mkts", "Show markets panel");
+    term.appendChild(rails);
+  } else {
+    if (!document.getElementById("btn-expand-book")) {
+      rails.insertAdjacentHTML(
+        "afterbegin",
+        renderPanelRail("left", "btn-expand-book", "Book", "Show order book"),
+      );
+    }
+    if (!document.getElementById("btn-expand-right")) {
+      rails.insertAdjacentHTML(
+        "beforeend",
+        renderPanelRail("right", "btn-expand-right", "Mkts", "Show markets panel"),
+      );
+    }
+  }
+  const chartBody = document.querySelector(".chart-body");
+  if (chartBody && !document.getElementById("btn-expand-tools")) {
+    chartBody.insertAdjacentHTML(
+      "afterbegin",
+      renderPanelRail("tools", "btn-expand-tools", "Tools", "Show drawing tools"),
+    );
+  }
+}
+
+function syncExpandRail(id: string, show: boolean): void {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("is-visible", show);
+  if (show) {
+    el.style.setProperty("display", "flex", "important");
+  } else {
+    el.style.removeProperty("display");
+  }
+}
+
+function syncFullscreenButton(): void {
+  const btn = document.getElementById("btn-fullscreen");
+  if (!btn) return;
+  const on = state.chartFullscreen;
+  btn.title = on ? "Exit fullscreen" : "Fullscreen";
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.classList.toggle("active", on);
+  btn.innerHTML = on ? Ico.minimize() : Ico.maximize();
+}
+
+function scheduleChartResize(): void {
+  if (!chartMounted) return;
+  requestAnimationFrame(() => {
+    resizeChart();
+    resizeSecondaryCharts();
     requestAnimationFrame(() => {
       resizeChart();
       resizeSecondaryCharts();
-      requestAnimationFrame(() => {
-        resizeChart();
-        resizeSecondaryCharts();
-      });
     });
+  });
+}
+
+/** Soft chart focus mode — no full remount (full render was blanking LWC). */
+function setChartFullscreen(on: boolean): void {
+  if (state.chartFullscreen === on) {
+    applyLayoutToDom();
+    return;
   }
+  state.chartFullscreen = on;
+  saveState(state);
+  applyLayoutToDom();
+  toast(on ? "Chart fullscreen — Esc to exit" : "Fullscreen off", "info");
+}
+
+function toggleChartFullscreen(): void {
+  setChartFullscreen(!state.chartFullscreen);
 }
 
 function wirePanelResize(handleId: string, side: "book" | "right"): void {
@@ -3563,6 +3715,7 @@ function wireEvents(): void {
   });
 
   wireLayoutPanels();
+  applyLayoutToDom();
   wireMobilePanels();
   wireMobileTradeSide();
   wireOracleRetry();
@@ -3651,10 +3804,6 @@ function wireEvents(): void {
       render();
     });
   });
-  window.setTimeout(() => {
-    const closeSys = () => showSystemDrop(false);
-    document.addEventListener("click", closeSys, { once: true });
-  }, 0);
 
   document.querySelectorAll("#main-nav .nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -3786,18 +3935,18 @@ function wireEvents(): void {
     showChartStyleModal(state, (patch) => saveChartPatch(patch));
   });
   document.getElementById("btn-overlays")?.addEventListener("click", (e) => {
+    e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
+    el.classList.add("active");
     showOverlayMenu(state, el, (patch) => {
       Object.assign(state, patch);
       saveState(state);
       applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
-    });
+    }, () => el.classList.remove("active"));
   });
   document.getElementById("btn-screenshot")?.addEventListener("click", () => { chartScreenshot(); toast("Screenshot saved", "ok"); });
   document.getElementById("btn-fullscreen")?.addEventListener("click", () => {
-    state.chartFullscreen = !state.chartFullscreen;
-    saveState(state);
-    render();
+    toggleChartFullscreen();
   });
   document.getElementById("btn-multi")?.addEventListener("click", (e) => {
     showMultiChartPicker(state, e.currentTarget as HTMLElement, (patch) => {
@@ -3844,8 +3993,20 @@ function wireEvents(): void {
 
   (["buy", "sell"] as const).forEach((side) => {
     document.getElementById(`btn-${side}`)?.addEventListener("click", () => submitOrder(side));
-    document.getElementById(`${side}-amt`)?.addEventListener("input", () => updatePreviewForSide(side));
-    document.getElementById(`${side}-price`)?.addEventListener("input", () => updatePreviewForSide(side));
+    document.getElementById(`${side}-amt`)?.addEventListener("input", () => {
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      if (slider) {
+        slider.value = "0";
+        syncPctMarks(side);
+      }
+      updatePreviewForSide(side);
+    });
+    document.getElementById(`${side}-price`)?.addEventListener("input", () => {
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      const pct = Number(slider?.value ?? 0);
+      if (pct > 0) setAmountPct(side, pct / 100);
+      updatePreviewForSide(side);
+    });
   });
 
   document.querySelectorAll("[data-avail-side]").forEach((btn) => {
@@ -3925,6 +4086,9 @@ function wireEvents(): void {
       // Resting BBO: buy→bid, sell→ask (does not instantly cross).
       const inp = document.getElementById(`${side}-price`) as HTMLInputElement;
       if (inp) inp.value = tickInputValue(side === "buy" ? bid : ask, state.activePair);
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      const pct = Number(slider?.value ?? 0);
+      if (pct > 0) setAmountPct(side, pct / 100);
       updatePreviewForSide(side);
     });
   });
@@ -3933,6 +4097,7 @@ function wireEvents(): void {
     state.feeConfig.payFeesInHmc = (e.target as HTMLInputElement).checked;
     saveState(state);
     softPatchFeePayChrome();
+    resyncPctSizedAmounts();
     updatePreview();
   });
 
@@ -3958,12 +4123,7 @@ function wireEvents(): void {
   });
 
   document.getElementById("btn-open-alerts")?.addEventListener("click", () => {
-    activityTab = "alerts";
-    document.querySelectorAll("#activity-tabs button").forEach((b) => {
-      b.classList.toggle("active", (b as HTMLElement).dataset.tab === "alerts");
-    });
-    document.getElementById("activity-body")!.innerHTML = renderActivityBody();
-    wireAlertButtons();
+    openAlertsPanel();
   });
 
   document.getElementById("btn-hotkeys")?.addEventListener("click", () => showHotkeysHelp());
@@ -3975,6 +4135,30 @@ function wireEvents(): void {
   syncPctMarks("sell");
 
   updatePreview();
+}
+
+function openAlertsPanel(): void {
+  activityTab = "alerts";
+  // Uncollapse markets column if needed so Alerts tab is visible.
+  if (layoutPrefs.rightCollapsed) {
+    layoutPrefs = togglePanelCollapsed(layoutPrefs, "right");
+    saveLayoutPrefs(layoutPrefs);
+  }
+  if (state.chartFullscreen) {
+    setChartFullscreen(false);
+  } else {
+    applyLayoutToDom();
+  }
+  switchMobilePanel("markets");
+  document.querySelectorAll("#activity-tabs button").forEach((b) => {
+    b.classList.toggle("active", (b as HTMLElement).dataset.tab === "alerts");
+  });
+  const body = document.getElementById("activity-body");
+  if (body) {
+    body.innerHTML = renderActivityBody();
+    wireAlertButtons();
+  }
+  document.getElementById("activity-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function wireBookTabs(): void {
@@ -4070,6 +4254,7 @@ function showHotkeysHelp(): void {
         <li><kbd>Esc</kbd> Cancel all open / close help</li>
         <li><kbd>1</kbd>–<kbd>0</kbd> Timeframes</li>
         <li><kbd>C</kbd> / <kbd>L</kbd> / <kbd>A</kbd> Candles / Line / Area</li>
+        <li><kbd>F</kbd> Chart fullscreen · Esc exits</li>
         <li><kbd>Alt</kbd>+<kbd>R</kbd> Reset chart view</li>
         <li><kbd>Del</kbd> Remove selected drawing</li>
         <li><kbd>?</kbd> This help</li>
@@ -4132,6 +4317,14 @@ function onKeydown(e: KeyboardEvent): void {
 
   if (e.key === "Escape") {
     e.preventDefault();
+    if (document.querySelector(".modal-backdrop")) {
+      document.querySelector(".modal-backdrop")?.remove();
+      return;
+    }
+    if (state.chartFullscreen) {
+      setChartFullscreen(false);
+      return;
+    }
     if (getSelectedDrawingId()) {
       clearDrawingSelection();
       return;
@@ -4141,6 +4334,13 @@ function onKeydown(e: KeyboardEvent): void {
     wireCancelButtons();
     refreshOrderLines(state.orders.filter((o) => o.pairId === state.activePair));
     toast(n ? `Cancelled ${n} order(s)` : "No open orders", "info");
+    return;
+  }
+
+  if (e.key === "f" || e.key === "F") {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    toggleChartFullscreen();
     return;
   }
 

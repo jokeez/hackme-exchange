@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertOrderFunds, maxBuyBaseAmount } from "./balance";
+import { assertOrderFunds, maxBuyBaseAmount, maxOrderBaseAmount } from "./balance";
 import { convert } from "./convert";
 import { calcFee, previewFeeRole } from "./fees";
 import { placeOrder, placeOco } from "./orders";
@@ -18,10 +18,11 @@ describe("trade paths + fees", () => {
       feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
     });
     const price = market.hmcUsdt;
-    const buyAmt = maxBuyBaseAmount(s, market, "HMC_USDT", price, "limit", 0.5);
+    const buyAmt = maxOrderBaseAmount(s, market, "HMC_USDT", "buy", price, "limit", 0.5, price);
     const buy = placeOrder(s, "HMC_USDT", "buy", "limit", buyAmt, price, undefined, undefined, "GTC", false, market);
     expect("id" in buy).toBe(true);
-    const sell = placeOrder(s, "HMC_USDT", "sell", "limit", 1000, price * 1.05, undefined, undefined, "GTC", false, market);
+    const sellAmt = maxOrderBaseAmount(s, market, "HMC_USDT", "sell", price * 1.05, "limit", 1, price);
+    const sell = placeOrder(s, "HMC_USDT", "sell", "limit", Math.min(1000, sellAmt), price * 1.05, undefined, undefined, "GTC", false, market);
     expect("id" in sell).toBe(true);
   });
 
@@ -31,7 +32,7 @@ describe("trade paths + fees", () => {
       feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
     });
     const price = 0.00042;
-    const amt = maxBuyBaseAmount(s, market, "HMC_USDT", price, "limit", 1);
+    const amt = maxBuyBaseAmount(s, market, "HMC_USDT", price, "limit", 1, market.hmcUsdt);
     expect(assertOrderFunds(s, market, "HMC_USDT", "buy", amt, price, "limit").ok).toBe(true);
     const o = placeOrder(s, "HMC_USDT", "buy", "limit", amt, price, undefined, undefined, "GTC", false, market);
     expect("id" in o).toBe(true);
