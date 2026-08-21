@@ -448,6 +448,18 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
       }
       continue;
     }
+    // Mid scale jump (e.g. 0.00064 → 0.05) — snap tip alone paints a fake cliff candle.
+    const tipClose = existingBase[existingBase.length - 1]?.close ?? 0;
+    if (tipClose > 0 && mid > 0) {
+      const ratio = mid / tipClose;
+      if (ratio > 1.25 || ratio < 0.8) {
+        const all = seedAllTimeframes(p.id, mid);
+        for (const tf of TIMEFRAMES) {
+          state.candles[p.id]![tf] = all[tf] ?? [];
+        }
+        continue;
+      }
+    }
     // Heal / extend base, then re-derive every TF so resolutions stay aligned.
     const need = barCountForTf(CANDLE_BASE_TF);
     const trimmed = trimCandlesToGenesis(existingBase, CANDLE_BASE_TF);
