@@ -1,28 +1,104 @@
+<div align="center">
+
+<pre aria-label="HackMe Exchange ASCII">
+██╗  ██╗ █████╗  █████╗ ██╗  ██╗███╗   ███╗███████╗    ███████╗██╗  ██╗
+██║  ██║██╔══██╗██╔════╝██║ ██╔╝████╗ ████║██╔════╝    ██╔════╝╚██╗██╔╝
+███████║███████║██║     █████╔╝ ██╔████╔██║█████╗      █████╗   ╚███╔╝
+██╔══██║██╔══██║██║     ██╔═██╗ ██║╚██╔╝██║██╔══╝      ██╔══╝   ██╔██╗
+██║  ██║██║  ██║╚██████╗██║  ██╗██║ ╚═╝ ██║███████╗    ███████╗██╔╝ ██╗
+╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝    ╚══════╝╚═╝  ╚═╝
+</pre>
+
 # HackMe Exchange
 
-Paper / private-lab **Spot · Convert · Account · Pool** terminal for the [HackMe](https://hackme.tech) ecosystem.
+### Paper Spot · Convert · Account · Pool — private lab terminal for the HackMe ecosystem
+
+**Own HMC market desk** — operator reference mids, pool telemetry, VIP fees. Soft D0 = paper UI only (no public matching API).
+
+<br/>
+
+[![D0 Paper](https://img.shields.io/badge/D0_Paper-2026--09--15-00d1ff?style=for-the-badge)](STATUS.md)
+[![Go%2Fno--go](https://img.shields.io/badge/go%2Fno--go-2026--09--10-7fe7ff?style=for-the-badge)](docs/D0_CHECKLIST.md)
+[![Tests](https://img.shields.io/badge/tests-544_PASS-39ff14?style=for-the-badge&logo=vitest&logoColor=white)](package.json)
+[![Public API](https://img.shields.io/badge/public_API-HOLD-ff6b9d?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/jokeez/hackme-exchange-api)
+[![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.01-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
+[![Site](https://img.shields.io/badge/hackme.tech-hub-ff6b9d?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](https://hackme.tech)
+
+<br/>
+
+**[🏠 Main HackMe repo](https://github.com/jokeez/hackme)** · **[📖 STATUS](STATUS.md)** · **[⚡ Quick start](#quick-start)** · **[💰 Economics](docs/ECONOMICS.md)** · **[🔐 Security](docs/SECURITY.md)** · **[📚 Docs](docs/README.md)** · **[🔌 Lab API](https://github.com/jokeez/hackme-exchange-api)**
+
+<br/>
 
 | | |
-|--|--|
-| **Status** | Private lab · localhost — **not** a public exchange |
-| **Soft target** | **D0 Paper · 2026-09-15** — static UI on `exchange.hackme.tech` |
-| **Go / no-go** | **2026-09-10** — see [`STATUS.md`](STATUS.md) |
-| **Reference mids** | **0.05** USDT/HMC · **0.01** USDT/SUP (±0.35% paper drift) |
+|:---:|:---|
+| **Parent network** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
+| **This SPA** | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
+| **Lab matching API** | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
+| **Soft target** | `exchange.hackme.tech` · **D0 Paper · 2026-09-15** |
 
-> Own HMC market — **not** a third-party listing claim.  
-> Soft D0 = paper UI only (**no** public matching API). Live deposits only after custody gates.
+</div>
 
 ---
 
-## Ecosystem
+## Why this repo
 
-| Project | Link |
-|---------|------|
-| **HackMe** (hub · pool · node) | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| **Exchange SPA** (this repo) | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
-| **Exchange API** (lab matching) | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
+HackMe’s pool and chain live in the **[main HackMe repository](https://github.com/jokeez/hackme)**. This sidecar is the **spot terminal**: charts, book, convert, paper wallet — so the network can show an own-market desk without merging SPA code into the hub monorepo.
 
-Pool oracle & explorer live on the main site — this repo does **not** ship mining or custody.
+| Pillar | What you get |
+|--------|----------------|
+| **📈 Spot** | Book · chart · market / limit / stop / OCO · VIP fees · pay-fees-in-HMC |
+| **⇄ Convert** | Paper or lab seed mid · inventory-aware when API connected |
+| **👤 Account** | Balances · VIP · lab mint / bridge · withdraw **request** (complete = CLI) |
+| **⛏ Pool** | Read-only oracle telemetry from [hackme.tech](https://hackme.tech) |
+
+```mermaid
+flowchart LR
+  subgraph hub["hackme.tech · main repo"]
+    POOL["Pool / oracle"]
+    NODE["Node / HMC"]
+  end
+  subgraph ex["hackme-exchange · this SPA"]
+    SPOT["Spot desk"]
+    CV["Convert"]
+    ACCT["Account"]
+  end
+  subgraph lab["hackme-exchange-api · private"]
+    MM["Lab MM · matching"]
+  end
+  POOL -->|telemetry| SPOT
+  SPOT --> CV
+  SPOT --> ACCT
+  lab -.->|localhost only| SPOT
+```
+
+> **Fair messaging:** own HMC market — **not** a third-party listing claim.  
+> Soft D0 = **paper only**. Live deposits after custody gates. Details: [STATUS.md](STATUS.md).
+
+---
+
+## Modes
+
+| Mode | Meaning |
+|------|---------|
+| **paper** (default) | localStorage wallet · reference mids — **not** real custody |
+| **lab** | Loopback [exchange-api](https://github.com/jokeez/hackme-exchange-api) — still **not** public |
+| **live** | **Blocked** until an explicit public go-live |
+
+Never put admin tokens in `VITE_*` — Vite inlines them into the browser bundle.
+
+---
+
+## Pricing (paper / soft)
+
+| Pair / leg | Reference | Notes |
+|------------|-----------|-------|
+| **HMC/USDT** | **0.05** | ±0.35% paper drift · **not** scaled by pool GH |
+| **SUP/USDT** | **0.01** | Same |
+| **HMC/SUP** | **5.0** | Cross = HMC ÷ SUP |
+| **HMC/BTC · SUP/BTC** | `usdt / btcUsd` | Live BTCUSDT when CSP allows · else fallback |
+
+Canonical sheet: [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
 ---
 
@@ -39,7 +115,7 @@ npm run dev            # → http://127.0.0.1:5199
 ### Optional private lab API
 
 ```bash
-# Terminal A
+# Terminal A — sibling API repo
 cd ../hackme-exchange-api && go run ./cmd/exchange-api
 # → http://127.0.0.1:18443/health
 
@@ -51,43 +127,16 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 
 ---
 
-## Modes
-
-| Mode | Meaning |
-|------|---------|
-| **paper** (default) | localStorage wallet · operator reference mids — **not** real custody |
-| **lab** | Loopback [exchange-api](https://github.com/jokeez/hackme-exchange-api) — still **not** public |
-| **live** | **Blocked** until an explicit public go-live |
-
-Never put admin tokens in `VITE_*` — Vite inlines them into the browser bundle.
-
----
-
-## What you get
-
-| Surface | Includes |
-|---------|----------|
-| **Spot** | Book, chart, market / limit / stop / OCO, VIP fees, pay-fees-in-HMC |
-| **Convert** | Paper or lab seed mid · inventory-aware when API connected |
-| **Account** | Balances, VIP, lab mint / bridge, withdraw **request** (complete = CLI) |
-| **Pool** | Read-only oracle telemetry → [hackme.tech](https://hackme.tech) |
-| **Hub embed** | `#exchange` iframe · paper chrome |
-
-**Pricing (paper):** operator refs **0.05 / 0.01** with mild live drift; BTC crosses use `usdt / btcUsd` (Binance BTCUSDT when CSP allows, else fallback). Pool GH is **telemetry only** — it does not scale mid.
-
----
-
 ## QA (current)
 
-```bash
-npm test                              # unit / UI / security suites
-node scripts/full_ui_ux_pass.mjs      # Spot · Convert · Account · Pool
-node scripts/g10_visual_pass.mjs      # mobile / visual
-node scripts/b_chart_manual_pass.mjs  # chart pairs / TF
-bash scripts/prepare_d0_static.sh     # paper dist tarball (gitignored)
-```
-
-Sibling API: `go test ./...` · `bash scripts/pre_public_dry_run.sh` → public **HOLD**.
+| Gate | Command / note |
+|------|----------------|
+| Unit + security | `npm test` → **544 PASS** |
+| Full UI/UX | `node scripts/full_ui_ux_pass.mjs` |
+| Visual / mobile | `node scripts/g10_visual_pass.mjs` |
+| Chart pairs | `node scripts/b_chart_manual_pass.mjs` |
+| D0 static tarball | `bash scripts/prepare_d0_static.sh` (gitignored) |
+| API pre-public | sibling `bash scripts/pre_public_dry_run.sh` → public **HOLD** |
 
 ---
 
@@ -104,8 +153,18 @@ Sibling API: `go test ./...` · `bash scripts/pre_public_dry_run.sh` → public 
 | [`docs/SECURITY.md`](docs/SECURITY.md) | SPA threat checklist |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup · PRs · secrets |
 
-Canonical **API** security / hosting / pre-public gates:  
+Canonical **API** security / hosting / pre-public:  
 [hackme-exchange-api/docs](https://github.com/jokeez/hackme-exchange-api/tree/main/docs)
+
+---
+
+## Related
+
+| Project | Link |
+|---------|------|
+| **HackMe Network (main)** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) |
+| **Site / pool** | [hackme.tech](https://hackme.tech) |
+| **Exchange API** | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
 
 ---
 

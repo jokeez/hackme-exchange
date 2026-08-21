@@ -1,6 +1,19 @@
+<div align="center">
+
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-21  
+**Updated:** 2026-08-21 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
+
+[![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
+[![SPA](https://img.shields.io/badge/SPA-hackme--exchange-7fe7ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme-exchange)
+[![API](https://img.shields.io/badge/API-HOLD-ff6b9d?style=for-the-badge)](https://github.com/jokeez/hackme-exchange-api)
+
+**[🏠 Main HackMe](https://github.com/jokeez/hackme)** · **[hackme.tech](https://hackme.tech)** · **[README](README.md)** · **[D0 checklist](docs/D0_CHECKLIST.md)**
+
+</div>
+
+---
+
 **Public:** **NO** — private lab / localhost only.  
 **Soft-public target:** **D0 Paper · 2026-09-15** (`exchange.hackme.tech` static).  
 **Go / no-go:** **2026-09-10**.
@@ -9,7 +22,7 @@
 
 | Project | Link |
 |---------|------|
-| HackMe hub | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
+| **HackMe hub (main)** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
 | Exchange SPA | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
 | Exchange API | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
 
