@@ -367,7 +367,20 @@ describe("icons UI consistency", () => {
       expect(s).toContain("<svg");
       expect(s).toContain('stroke-width="1.5"');
     }
-    for (const id of ["cursor", "hline", "trend", "fib", "rect", "text", "measure", "clear", "lock"] as const) {
+    for (const id of [
+      "cursor",
+      "hline",
+      "vline",
+      "cross",
+      "trend",
+      "ray",
+      "fib",
+      "rect",
+      "text",
+      "measure",
+      "clear",
+      "lock",
+    ] as const) {
       expect(drawToolIcon(id)).toContain("<svg");
     }
   });

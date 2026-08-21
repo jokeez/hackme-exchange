@@ -772,8 +772,13 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   display: none;
 }
 .chart-body.tools-collapsed .panel-rail.tools-rail,
-.terminal.tools-collapsed .panel-rail.tools-rail {
+.terminal.tools-collapsed .panel-rail.tools-rail,
+.panel-rail.is-visible {
   display: flex;
+}
+.terminal.chart-fullscreen .panel-rail,
+.terminal.chart-fullscreen .panel-rail.is-visible {
+  display: none !important;
 }
 .panel-rail .rail-chevron {
   font-size: 1rem;
@@ -1098,8 +1103,21 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 .ind-config .ind-row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 0.45rem; align-items: center; margin-bottom: 0.35rem; font-size: 0.75rem; }
 .modal-note { margin: 0.5rem 0; }
 
-.chart-fullscreen .col-center { grid-column: 1 / -1; }
-.chart-fullscreen .terminal { grid-template-columns: 1fr; }
+/* Class lives on #terminal itself (not an ancestor) — use .terminal.chart-fullscreen */
+.terminal.chart-fullscreen {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.terminal.chart-fullscreen .col-center {
+  grid-column: 1 / -1;
+  min-height: calc(100vh - 120px);
+}
+.terminal.chart-fullscreen .col-center .chart-host { min-height: 70vh; }
+.terminal.chart-fullscreen .col-book,
+.terminal.chart-fullscreen .col-right,
+.terminal.chart-fullscreen .order-zone,
+.terminal.chart-fullscreen .terminal-rails {
+  display: none !important;
+}
 
 .col-markets, .col-trade { display: none; }
 
@@ -1322,8 +1340,6 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 
 /* Chart — flex grower; never force 260px floor (folds / overlaps order form) */
 .col-center .chart-body { flex: 1 1 0; min-height: 0; }
-.chart-fullscreen .col-center { grid-column: 1 / -1; min-height: calc(100vh - 120px); }
-.chart-fullscreen .col-center .chart-host { min-height: 70vh; }
 .chart-toolbar {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.35rem;
   padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--edge);
@@ -1492,6 +1508,10 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   align-self: stretch;
   position: relative;
   min-width: 2.9rem;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
   box-shadow:
     inset -1px 0 0 rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(77, 228, 255, 0.06);
@@ -2201,8 +2221,6 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 .ohlc-legend { letter-spacing: 0.01em; }
 .pnl-dashboard .pnl-card { background: rgba(0,0,0,.2); }
 .modal-wide { width: min(480px, 100%); }
-.chart-fullscreen .col-center { grid-column: 1 / -1; min-height: calc(100vh - 120px); }
-.chart-fullscreen .col-center .chart-host { min-height: 70vh; }
 .multi-chart .chart-split { display: grid; grid-template-rows: 1fr 1fr; }
 .fee-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 0.68rem; margin-bottom: 0.2rem; cursor: pointer; color: var(--muted); }
 .fee-toggle input[type="checkbox"] {
@@ -3420,6 +3438,10 @@ html[data-embed="hub"] .ex-header {
 
 html[data-embed="hub"] .col-book { display: flex !important; }
 html[data-embed="hub"] .col-book.hidden { display: none !important; }
+html[data-embed="hub"] .col-right.hidden,
+html[data-embed="hub"] .order-zone.hidden {
+  display: none !important;
+}
 
 html[data-embed="hub"] .terminal,
 html[data-embed="hub"] .terminal.mobile-stack {
@@ -3445,6 +3467,36 @@ html[data-embed="hub"] .terminal.book-collapsed.right-collapsed,
 html[data-embed="hub"] .terminal.mobile-stack.book-collapsed.right-collapsed {
   grid-template-columns: minmax(0, 1fr) !important;
 }
+
+/* Fullscreen must beat hub 3-col !important grids (else chart stuck in 200px track). */
+html[data-embed="hub"] .terminal.chart-fullscreen,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen,
+html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed,
+html[data-embed="hub"] .terminal.chart-fullscreen.right-collapsed,
+html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed.right-collapsed,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.right-collapsed,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed.right-collapsed {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+html[data-embed="hub"] .terminal.chart-fullscreen .col-book,
+html[data-embed="hub"] .terminal.chart-fullscreen .col-right,
+html[data-embed="hub"] .terminal.chart-fullscreen .order-zone,
+html[data-embed="hub"] .terminal.chart-fullscreen .terminal-rails,
+html[data-embed="hub"] .terminal.chart-fullscreen .panel-rail,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .col-book,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .col-right,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .order-zone {
+  display: none !important;
+}
+html[data-embed="hub"] .terminal.chart-fullscreen .col-center,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .col-center {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-column: 1 / -1 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
 html[data-embed="hub"] .terminal.mobile-stack .col-book,
 html[data-embed="hub"] .terminal.mobile-stack .col-center,
 html[data-embed="hub"] .terminal.mobile-stack .col-right {
@@ -3457,7 +3509,12 @@ html[data-embed="hub"] .terminal.mobile-stack .col-right {
   grid-column: auto !important;
   position: relative;
 }
-html[data-embed="hub"] .terminal.mobile-stack .col-book.hidden {
+html[data-embed="hub"] .terminal.mobile-stack .col-book.hidden,
+html[data-embed="hub"] .terminal.mobile-stack .col-right.hidden {
+  display: none !important;
+}
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .col-book,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .col-right {
   display: none !important;
 }
 
@@ -3526,6 +3583,12 @@ html[data-embed="hub"] .order-zone {
   border-top: 1px solid var(--edge);
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+}
+/* Must follow display:block !important above */
+html[data-embed="hub"] .order-zone.hidden,
+html[data-embed="hub"] .terminal.chart-fullscreen .order-zone,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .order-zone {
+  display: none !important;
 }
 html[data-embed="hub"] .order-panel-head { gap: 0.04rem; margin-bottom: 0.1rem; }
 html[data-embed="hub"] .order-head-meta {
@@ -3677,8 +3740,15 @@ html[data-embed="hub"] .funds-panel .data-table { font-size: 0.7rem; }
 html[data-embed="hub"] .panel-rail { display: none; }
 html[data-embed="hub"] .terminal.book-collapsed .panel-rail.left,
 html[data-embed="hub"] .terminal.tools-collapsed .panel-rail.tools-rail,
-html[data-embed="hub"] .terminal.right-collapsed .panel-rail.right {
+html[data-embed="hub"] .chart-body.tools-collapsed .panel-rail.tools-rail,
+html[data-embed="hub"] .terminal.right-collapsed .panel-rail.right,
+html[data-embed="hub"] .panel-rail.is-visible {
   display: flex !important;
+}
+html[data-embed="hub"] .terminal.chart-fullscreen .panel-rail,
+html[data-embed="hub"] .terminal.chart-fullscreen .panel-rail.is-visible,
+html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .panel-rail {
+  display: none !important;
 }
 
 @media (max-width: 1280px) {
@@ -3696,6 +3766,16 @@ html[data-embed="hub"] .terminal.right-collapsed .panel-rail.right {
   }
   html[data-embed="hub"] .terminal.book-collapsed.right-collapsed,
   html[data-embed="hub"] .terminal.mobile-stack.book-collapsed.right-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  html[data-embed="hub"] .terminal.chart-fullscreen,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen,
+  html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed,
+  html[data-embed="hub"] .terminal.chart-fullscreen.right-collapsed,
+  html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed.right-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.right-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed.right-collapsed {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
@@ -3716,9 +3796,23 @@ html[data-embed="hub"] .terminal.right-collapsed .panel-rail.right {
   html[data-embed="hub"] .terminal.mobile-stack.book-collapsed.right-collapsed {
     grid-template-columns: minmax(0, 1fr) !important;
   }
+  html[data-embed="hub"] .terminal.chart-fullscreen,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen,
+  html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed,
+  html[data-embed="hub"] .terminal.chart-fullscreen.right-collapsed,
+  html[data-embed="hub"] .terminal.chart-fullscreen.book-collapsed.right-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.right-collapsed,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed.right-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
   html[data-embed="hub"] .order-zone {
     min-height: 280px !important;
     max-height: min(40vh, 340px) !important;
+  }
+  html[data-embed="hub"] .terminal.chart-fullscreen .order-zone,
+  html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .order-zone {
+    display: none !important;
   }
 }
 

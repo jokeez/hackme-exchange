@@ -28,11 +28,12 @@ import { defaultDemoState } from "./store";
 import { uid } from "./id";
 import {
   MAX_IMPORT_TRADE_QUOTE,
+  sanitizeImportedCandles,
   sanitizeImportedOrder,
   sanitizeImportedTrade,
 } from "./stateSanitize";
 
-export { MAX_IMPORT_TRADE_QUOTE, sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
+export { MAX_IMPORT_TRADE_QUOTE, sanitizeImportedOrder, sanitizeImportedTrade, sanitizeImportedCandles } from "./stateSanitize";
 
 export function exportDemoJson(state: DemoState): string {
   return JSON.stringify(
@@ -181,11 +182,8 @@ export function parseDemoImport(raw: string): DemoState {
   } else {
     state.priceAlerts = [];
   }
-  state.drawings = sanitizeDrawings(incoming.drawings, 200);
-  state.candles =
-    incoming.candles && typeof incoming.candles === "object" && !Array.isArray(incoming.candles)
-      ? incoming.candles
-      : {};
+  state.drawings = sanitizeDrawings(incoming.drawings);
+  state.candles = sanitizeImportedCandles(incoming.candles);
   state.equitySnapshots = Array.isArray(incoming.equitySnapshots)
     ? incoming.equitySnapshots.slice(0, 200).filter(
         (e) =>
@@ -224,7 +222,7 @@ export function parseDemoImport(raw: string): DemoState {
   state.drawingsLocked = !!incoming.drawingsLocked;
   state.activeDrawTool =
     typeof incoming.activeDrawTool === "string" &&
-    ["cursor", "hline", "trend", "fib", "rect", "text", "measure"].includes(incoming.activeDrawTool)
+    ["cursor", "hline", "vline", "cross", "trend", "ray", "fib", "rect", "text", "measure"].includes(incoming.activeDrawTool)
       ? incoming.activeDrawTool
       : "cursor";
   state.initialEquityUsdt =

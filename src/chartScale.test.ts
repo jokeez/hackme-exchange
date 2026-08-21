@@ -4,6 +4,7 @@ import {
   clipBarWicks,
   isPriceDiscontinuity,
   logicalRangeToIndices,
+  maxBodyFracForTf,
   maxJumpFracForTf,
   robustPriceRange,
   sanitizeCandleExtremes,
@@ -44,6 +45,24 @@ describe("clipBarWicks / sanitizeCandleExtremes", () => {
     expect(spiked.low).toBeGreaterThan(0.000001);
     expect(spiked.low).toBeLessThan(0.0004);
     expect(spiked.high).toBeGreaterThanOrEqual(0.0004);
+  });
+
+  it("keeps seeded paper wicks tight so the pane is not a barcode", () => {
+    const candles = seedCandles("HMC_USDT", "15m", 0.05, 120);
+    const mid = 0.05;
+    let maxWickFrac = 0;
+    for (const c of candles) {
+      const bodyMid = (c.open + c.close) / 2;
+      const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
+      const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
+      maxWickFrac = Math.max(maxWickFrac, up, dn);
+    }
+    // Screenshot bug was ~6%+ wick forest with flat EMAs — stay well under 2%.
+    expect(maxWickFrac).toBeLessThan(0.02);
+    const closes = candles.map((c) => c.close);
+    const cMin = Math.min(...closes);
+    const cMax = Math.max(...closes);
+    expect((cMax - cMin) / mid).toBeLessThan(0.08);
   });
 
   it("flattens a cliff body vs previous close", () => {
@@ -125,5 +144,24 @@ describe("upsertTick 1m cliff", () => {
     expect(bodyFrac).toBeLessThan(0.03);
     expect(tip.close / last.close).toBeGreaterThan(0.97);
     expect(tip.low / last.close).toBeGreaterThan(0.97);
+  });
+});
+
+describe("paper tip + volume hygiene", () => {
+  it("seed tip never paints a screenshot-class body spike vs mid", () => {
+    const mid = 0.05;
+    const candles = seedCandles("HMC_USDT", "15m", mid, 200);
+    const tip = candles[candles.length - 1]!;
+    const bodyFrac = Math.abs(tip.close - tip.open) / tip.open;
+    expect(bodyFrac).toBeLessThanOrEqual(maxBodyFracForTf("15m") + 1e-9);
+    expect(tip.high / tip.low).toBeLessThan(1.04);
+    // Tip close stays near mid (clamped), not a mile away
+    expect(Math.abs(tip.close - mid) / mid).toBeLessThan(0.035);
+  });
+
+  it("seed volumes vary across bars (not a flat barcode)", () => {
+    const candles = seedCandles("HMC_USDT", "15m", 0.05, 80);
+    const vols = new Set(candles.map((c) => c.volume.toFixed(2)));
+    expect(vols.size).toBeGreaterThan(10);
   });
 });

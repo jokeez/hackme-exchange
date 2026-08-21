@@ -2,15 +2,27 @@ import type { DrawTool, Drawing, PairId, Timeframe } from "./types";
 import { TF_SEC } from "./types";
 import { escapeHtml, sanitizeCssColor, sanitizeDomId } from "./sanitize";
 
+/** Soft cap for live + persisted drawings (DoS / canvas paint). */
+export const MAX_DRAWINGS = 200;
+
+/** Reject absurd prices that would blow canvas transforms / labels. */
+export const MAX_DRAW_PRICE = 1e9;
+export const MIN_DRAW_PRICE = 1e-12;
+
 const DRAW_TOOLS: ReadonlySet<string> = new Set([
   "cursor",
   "hline",
+  "vline",
+  "cross",
   "trend",
+  "ray",
   "fib",
   "rect",
   "text",
   "measure",
 ]);
+
+export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
 
 const PAIR_IDS: ReadonlySet<string> = new Set([
   "HMC_USDT",
@@ -82,6 +94,33 @@ export function isMeaningfulMeasure(
   return dT >= 1 || dP / scale >= minPriceFrac;
 }
 
+/** Extend segment p0→p1 to chart bounds (for ray tool). */
+export function extendRayToBounds(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  const dx = p1.x - p0.x;
+  const dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return { ...p1 };
+  const ux = dx / len;
+  const uy = dy / len;
+  // Far enough to exit any viewport
+  const reach = Math.max(w, h) * 4;
+  return { x: p0.x + ux * reach, y: p0.y + uy * reach };
+}
+
+export function measureHudLines(st: MeasureStats): [string, string, string] {
+  const sign = st.up ? "+" : "";
+  return [
+    `${sign}${st.dPrice.toPrecision(6)}`,
+    `${sign}${st.dPct.toFixed(2)}%`,
+    `${st.bars} bars · ${st.timeLabel}`,
+  ];
+}
+
 function finiteNum(n: unknown, fallback = 0): number {
   if (typeof n === "number" && Number.isFinite(n)) return n;
   if (typeof n === "string" && n.trim()) {
@@ -95,8 +134,10 @@ function sanitizePoint(raw: unknown): { time: number; price: number } | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const time = finiteNum(o.time, NaN);
-  const price = finiteNum(o.price, NaN);
+  let price = finiteNum(o.price, NaN);
   if (!Number.isFinite(time) || !Number.isFinite(price)) return null;
+  if (price <= 0) return null;
+  price = Math.min(MAX_DRAW_PRICE, Math.max(MIN_DRAW_PRICE, price));
   return { time, price };
 }
 
@@ -113,7 +154,7 @@ export function sanitizeDrawing(raw: unknown, fallbackPair: PairId = "HMC_USDT")
     const sp = sanitizePoint(p);
     if (sp) points.push(sp);
   }
-  if (tool === "hline" || tool === "text") {
+  if (tool === "hline" || tool === "vline" || tool === "cross" || tool === "text") {
     if (!points.length) return null;
   } else if (points.length < 2) {
     return null;
@@ -133,7 +174,7 @@ export function sanitizeDrawing(raw: unknown, fallbackPair: PairId = "HMC_USDT")
   return { id, pairId, tool, points, color, text };
 }
 
-export function sanitizeDrawings(raw: unknown, max = 200): Drawing[] {
+export function sanitizeDrawings(raw: unknown, max = MAX_DRAWINGS): Drawing[] {
   if (!Array.isArray(raw)) return [];
   const out: Drawing[] = [];
   for (const item of raw.slice(0, max * 2)) {

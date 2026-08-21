@@ -155,7 +155,7 @@ export function sanitizeLedgerEntry(
     asset: sanitizeLedgerAsset(e?.asset),
     amount: typeof e?.amount === "number" && Number.isFinite(e.amount) ? e.amount : 0,
     usdtValue: typeof e?.usdtValue === "number" && Number.isFinite(e.usdtValue) ? e.usdtValue : 0,
-    note: typeof e?.note === "string" ? e.note.slice(0, 240) : "",
+    note: sanitizePlainNote(e?.note, 240),
     ts: typeof e?.ts === "number" && Number.isFinite(e.ts) ? e.ts : Date.now(),
     ...(e?.pairId ? { pairId: e.pairId } : {}),
   };

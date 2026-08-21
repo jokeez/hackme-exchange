@@ -52,7 +52,7 @@ export function placeOrder(
       if (!check.ok) return check;
       // Marketable GTC limit must take liquidity — never rest as maker (fee undercharge).
       if (kind === "limit" && check.immediate && timeInForce === "GTC" && !postOnly) {
-        const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind);
+        const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind, true);
         if (!funds.ok) return funds;
         const quoteGross = price * amountBase;
         const fill = executeFill(state, m, pairId, side, price, amountBase, quoteGross, "limit", false, true);

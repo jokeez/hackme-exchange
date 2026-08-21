@@ -21,6 +21,8 @@ export const Ico = {
   layout: () => svg(`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`),
   square: () => svg(`<rect x="5" y="5" width="14" height="14" rx="1"/>`),
   maximize: () => svg(`<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>`),
+  /** Corners inward — exit chart fullscreen. */
+  minimize: () => svg(`<path d="M8 3v3H5M16 3v3h3M8 21v-3H5M16 21v-3h3"/>`),
   candlestick: () =>
     svg(
       `<path d="M8 4v3M8 17v3M16 2v4M16 16v6"/><rect x="6" y="7" width="4" height="10" rx="0.5"/><rect x="14" y="6" width="4" height="10" rx="0.5"/>`,
@@ -30,6 +32,9 @@ export const Ico = {
   minus: () => svg(`<path d="M5 12h14"/>`),
   trendUp: () => svg(`<path d="M3 17 9 11l4 4 8-8"/><path d="M14 7h7v7"/>`),
   fib: () => svg(`<path d="M4 5h16M4 9h16M4 14h16M4 19h16"/>`),
+  vline: () => svg(`<path d="M12 3v18"/>`),
+  cross: () => svg(`<path d="M4 12h16M12 4v16"/>`),
+  ray: () => svg(`<path d="M4 18 14 8"/><path d="M14 8h6M14 8v6"/>`),
   typeA: () => svg(`<path d="M4 20 12 4l8 16"/><path d="M7.5 14h9"/>`),
   ruler: () => svg(`<path d="M21.3 8.7 8.7 21.3a2.4 2.4 0 0 1-3.4 0L2.7 18.7a2.4 2.4 0 0 1 0-3.4L15.3 2.7a2.4 2.4 0 0 1 3.4 0l2.6 2.6a2.4 2.4 0 0 1 0 3.4Z"/><path d="m14.5 7.5 2 2M11 11l2 2M7.5 14.5l2 2"/>`),
   trash: () => svg(`<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>`),
@@ -56,7 +61,19 @@ export function pairAssetIcons(base: string, _quote?: string): string {
   return `<span class="pair-icons" aria-hidden="true">${assetBadge(base)}</span>`;
 }
 
-export type DrawIconId = "cursor" | "hline" | "trend" | "fib" | "rect" | "text" | "measure" | "clear" | "lock";
+export type DrawIconId =
+  | "cursor"
+  | "hline"
+  | "vline"
+  | "cross"
+  | "trend"
+  | "ray"
+  | "fib"
+  | "rect"
+  | "text"
+  | "measure"
+  | "clear"
+  | "lock";
 
 export function drawToolIcon(id: DrawIconId): string {
   switch (id) {
@@ -64,8 +81,14 @@ export function drawToolIcon(id: DrawIconId): string {
       return Ico.mousePointer();
     case "hline":
       return Ico.minus();
+    case "vline":
+      return Ico.vline();
+    case "cross":
+      return Ico.cross();
     case "trend":
       return Ico.trendUp();
+    case "ray":
+      return Ico.ray();
     case "fib":
       return Ico.fib();
     case "rect":

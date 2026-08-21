@@ -6,8 +6,9 @@ import type { Candle, Timeframe } from "./types";
  * optionally tighten absolute outliers vs a robust mid of the series.
  */
 
-/** Max wick beyond body as fraction of body mid (e.g. 0.06 = ±6%). */
-export const MAX_WICK_FRAC = 0.06;
+/** Max wick beyond body as fraction of body mid (e.g. 0.012 = ±1.2%).
+ * Was 6% — every bar painted a “barcode” of mile-long wicks while EMAs stayed flat. */
+export const MAX_WICK_FRAC = 0.012;
 
 /**
  * Legacy default jump — prefer {@link maxJumpFracForTf}.
@@ -114,7 +115,8 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05): Candle {
   if (!finitePos(c.open)) return clipBarWicks(c);
   const open = c.open;
   const close = clampTickMid(finitePos(c.close) ? c.close : open, open, maxBody);
-  const wickPad = maxBody * 1.25;
+  // Wick pad tracks body cap but stays tighter than the body itself (no barcode tape).
+  const wickPad = Math.min(maxBody * 0.55, MAX_WICK_FRAC * 1.25);
   const hiCap = open * (1 + wickPad);
   const loCap = open * Math.max(1e-6, 1 - wickPad);
   let high = Math.max(open, close, finitePos(c.high) ? c.high : close);

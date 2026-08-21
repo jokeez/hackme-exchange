@@ -14,7 +14,20 @@ describe("icons", () => {
   });
 
   it("drawToolIcon covers all draw ids", () => {
-    const ids: DrawIconId[] = ["cursor", "hline", "trend", "fib", "rect", "text", "measure", "clear", "lock"];
+    const ids: DrawIconId[] = [
+      "cursor",
+      "hline",
+      "vline",
+      "cross",
+      "trend",
+      "ray",
+      "fib",
+      "rect",
+      "text",
+      "measure",
+      "clear",
+      "lock",
+    ];
     for (const id of ids) {
       const svg = drawToolIcon(id);
       expect(svg).toContain("<svg");

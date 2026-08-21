@@ -21,8 +21,8 @@ import {
 import { sanitizeFeeConfig } from "./fees";
 import { STORAGE_KEY } from "./theme";
 import { uid } from "./id";
-import { sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
-import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
+import { sanitizeImportedCandles, sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
+import { MAX_DRAWINGS, sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 
 /** Persist 1m base only — higher TFs re-derived (+ padded) on load. */
 const STORAGE_BASE_CAP = 2000;
@@ -37,7 +37,7 @@ function compactForStorage(state: DemoState, aggressive = false): DemoState {
   s.trades = s.trades.slice(0, aggressive ? 40 : STORAGE_TRADES_CAP);
   s.ledger = s.ledger.slice(0, aggressive ? 40 : STORAGE_LEDGER_CAP);
   s.equitySnapshots = s.equitySnapshots.slice(0, aggressive ? 24 : STORAGE_EQUITY_CAP);
-  s.drawings = sanitizeDrawings(s.drawings, aggressive ? 40 : 120);
+  s.drawings = sanitizeDrawings(s.drawings, aggressive ? 40 : Math.min(120, MAX_DRAWINGS));
   if (aggressive) {
     s.candles = {};
     return s;
@@ -202,11 +202,12 @@ export function loadState(): DemoState {
       equitySnapshots: Array.isArray(parsed.equitySnapshots)
         ? parsed.equitySnapshots.slice(0, STORAGE_EQUITY_CAP)
         : [],
-      drawings: sanitizeDrawings(parsed.drawings ?? [], 200),
+      drawings: sanitizeDrawings(parsed.drawings ?? [], MAX_DRAWINGS),
+      candles: sanitizeImportedCandles(parsed.candles),
       bookView: parsed.bookView === "depth" ? "depth" : "book",
       activeDrawTool:
         typeof parsed.activeDrawTool === "string" &&
-        ["cursor", "hline", "trend", "fib", "rect", "text", "measure"].includes(parsed.activeDrawTool)
+        ["cursor", "hline", "vline", "cross", "trend", "ray", "fib", "rect", "text", "measure"].includes(parsed.activeDrawTool)
           ? parsed.activeDrawTool
           : "cursor",
       chartOverlays: sanitizeChartOverlays(parsed.chartOverlays),
