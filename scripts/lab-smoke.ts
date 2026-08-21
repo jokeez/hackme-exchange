@@ -289,8 +289,8 @@ async function main(): Promise<number> {
   }
 
   // 6) convert (API field names: from_asset / to_asset)
-  // Soft-launch mid≈55_000 (0.00055 USDT/HMC): 1 USDT → ~1818 HMC, but MM convert
-  // inventory only has a small free pad (~15 HMC). Size convert to ~2 HMC notional.
+  // Soft-launch mid≈5_000_000 (0.05 USDT/HMC). Size convert to a few HMC of notional
+  // so MM inventory pad is not exhausted on one quote.
   {
     const targetHmc = 200_000_000; // 2 HMC minor
     const convertAmount = Math.max(1, Math.floor((targetHmc * midPx) / 100_000_000));

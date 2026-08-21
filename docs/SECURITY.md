@@ -20,6 +20,7 @@
 | localStorage pollution | `loadState` uses `stripPollutionKeys` + same clamps as import (`oracleAnchor`, ledger enums, chart settings, ids) |
 | Origin spoof | `sanitizeHttpUrl` — only `http:` / `https:` for hub/pool/node; `openInNewTab` same |
 | Chart text XSS | Labels truncated; Object Tree escapes `text` / `id` |
+| BTC mark fetch | Optional `api.binance.com` BTCUSDT — allowlisted in CSP `connect-src`; fallback **67500** if blocked/offline |
 
 **Residual (accepted for demo):** no auth, synthetic book/tape, client-side paper balances, CSP is meta-only with `'unsafe-inline'` (preview servers may omit headers), Google Fonts without SRI, no rate limits (no backend yet), measure/drawings are client-local only.
 

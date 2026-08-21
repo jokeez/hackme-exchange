@@ -1,6 +1,6 @@
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-15  
+**Updated:** 2026-08-21  
 **Public:** **NO** — private lab / localhost only.  
 **Soft-public target:** **D0 Paper · 2026-09-15** (`exchange.hackme.tech` static).  
 **Go / no-go:** **2026-09-10**.
@@ -20,7 +20,7 @@ Own HMC market — **not** a third-party listing claim:
 | Phase | What |
 |-------|------|
 | **Now** | Paper / private-lab Spot + Convert |
-| **Soft** | Static paper UI ~mid-September — **no** public matching API |
+| **Soft (D0)** | Static paper UI ~mid-September — **no** public matching API |
 | **Live deposits / foreign CEX** | Only after custody + security gates |
 
 Pool: useful-PoW live → [hackme.tech](https://hackme.tech/)  
@@ -30,9 +30,20 @@ No ROI promises. No fake “Tier-1 tomorrow.”
 
 | Mode | Meaning |
 |------|---------|
-| **paper** (default) | localStorage balances · oracle mids — **not** real custody |
+| **paper** (default) | localStorage balances · reference mids — **not** real custody |
 | **lab** | Loopback `exchange-api` (`127.0.0.1:18443`) — still **not** public |
 | **live** | **Blocked** until an explicit public go-live |
+
+## Pricing (paper / soft)
+
+| Asset | Operator reference | Notes |
+|-------|--------------------|-------|
+| HMC/USDT | **0.05** | Mild ±0.35% paper drift; **not** scaled by pool GH |
+| SUP/USDT | **0.01** | Same |
+| HMC/SUP | **5.0** | Cross = HMC÷SUP |
+| HMC/BTC · SUP/BTC | `usdt / btcUsd` | Live BTCUSDT when available |
+
+Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
 ## Locked decisions
 
@@ -41,6 +52,7 @@ No ROI promises. No fake “Tier-1 tomorrow.”
 | Subdomain before D0? | **No** — hub `#exchange` + `:5199` only |
 | D0 | Static SPA + this STATUS — **no** public API/custody |
 | D1 DB | **Postgres** (lab SQLite stays private) |
+| D1 host | Separate **exchange-VPS** (not mining hub) |
 | Live mode | Blocked until explicit go-live |
 | Repos | Split: SPA + API (not merged into HackMe hub) |
 
@@ -63,13 +75,13 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 # → http://127.0.0.1:18443/health
 ```
 
-## QA snapshot (2026-08-15)
+## QA snapshot (2026-08-21)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **486** pass |
+| `npm test` | **544** pass |
+| Full UI/UX · G10 · B-chart | **P0=0** |
 | `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443` |
-| G10 visual pass | **ok** — P0=0 P1=0 · oracle live |
 | API `go test ./...` | **ok** |
 | PRE_PUBLIC dry-run | **ok** · public still **HOLD** |
 | Public edge | **HOLD** |
@@ -87,6 +99,7 @@ cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
 
 - [`docs/D0_CHECKLIST.md`](docs/D0_CHECKLIST.md) — Sep 10 go/no-go  
 - [`docs/SCOPE.md`](docs/SCOPE.md) — boundaries  
+- [`docs/ECONOMICS.md`](docs/ECONOMICS.md) — fees · reference mids  
 - [API PRE_PUBLIC checklist](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRE_PUBLIC_CHECKLIST.md)  
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
