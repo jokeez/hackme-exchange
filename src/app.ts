@@ -152,6 +152,8 @@ import {
 } from "./orderPanel";
 import { recordConvert } from "./ledger";
 import {
+  DEFAULT_SUP_REFERENCE_MID,
+  applyLivePaperMids,
   fetchMarket,
   formatGh,
   formatNum,
@@ -4205,13 +4207,16 @@ function microTickPrices(): void {
   let changed = false;
   bookPhase += 0.38;
   liveTickN += 1;
+  // Breathe around operator refs; keep HMC/SUP/BTC crosses coherent every tick.
+  market = applyLivePaperMids(market, state.oracleAnchor, DEFAULT_SUP_REFERENCE_MID);
   const labLive = useLabMatching();
   for (const p of PAIRS) {
     const oracleTarget = midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
     const target = labMid > 0 ? labMid : oracleTarget;
     const prev = prevMids[p.id] ?? target;
-    const blend = target;
+    // Soft blend so candle tip does not teleport on every 700ms tick.
+    const blend = prev * 0.72 + target * 0.28;
     if (!state.candles[p.id]) state.candles[p.id] = {};
     state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, blend, prev);
     prevMids[p.id] = blend;
@@ -4352,7 +4357,7 @@ async function refresh(): Promise<void> {
       source = "live";
     }
   } else if (!m) {
-    m = localFallbackMarket(state.oracleAnchor);
+    m = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
     source = "fallback";
   } else if (warming) {
     source = "fallback";
@@ -4449,7 +4454,7 @@ export async function boot(): Promise<void> {
   saveState(state);
   // Instant desk — never block first paint on oracle RTT / VPN / CORS.
   if (!market || !poolLive) {
-    market = localFallbackMarket(state.oracleAnchor);
+    market = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
     poolLive = pendingPoolLive();
     oracleMeta = { source: "fallback", fetchedAt: 0, poolStatus: "pending" };
     ensureCandles(state, market);
@@ -4470,7 +4475,7 @@ export async function boot(): Promise<void> {
   } catch (err) {
     console.warn("[hackme-exchange] initial oracle sync failed — using fallback", err);
     if (!market || !poolLive || poolLive.status === "pending") {
-      market = localFallbackMarket(state.oracleAnchor);
+      market = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
       poolLive = offlinePoolLive();
       oracleMeta = { source: "fallback", fetchedAt: Date.now(), poolStatus: "offline" };
       ensureCandles(state, market);

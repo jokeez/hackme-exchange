@@ -27,7 +27,9 @@ function hubBase(): string {
 
 /** Pool GH reference for spread / fallback telemetry only — not for mid pricing. */
 const REF_GH = 35;
-const DEFAULT_BTC_USD = 67_500;
+
+/** Fallback BTC/USD when live ticker is unreachable. */
+export const DEFAULT_BTC_USD = 67_500;
 
 /**
  * Operator reference mid (USDT per 1 HMC) for D0 paper / soft-launch.
@@ -35,11 +37,68 @@ const DEFAULT_BTC_USD = 67_500;
  */
 export const DEFAULT_REFERENCE_MID = 0.05;
 
-/** Operator reference mid (USDT per 1 SUP) — fair paper desk, not dust × scarcity. */
+/** Operator reference mid (USDT per 1 SUP) — fair paper desk. */
 export const DEFAULT_SUP_REFERENCE_MID = 0.01;
+
+/** Live paper drift band around each reference (±0.35%). */
+export const PAPER_MID_BAND = 0.0035;
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/**
+ * Mild time-based walk around an operator reference mid.
+ * Produces ticks like 0.050034 / 0.049971 — not a frozen print, still mean-reverting.
+ */
+export function liveReferenceMid(
+  reference: number,
+  asset: "hmc" | "sup",
+  nowMs = Date.now(),
+): number {
+  const ref = Math.max(reference, 1e-12);
+  const tick = Math.floor(nowMs / 700);
+  const phase = asset === "hmc" ? 0.71 : 1.93;
+  const slow = Math.sin(tick / 23 + phase) * 0.00115;
+  const mid = Math.sin(tick / 9 + phase * 1.7) * 0.00055;
+  const fast = Math.sin(tick / 3.5 + phase * 2.4) * 0.00028;
+  const scale = clamp(1 + slow + mid + fast, 1 - PAPER_MID_BAND, 1 + PAPER_MID_BAND);
+  return ref * scale;
+}
+
+/** Keep cross pairs coherent: HMC/SUP, HMC/BTC, SUP/BTC from USDT legs + BTC/USD. */
+export function resyncCrossMids(m: Omit<MarketSnapshot, "assetUsd">): MarketSnapshot {
+  const hmcUsdt = Math.max(m.hmcUsdt, 1e-12);
+  const supUsdt = Math.max(m.supUsdt, 1e-12);
+  const btcUsd = Math.max(m.btcUsd, 1);
+  const base: Omit<MarketSnapshot, "assetUsd"> = {
+    ...m,
+    hmcUsdt,
+    supUsdt,
+    btcUsd,
+    hmcSup: hmcUsdt / supUsdt,
+    hmcBtc: hmcUsdt / btcUsd,
+    supBtc: supUsdt / btcUsd,
+  };
+  return { ...base, assetUsd: computeAssetUsd(base) };
+}
+
+/**
+ * Apply live paper drift to HMC/SUP around operator refs, then re-sync BTC crosses.
+ * Call on each micro-tick and after oracle refresh so the desk breathes.
+ */
+export function applyLivePaperMids(
+  m: MarketSnapshot,
+  hmcRef: number,
+  supRef: number = DEFAULT_SUP_REFERENCE_MID,
+  nowMs = Date.now(),
+): MarketSnapshot {
+  return resyncCrossMids({
+    ...m,
+    hmcUsdt: liveReferenceMid(hmcRef, "hmc", nowMs),
+    supUsdt: liveReferenceMid(supRef, "sup", nowMs),
+    btcUsd: Math.max(m.btcUsd, 1),
+  });
 }
 
 export function buildMarket(
@@ -55,34 +114,26 @@ export function buildMarket(
   const poolGh = work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : REF_GH);
   const rewardPerM = work.reward_per_m ?? 0.00021;
   const workers = work.workers_online ?? work.workers_count ?? pool.workers ?? 3;
-
-  // Reference mids only — no GH / reward / scarcity multipliers on price.
-  const hmcUsdt = Math.max(referenceMid, 1e-12);
   const minted = sup.economics?.total_minted_sup ?? 0.05;
   const max = sup.economics?.max_supply_sup ?? 21_000_000;
-  const supUsdt = Math.max(supReferenceMid, 1e-12);
-  const hmcSup = hmcUsdt / Math.max(supUsdt, 1e-12);
-  const hmcBtc = hmcUsdt / btcUsd;
-  const supBtc = supUsdt / btcUsd;
 
-  const base: Omit<MarketSnapshot, "assetUsd"> = {
-    hmcUsdt,
-    supUsdt,
-    hmcSup,
-    hmcBtc,
-    supBtc,
+  // Exact operator refs here — live drift applied via applyLivePaperMids in the desk loop.
+  return resyncCrossMids({
+    hmcUsdt: Math.max(referenceMid, 1e-12),
+    supUsdt: Math.max(supReferenceMid, 1e-12),
+    hmcSup: 0,
+    hmcBtc: 0,
+    supBtc: 0,
     poolGh,
     rewardPerM,
     workers,
     supMinted: minted,
     supMax: max,
     blockHeight: pool.block_height ?? pool.tip_height ?? 0,
-    btcUsd,
+    btcUsd: Math.max(btcUsd, 1),
     targetMod: work.target_mod ?? 0,
     totalPayoutHmc: work.total_payout_hmc ?? 0,
-  };
-
-  return { ...base, assetUsd: computeAssetUsd(base) };
+  });
 }
 
 export function midForPair(m: MarketSnapshot, pairId: PairId): number {
@@ -112,26 +163,51 @@ export function tickerFromMarket(m: MarketSnapshot, pairId: PairId): Ticker {
 }
 
 /** Sync local mids when pool API is slow/unreachable — instant boot paint. */
-export function localFallbackMarket(referenceMid = DEFAULT_REFERENCE_MID): MarketSnapshot {
+export function localFallbackMarket(
+  referenceMid = DEFAULT_REFERENCE_MID,
+  btcUsd = DEFAULT_BTC_USD,
+): MarketSnapshot {
   return buildMarket(
     { hashrate: REF_GH * 1e9, workers: 4, tip_height: 155000, status: "ok" },
     { pool_hashrate_gh_s: REF_GH, reward_per_m: 0.00021, workers_online: 4 },
     { economics: { total_minted_sup: 0.05, max_supply_sup: 21_000_000 } },
     referenceMid,
+    btcUsd,
   );
 }
 
-export async function fetchMarket(referenceMid = DEFAULT_REFERENCE_MID): Promise<{
+/** Best-effort public BTC/USDT mark for HMC/BTC + SUP/BTC sync. */
+export async function fetchBtcUsd(): Promise<number> {
+  try {
+    const r = await fetchWithTimeout(
+      "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+      {},
+      3_500,
+    );
+    if (!r.ok) return DEFAULT_BTC_USD;
+    const j = (await r.json()) as { price?: string };
+    const n = Number(j.price);
+    if (!Number.isFinite(n) || n < 1_000 || n > 5_000_000) return DEFAULT_BTC_USD;
+    return n;
+  } catch {
+    return DEFAULT_BTC_USD;
+  }
+}
+
+export async function fetchMarket(
+  referenceMid = DEFAULT_REFERENCE_MID,
+): Promise<{
   market: MarketSnapshot;
   source: "live" | "fallback";
 }> {
   try {
-    // Pool is required; work/sup are best-effort — flaky proxy must not zero the desk.
+    // Pool is required; work/sup/btc are best-effort — flaky proxy must not zero the desk.
     const poolT = 4_000;
     const workT = 6_000;
     const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
     const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
     const supP = fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, poolT).catch(() => null);
+    const btcP = fetchBtcUsd();
     const poolRes = await poolP;
     if (!poolRes.ok) throw new Error("pool");
     const pool = (await poolRes.json()) as PoolStats;
@@ -153,8 +229,16 @@ export async function fetchMarket(referenceMid = DEFAULT_REFERENCE_MID): Promise
         sup = {};
       }
     }
-    return { market: buildMarket(pool, work, sup, referenceMid), source: "live" };
+    const btcUsd = await btcP;
+    const base = buildMarket(pool, work, sup, referenceMid, btcUsd);
+    return {
+      market: applyLivePaperMids(base, referenceMid, DEFAULT_SUP_REFERENCE_MID),
+      source: "live",
+    };
   } catch {
-    return { market: localFallbackMarket(referenceMid), source: "fallback" };
+    return {
+      market: applyLivePaperMids(localFallbackMarket(referenceMid), referenceMid),
+      source: "fallback",
+    };
   }
 }
