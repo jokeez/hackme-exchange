@@ -243,15 +243,15 @@ describe("VIP FX + fee wallet edge cases", () => {
 });
 
 describe("sanitizeFeeConfig", () => {
-  it("clamps abusive discount and bps from import", () => {
+  it("pins maker/taker to Regular VIP and clamps discount", () => {
     const cfg = sanitizeFeeConfig({
       makerBps: -5,
       takerBps: 999,
       payFeesInHmc: true,
       hmcDiscountPct: 150,
     });
-    expect(cfg.makerBps).toBeGreaterThanOrEqual(1);
-    expect(cfg.takerBps).toBe(100);
+    expect(cfg.makerBps).toBe(8);
+    expect(cfg.takerBps).toBe(10);
     expect(cfg.hmcDiscountPct).toBe(25);
     expect(cfg.payFeesInHmc).toBe(true);
   });

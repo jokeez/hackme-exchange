@@ -64,13 +64,13 @@ body {
 }
 *::-webkit-scrollbar-corner { background: transparent; }
 .order-zone, #book, .markets-list, #tape, #activity-body {
-  scrollbar-width: none;
+  scrollbar-width: thin;
 }
 .order-zone::-webkit-scrollbar,
 #book::-webkit-scrollbar,
 .markets-list::-webkit-scrollbar,
 #tape::-webkit-scrollbar,
-#activity-body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+#activity-body::-webkit-scrollbar { width: 6px; height: 6px; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .mono { font-family: var(--mono); }
@@ -1288,7 +1288,7 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   display: grid; grid-template-columns: 1fr 0.9fr 0.95fr; gap: 0.15rem;
   padding: 0.02rem 0.45rem; position: relative; line-height: 1.25;
 }
-.ob-head { color: var(--muted); font-size: 0.58rem; padding-top: 0.15rem; padding-bottom: 0.1rem; }
+.ob-head { color: var(--muted); font-size: 0.75rem; padding-top: 0.15rem; padding-bottom: 0.1rem; }
 .ob-total { display: block; text-align: right; }
 .ob-row span, .ob-row .ob-price { font-family: var(--mono); }
 .ob-row.ask .ob-price, .ob-row.ask span:first-child { color: var(--sell); }
@@ -3817,3 +3817,14 @@ html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .panel-rail {
 }
 
 
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .last-pill.pulse { animation: none !important; }
+  .bg-glow { opacity: 0.12; filter: none; }
+}

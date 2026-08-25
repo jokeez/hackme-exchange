@@ -710,7 +710,7 @@ function renderBook(): string {
   const row = (l: (typeof bids)[0], side: "bid" | "ask") => {
     const pct = (l.amountBase / max) * 100;
     const price = l.price;
-    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" title="${rowTitle(side)}">
+    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" tabindex="0" title="${rowTitle(side)}">
       <div class="ob-bar" style="width:${pct}%"></div>
       <span class="ob-price">${formatPrice(price)}</span>
       <span>${formatNum(l.amountBase, 1)}</span>
@@ -1670,7 +1670,7 @@ function renderSpot(): string {
           <button type="button" class="btn-panel-toggle" id="btn-collapse-right" title="Hide markets">›</button>
         </div>
         ${renderOracleStatusHtml(oracleMeta)}
-        <input class="market-search" id="market-search" placeholder="Search…" value="${escapeHtml(marketSearch)}" />
+        <input class="market-search" id="market-search" type="search" placeholder="Search…" aria-label="Search markets" value="${escapeHtml(marketSearch)}" />
         <div class="lane-tabs" id="lane-tabs">
           <button type="button" class="lane-tab ${marketLane === "all" ? "active" : ""}" data-lane="all">All</button>
           ${LANES.map((l) => `<button type="button" class="lane-tab ${marketLane === l.id ? "active" : ""}" data-lane="${l.id}">${l.label}</button>`).join("")}
@@ -1679,10 +1679,10 @@ function renderSpot(): string {
       </div>
       <div class="activity-panel" id="activity-panel">
         <div class="activity-tabs" id="activity-tabs" role="tablist" aria-label="Spot activity">
-          <button type="button" class="${activityTab === "orders" ? "active" : ""}" data-tab="orders" role="tab">Orders</button>
-          <button type="button" class="${activityTab === "history" ? "active" : ""}" data-tab="history" role="tab">Fills</button>
-          <button type="button" class="${activityTab === "tape" ? "active" : ""}" data-tab="tape" role="tab">Tape</button>
-          <button type="button" class="${activityTab === "alerts" ? "active" : ""}" data-tab="alerts" role="tab">Alerts</button>
+          <button type="button" class="${activityTab === "orders" ? "active" : ""}" data-tab="orders" role="tab" aria-selected="${activityTab === "orders"}">Orders</button>
+          <button type="button" class="${activityTab === "history" ? "active" : ""}" data-tab="history" role="tab" aria-selected="${activityTab === "history"}">Fills</button>
+          <button type="button" class="${activityTab === "tape" ? "active" : ""}" data-tab="tape" role="tab" aria-selected="${activityTab === "tape"}">Tape</button>
+          <button type="button" class="${activityTab === "alerts" ? "active" : ""}" data-tab="alerts" role="tab" aria-selected="${activityTab === "alerts"}">Alerts</button>
         </div>
         <div class="activity-body" id="activity-body">${renderActivityBody()}</div>
       </div>
@@ -1754,7 +1754,7 @@ function render(): void {
     </div>
   </header>
   ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet }) : renderPoolPage(poolLive, market)}
-  ${view !== "spot" ? `<div class="mining-strip mono" id="mining-strip">
+  ${view === "pool" ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
 
@@ -1848,14 +1848,24 @@ function wireBookClicks(): void {
   const host = document.getElementById("col-book");
   if (!host || host.dataset.bookClickWired === "1") return;
   host.dataset.bookClickWired = "1";
-  host.addEventListener("click", (ev) => {
-    const row = (ev.target as HTMLElement | null)?.closest?.("[data-book-price]") as HTMLElement | null;
-    if (!row || !host.contains(row)) return;
+  const applyRow = (row: HTMLElement) => {
     const price = Number(row.dataset.bookPrice);
     const side = row.dataset.bookSide === "ask" ? "buy" : "sell";
     if (!Number.isFinite(price) || price <= 0) return;
     fillOrderPanelAtPrice(side, uiType === "stop_limit" ? "stop_limit" : "limit", price);
     toast(`${side === "buy" ? "Buy" : "Sell"} price ← ${formatPrice(price)}`, "info");
+  };
+  host.addEventListener("click", (ev) => {
+    const row = (ev.target as HTMLElement | null)?.closest?.("[data-book-price]") as HTMLElement | null;
+    if (!row || !host.contains(row)) return;
+    applyRow(row);
+  });
+  host.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const row = (ev.target as HTMLElement | null)?.closest?.("[data-book-price]") as HTMLElement | null;
+    if (!row || !host.contains(row)) return;
+    ev.preventDefault();
+    applyRow(row);
   });
 }
 
@@ -4114,8 +4124,11 @@ function wireEvents(): void {
   document.querySelectorAll("#activity-tabs button").forEach((btn) => {
     btn.addEventListener("click", () => {
       activityTab = normalizeActivityTab((btn as HTMLElement).dataset.tab);
-      document.querySelectorAll("#activity-tabs button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
+      document.querySelectorAll("#activity-tabs button").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
       document.getElementById("activity-body")!.innerHTML = renderActivityBody();
       wireCancelButtons();
       wireAlertButtons();
@@ -4151,7 +4164,9 @@ function openAlertsPanel(): void {
   }
   switchMobilePanel("markets");
   document.querySelectorAll("#activity-tabs button").forEach((b) => {
-    b.classList.toggle("active", (b as HTMLElement).dataset.tab === "alerts");
+    const on = (b as HTMLElement).dataset.tab === "alerts";
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
   });
   const body = document.getElementById("activity-body");
   if (body) {

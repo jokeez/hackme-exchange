@@ -1,4 +1,4 @@
-/** Detect hub iframe embed (`?embed=hub` or nested frame). */
+/** Detect hub iframe embed via explicit `?embed=hub` only (L5). */
 export function isHubEmbed(): boolean {
   try {
     if (typeof location !== "undefined") {
@@ -8,12 +8,7 @@ export function isHubEmbed(): boolean {
   } catch {
     /* ignore */
   }
-  try {
-    return typeof window !== "undefined" && window.self !== window.top;
-  } catch {
-    // Cross-origin parent → treat as embed
-    return true;
-  }
+  return false;
 }
 
 export function applyHubEmbedChrome(): void {
