@@ -86,8 +86,8 @@ describe("demoIo", () => {
       },
     });
     const parsed = parseDemoImport(JSON.stringify({ state }));
-    expect(parsed.feeConfig.makerBps).toBeGreaterThanOrEqual(1);
-    expect(parsed.feeConfig.takerBps).toBe(100);
+    expect(parsed.feeConfig.makerBps).toBe(8);
+    expect(parsed.feeConfig.takerBps).toBe(10);
     expect(parsed.feeConfig.hmcDiscountPct).toBe(25);
   });
 

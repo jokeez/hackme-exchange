@@ -405,8 +405,8 @@ describe("visual CSS tokens & critical rules", () => {
     expect(css).toMatch(/\.cv-chip\s*\{[^}]*font-weight:\s*600/s);
   });
 
-  it("hides native scrollbars on terminal panes", () => {
-    expect(css).toContain("scrollbar-width: none");
+  it("keeps thin scrollbars on terminal panes", () => {
+    expect(css).toContain("scrollbar-width: thin");
     expect(css).toContain(".order-zone");
     expect(css).toContain("#book");
   });

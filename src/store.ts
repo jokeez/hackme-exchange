@@ -200,10 +200,22 @@ export function loadState(): DemoState {
           }))
         : [],
       equitySnapshots: Array.isArray(parsed.equitySnapshots)
-        ? parsed.equitySnapshots.slice(0, STORAGE_EQUITY_CAP)
+        ? parsed.equitySnapshots
+            .slice(0, STORAGE_EQUITY_CAP)
+            .filter(
+              (e) =>
+                e &&
+                typeof e === "object" &&
+                typeof (e as { ts?: unknown }).ts === "number" &&
+                typeof (e as { equityUsdt?: unknown }).equityUsdt === "number",
+            )
         : [],
       drawings: sanitizeDrawings(parsed.drawings ?? [], MAX_DRAWINGS),
       candles: sanitizeImportedCandles(parsed.candles),
+      bookGrouping:
+        typeof parsed.bookGrouping === "number" && Number.isFinite(parsed.bookGrouping)
+          ? Math.max(0, parsed.bookGrouping)
+          : DEFAULT.bookGrouping,
       bookView: parsed.bookView === "depth" ? "depth" : "book",
       activeDrawTool:
         typeof parsed.activeDrawTool === "string" &&

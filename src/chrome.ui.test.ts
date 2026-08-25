@@ -77,7 +77,10 @@ describe("multi chart picker", () => {
 });
 
 describe("spot chrome control contracts", () => {
-  it("documents required control ids used by wireEvents", () => {
+  it("documents required control ids used by wireEvents (parsed from app.ts)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const src = readFileSync(resolve(__dirname, "app.ts"), "utf8");
     const required = [
       "btn-system-status",
       "sys-drop",
@@ -93,6 +96,11 @@ describe("spot chrome control contracts", () => {
       "mobile-panel-tabs",
       "activity-tabs",
     ];
+    for (const id of required) {
+      expect(src.includes(`"${id}"`) || src.includes(`'${id}'`) || src.includes(`id="${id}"`) || src.includes(`#${id}`)).toBe(
+        true,
+      );
+    }
     expect(required.length).toBe(13);
     expect(new Set(required).size).toBe(required.length);
   });

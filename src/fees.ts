@@ -2,7 +2,7 @@ import type { DemoState, FeeConfig, MarketSnapshot, OrderKind, PairId } from "./
 import { DEFAULT_FEE_CONFIG } from "./types";
 import { walletKeyForPair } from "./registry";
 import { pairById } from "./pairs";
-import { finiteNonNeg, finiteNonNegCapped } from "./sanitize";
+import { finiteNonNeg } from "./sanitize";
 
 export type LiquidityRole = "maker" | "taker";
 export { DEFAULT_FEE_CONFIG };
@@ -17,7 +17,7 @@ export type VipTier = {
 
 /**
  * Spot fee schedule — must match API `internal/fees/fees.go` (lab matching source of truth).
- * `FeeConfig.makerBps` / `takerBps` are import clamps only — calcFee uses these tiers.
+ * `FeeConfig.makerBps` / `takerBps` mirror Regular VIP for import display only — calcFee uses VIP_TIERS.
  */
 export const VIP_TIERS: VipTier[] = [
   { name: "VIP 3", makerBps: 2, takerBps: 4, minVolUsdt: 10_000_000 },
@@ -29,9 +29,11 @@ export const VIP_TIERS: VipTier[] = [
 /** Clamp imported fee settings — blocks negative/zero-fee abuse via state import. */
 export function sanitizeFeeConfig(raw: Partial<FeeConfig> | undefined): FeeConfig {
   const d = DEFAULT_FEE_CONFIG;
+  const regular = VIP_TIERS[VIP_TIERS.length - 1]!;
+  // M7: ignore imported maker/taker bps as fee knobs — pin to Regular VIP schedule.
   return {
-    makerBps: Math.max(1, finiteNonNegCapped(raw?.makerBps, d.makerBps, 100)),
-    takerBps: Math.max(1, finiteNonNegCapped(raw?.takerBps, d.takerBps, 100)),
+    makerBps: regular.makerBps,
+    takerBps: regular.takerBps,
     payFeesInHmc: !!raw?.payFeesInHmc,
     hmcDiscountPct: Math.min(25, Math.max(0, finiteNonNeg(raw?.hmcDiscountPct, d.hmcDiscountPct))),
   };
@@ -107,8 +109,9 @@ export function calcFee(
 
   if (state.feeConfig.payFeesInHmc && m.hmcUsdt > 0) {
     const discount = state.feeConfig.hmcDiscountPct;
-    const discounted = feeQuote * (1 - discount / 100);
-    const feeHmc = discounted / m.hmcUsdt;
+    // M5: ceil discounted quote + HMC conversion to 1e8 (same as quote fee path).
+    const discounted = Math.ceil(feeQuote * (1 - discount / 100) * 1e8) / 1e8;
+    const feeHmc = Math.ceil((discounted / m.hmcUsdt) * 1e8) / 1e8;
     return {
       role,
       bps,

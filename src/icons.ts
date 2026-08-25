@@ -1,3 +1,5 @@
+import { escapeHtml } from "./sanitize";
+
 /** Lucide-style inline icons — one stroke weight for the whole terminal. */
 const SW = 1.5;
 
@@ -52,8 +54,8 @@ export function assetBadge(symbol: string): string {
   if (key === "SUP") {
     return `<span class="asset-ico asset-sup" title="SUP" aria-hidden="true">S</span>`;
   }
-  const mark = key.slice(0, 1) || "?";
-  return `<span class="asset-ico asset-unk" title="${key}" aria-hidden="true">${mark}</span>`;
+  const mark = escapeHtml(key.slice(0, 1) || "?");
+  return `<span class="asset-ico asset-unk" title="${escapeHtml(key)}" aria-hidden="true">${mark}</span>`;
 }
 
 /** Pair row icon — base coin only (HMC or SUP), never quote $.₿ */
