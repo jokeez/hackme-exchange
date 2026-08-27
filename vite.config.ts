@@ -8,7 +8,7 @@ import { defineConfig, type Connect, type Plugin } from "vite";
  */
 function cspPaperProdPlugin(): Plugin {
   const paperCsp =
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://hackme.tech; connect-src 'self' https://hackme.tech https://api.binance.com; base-uri 'self'; form-action 'self'; object-src 'none'";
+    "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://hackme.tech; connect-src 'self' https://hackme.tech https://api.binance.com; base-uri 'self'; form-action 'self'; object-src 'none'";
   return {
     name: "hackme-csp-paper-prod",
     transformIndexHtml(html, ctx) {
