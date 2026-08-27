@@ -78,10 +78,13 @@ const isDev = !!(import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.D
  * Never read VITE_HACKME_ADMIN_TOKEN — Vite would inline any .env value into the client
  * bundle. Admin auth stays CLI/node-only (X-Hackme-Admin-Token / X-Admin-Token).
  */
-/** Vite dev proxy only in browser — not in vitest (happy-dom has no proxy on :3000). */
+/** Vite/dev or production exchange host: same-origin hub/pool proxies (avoids CORS). */
 const useDevProxy = isDev && !isVitest && typeof window !== "undefined";
-const defaultHub = useDevProxy ? `${window.location.origin}/hub-proxy` : "https://hackme.tech";
-const defaultPool = useDevProxy
+const useProdSameOriginProxy =
+  !isDev && !isVitest && typeof window !== "undefined";
+const useHubProxy = useDevProxy || useProdSameOriginProxy;
+const defaultHub = useHubProxy ? `${window.location.origin}/hub-proxy` : "https://hackme.tech";
+const defaultPool = useHubProxy
   ? `${window.location.origin}/pool-proxy`
   : "https://hackme.tech/pool/coordinator";
 

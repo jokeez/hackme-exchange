@@ -725,6 +725,9 @@ function renderBook(): string {
   const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
   const midHint = labLive
     ? "Lab L2 mid"
+    : "Oracle · indicative";
+  const midTitle = labLive
+    ? "Lab L2 mid"
     : "Oracle · indicative (not tradeable L2)";
   return `
     <div class="book-view-tabs segmented">
@@ -740,7 +743,7 @@ function renderBook(): string {
     </div>
     <div class="ob-head"><span>Price (${pair.quote})</span><span>Amount (${pair.base})</span><span class="ob-total">Total</span></div>
     <div class="ob-asks">${asks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
-    <div class="ob-mid" title="${midHint}">
+    <div class="ob-mid" title="${midTitle}">
       <div class="ob-mid-price">${formatPrice(midPx)}</div>
       <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
       <div class="ob-mid-src muted small">${midHint}</div>

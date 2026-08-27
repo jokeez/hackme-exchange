@@ -411,6 +411,13 @@ describe("visual CSS tokens & critical rules", () => {
     expect(css).toContain("#book");
   });
 
+  it("order-book mid band fits price+spread+source without fixed 28px clip", () => {
+    expect(css).toMatch(/\.ob-mid\s*\{[^}]*min-height:\s*3\.25rem/s);
+    expect(css).not.toMatch(/\.ob-mid\s*\{[^}]*max-height:\s*28px/s);
+    expect(css).toContain(".ob-mid-src");
+    expect(css).toContain("text-overflow: ellipsis");
+  });
+
   it("styles cancel muted and volume-ratio / pnl-calendar / quick-size", () => {
     expect(css).toContain(".data-table button.link");
     expect(css).toContain("volume-ratio");
