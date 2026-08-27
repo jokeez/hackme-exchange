@@ -1299,16 +1299,24 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 .ob-row.bid .ob-bar { left: 0; background: rgba(0, 192, 115, 0.14); }
 .ob-mid {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 28px; min-height: 28px; max-height: 28px; box-sizing: border-box;
-  text-align: center; padding: 0.05rem 0.4rem;
+  /* Three lines: price + spread + source — never clip into bids/asks (was 28px). */
+  height: auto; min-height: 3.25rem; max-height: none; box-sizing: border-box;
+  gap: 0.08rem;
+  text-align: center; padding: 0.28rem 0.45rem;
   border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge);
   background: var(--panel-strip); font-family: var(--mono); color: var(--text);
+  overflow: hidden; flex-shrink: 0; z-index: 2; position: relative;
 }
-.ob-mid-price { font-weight: 700; font-size: 0.78rem; line-height: 1.15; }
-.ob-mid-src { margin-top: 0.15rem; line-height: 1.2; opacity: 0.85; }
+.ob-mid-price { font-weight: 700; font-size: 0.82rem; line-height: 1.15; }
+.ob-mid-src {
+  margin-top: 0; line-height: 1.2; opacity: 0.85;
+  font-size: 0.62rem; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .ob-mid-spread {
-  font-size: 0.52rem; font-weight: 500; color: var(--muted); margin-top: 0;
-  letter-spacing: 0.01em;
+  font-size: 0.58rem; font-weight: 500; color: var(--muted); margin-top: 0;
+  letter-spacing: 0.01em; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .volume-ratio {
   display: flex; flex-direction: column; gap: 0.12rem;
@@ -1373,7 +1381,7 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 }
 .chart-host {
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 260px;
   position: relative;
   width: 100%;
   height: auto;
