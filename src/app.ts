@@ -299,10 +299,12 @@ let orderInFlight = false;
 let custodyInFlight = false;
 
 const PAPER_BADGE = `<span class="demo-badge" title="Simulated exchange — not a real CEX">PAPER · SYNTHETIC</span>`;
+const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Simulated exchange — not a real CEX">PAPER</span>`;
 const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">DEMO/LAB · LIVE BOOK</span>`;
+const LAB_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from private lab matching engine">LAB</span>`;
 
 function bookHeaderBadge(): string {
-  return useLabMatching() ? LAB_BOOK_BADGE : PAPER_BADGE;
+  return useLabMatching() ? LAB_BOOK_BADGE_SM : PAPER_BADGE_SM;
 }
 
 function renderPanelRail(
@@ -4808,10 +4810,7 @@ function maybeShowTour(): void {
       paint();
     });
   };
-  // Click outside the card closes (backdrop intercepts the whole UI otherwise).
-  bd.addEventListener("click", (e) => {
-    if (e.target === bd) dismiss();
-  });
+  // Esc / Skip / Next dismiss — backdrop must not steal the first desk click.
   window.addEventListener("keydown", onKey);
   document.body.appendChild(bd);
   paint();

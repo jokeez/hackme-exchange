@@ -81,7 +81,9 @@ describe("price scale wheel helpers", () => {
   it("visibleBarBudget scales with pane width", () => {
     expect(visibleBarBudget(400, 8)).toBeLessThan(visibleBarBudget(1400, 8));
     expect(visibleBarBudget(800, 8)).toBeGreaterThanOrEqual(40);
-    expect(visibleBarBudget(800, 8)).toBeLessThanOrEqual(120);
+    expect(visibleBarBudget(800, 8)).toBeLessThanOrEqual(180);
+    expect(visibleBarBudget(1800, 8)).toBeGreaterThan(visibleBarBudget(800, 8));
+    expect(visibleBarBudget(1800, 8)).toBeLessThanOrEqual(180);
   });
 
   it("anchor budget stays wide even when series is short (no mega-candle stretch)", async () => {

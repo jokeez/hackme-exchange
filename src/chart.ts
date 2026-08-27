@@ -1174,16 +1174,21 @@ export function isOverPriceScale(clientX: number, hostRect: DOMRect, scaleWidth:
 export function visibleBarBudget(hostWidth: number, barSpacing: number): number {
   const usable = Math.max(160, hostWidth - 80);
   const spacing = Math.max(3, barSpacing || 8);
-  // ~40–120 candles — exchange desks never open zoomed into 3–5 mega-bars.
-  return Math.max(40, Math.min(120, Math.floor(usable / spacing)));
+  // Ultrawide: allow denser window so 1D/15m doesn't look empty.
+  return Math.max(40, Math.min(180, Math.floor(usable / spacing)));
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
-  const base = tf === "30s" || tf === "1m" ? 6 : tf === "1D" || tf === "1W" ? 10 : 8;
+  const base = tf === "30s" || tf === "1m" ? 6 : tf === "1D" || tf === "1W" ? 8 : 8;
   if (hostWidth < 480) return Math.max(4, base - 2);
   if (hostWidth < 720) return Math.max(5, base - 1);
-  if (hostWidth > 1600) return base + 1;
+  if (hostWidth > 1600) return base; // was +1 — fat bars on ultrawide
   return base;
+}
+
+export function chartRightOffset(hostWidth: number, tf: Timeframe): number {
+  if (tf === "1D" || tf === "1W") return hostWidth < 640 ? 2 : 3;
+  return hostWidth < 640 ? 4 : 6;
 }
 
 function setupDrawInteraction(
@@ -1466,7 +1471,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     },
     rightPriceScale: {
       borderColor: "rgba(255,255,255,0.08)",
-      scaleMargins: { top: 0.06, bottom: 0.18 },
+      scaleMargins: { top: 0.08, bottom: 0.14 },
       mode: opts.settings.logScale ? 1 : 0,
       entireTextOnly: true,
       autoScale: true,
@@ -1489,7 +1494,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       borderColor: "rgba(255,255,255,0.08)",
       timeVisible: true,
       secondsVisible: opts.tf === "30s" || opts.tf === "1m",
-      rightOffset: hostW < 640 ? 4 : 8,
+      rightOffset: chartRightOffset(hostW, opts.tf),
       barSpacing: spacing,
     },
     crosshair: { mode: 0 },
@@ -2177,7 +2182,7 @@ export function anchorToLatestCandle(barCount?: number): void {
   const hostW = hostEl?.clientWidth || 800;
   const tf = (lastOpts?.tf ?? "15m") as Timeframe;
   const spacing = barSpacingForWidth(hostW, tf);
-  const rightPad = hostW < 640 ? 4 : 8;
+  const rightPad = chartRightOffset(hostW, tf);
   try {
     chart.timeScale().applyOptions({
       barSpacing: spacing,

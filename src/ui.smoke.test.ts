@@ -412,10 +412,11 @@ describe("visual CSS tokens & critical rules", () => {
   });
 
   it("order-book mid band fits price+spread+source without fixed 28px clip", () => {
-    expect(css).toMatch(/\.ob-mid\s*\{[^}]*min-height:\s*3\.25rem/s);
+    expect(css).toMatch(/\.ob-mid\s*\{[^}]*min-height:\s*3\.4rem/s);
     expect(css).not.toMatch(/\.ob-mid\s*\{[^}]*max-height:\s*28px/s);
     expect(css).toContain(".ob-mid-src");
     expect(css).toContain("text-overflow: ellipsis");
+    expect(css).toMatch(/\.tour-backdrop\s*\{[^}]*pointer-events:\s*none/s);
   });
 
   it("styles cancel muted and volume-ratio / pnl-calendar / quick-size", () => {
