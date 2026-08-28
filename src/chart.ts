@@ -35,7 +35,7 @@ import {
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { chartInteractionOptions } from "./mobile";
+import { chartInteractionOptions, isMobileLayout } from "./mobile";
 
 const SCHEMES = {
   classic: { up: "#00e676", down: "#ff5252" },
@@ -1171,6 +1171,21 @@ export function isOverPriceScale(clientX: number, hostRect: DOMRect, scaleWidth:
   return clientX >= hostRect.right - w - 4;
 }
 
+/** Map a horizontal px drag on the price gutter to logical bar shift (LWC time scale). */
+export function priceGutterPanLogicalDelta(dxPx: number, barSpacing: number): number {
+  return dxPx / Math.max(1, barSpacing);
+}
+
+/** Shift a visible logical range by a horizontal px drag. */
+export function shiftLogicalRangeByPx(
+  range: { from: number; to: number },
+  dxPx: number,
+  barSpacing: number,
+): { from: number; to: number } {
+  const delta = priceGutterPanLogicalDelta(dxPx, barSpacing);
+  return { from: range.from - delta, to: range.to - delta };
+}
+
 /** How many bars fit in the pane (Binance/TV-like default window). */
 export function visibleBarBudget(hostWidth: number, barSpacing: number): number {
   const usable = Math.max(160, hostWidth - 80);
@@ -2049,9 +2064,15 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   priceWheelCleanup?.();
   priceWheelResidual = 0;
   priceWheelLastApplyMs = 0;
+  const mobile = isMobileLayout();
   let axisPointerDown = false;
+  let gutterPanning = false;
+  let gutterStartX = 0;
+  let gutterStartRange: { from: number; to: number } | null = null;
+  let gutterPointerId = -1;
 
   const onWheel = (e: WheelEvent) => {
+    if (mobile) return;
     if (!chart || !candleSeries || !hostEl) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
     // Capture + stopImmediate: LWC also zooms the price axis on wheel —
@@ -2114,6 +2135,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
   };
   const onDblClick = (e: MouseEvent) => {
+    if (mobile) return;
     if (!chart || !hostEl) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
     e.preventDefault();
@@ -2126,10 +2148,40 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   // LWC axisPressedMouseMove.price can collapse the window without our wheel
   // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
+    if (!chart) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
+    if (mobile) {
+      const lr = chart.timeScale().getVisibleLogicalRange();
+      if (!lr) return;
+      gutterPanning = true;
+      gutterPointerId = e.pointerId;
+      gutterStartX = e.clientX;
+      gutterStartRange = { from: lr.from, to: lr.to };
+      try {
+        shell.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     axisPointerDown = true;
   };
   const onPointerMove = (e: PointerEvent) => {
+    if (gutterPanning && chart && gutterStartRange) {
+      if (e.pointerId !== gutterPointerId) return;
+      const spacing = chart.timeScale().options().barSpacing ?? 8;
+      const next = shiftLogicalRangeByPx(gutterStartRange, e.clientX - gutterStartX, spacing);
+      try {
+        chart.timeScale().setVisibleLogicalRange(next);
+      } catch {
+        /* ignore invalid transient range */
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!axisPointerDown) return;
     if ((e.buttons & 1) === 0) {
       axisPointerDown = false;
@@ -2137,18 +2189,32 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
     // Intentionally no heal-while-dragging — that made vertical scale feel sticky/broken.
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: PointerEvent) => {
+    if (gutterPanning && e.pointerId === gutterPointerId) {
+      gutterPanning = false;
+      gutterStartRange = null;
+      gutterPointerId = -1;
+      try {
+        shell.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     if (!axisPointerDown) return;
     axisPointerDown = false;
     healVisiblePriceScale();
   };
   shell.addEventListener("wheel", onWheel, { passive: false, capture: true });
   shell.addEventListener("dblclick", onDblClick, { capture: true });
-  shell.addEventListener("pointerdown", onPointerDown, { capture: true });
-  window.addEventListener("pointermove", onPointerMove, { capture: true });
+  shell.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
+  window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
   window.addEventListener("pointerup", onPointerUp, { capture: true });
   window.addEventListener("pointercancel", onPointerUp, { capture: true });
   priceWheelCleanup = () => {
+    gutterPanning = false;
+    gutterStartRange = null;
+    gutterPointerId = -1;
     shell.removeEventListener("wheel", onWheel, true);
     shell.removeEventListener("dblclick", onDblClick, true);
     shell.removeEventListener("pointerdown", onPointerDown, true);
@@ -2283,6 +2349,8 @@ export function applyChartInteractionOptions(): void {
     handleScale: io.handleScale,
     handleScroll: io.handleScroll,
   });
+  const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
+  if (inner) setupPriceScaleWheel(inner);
 }
 
 /** Re-measure after panel drag, iframe chrome, or orientation change. */

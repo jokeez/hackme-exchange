@@ -137,6 +137,8 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain("touch-action: none");
     expect(app).toContain("applyChartInteractionOptions");
     expect(app).toContain("syncMobileLayoutClass");
+    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("shiftLogicalRangeByPx");
+    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("gutterPanning");
   });
 
   it("ships mobile system sheet, ticker icons, hidden draw-tools on chart", () => {
