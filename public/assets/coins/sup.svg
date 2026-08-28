@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="SUP">
+  <defs>
+    <linearGradient id="sup-ring" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="52%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="sup-face" x1="8" y1="6" x2="24" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1a0f2e"/>
+      <stop offset="45%" stop-color="#0d1830"/>
+      <stop offset="100%" stop-color="#071820"/>
+    </linearGradient>
+    <linearGradient id="sup-s" x1="10" y1="9" x2="22" y2="23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#e9d5ff"/>
+      <stop offset="40%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#67e8f9"/>
+    </linearGradient>
+    <filter id="sup-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="0.65" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Hex shell — sibling to HMC logo -->
+  <path fill="#05070d" d="M16 1.2 28.2 8.2v13.6L16 28.8 3.8 21.8V8.2Z"/>
+  <path fill="none" stroke="url(#sup-ring)" stroke-width="1.35" d="M16 2.6 26.4 8.6v11.8L16 26.4 5.6 20.4V8.6Z"/>
+  <path fill="url(#sup-face)" d="M16 4.4 24.2 9.2v9.6L16 23.6 7.8 18.8v-9.6Z"/>
+  <!-- Circuit traces (HMC family) -->
+  <g stroke="#22d3ee" stroke-width="0.45" stroke-linecap="round" opacity="0.42">
+    <path d="M8.2 11.2h4.2M19.6 11.2h4.2M8.2 20.8h3.4M20.4 20.8h3.4"/>
+    <circle cx="12.8" cy="11.2" r="0.55" fill="#a855f7" stroke="none"/>
+    <circle cx="19.2" cy="20.8" r="0.55" fill="#67e8f9" stroke="none"/>
+  </g>
+  <!-- Support mark: bold S -->
+  <path
+    fill="url(#sup-s)"
+    filter="url(#sup-glow)"
+    d="M19.35 11.05c0-1.55-1.2-2.55-3.35-2.55-1.95 0-3.25.75-3.25 2.05 0 1.15.85 1.7 2.75 2.05l1.05.2c2.55.5 3.85 1.45 3.85 3.35 0 2.15-1.85 3.45-4.95 3.45-3.15 0-5.05-1.35-5.2-3.55h2.05c.12 1.15 1.05 1.85 3.1 1.85 2.05 0 3.15-.7 3.15-1.95 0-1.1-.75-1.65-2.85-2.05l-1.1-.22c-2.35-.45-3.55-1.35-3.55-3.05 0-2 1.65-3.25 4.45-3.25 2.75 0 4.55 1.2 4.7 3.2z"
+  />
+</svg>

@@ -272,6 +272,14 @@ function applyHubEmbedLayoutPrefs(): void {
   };
 }
 
+/** Phone chart view: hide draw toolbar by default (no overlap with candles). */
+function applyMobileLayoutPrefs(): void {
+  if (!isMobileLayout() || isHubEmbed()) return;
+  if (!layoutPrefs.toolsCollapsed) {
+    layoutPrefs = { ...layoutPrefs, toolsCollapsed: true };
+  }
+}
+
 
 let oracleMeta: OracleMeta = {
   source: "fallback",
@@ -1587,7 +1595,7 @@ function renderSpot(): string {
   <div class="ticker-bar binance-ticker">
     <div class="tb-left">
       <div class="tb-pair">
-        <span class="tb-star" aria-hidden="true">◆</span>
+        <span class="tb-pair-icons">${pairAssetIcons(pair.base, pair.quote)}</span>
         <div>
           <h1>${pair.label}</h1>
           <span class="tb-sub muted small">${
@@ -1791,7 +1799,8 @@ function render(): void {
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
       <div class="sys-menu-wrap">
         <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false">⚙ System</button>
-        <div class="sys-drop hidden" id="sys-drop">
+        <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
+        <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
           <button type="button" class="sys-item" id="btn-sync-node-header">↻ Sync HMC/SUP</button>
@@ -1928,11 +1937,14 @@ let sysDropCloser: ((ev: MouseEvent) => void) | null = null;
 
 function showSystemDrop(show?: boolean): void {
   const drop = document.getElementById("sys-drop");
+  const backdrop = document.getElementById("sys-backdrop");
   const btn = document.getElementById("btn-system-status");
   if (!drop) return;
   const currentlyHidden = drop.classList.contains("hidden");
   const willOpen = show === undefined ? currentlyHidden : show;
   drop.classList.toggle("hidden", !willOpen);
+  backdrop?.classList.toggle("hidden", !willOpen);
+  document.body.classList.toggle("sys-menu-open", willOpen);
   btn?.setAttribute("aria-expanded", willOpen ? "true" : "false");
   if (sysDropCloser) {
     document.removeEventListener("click", sysDropCloser);
@@ -1944,10 +1956,7 @@ function showSystemDrop(show?: boolean): void {
       const t = ev.target as Node | null;
       if (!t) return;
       if (drop.contains(t) || btn?.contains(t)) return;
-      drop.classList.add("hidden");
-      btn?.setAttribute("aria-expanded", "false");
-      if (sysDropCloser) document.removeEventListener("click", sysDropCloser);
-      sysDropCloser = null;
+      showSystemDrop(false);
     };
     document.addEventListener("click", sysDropCloser);
   }, 0);
@@ -3862,6 +3871,7 @@ function wireEvents(): void {
     e.stopPropagation();
     showSystemDrop();
   });
+  document.getElementById("sys-backdrop")?.addEventListener("click", () => showSystemDrop(false));
   document.getElementById("sys-drop")?.addEventListener("click", (e) => e.stopPropagation());
   document.querySelectorAll("#btn-theme-hub, #btn-theme-wallet").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -4725,6 +4735,7 @@ async function refresh(): Promise<void> {
 
 export async function boot(): Promise<void> {
   applyHubEmbedLayoutPrefs();
+  applyMobileLayoutPrefs();
   applyHashToState();
   saveState(state);
   // Instant desk — never block first paint on oracle RTT / VPN / CORS.

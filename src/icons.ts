@@ -44,16 +44,31 @@ export const Ico = {
   chevronDown: () => svg(`<path d="m6 9 6 6 6-6"/>`, 12),
 } as const;
 
+const COIN_ICON_SRC: Record<string, string> = {
+  HMC: "/logo-hex.png",
+  USDT: "/assets/coins/usdt.svg",
+  BTC: "/assets/coins/btc.svg",
+  SUP: "/assets/coins/sup.svg",
+};
+
+const COIN_ICON_CLASS: Record<string, string> = {
+  HMC: "asset-hmc asset-hmc-logo",
+  USDT: "asset-usdt asset-coin-logo",
+  BTC: "asset-btc asset-coin-logo",
+  SUP: "asset-sup asset-coin-logo",
+};
+
+function coinLogoBadge(symbol: string, src: string, extraClass = ""): string {
+  const key = symbol.toUpperCase();
+  const cls = COIN_ICON_CLASS[key] ?? "asset-unk asset-coin-logo";
+  return `<span class="asset-ico ${cls} ${extraClass}" title="${escapeHtml(key)}" aria-hidden="true"><img src="${src}" alt="" width="16" height="16" decoding="async" /></span>`;
+}
+
 /** Markets list: one badge for the base asset only (no USDT/BTC stack). */
 export function assetBadge(symbol: string): string {
   const key = symbol.toUpperCase();
-  if (key === "HMC") {
-    // No inline onerror — CSP script-src 'self' blocks event-handler XSS vectors.
-    return `<span class="asset-ico asset-hmc asset-hmc-logo" title="HMC" aria-hidden="true"><img src="/logo-hex.png" alt="" width="16" height="16" decoding="async" /></span>`;
-  }
-  if (key === "SUP") {
-    return `<span class="asset-ico asset-sup" title="SUP" aria-hidden="true">S</span>`;
-  }
+  const src = COIN_ICON_SRC[key];
+  if (src) return coinLogoBadge(key, src);
   const mark = escapeHtml(key.slice(0, 1) || "?");
   return `<span class="asset-ico asset-unk" title="${escapeHtml(key)}" aria-hidden="true">${mark}</span>`;
 }
