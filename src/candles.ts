@@ -661,11 +661,11 @@ export function trimCandlesToGenesis(candles: Candle[], tf: Timeframe): Candle[]
 export function stats24h(
   candles: Candle[],
   tf: Timeframe = "15m",
-): { changePct: number; high: number; low: number; vol: number } {
-  if (candles.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
+): { changePct: number; high: number; low: number; vol: number; refOpen: number; refClose: number } {
+  if (candles.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0, refOpen: 0, refClose: 0 };
   const bars24 = Math.min(candles.length, Math.max(2, Math.ceil(86_400 / TF_SEC[tf])));
   const slice = sanitizeCandleExtremes(candles.slice(-bars24), maxBodyFracForTf(tf));
-  if (slice.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0 };
+  if (slice.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0, refOpen: 0, refClose: 0 };
   const first = slice[0]!.open;
   const last = slice[slice.length - 1]!.close;
   let high = -Infinity;
@@ -681,6 +681,8 @@ export function stats24h(
     high,
     low,
     vol,
+    refOpen: first,
+    refClose: last,
   };
 }
 

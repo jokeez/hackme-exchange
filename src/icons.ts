@@ -42,6 +42,7 @@ export const Ico = {
   trash: () => svg(`<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>`),
   lock: () => svg(`<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`),
   chevronDown: () => svg(`<path d="m6 9 6 6 6-6"/>`, 12),
+  more: () => svg(`<circle cx="12" cy="5" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.25" fill="currentColor" stroke="none"/>`),
 } as const;
 
 /** Bump when coin SVG/PNG art changes — busts CDN cache on exchange.hackme.tech. */

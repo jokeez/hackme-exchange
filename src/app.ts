@@ -54,7 +54,7 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, syncSecondaryChart, updateSecondaryChart } from "./chartSecondary";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart } from "./chartSecondary";
 import {
   authLogout,
   authRevokeAll,
@@ -123,7 +123,7 @@ import {
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { renderDepthPanel } from "./depth";
-import { renderOracleStatusHtml, type OracleMeta } from "./oracleStatus";
+import { renderOracleStatusHtml, patchOracleStatusDom, type OracleMeta } from "./oracleStatus";
 import { parseRouteHash, writeRouteHash } from "./routeHash";
 import { appendSyntheticTrade, mergeTapeRows, seedPublicTape, type TapePrint } from "./tape";
 import {
@@ -155,6 +155,7 @@ import {
   syncPctMarks,
 } from "./orderPanel";
 import { recordConvert } from "./ledger";
+import { buildPairQuote, quoteToneClass, type PairQuote } from "./quote";
 import {
   DEFAULT_SUP_REFERENCE_MID,
   applyLivePaperMids,
@@ -194,7 +195,7 @@ import {
   walletEquityFromMarket,
 } from "./store";
 import { toast } from "./toast";
-import { isMobileLayout, loadMobilePanel, loadMobileTradeSide, mobilePanelResizeEnabled, MOBILE_LAYOUT_MAX_PX, saveMobilePanel, saveMobileTradeSide, syncMobileLayoutClass, type MobilePanel } from "./mobile";
+import { isMobileLayout, loadMobilePanel, loadMobileTradeSide, mobilePanelResizeEnabled, MOBILE_LAYOUT_MAX_PX, saveMobilePanel, saveMobileTradeSide, setMobileTradeSide, syncMobileLayoutClass, type MobilePanel } from "./mobile";
 import { loadTheme, saveTheme } from "./theme";
 import type {
   Candle,
@@ -204,6 +205,7 @@ import type {
   IndicatorId,
   MainView,
   MarketSnapshot,
+  MultiPanePairs,
   MultiPaneTfs,
   OrderKind,
   OrderSide,
@@ -215,7 +217,7 @@ import type {
   TimeInForce,
   Wallet,
 } from "./types";
-import { QUICK_TFS, TIMEFRAMES, TF_SEC } from "./types";
+import { QUICK_TFS, TIMEFRAMES, TF_SEC, DEFAULT_MULTI_PANE_PAIRS } from "./types";
 
 let state = loadState();
 let theme: ThemeId = loadTheme();
@@ -255,6 +257,7 @@ let lastOhlc: Candle | null = null;
 let prevMids: Partial<Record<PairId, number>> = {};
 let tickTimer: number | undefined;
 let labBookTimer: number | undefined;
+let oracleAgeTimer: number | undefined;
 let publicTape: TapePrint[] = [];
 let bookPhase = 0;
 let announceDismissed =
@@ -291,6 +294,7 @@ function onMobileLayoutChange(): void {
   const wasMobile = document.documentElement.classList.contains("mobile-layout");
   syncMobileLayoutClass();
   const nowMobile = isMobileLayout();
+  showChartTypeDrop(false);
   if (wasMobile !== nowMobile) {
     mobileToolsOpen = false;
     document.getElementById("terminal")?.classList.remove("mobile-tools-open");
@@ -642,12 +646,10 @@ function placeOcoOrWarn(
 }
 
 function chartOpts() {
-  const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const mid = spotTradeMid();
-  const prev = candles.length >= 2 ? candles[candles.length - 2]?.close : mid;
-  return getChartMountOpts(state, state.activePair, state.activeTf, mid, {
-    lastPriceUp: mid >= (prev ?? mid),
-    yesterdayClose: yesterdayClose(candles),
+  const q = activePairQuote();
+  return getChartMountOpts(state, state.activePair, state.activeTf, q.mid, {
+    lastPriceUp: q.tone !== "down",
+    yesterdayClose: q.refOpen > 0 ? q.refOpen : yesterdayClose(state.candles[state.activePair]?.[state.activeTf] ?? []),
     watermark: `${pairById(state.activePair).label} · ${state.activeTf}`,
   });
 }
@@ -678,13 +680,63 @@ function activeTicker(): Ticker {
   return tickers[state.activePair] ?? tickerFromMarket(market!, state.activePair);
 }
 
-/** Spot header / order defaults: lab L2 mid when fixture matching is live. */
-function spotTradeMid(): number {
+/** Spot mid for any pair — same source for toolbar, market rows, and chart HUD. */
+function spotMidForPair(pairId: PairId): number {
   if (useLabMatching()) {
-    const lab = labBookMid(state.activePair);
+    const lab = labBookMid(pairId);
     if (lab > 0) return lab;
   }
-  return activeTicker().mid;
+  const blended = prevMids[pairId];
+  if (blended != null && blended > 0) return blended;
+  const tk = tickers[pairId];
+  if (tk?.mid && tk.mid > 0) return tk.mid;
+  return market ? midForPair(market, pairId) : 0;
+}
+
+/** Unified quote: one mid + 24h change from 15m candles everywhere. */
+function pairQuote(pairId: PairId = state.activePair): PairQuote {
+  return buildPairQuote({
+    pairId,
+    mid: spotMidForPair(pairId),
+    candlesByTf: state.candles[pairId],
+    fallbackTf: pairId === state.activePair ? state.activeTf : "15m",
+  });
+}
+
+function activePairQuote(): PairQuote {
+  return pairQuote(state.activePair);
+}
+
+function patchTickerBar(quote: PairQuote = activePairQuote()): void {
+  const pair = pairById(state.activePair);
+  const tone = quoteToneClass(quote.tone);
+  const priceEl = document.querySelector(".tb-price");
+  const chgEl = document.querySelector(".tb-chg");
+  const fiatEl = document.querySelector("[data-tb-usdt]") as HTMLElement | null;
+  const statsEl = document.querySelector(".tb-stats");
+  if (priceEl) {
+    priceEl.textContent = formatPrice(quote.mid);
+    priceEl.className = `tb-price ${tone}`;
+  }
+  if (chgEl) {
+    chgEl.textContent = formatPct(quote.changePct);
+    chgEl.className = `tb-chg ${tone}`;
+  }
+  if (fiatEl && market && pair.quote !== "USDT") {
+    const fx = pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1;
+    fiatEl.textContent = `≈ ${formatPrice(quote.mid * fx)} USDT`;
+  }
+  if (statsEl && quote.high24h > 0) {
+    const spans = statsEl.querySelectorAll("span.mono");
+    if (spans[0]) spans[0].textContent = formatPrice(quote.high24h);
+    if (spans[1]) spans[1].textContent = formatPrice(quote.low24h);
+    if (spans[2]) spans[2].textContent = formatVolBase(quote.vol24h, pair.base);
+  }
+}
+
+/** Spot header / order defaults: lab L2 mid when fixture matching is live. */
+function spotTradeMid(): number {
+  return spotMidForPair(state.activePair);
 }
 
 function filteredPairs() {
@@ -710,9 +762,7 @@ function renderMarketsList(): string {
     </div>`;
   }
   const row = (p: (typeof PAIRS)[0]) => {
-    const t = tickers[p.id];
-    const c15 = state.candles[p.id]?.["15m"];
-    const ch = c15?.length ? stats24h(c15, "15m").changePct : (t?.change24hPct ?? 0);
+    const q = pairQuote(p.id);
     const active = p.id === state.activePair ? "active" : "";
     const starred = state.favoritePairs.includes(p.id) ? "on" : "";
     return `<div class="market-row-wrap ${active}">
@@ -723,8 +773,8 @@ function renderMarketsList(): string {
         <span class="mr-sym" title="${p.label}"><strong>${p.base}</strong><span class="muted">/${p.quote}</span></span>
       </div>
       <div class="mr-right">
-        <span class="mono mr-px">${t ? formatPriceCompact(t.mid) : "—"}</span>
-        <span class="mono mr-chg ${pctTone(ch)}">${formatPct(ch)}</span>
+        <span class="mono mr-px">${q.mid > 0 ? formatPriceCompact(q.mid) : "—"}</span>
+        <span class="mono mr-chg ${quoteToneClass(q.tone)}">${formatPct(q.changePct)}</span>
       </div>
     </button></div>`;
   };
@@ -870,6 +920,29 @@ function renderTape(): string {
       </div>`,
     )
     .join("");
+}
+
+function renderMobileTradeTape(): string {
+  ensurePublicTape();
+  const rows = useLabMatching()
+    ? mergeTapeRows(state.trades, [], state.activePair, 8)
+    : mergeTapeRows(state.trades, publicTape, state.activePair, 8);
+  if (!rows.length) {
+    return `<div class="mobile-tape-empty muted small">No trades yet</div>`;
+  }
+  return rows
+    .map(
+      (t) => `<div class="mobile-tape-row ${t.side === "buy" ? "up" : "down"}">
+        <span class="mono">${formatPrice(t.price)}</span>
+        <span class="mono dim">${formatNum(t.amountBase, 2)}</span>
+      </div>`,
+    )
+    .join("");
+}
+
+function patchMobileTradeTape(): void {
+  const el = document.getElementById("mobile-trade-tape");
+  if (el) el.innerHTML = renderMobileTradeTape();
 }
 
 function formatTradeFee(t: { feeQuote: number; feeHmc?: number; feePaidInHmc: boolean }, quoteSymbol = "USDT"): string {
@@ -1576,12 +1649,12 @@ function markConvertPct(pct: number): void {
 function renderSpot(): string {
   const pair = pairById(state.activePair);
   const t = activeTicker();
-  /** Lab book mid for order defaults / slip — pool oracle mid can sit outside API price_band. */
-  const tradeMid = spotTradeMid();
+  const quote = activePairQuote();
+  const tradeMid = quote.mid;
+  const s24 = quote;
+  const ch = quote.changePct;
+  const tone = quoteToneClass(quote.tone);
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const candles15 = state.candles[state.activePair]?.["15m"] ?? candles;
-  const s24 = stats24h(candles15, "15m");
-  const ch = s24.changePct;
   const pnl = market ? pnlPct(state, market) : 0;
   const av = availBalance(pair);
   const displayTip = state.chartMode === "heikin" ? (getDisplayedLastCandle() ?? candles.slice(-1)[0] ?? null) : (candles.slice(-1)[0] ?? null);
@@ -1640,8 +1713,8 @@ function renderSpot(): string {
         <span class="tb-chev" aria-hidden="true">▾</span>
       </button>
       <div class="tb-quote">
-        <span class="tb-price ${ch >= 0 ? "up" : "down"}">${formatPrice(tradeMid)}</span>
-        <span class="tb-chg ${pctTone(ch)}">${formatPct(ch)}</span>
+        <span class="tb-price ${tone}">${formatPrice(tradeMid)}</span>
+        <span class="tb-chg ${tone}">${formatPct(ch)}</span>
         ${
           pair.quote !== "USDT" && market
             ? `<span class="tb-fiat muted small" data-tb-usdt="1">≈ ${formatPrice(
@@ -1653,9 +1726,9 @@ function renderSpot(): string {
       </div>
     </div>
     <div class="tb-stats">
-      <div><label>24h High</label><span class="mono">${formatPrice(s24.high || t.high24h)}</span></div>
-      <div><label>24h Low</label><span class="mono">${formatPrice(s24.low || t.low24h)}</span></div>
-      <div><label>24h Vol (${pair.base})</label><span class="mono">${formatVolBase(s24.vol || t.volume24hBase, pair.base)}</span></div>
+      <div><label>24h High</label><span class="mono">${formatPrice(s24.high24h || t.high24h)}</span></div>
+      <div><label>24h Low</label><span class="mono">${formatPrice(s24.low24h || t.low24h)}</span></div>
+      <div><label>24h Vol (${pair.base})</label><span class="mono">${formatVolBase(s24.vol24h || t.volume24hBase, pair.base)}</span></div>
       <div><label>Spread</label><span class="mono">${formatNum(t.spreadBps / 100, 3)}%</span></div>
     </div>
     <div class="tb-right">
@@ -1675,7 +1748,7 @@ function renderSpot(): string {
       ? `<div class="recent-pairs" id="recent-pairs" aria-label="Recent markets">${recentPairs
           .map((p) => {
             const meta = pairById(p);
-            const mid = tickers[p]?.mid;
+            const mid = pairQuote(p).mid;
             return `<button type="button" class="recent-pair" data-recent-pair="${p}"><span>${meta.label}</span>${
               mid ? `<span class="mono muted">${formatPrice(mid)}</span>` : ""
             }</button>`;
@@ -1691,10 +1764,15 @@ function renderSpot(): string {
         <button type="button" class="btn-panel-toggle" id="btn-collapse-book" title="Hide order book">‹</button>
       </div>
       <div id="book">${renderBook()}</div>
+      <div class="mobile-trade-tape-wrap" id="mobile-trade-tape-wrap" aria-label="Recent trades">
+        <div class="mobile-trade-tape-head muted small">Trades</div>
+        <div class="mobile-trade-tape" id="mobile-trade-tape">${renderMobileTradeTape()}</div>
+      </div>
       <div class="panel-resize" id="resize-book" title="Drag to resize"></div>
     </aside>
 
     <section class="col-center">
+      <div class="chart-chrome" id="chart-chrome">
       <div class="chart-topbar">
         <div class="tf-block">
           ${QUICK_TFS.map((tf) => `<button type="button" class="tfq ${tf === state.activeTf ? "active" : ""}" data-tf="${tf}">${tf}</button>`).join("")}
@@ -1710,16 +1788,14 @@ function renderSpot(): string {
           <button type="button" class="layout-chip ${!layoutPrefs.rightCollapsed ? "active" : ""}" id="chip-right" data-panel="right" title="Markets" aria-pressed="${!layoutPrefs.rightCollapsed ? "true" : "false"}">Mkts</button>
         </div>
         <div class="chart-mode-menu">
-          <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type" aria-label="Chart type">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}${Ico.chevronDown()}</button>
-          <div class="mode-drop hidden" id="chart-type-drop">
-            ${chartModes.map((m) => `<button type="button" class="cm ${m.id === state.chartMode ? "active" : ""}" data-mode="${m.id}">${m.label}</button>`).join("")}
-          </div>
+          <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type" aria-label="Chart type" aria-haspopup="true" aria-expanded="false">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}<span class="ico-chev" aria-hidden="true">${Ico.chevronDown()}</span></button>
+          <button type="button" class="btn-ico btn-mobile-chart-more" id="btn-mobile-chart-more" title="More chart tools" aria-label="More chart tools" aria-haspopup="true" aria-expanded="false">${Ico.more()}</button>
         </div>
         <div class="chart-actions">
           <button type="button" class="btn-ico btn-mobile-tools ${mobileToolsOpen ? "active" : ""}" id="btn-mobile-tools" title="Drawing tools" aria-label="Drawing tools" aria-pressed="${mobileToolsOpen ? "true" : "false"}">${Ico.mousePointer()}</button>
           <button type="button" class="btn-ico" id="btn-goto-date" title="Go to date" aria-label="Go to date">${Ico.clock()}</button>
           <button type="button" class="btn-ico" id="btn-indicators" title="Indicators" aria-label="Indicators">${Ico.activity()}</button>
-          <button type="button" class="btn-ico" id="btn-overlays" title="Overlays" aria-label="Overlays">${Ico.list()}</button>
+          <button type="button" class="btn-ico" id="btn-overlays" aria-label="Overlays">${Ico.list()}</button>
           <button type="button" class="btn-ico" id="btn-chart-settings" title="Chart style" aria-label="Chart style">${Ico.settings()}</button>
           <button type="button" class="btn-ico" id="btn-screenshot" title="Screenshot" aria-label="Screenshot">${Ico.camera()}</button>
           <button type="button" class="btn-ico ${state.multiChartLayout !== "1" ? "active" : ""}" id="btn-multi" title="Multi chart" aria-label="Multi chart">${Ico.layout()}</button>
@@ -1728,6 +1804,7 @@ function renderSpot(): string {
       </div>
       <div class="ind-tabs compact" id="ind-tabs">
         ${indicators.map((i) => `<button type="button" class="ind ${state.chartSettings.indicators[i.id] ? "active" : ""}" data-ind="${i.id}">${i.label}</button>`).join("")}
+      </div>
       </div>
       <div class="chart-body ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""}">
         ${renderPanelRail("tools", "btn-expand-tools", "Tools", "Show drawing tools")}
@@ -1799,8 +1876,23 @@ function renderSpot(): string {
   <div class="mining-strip mono" id="mining-strip">
     ${pair.label} · ${formatGh(poolLive!.poolGh)} · ${poolLive!.workers} workers · reward/M ${formatRewardPerM(poolLive!.rewardPerM)} · #${formatNum(poolLive!.blockHeight, 0)}
   </div>
-  ${renderMobileChartTradeBar()}
-  <div class="mobile-panel-wrap mobile-bottom-nav">${renderMobilePanelTabs()}</div>
+  <div class="mobile-footer-stack" id="mobile-footer-stack">
+    ${renderMobileChartTradeBar()}
+    <div class="mobile-panel-wrap mobile-bottom-nav">${renderMobilePanelTabs()}</div>
+  </div>
+  <div class="chart-type-backdrop hidden" id="chart-type-backdrop" aria-hidden="true"></div>
+  <div class="mode-drop hidden" id="chart-type-drop" role="menu" aria-label="Chart type">
+    ${chartModes.map((m) => `<button type="button" class="cm ${m.id === state.chartMode ? "active" : ""}" data-mode="${m.id}" role="menuitem">${m.label}</button>`).join("")}
+  </div>
+  <div class="chart-more-backdrop hidden" id="chart-more-backdrop" aria-hidden="true"></div>
+  <div class="mode-drop hidden" id="chart-more-drop" role="menu" aria-label="Chart tools">
+    <p class="muted small sheet-title">Chart tools</p>
+    <button type="button" class="cm" data-chart-more="indicators" role="menuitem">Indicators</button>
+    <button type="button" class="cm" data-chart-more="overlays" role="menuitem">Overlays</button>
+    <button type="button" class="cm" data-chart-more="style" role="menuitem">Chart style</button>
+    <button type="button" class="cm" data-chart-more="goto" role="menuitem">Go to date</button>
+    <button type="button" class="cm" data-chart-more="screenshot" role="menuitem">Screenshot</button>
+  </div>
   </div>
   <div class="kbd-hint">? help · Shift+B/S market · Esc cancel all · 1-0 TF · Alt+R reset · charts by TradingView</div>`;
 }
@@ -1976,6 +2068,137 @@ function wireBookClicks(): void {
 }
 
 let sysDropCloser: ((ev: MouseEvent) => void) | null = null;
+let chartTypeDropOpenedAt = 0;
+let chartMoreDropOpenedAt = 0;
+
+function mobileFooterInsetPx(): number {
+  const footer = document.getElementById("mobile-footer-stack");
+  if (!footer) return 0;
+  const style = getComputedStyle(footer);
+  if (style.display === "none" || style.visibility === "hidden") return 0;
+  const h = footer.getBoundingClientRect().height;
+  return h > 0 ? Math.ceil(h) : 0;
+}
+
+function positionChartTypeDrop(): void {
+  const drop = document.getElementById("chart-type-drop");
+  const btn = document.getElementById("btn-chart-type");
+  if (!drop || !btn || drop.classList.contains("hidden")) return;
+
+  const margin = 8;
+  const mobileSheet = isMobileLayout();
+  drop.classList.toggle("mode-drop-sheet", mobileSheet);
+  if (mobileSheet) {
+    const footerInset = mobileFooterInsetPx();
+    drop.style.position = "fixed";
+    drop.style.left = "0";
+    drop.style.right = "0";
+    drop.style.bottom = `${footerInset}px`;
+    drop.style.top = "auto";
+    drop.style.zIndex = "2000";
+    drop.style.maxHeight = `min(48vh, calc(100dvh - ${footerInset + 96}px))`;
+    drop.style.overflowY = "auto";
+    return;
+  }
+
+  drop.style.position = "fixed";
+  drop.style.zIndex = "2000";
+  const rect = btn.getBoundingClientRect();
+  drop.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - 148))}px`;
+  drop.style.right = "auto";
+  drop.style.top = `${rect.bottom + margin}px`;
+  drop.style.bottom = "auto";
+  drop.style.maxHeight = `${Math.max(120, window.innerHeight - rect.bottom - margin * 2)}px`;
+  drop.style.overflowY = "auto";
+}
+
+function showChartTypeDrop(show?: boolean): void {
+  const drop = document.getElementById("chart-type-drop");
+  const backdrop = document.getElementById("chart-type-backdrop");
+  const btn = document.getElementById("btn-chart-type");
+  if (!drop) return;
+  const currentlyHidden = drop.classList.contains("hidden");
+  const willOpen = show === undefined ? currentlyHidden : show;
+  drop.classList.toggle("hidden", !willOpen);
+  backdrop?.classList.toggle("hidden", !willOpen);
+  backdrop?.setAttribute("aria-hidden", willOpen ? "false" : "true");
+  btn?.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  document.body.classList.toggle("chart-type-open", willOpen);
+  if (willOpen) {
+    chartTypeDropOpenedAt = Date.now();
+    showChartMoreDrop(false);
+    if (backdrop) document.body.appendChild(backdrop);
+    document.body.appendChild(drop);
+    requestAnimationFrame(() => positionChartTypeDrop());
+  } else {
+    drop.classList.remove("mode-drop-sheet");
+    drop.style.cssText = "";
+    const host = document.querySelector(".spot-layout");
+    if (host) {
+      if (backdrop) host.appendChild(backdrop);
+      host.appendChild(drop);
+    }
+  }
+}
+
+function positionChartMoreDrop(): void {
+  const drop = document.getElementById("chart-more-drop");
+  const btn = document.getElementById("btn-mobile-chart-more");
+  if (!drop || !btn || drop.classList.contains("hidden")) return;
+  const margin = 8;
+  const footerInset = mobileFooterInsetPx();
+  const rect = btn.getBoundingClientRect();
+  if (isMobileLayout()) {
+    drop.classList.add("mode-drop-sheet");
+    drop.style.position = "fixed";
+    drop.style.left = `${margin}px`;
+    drop.style.right = `${margin}px`;
+    drop.style.bottom = `${footerInset + margin}px`;
+    drop.style.top = "auto";
+    drop.style.zIndex = "2000";
+    drop.style.maxHeight = `${Math.max(160, window.innerHeight - footerInset - margin * 2 - 48)}px`;
+    drop.style.overflowY = "auto";
+    return;
+  }
+  drop.classList.remove("mode-drop-sheet");
+  drop.style.position = "fixed";
+  drop.style.top = `${rect.bottom + 4}px`;
+  drop.style.left = `${Math.max(8, Math.min(rect.left - 80, window.innerWidth - 200))}px`;
+  drop.style.right = "auto";
+  drop.style.bottom = "auto";
+  drop.style.zIndex = "1200";
+  drop.style.maxHeight = `${Math.max(120, window.innerHeight - rect.bottom - 16)}px`;
+  drop.style.overflowY = "auto";
+}
+
+function showChartMoreDrop(show?: boolean): void {
+  const drop = document.getElementById("chart-more-drop");
+  const backdrop = document.getElementById("chart-more-backdrop");
+  const btn = document.getElementById("btn-mobile-chart-more");
+  if (!drop) return;
+  const currentlyHidden = drop.classList.contains("hidden");
+  const willOpen = show === undefined ? currentlyHidden : show;
+  drop.classList.toggle("hidden", !willOpen);
+  backdrop?.classList.toggle("hidden", !willOpen);
+  backdrop?.setAttribute("aria-hidden", willOpen ? "false" : "true");
+  btn?.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  document.body.classList.toggle("chart-more-open", willOpen);
+  if (willOpen) {
+    chartMoreDropOpenedAt = Date.now();
+    showChartTypeDrop(false);
+    if (backdrop) document.body.appendChild(backdrop);
+    document.body.appendChild(drop);
+    requestAnimationFrame(() => positionChartMoreDrop());
+  } else {
+    drop.classList.remove("mode-drop-sheet");
+    drop.style.cssText = "";
+    const host = document.querySelector(".spot-layout");
+    if (host) {
+      if (backdrop) host.appendChild(backdrop);
+      host.appendChild(drop);
+    }
+  }
+}
 
 function positionSystemDrop(): void {
   const drop = document.getElementById("sys-drop");
@@ -2049,6 +2272,7 @@ function refreshAfterLabTrade(): void {
   refreshActivityPanel();
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
+  patchMobileTradeTape();
 }
 
 /**
@@ -2553,33 +2777,44 @@ function runLockedLabOrder(work: () => Promise<void>): void {
   });
 }
 
-function fillOrderPanelAtPrice(side: "buy" | "sell", kind: "limit" | "stop_limit", price: number): void {
+function fillOrderPanelAtPrice(
+  side: "buy" | "sell",
+  kind: "limit" | "stop_limit",
+  price: number,
+  pairId: PairId = state.activePair,
+): void {
   uiType = kind;
-  setFormPrice(side, price, state.activePair);
+  setFormPrice(side, price, pairId);
   const stopInp = document.getElementById(`${side}-stop`) as HTMLInputElement | null;
-  if (kind === "stop_limit" && stopInp) stopInp.value = tickInputValue(price, state.activePair);
+  if (kind === "stop_limit" && stopInp) stopInp.value = tickInputValue(price, pairId);
   syncOrderTypeTabs(kind);
   toggleOrderFields();
   updatePreviewForSide(side);
+  if (isMobileLayout()) setMobileTradeSide(side);
   document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit", price: number): void {
-  const pair = pairById(state.activePair);
+function quickPlaceFromChart(
+  side: "buy" | "sell",
+  kind: "limit" | "stop_limit",
+  price: number,
+  pairId: PairId = state.activePair,
+): void {
+  const pair = pairById(pairId);
   const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
   let amt = Number(amtInp?.value ?? 0);
   if (amt <= 0) {
     if (!market || !(price > 0)) {
       toast("Insufficient balance — set amount", "warn");
-      fillOrderPanelAtPrice(side, kind, price);
+      fillOrderPanelAtPrice(side, kind, price, pairId);
       return;
     }
-    const mid = midForPair(market, state.activePair);
-    amt = maxOrderBaseAmount(state, market, state.activePair, side, price, kind, 0.25, mid);
+    const mid = midForPair(market, pairId);
+    amt = maxOrderBaseAmount(state, market, pairId, side, price, kind, 0.25, mid);
   }
   if (amt <= 0) {
     toast("Insufficient balance — set amount", "warn");
-    fillOrderPanelAtPrice(side, kind, price);
+    fillOrderPanelAtPrice(side, kind, price, pairId);
     return;
   }
   if (useLabMatching()) {
@@ -2588,19 +2823,19 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
       return;
     }
     runLockedLabOrder(async () => {
-      await refreshLabBook(state.activePair);
+      await refreshLabBook(pairId);
       if (!paperGuardsOrWarn(side, kind, amt, price)) return;
       if (kind === "limit") {
-        const mid = labBookMid(state.activePair) || (market ? midForPair(market, state.activePair) : price);
+        const mid = labBookMid(pairId) || (market ? midForPair(market, pairId) : price);
         const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
         if (!check.ok) {
           toast(check.reason, "warn");
-          fillOrderPanelAtPrice(side, kind, price);
+          fillOrderPanelAtPrice(side, kind, price, pairId);
           return;
         }
         const lab = await placeLabOrder(
           state,
-          state.activePair,
+          pairId,
           side,
           "limit",
           amt,
@@ -2617,16 +2852,16 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
         refreshAfterLabTrade();
         return;
       }
-      const mid = labBookMid(state.activePair) || (market ? midForPair(market, state.activePair) : price);
+      const mid = labBookMid(pairId) || (market ? midForPair(market, pairId) : price);
       const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
       if (!check.ok) {
         toast(check.reason, "warn");
-        fillOrderPanelAtPrice(side, kind, price);
+        fillOrderPanelAtPrice(side, kind, price, pairId);
         return;
       }
       const lab = await placeLabOrder(
         state,
-        state.activePair,
+        pairId,
         side,
         "stop_limit",
         amt,
@@ -2645,18 +2880,18 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
   }
   if (!paperGuardsOrWarn(side, kind, amt, price)) return;
   if (kind === "limit") {
-    const mid = market ? midForPair(market, state.activePair) : price;
+    const mid = market ? midForPair(market, pairId) : price;
     const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
     if (!check.ok) {
       toast(check.reason, "warn");
-      fillOrderPanelAtPrice(side, kind, price);
+      fillOrderPanelAtPrice(side, kind, price, pairId);
       return;
     }
     if (check.immediate && market) {
       const quote = price * amt;
-      const pair = pairById(state.activePair);
-      const fee = calcFee(state, market, state.activePair, quote, "taker");
-      const res = executeFill(state, market, state.activePair, side, price, amt, quote, "limit", false, true);
+      const pair = pairById(pairId);
+      const fee = calcFee(state, market, pairId, quote, "taker");
+      const res = executeFill(state, market, pairId, side, price, amt, quote, "limit", false, true);
       if (!res.ok) { toast(res.reason, "warn"); return; }
       toast(`${side.toUpperCase()} filled @ ${formatPrice(price)} · ${previewFeeLabel(fee, pair.quote)}`, "ok");
       saveState(state);
@@ -2664,16 +2899,16 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
       document.getElementById("activity-body")!.innerHTML = renderActivityBody();
       return;
     }
-    placeOrderOrWarn(state.activePair, side, "limit", amt, price, undefined, undefined, uiTif, uiPostOnly);
+    placeOrderOrWarn(pairId, side, "limit", amt, price, undefined, undefined, uiTif, uiPostOnly);
   } else {
-    const mid = market ? midForPair(market, state.activePair) : price;
+    const mid = market ? midForPair(market, pairId) : price;
     const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
     if (!check.ok) {
       toast(check.reason, "warn");
-      fillOrderPanelAtPrice(side, kind, price);
+      fillOrderPanelAtPrice(side, kind, price, pairId);
       return;
     }
-    placeOrderOrWarn(state.activePair, side, "stop_limit", amt, price, price, undefined, uiTif, uiPostOnly);
+    placeOrderOrWarn(pairId, side, "stop_limit", amt, price, price, undefined, uiTif, uiPostOnly);
   }
   saveState(state);
   toast(`${kind === "limit" ? "Limit" : "Stop"} ${side} @ ${formatPrice(price)}`, "ok");
@@ -2685,28 +2920,35 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
   document.getElementById("activity-body")!.innerHTML = renderActivityBody();
 }
 
-function handleChartContextAction(action: string, price: number): void {
+function handleChartContextAction(
+  action: string,
+  price: number,
+  ctx?: { pairId: PairId; paneHostId: string },
+): void {
+  const pairId = ctx?.pairId ?? state.activePair;
+  const paneHostId = ctx?.paneHostId ?? "chart-host";
+  const isMainPane = paneHostId === "chart-host";
   switch (action) {
     case "buy_limit":
-      quickPlaceFromChart("buy", "limit", price);
+      quickPlaceFromChart("buy", "limit", price, pairId);
       break;
     case "buy_stop":
-      quickPlaceFromChart("buy", "stop_limit", price);
+      quickPlaceFromChart("buy", "stop_limit", price, pairId);
       break;
     case "sell_limit":
-      quickPlaceFromChart("sell", "limit", price);
+      quickPlaceFromChart("sell", "limit", price, pairId);
       break;
     case "sell_stop":
-      quickPlaceFromChart("sell", "stop_limit", price);
+      quickPlaceFromChart("sell", "stop_limit", price, pairId);
       break;
     case "create_order":
-      fillOrderPanelAtPrice("buy", "limit", price);
+      fillOrderPanelAtPrice("buy", "limit", price, pairId);
       toast(`Price → ${formatPrice(price)}`, "info");
       break;
     case "add_alert": {
       state.priceAlerts.push({
         id: uid(),
-        pairId: state.activePair,
+        pairId,
         price,
         fired: false,
         createdAt: Date.now(),
@@ -2720,7 +2962,8 @@ function handleChartContextAction(action: string, price: number): void {
       break;
     }
     case "reset_view":
-      resetChartView();
+      if (isMainPane) resetChartView();
+      else resetSecondaryPaneView(paneHostId);
       toast("Chart view reset", "info");
       break;
     case "copy_price":
@@ -2738,7 +2981,7 @@ function handleChartContextAction(action: string, price: number): void {
       }).catch(() => toast("Clipboard read blocked", "warn"));
       break;
     case "object_tree": {
-      const drawings = state.drawings.filter((d) => d.pairId === state.activePair);
+      const drawings = state.drawings.filter((d) => d.pairId === pairId);
       showObjectTreeModal(
         drawings.map((d) => ({ id: d.id, tool: d.tool, text: d.text })),
         (id) => {
@@ -2748,21 +2991,23 @@ function handleChartContextAction(action: string, price: number): void {
           toast("Drawing removed", "info");
         },
         () => {
-          state.drawings = state.drawings.filter((d) => d.pairId !== state.activePair);
+          state.drawings = state.drawings.filter((d) => d.pairId !== pairId);
           saveState(state);
-          refreshDrawings([]);
+          refreshDrawings(state.drawings.filter((d) => d.pairId === state.activePair));
           toast("All drawings cleared", "info");
         },
       );
       break;
     }
     case "remove_indicators":
+      if (!isMainPane) break;
       saveChartPatch({
         chartSettings: clearAllIndicators(state.chartSettings),
         indicatorConfig: clearIndicatorConfig(),
       });
       break;
     case "toggle_marks":
+      if (!isMainPane) break;
       state.chartOverlays.showVolume = !state.chartOverlays.showVolume;
       saveState(state);
       applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
@@ -2772,6 +3017,19 @@ function handleChartContextAction(action: string, price: number): void {
       showChartStyleModal(state, (patch) => saveChartPatch(patch));
       break;
   }
+}
+
+function openPaneContextMenu(pairId: PairId, paneHostId: string, price: number, x: number, y: number): void {
+  const pair = pairById(pairId);
+  const isMain = paneHostId === "chart-host";
+  showChartContextMenu(x, y, price, {
+    baseSymbol: pair.base,
+    indicatorCount: isMain ? countActiveIndicators(state.chartSettings, state.indicatorConfig) : 0,
+    marksHidden: isMain ? !state.chartOverlays.showVolume : true,
+    onOpen: () => setContextPriceMarker(null),
+    onClose: () => setContextPriceMarker(null),
+    onAction: (action, p) => handleChartContextAction(action, p, { pairId, paneHostId }),
+  });
 }
 
 function refreshOhlcLegendIdle(): void {
@@ -2816,18 +3074,7 @@ function mountChartPanel(): void {
       refreshOrderLines(state.orders.filter((o) => o.pairId === state.activePair));
       toast(`Order price → ${formatPrice(price)}`, "info");
     },
-    onContextMenu: (price, x, y) => {
-      const pair = pairById(state.activePair);
-      showChartContextMenu(x, y, price, {
-        baseSymbol: pair.base,
-        indicatorCount: countActiveIndicators(state.chartSettings, state.indicatorConfig),
-        marksHidden: !state.chartOverlays.showVolume,
-        // No sticky orange price line — RMB is context menu only.
-        onOpen: () => setContextPriceMarker(null),
-        onClose: () => setContextPriceMarker(null),
-        onAction: (action, p) => handleChartContextAction(action, p),
-      });
-    },
+    onContextMenu: (price, x, y) => openPaneContextMenu(state.activePair, "chart-host", price, x, y),
     onUpdateDrawing: (d) => {
       const i = state.drawings.findIndex((x) => x.id === d.id);
       if (i >= 0) state.drawings[i] = d;
@@ -2858,7 +3105,8 @@ function mountChartPanel(): void {
         const n = state.multiChartLayout === "4" ? 4 : 2;
         for (let i = 2; i <= n; i++) {
           const ptf = paneTf(i);
-          const c2 = all[ptf] ?? [];
+          const pid = panePair(i);
+          const c2 = state.candles[pid]?.[ptf] ?? [];
           if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
         }
       }
@@ -2888,6 +3136,31 @@ function paneTf(pane: number): Timeframe {
   return tfs[idx] ?? state.secondaryTf ?? "1H";
 }
 
+function panePair(pane: number): PairId {
+  if (pane <= 1) return state.activePair;
+  const idx = pane - 2;
+  const pairs = state.multiPanePairs ?? DEFAULT_MULTI_PANE_PAIRS;
+  return pairs[idx] ?? state.activePair;
+}
+
+function setPanePair(pane: number, pairId: PairId): void {
+  if (pane <= 1) {
+    if (pairId === state.activePair) return;
+    state.activePair = pairId;
+    saveState(state);
+    syncRouteHash();
+    render();
+    refresh();
+    return;
+  }
+  const next = [...(state.multiPanePairs ?? DEFAULT_MULTI_PANE_PAIRS)] as MultiPanePairs;
+  if (next[pane - 2] === pairId) return;
+  next[pane - 2] = pairId;
+  state.multiPanePairs = next;
+  saveState(state);
+  syncMultiCharts();
+}
+
 function setPaneTf(pane: number, tf: Timeframe): void {
   if (pane <= 1) {
     state.activeTf = tf;
@@ -2912,51 +3185,67 @@ function syncMultiCharts(): void {
     destroySecondaryChart();
     return;
   }
-  const pair = pairById(state.activePair);
+  if (market) ensureCandles(state, market);
+  const pairOpts = PAIRS.map((p) => ({ id: p.id, label: p.label }));
   const n = state.multiChartLayout === "4" ? 4 : 2;
   for (let i = 2; i <= n; i++) {
     const host = document.getElementById(`chart-host-${i}`);
     if (!host) continue;
+    const pairId = panePair(i);
+    const pair = pairById(pairId);
     const tf = paneTf(i);
-    const c = state.candles[state.activePair]?.[tf] ?? [];
-    if (c.length < 2) continue;
+    const c = state.candles[pairId]?.[tf] ?? [];
+    if (c.length < 2) {
+      host.innerHTML = `<div class="sub-chart-chrome"><span class="muted small">Loading ${pair.label} · ${tf}</span></div>`;
+      continue;
+    }
     syncSecondaryChart(host, c, {
+      pairId,
       pairLabel: pair.label,
       tf,
+      pairs: pairOpts,
       timeframes: TIMEFRAMES,
       onTfChange: (next) => setPaneTf(i, next),
+      onPairChange: (next) => setPanePair(i, next),
+      onContextMenu: (price, x, y) => openPaneContextMenu(pairId, `chart-host-${i}`, price, x, y),
+      getDrawings: () => state.drawings.filter((d) => d.pairId === pairId),
+      drawingsLocked: () => state.drawingsLocked,
+      onAddDrawing: (d) => {
+        if (state.drawings.length >= MAX_DRAWINGS) {
+          toast(`Drawing limit (${MAX_DRAWINGS}) — delete some first`, "warn");
+          return;
+        }
+        state.drawings.push(d);
+        saveState(state);
+        refreshDrawings(state.drawings.filter((x) => x.pairId === state.activePair));
+      },
+      onUpdateDrawing: (d) => {
+        const idx = state.drawings.findIndex((x) => x.id === d.id);
+        if (idx >= 0) state.drawings[idx] = d;
+        saveState(state);
+        refreshDrawings(state.drawings.filter((x) => x.pairId === state.activePair));
+      },
     });
   }
-  requestAnimationFrame(() => {
+  const resizeAll = () => {
+    resizeChart();
     resizeSecondaryCharts();
-    requestAnimationFrame(() => resizeSecondaryCharts());
+  };
+  requestAnimationFrame(() => {
+    resizeAll();
+    requestAnimationFrame(() => {
+      resizeAll();
+      requestAnimationFrame(resizeAll);
+    });
   });
 }
 
 function patchLive(): void {
   if (state.mainView !== "spot") return;
   markPerf("patchLive-start");
-  const t = activeTicker();
-  const tradeMid = spotTradeMid();
-  const pair = pairById(state.activePair);
-  const candles15 = state.candles[state.activePair]?.["15m"] ?? state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const s24 = stats24h(candles15, "15m");
-  const ch = s24.changePct;
-  const priceEl = document.querySelector(".tb-price");
-  const chgEl = document.querySelector(".tb-chg");
-  const fiatEl = document.querySelector("[data-tb-usdt]") as HTMLElement | null;
-  if (priceEl) {
-    priceEl.textContent = formatPrice(tradeMid);
-    priceEl.className = `tb-price ${ch >= 0 ? "up" : "down"}`;
-  }
-  if (chgEl) {
-    chgEl.textContent = formatPct(ch);
-    chgEl.className = `tb-chg ${ch >= 0 ? "up" : "down"}`;
-  }
-  if (fiatEl && market && pair.quote !== "USDT") {
-    const fx = pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1;
-    fiatEl.textContent = `≈ ${formatPrice(tradeMid * fx)} USDT`;
-  }
+  const quote = activePairQuote();
+  patchTickerBar(quote);
+  patchMarketRowsInPlace();
   // Book/tape DOM is heavier — throttle like microTick (avoid full rewire every call).
   throttledBookTapePatch();
   if (chartMounted) {
@@ -2970,20 +3259,20 @@ function patchLive(): void {
       setCandleData(candles, opts, { preserveLogicalRange: true });
     }
     refreshOrderLines(opts.orders, opts.alerts);
-    updateLivePriceHud(tradeMid, ch >= 0, candleCountdown(state.activeTf));
+    updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
     if (state.multiChartLayout !== "1") {
       const n = state.multiChartLayout === "4" ? 4 : 2;
       for (let i = 2; i <= n; i++) {
         const tf = paneTf(i);
-        const c2 = state.candles[state.activePair]?.[tf] ?? [];
+        const pid = panePair(i);
+        const c2 = state.candles[pid]?.[tf] ?? [];
         if (c2.length) {
-          // Secondary gap recovery is inside updateSecondaryChart try/catch → full set.
           updateSecondaryChart(c2, `chart-host-${i}`);
         }
       }
     }
   }
-  evaluatePriceAlerts(tradeMid);
+  evaluatePriceAlerts(quote.mid);
   const strip = document.getElementById("mining-strip");
   if (strip && poolLive) {
     const p = pairById(state.activePair);
@@ -3006,6 +3295,7 @@ const throttledBookTapePatch = throttle(() => {
   }
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
+  patchMobileTradeTape();
 }, 350);
 
 function previewFeeLabel(fee: { feeQuote: number; feeHmc: number; paidInHmc: boolean }, quote: string): string {
@@ -3605,20 +3895,25 @@ function syncLayoutChips(): void {
 function applyLayoutToDom(): void {
   const term = document.getElementById("terminal");
   const fs = state.chartFullscreen;
+  const mobile = isMobileLayout() && !fs;
   document.documentElement.classList.toggle("ex-chart-fs", fs);
   document.body.classList.toggle("ex-chart-fs", fs);
   if (term) {
     term.classList.toggle("chart-fullscreen", fs);
-    // Always keep collapse flags in sync — expand rails key off these classes (hub too).
-    term.classList.toggle("book-collapsed", layoutPrefs.bookCollapsed);
-    term.classList.toggle("right-collapsed", layoutPrefs.rightCollapsed);
-    term.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
-    // Hub embed CSS uses !important on grid — setProperty('important') must match.
-    term.style.setProperty(
-      "grid-template-columns",
-      terminalGridColumnsForView(layoutPrefs, fs),
-      "important",
-    );
+    if (mobile) {
+      // Mobile tabs own panel visibility — desktop collapse prefs must not hide book/markets.
+      term.classList.remove("book-collapsed", "right-collapsed", "tools-collapsed");
+      term.style.setProperty("grid-template-columns", "1fr", "important");
+    } else {
+      term.classList.toggle("book-collapsed", layoutPrefs.bookCollapsed);
+      term.classList.toggle("right-collapsed", layoutPrefs.rightCollapsed);
+      term.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
+      term.style.setProperty(
+        "grid-template-columns",
+        terminalGridColumnsForView(layoutPrefs, fs),
+        "important",
+      );
+    }
   }
   ensurePanelRails();
   const book = document.getElementById("col-book");
@@ -3627,8 +3922,8 @@ function applyLayoutToDom(): void {
   const chartBody = document.querySelector(".chart-body");
   const orderZone = document.getElementById("order-zone");
   const rails = document.getElementById("terminal-rails");
-  const hideBook = fs || layoutPrefs.bookCollapsed;
-  const hideRight = fs || layoutPrefs.rightCollapsed;
+  const hideBook = mobile ? false : fs || layoutPrefs.bookCollapsed;
+  const hideRight = mobile ? false : fs || layoutPrefs.rightCollapsed;
   if (book) {
     book.classList.toggle("hidden", hideBook);
     if (fs) book.style.setProperty("display", "none", "important");
@@ -3838,9 +4133,13 @@ function wireLayoutPanels(): void {
 }
 
 function syncMobileChrome(mp: MobilePanel): void {
+  const mobile = isMobileLayout();
+  const root = document.documentElement;
+  if (mobile) root.setAttribute("data-mobile-panel", mp);
+  else root.removeAttribute("data-mobile-panel");
   const bar = document.getElementById("mobile-chart-trade-bar");
   if (bar) {
-    const onChart = mp === "chart" && isMobileLayout();
+    const onChart = mp === "chart" && mobile;
     bar.hidden = !onChart;
     bar.setAttribute("aria-hidden", onChart ? "false" : "true");
   }
@@ -3868,6 +4167,7 @@ function switchMobilePanel(mp: MobilePanel, opts?: { tradeSide?: "buy" | "sell" 
     b.setAttribute("tabindex", on ? "0" : "-1");
   });
   syncMobileChrome(mp);
+  applyLayoutToDom();
   if (mp === "chart") {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -3895,26 +4195,23 @@ function wireMobilePanels(): void {
       switchMobilePanel("trade", { tradeSide: side });
     });
   });
+  document.querySelector(".chart-body")?.addEventListener("click", (e) => {
+    if (!mobileToolsOpen || !isMobileLayout()) return;
+    const t = e.target as HTMLElement;
+    if (t.closest(".draw-tools") || t.closest("#btn-mobile-tools")) return;
+    if (t.closest(".chart-topbar") || t.closest(".ind-tabs")) return;
+    setMobileToolsOpen(false);
+  });
   syncMobileChrome(mobilePanel);
 }
 
 function wireMobileTradeSide(): void {
   if (!isMobileLayout()) return;
-  const dual = document.getElementById("dual-order");
   const tabs = Array.from(document.querySelectorAll("#trade-side-toggle .ts")) as HTMLElement[];
-  if (!dual || !tabs.length) return;
-  const setSide = (side: "buy" | "sell") => {
-    dual.setAttribute("data-mobile-side", side);
-    saveMobileTradeSide(side);
-    tabs.forEach((tab) => {
-      const on = tab.dataset.mobileSide === side;
-      tab.classList.toggle("active", on);
-      tab.setAttribute("aria-selected", on ? "true" : "false");
-    });
-  };
-  setSide(loadMobileTradeSide());
+  if (!tabs.length) return;
+  setMobileTradeSide(loadMobileTradeSide());
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => setSide((tab.dataset.mobileSide as "buy" | "sell") || "buy"));
+    tab.addEventListener("click", () => setMobileTradeSide((tab.dataset.mobileSide as "buy" | "sell") || "buy"));
   });
 }
 
@@ -3925,11 +4222,32 @@ function wireOracleRetry(): void {
   });
 }
 
+function patchMarketRowsInPlace(): void {
+  document.querySelectorAll<HTMLElement>(".market-row[data-pair]").forEach((row) => {
+    const pid = row.dataset.pair as PairId | undefined;
+    if (!pid) return;
+    const q = pairQuote(pid);
+    const px = row.querySelector(".mr-px");
+    const ch = row.querySelector(".mr-chg");
+    if (px) px.textContent = q.mid > 0 ? formatPriceCompact(q.mid) : "—";
+    if (ch) {
+      ch.textContent = formatPct(q.changePct);
+      ch.className = `mono mr-chg ${quoteToneClass(q.tone)}`;
+    }
+  });
+}
+
 function patchOracleStatus(): void {
+  const panel = document.querySelector(".markets-panel");
+  if (panel && patchOracleStatusDom(panel, oracleMeta)) return;
   const existing = document.querySelector(".markets-panel .oracle-status");
   if (!existing) return;
   existing.outerHTML = renderOracleStatusHtml(oracleMeta);
   wireOracleRetry();
+}
+
+function tickOracleAge(): void {
+  patchOracleStatus();
 }
 
 function wireEvents(): void {
@@ -4095,17 +4413,76 @@ function wireEvents(): void {
   });
 
   document.querySelectorAll("#chart-type-drop .cm, #chart-type-drop button[data-mode]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       state.chartMode = (btn as HTMLElement).dataset.mode as ChartMode;
       saveState(state);
+      showChartTypeDrop(false);
       mountChartPanel();
-      document.getElementById("chart-type-drop")?.classList.add("hidden");
     });
   });
 
   document.getElementById("btn-chart-type")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    document.getElementById("chart-type-drop")?.classList.toggle("hidden");
+    showChartTypeDrop();
+  });
+  document.getElementById("chart-type-backdrop")?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (Date.now() - chartTypeDropOpenedAt < 320) return;
+    showChartTypeDrop(false);
+  });
+  document.getElementById("chart-type-drop")?.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+
+  document.getElementById("btn-mobile-chart-more")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showChartMoreDrop();
+  });
+  document.getElementById("chart-more-backdrop")?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (Date.now() - chartMoreDropOpenedAt < 320) return;
+    showChartMoreDrop(false);
+  });
+  document.getElementById("chart-more-drop")?.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+  document.querySelectorAll("#chart-more-drop [data-chart-more]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const action = (btn as HTMLElement).dataset.chartMore;
+      showChartMoreDrop(false);
+      if (action === "indicators") showIndicatorModal(state, (patch) => saveChartPatch(patch));
+      else if (action === "overlays") {
+        const anchor = document.getElementById("btn-mobile-chart-more");
+        if (anchor) {
+          anchor.classList.add("active");
+          showOverlayMenu(
+            state,
+            anchor,
+            (patch) => {
+              Object.assign(state, patch);
+              saveState(state);
+              applyOverlays(
+                state.chartOverlays,
+                state.orders.filter((o) => o.pairId === state.activePair),
+                activeTicker().mid,
+              );
+            },
+            () => anchor.classList.remove("active"),
+          );
+        }
+      } else if (action === "style") showChartStyleModal(state, (patch) => saveChartPatch(patch));
+      else if (action === "goto") {
+        showGoToDateModal((ts) => {
+          scrollToTimestamp(ts);
+          toast("Jumped to date", "info");
+        });
+      } else if (action === "screenshot") {
+        chartScreenshot();
+        toast("Screenshot saved", "ok");
+      }
+    });
   });
 
   document.getElementById("btn-indicators")?.addEventListener("click", () => {
@@ -4664,17 +5041,16 @@ function microTickPrices(): void {
     const labMid = labLive ? labBookMid(p.id) : 0;
     const target = labMid > 0 ? labMid : oracleTarget;
     const prev = prevMids[p.id] ?? target;
-    // Soft blend so candle tip does not teleport on every 700ms tick.
-    const blend = prev * 0.72 + target * 0.28;
+    // Lab: raw book mid. Paper: soft blend so candle tip does not teleport every 700ms.
+    const displayMid = labMid > 0 ? labMid : prev * 0.72 + target * 0.28;
     if (!state.candles[p.id]) state.candles[p.id] = {};
-    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, blend, prev);
-    prevMids[p.id] = blend;
+    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, displayMid, prev);
+    prevMids[p.id] = displayMid;
     if (tickers[p.id]) {
       if (labLive && labMid > 0) {
-        // Keep bid/ask from lab book refresh; only sync mid for HUD/chart last-price.
-        tickers[p.id] = { ...tickers[p.id]!, mid: blend };
+        tickers[p.id] = { ...tickers[p.id]!, mid: labMid };
       } else {
-        tickers[p.id] = { ...tickers[p.id]!, mid: blend, bid: blend * 0.9995, ask: blend * 1.0005 };
+        tickers[p.id] = { ...tickers[p.id]!, mid: displayMid, bid: displayMid * 0.9995, ask: displayMid * 1.0005 };
       }
     }
     changed = true;
@@ -4704,40 +5080,18 @@ function microTickPrices(): void {
     const n = state.multiChartLayout === "4" ? 4 : 2;
     for (let i = 2; i <= n; i++) {
       const tf = paneTf(i);
-      const c2 = state.candles[state.activePair]?.[tf] ?? [];
+      const pid = panePair(i);
+      const c2 = state.candles[pid]?.[tf] ?? [];
       if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
     }
   }
-  const mid = useLabMatching()
-    ? spotTradeMid()
-    : (prevMids[state.activePair] ?? activeTicker().mid);
-  const up = mid >= (last?.open ?? mid);
-  updateLivePriceHud(mid, up, candleCountdown(state.activeTf));
-  evaluatePriceAlerts(mid);
-
-  const priceEl = document.querySelector(".tb-price");
-  const chgEl = document.querySelector(".tb-chg");
-  const fiatEl = document.querySelector("[data-tb-usdt]") as HTMLElement | null;
-  const candles15 = state.candles[state.activePair]?.["15m"] ?? candles;
-  const s24 = stats24h(candles15, "15m");
-  const ch = s24.changePct;
-  if (priceEl) {
-    priceEl.textContent = formatPrice(mid);
-    priceEl.className = `tb-price ${ch >= 0 ? "up" : "down"}`;
-  }
-  if (chgEl) {
-    chgEl.textContent = formatPct(ch);
-    chgEl.className = `tb-chg ${ch >= 0 ? "up" : "down"}`;
-  }
-  if (fiatEl && market) {
-    const pair = pairById(state.activePair);
-    if (pair.quote !== "USDT") {
-      const fx = pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1;
-      fiatEl.textContent = `≈ ${formatPrice(mid * fx)} USDT`;
-    }
-  }
+  const quote = activePairQuote();
+  updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
+  evaluatePriceAlerts(quote.mid);
+  patchTickerBar(quote);
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
+  patchMobileTradeTape();
   // Book DOM is heavier — refresh every ~2.1s at 700ms tick (paper synthetic only;
   // lab book updates via labBookTimer / fill sync).
   if (!useLabMatching() && liveTickN % 3 === 0) {
@@ -4747,7 +5101,10 @@ function microTickPrices(): void {
       wireBookTabs();
     }
   }
-  if (liveTickN % 6 === 0) {
+  if (liveTickN % 2 === 0) {
+    patchMarketRowsInPlace();
+  }
+  if (liveTickN % 30 === 0) {
     const list = document.getElementById("markets-list");
     if (list) {
       list.innerHTML = renderMarketsList();
@@ -4849,6 +5206,7 @@ async function refresh(): Promise<void> {
     tk.low24h = s.low;
     tk.volume24hBase = s.vol;
     const labMid = useLabMatching() ? labBookMid(p.id) : 0;
+    const displayMid = labMid > 0 ? labMid : midForPair(market, p.id);
     if (labMid > 0) {
       // Preserve lab L2 mid/bid/ask if we already have a book; only refresh 24h stats fields.
       const prevTk = tickers[p.id];
@@ -4865,7 +5223,7 @@ async function refresh(): Promise<void> {
     } else {
       tickers[p.id] = tk;
     }
-    const mid = labMid > 0 ? labMid : midForPair(market, p.id);
+    const mid = displayMid;
     const prev = firstLiveAfterBoot ? undefined : prevMids[p.id];
     if (!firstLiveAfterBoot) {
       if (!state.candles[p.id]) state.candles[p.id] = {};
@@ -4955,6 +5313,7 @@ export async function boot(): Promise<void> {
     }
   }, 4_000);
   tickTimer = window.setInterval(microTickPrices, 700);
+  oracleAgeTimer = window.setInterval(tickOracleAge, 1000);
   labBookTimer = window.setInterval(() => {
     void (async () => {
       if (!useLabMatching() || state.mainView !== "spot") return;
@@ -5059,5 +5418,7 @@ function maybeShowTour(): void {
 window.addEventListener("beforeunload", () => {
   if (pollTimer) clearInterval(pollTimer);
   if (tickTimer) clearInterval(tickTimer);
+  if (oracleAgeTimer) clearInterval(oracleAgeTimer);
+  if (labBookTimer) clearInterval(labBookTimer);
   destroyChart();
 });

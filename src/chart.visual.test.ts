@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, priceRangeNeedsHeal, visibleBarBudget, wheelZoomStep, zoomPriceRange } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -43,6 +43,14 @@ describe("price scale wheel helpers", () => {
     expect(out.to - out.from).toBeLessThan((base.to - base.from) * 1.15);
   });
 
+  it("zoomBarSpacing widens on zoom out and pans logical range", () => {
+    expect(zoomBarSpacing(8, 1)).toBeGreaterThan(8);
+    expect(zoomBarSpacing(8, -1)).toBeLessThan(8);
+    const panned = panLogicalRangeByWheel({ from: 10, to: 50 }, 80, 8);
+    expect(panned.from).toBeGreaterThan(10);
+    expect(panned.to).toBeGreaterThan(50);
+  });
+
   it("heals a near-zero corrupted price window back to the instrument", () => {
     const healed = clampVisiblePriceRange({ from: 9e-15, to: 1.5e-14 }, 0.00043);
     expect(healed.from).toBeGreaterThan(0.00043 * 1e-4);
@@ -67,6 +75,14 @@ describe("price scale wheel helpers", () => {
     expect(collapsed.to).toBeGreaterThan(ref);
     expect(priceRangeNeedsHeal({ from: ref, to: ref + 1e-14 }, ref)).toBe(true);
     expect(priceRangeNeedsHeal(collapsed, ref)).toBe(false);
+    // Legitimate user zoom-out must not trigger heal spam.
+    const wide = { from: ref * 0.96, to: ref * 1.04 };
+    expect(priceRangeNeedsHeal(wide, ref)).toBe(false);
+  });
+
+  it("uses wider bar spacing on phone-width panes", () => {
+    expect(barSpacingForWidth(360, "15m")).toBeGreaterThanOrEqual(9);
+    expect(barSpacingForWidth(360, "15m")).toBeGreaterThan(barSpacingForWidth(1200, "15m"));
   });
 
   it("keeps anchor price fixed when provided", () => {

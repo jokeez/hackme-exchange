@@ -11,6 +11,7 @@ import {
   mobilePanelResizeEnabled,
   saveMobilePanel,
   saveMobileTradeSide,
+  setMobileTradeSide,
   syncMobileLayoutClass,
 } from "./mobile";
 import { readFileSync } from "node:fs";
@@ -101,7 +102,7 @@ describe("mobile layout helpers", () => {
     expect(loadMobileTradeSide()).toBe("buy");
   });
 
-  it("chartInteractionOptions enables pinch and touch pan on mobile", () => {
+  it("chartInteractionOptions enables pinch; price wheel is custom (not LWC native)", () => {
     const orig = window.matchMedia;
     window.matchMedia = ((q: string) =>
       ({
@@ -116,11 +117,29 @@ describe("mobile layout helpers", () => {
       }) as MediaQueryList) as typeof window.matchMedia;
     const mobile = chartInteractionOptions();
     expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
+    expect(mobile.handleScale.mouseWheel).toBe(false);
     expect(mobile.handleScale.pinch).toBe(true);
     expect(mobile.handleScroll.horzTouchDrag).toBe(true);
-    expect(mobile.handleScroll.pressedMouseMove).toBe(true);
+    expect(mobile.handleScroll.mouseWheel).toBe(false);
     expect(mobilePanelResizeEnabled()).toBe(false);
     window.matchMedia = orig;
+
+    const origDesk = window.matchMedia;
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: false,
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
+    const desk = chartInteractionOptions();
+    expect(desk.handleScale.mouseWheel).toBe(false);
+    expect(desk.handleScroll.mouseWheel).toBe(false);
+    window.matchMedia = origDesk;
   });
 });
 
@@ -240,6 +259,44 @@ describe("mobile CSS contracts", () => {
     expect(app).toContain('panelId: "activity-panel"');
     expect(app).toContain('aria-label="Indicators"');
     expect(app).toContain('id="sys-backdrop"');
+  });
+
+  it("ships chart-type portal sheet above mobile footer", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(css).toContain(".chart-type-backdrop");
+    expect(css).toContain(".mode-drop-sheet");
+    expect(css).toContain("body.chart-type-open");
+    expect(css).toContain("#chart-type-drop.mode-drop-sheet");
+    expect(app).toContain("showChartTypeDrop");
+    expect(app).toContain("mobileFooterInsetPx");
+    expect(app).toContain('document.body.appendChild(drop)');
+    expect(app).toContain('id="chart-type-drop"');
+    expect(css).toContain(".chart-chrome");
+  });
+
+  it("ships mobile chart-more sheet and trade tape strip", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(app).toContain('id="btn-mobile-chart-more"');
+    expect(app).toContain('id="chart-more-drop"');
+    expect(app).toContain("showChartMoreDrop");
+    expect(app).toContain("setMobileTradeSide");
+    expect(app).toContain('id="mobile-trade-tape"');
+    expect(css).toContain(".mobile-trade-tape-wrap");
+    expect(css).toContain(".btn-mobile-chart-more");
+    expect(css).toContain("html.mobile-layout .tb-stats");
+  });
+
+  it("setMobileTradeSide syncs buy/sell tab", () => {
+    document.body.innerHTML = `<div id="trade-side-toggle">
+      <button class="ts buy active" data-mobile-side="buy"></button>
+      <button class="ts sell" data-mobile-side="sell"></button>
+    </div><div id="dual-order" data-mobile-side="buy"></div>`;
+    setMobileTradeSide("sell");
+    expect(document.getElementById("dual-order")?.getAttribute("data-mobile-side")).toBe("sell");
+    expect(document.querySelector('.ts.sell')?.classList.contains("active")).toBe(true);
+    expect(loadMobileTradeSide()).toBe("sell");
   });
 
   it("ships coin svg assets for USDT BTC SUP", () => {

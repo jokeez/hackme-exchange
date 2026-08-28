@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui-smoke": "vitest run src/ui.smoke.test.ts src/pro.features.test.ts",
+    "test:viewport": "node scripts/multi_viewport_pass.mjs",
     "test:all": "vitest run",
     "dev:d1": "bash scripts/d1-local-dev.sh",
     "smoke:d1": "npx tsx scripts/d1-smoke.ts"

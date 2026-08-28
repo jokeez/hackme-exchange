@@ -52,15 +52,16 @@ describe("chartSecondary multi-slot", () => {
       { time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
       { time: 2, open: 1.5, high: 2.2, low: 1.2, close: 2, volume: 12 },
     ];
-    mountSecondaryChart(a, candles, { pairLabel: "HMC/USDT", tf: "15m" });
-    mountSecondaryChart(b, candles, { pairLabel: "HMC/USDT", tf: "1H" });
+    mountSecondaryChart(a, candles, { pairId: "HMC_USDT", pairLabel: "HMC/USDT", tf: "15m" });
+    mountSecondaryChart(b, candles, { pairId: "HMC_USDT", pairLabel: "HMC/USDT", tf: "1H" });
     expect(secondaryChartCount()).toBe(2);
     expect(setData).toHaveBeenCalledTimes(2);
     expect(a.querySelector(".sub-tf-select")).toBeTruthy();
-    expect(a.querySelector(".sub-chart-meta")?.textContent).toContain("HMC/USDT");
+    expect(a.querySelector(".sub-pair-select")).toBeTruthy();
+    expect((a.querySelector(".sub-pair-select") as HTMLSelectElement).value).toBe("HMC_USDT");
 
     setData.mockClear();
-    syncSecondaryChart(a, candles, { pairLabel: "HMC/USDT", tf: "15m" });
+    syncSecondaryChart(a, candles, { pairId: "HMC_USDT", pairLabel: "HMC/USDT", tf: "15m" });
     expect(setData).toHaveBeenCalledTimes(1);
     // Initial mounts pin to latest bars (not fitContent whole history).
     expect(setVisibleLogicalRange).toHaveBeenCalled();

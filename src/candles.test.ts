@@ -210,7 +210,7 @@ describe("upsertTick", () => {
 
 describe("stats24h", () => {
   it("empty / short series → zeros", () => {
-    expect(stats24h([])).toEqual({ changePct: 0, high: 0, low: 0, vol: 0 });
+    expect(stats24h([])).toEqual({ changePct: 0, high: 0, low: 0, vol: 0, refOpen: 0, refClose: 0 });
   });
 
   it("computes change high low vol on slice", () => {

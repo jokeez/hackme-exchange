@@ -51,6 +51,21 @@ export function saveMobileTradeSide(side: MobileTradeSide): void {
   }
 }
 
+/** Sync mobile buy/sell tab without re-wiring listeners (book click, etc.). */
+export function setMobileTradeSide(side: MobileTradeSide): void {
+  if (typeof document === "undefined") return;
+  const dual = document.getElementById("dual-order");
+  const tabs = Array.from(document.querySelectorAll("#trade-side-toggle .ts")) as HTMLElement[];
+  if (!dual || !tabs.length) return;
+  dual.setAttribute("data-mobile-side", side);
+  saveMobileTradeSide(side);
+  tabs.forEach((tab) => {
+    const on = tab.dataset.mobileSide === side;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+
 /** LWC interaction profile — phones lock the price axis, desktop keeps full desk. */
 export function chartInteractionOptions(): {
   handleScale: {
@@ -70,12 +85,14 @@ export function chartInteractionOptions(): {
   return {
     handleScale: {
       axisPressedMouseMove: { time: true, price: !mobile },
-      mouseWheel: !mobile,
+      // Price-axis wheel is handled in chart.ts — LWC native wheel fights our clamped zoom.
+      mouseWheel: false,
       pinch: true,
       axisDoubleClickReset: { time: true, price: !mobile },
     },
     handleScroll: {
-      mouseWheel: !mobile,
+      // Plot wheel zoom/pan is custom in chart.ts (Binance-like).
+      mouseWheel: false,
       pressedMouseMove: true,
       horzTouchDrag: true,
       vertTouchDrag: false,

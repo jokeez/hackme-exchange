@@ -116,3 +116,22 @@ function trimZeros(s: string): string {
 export function chartPriceFormatter(price: number): string {
   return formatPrice(price);
 }
+
+const CHART_LOCALE_CANDIDATES = ["en-US", "en"] as const;
+
+/** Safe locale for LWC — headless Chromium can throw on bare "en-US" in some builds. */
+export function chartLocaleTag(): string {
+  for (const tag of CHART_LOCALE_CANDIDATES) {
+    try {
+      new Intl.NumberFormat(tag).format(1);
+      return tag;
+    } catch {
+      /* try next */
+    }
+  }
+  return "en";
+}
+
+export function chartLocalization(): { locale: string; priceFormatter: typeof chartPriceFormatter } {
+  return { locale: chartLocaleTag(), priceFormatter: chartPriceFormatter };
+}

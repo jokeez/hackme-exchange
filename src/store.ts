@@ -1,5 +1,5 @@
-import type { Candle, DemoState, MarketSnapshot, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES } from "./types";
+import type { Candle, DemoState, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
+import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES } from "./types";
 import { barCountForTf, ensureContiguousCandles, prependOlderCandles, sanitizeCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
 import { maxBodyFracForTf, clampTickMid } from "./chartScale";
 import { midForPair } from "./market";
@@ -121,6 +121,7 @@ const DEFAULT: DemoState = {
   feeConfig: structuredClone(DEFAULT_FEE_CONFIG),
   secondaryTf: "4H",
   multiPaneTfs: [...DEFAULT_MULTI_PANE_TFS] as MultiPaneTfs,
+  multiPanePairs: [...DEFAULT_MULTI_PANE_PAIRS] as MultiPanePairs,
   chartFullscreen: false,
   multiChart: false,
   multiChartLayout: "1",
@@ -144,6 +145,24 @@ export function sanitizeMultiPaneTfs(raw: unknown, fallbackSecondary?: Timeframe
     migrateTf(typeof raw[0] === "string" ? raw[0] : base[0]),
     migrateTf(typeof raw[1] === "string" ? raw[1] : base[1]),
     migrateTf(typeof raw[2] === "string" ? raw[2] : base[2]),
+  ];
+}
+
+export function sanitizeMultiPanePairs(raw: unknown): MultiPanePairs {
+  const base = [...DEFAULT_MULTI_PANE_PAIRS] as MultiPanePairs;
+  const fallback = PAIRS[0]?.id ?? "HMC_USDT";
+  const valid = (id: unknown, fb: PairId): PairId => {
+    if (typeof id === "string" && PAIRS.some((p) => p.id === id)) return id as PairId;
+    const safeFb = PAIRS.some((p) => p.id === fb) ? fb : fallback;
+    return safeFb;
+  };
+  if (!Array.isArray(raw)) {
+    return [valid(base[0], base[0]), valid(base[1], base[1]), valid(base[2], base[2])];
+  }
+  return [
+    valid(raw[0], base[0]),
+    valid(raw[1], base[1]),
+    valid(raw[2], base[2]),
   ];
 }
 
@@ -187,6 +206,7 @@ export function loadState(): DemoState {
         (parsed as { multiPaneTfs?: unknown }).multiPaneTfs,
         migrateTf(parsed.secondaryTf === parsed.activeTf ? "4H" : parsed.secondaryTf),
       ),
+      multiPanePairs: sanitizeMultiPanePairs((parsed as { multiPanePairs?: unknown }).multiPanePairs),
       ledger: Array.isArray(parsed.ledger)
         ? parsed.ledger.slice(0, STORAGE_LEDGER_CAP).map((e) => ({
             id: sanitizeDomId(e.id, uid()),

@@ -4,6 +4,17 @@ import { sanitizeCandleStyle, sanitizeChartSettings, sanitizeCssColor, sanitizeI
 
 type SaveCb = (patch: Partial<DemoState>) => void;
 
+function positionPopMenu(anchor: HTMLElement, menu: HTMLElement, menuWidth = 176): void {
+  const r = anchor.getBoundingClientRect();
+  const w = menuWidth;
+  menu.style.position = "fixed";
+  menu.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 48)}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
+  menu.style.zIndex = "1200";
+  menu.style.maxHeight = `${Math.max(120, window.innerHeight - r.bottom - 16)}px`;
+  menu.style.overflowY = "auto";
+}
+
 function closeChartModals(): void {
   document.querySelectorAll(".modal-backdrop[data-chart-modal]").forEach((el) => el.remove());
 }
@@ -211,24 +222,24 @@ export function showOverlayMenu(
   document.querySelectorAll(".pop-menu").forEach((el) => el.remove());
   const o = state.chartOverlays;
   const menu = document.createElement("div");
-  menu.className = "pop-menu glass";
+  menu.className = "pop-menu glass overlay-menu";
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", "Chart overlays");
   menu.innerHTML = `
+    <p class="pop-menu-title">Overlays</p>
     <label><input type="checkbox" id="ov-vol" ${o.showVolume ? "checked" : ""} /> Volume</label>
     <label><input type="checkbox" id="ov-orders" ${o.showOrderLines ? "checked" : ""} /> Order lines</label>
     <label><input type="checkbox" id="ov-last" ${o.showLastPrice ? "checked" : ""} /> Last price line</label>
     <label><input type="checkbox" id="ov-preview" ${o.orderPreview ? "checked" : ""} /> Order preview</label>
     <label><input type="checkbox" id="ov-quick" ${o.quickOrder ? "checked" : ""} /> Quick order</label>`;
-  const r = anchor.getBoundingClientRect();
-  menu.style.position = "fixed";
-  menu.style.top = `${r.bottom + 4}px`;
-  menu.style.left = `${Math.min(window.innerWidth - 200, Math.max(8, r.left))}px`;
-  menu.style.zIndex = "999";
+  const prevTitle = anchor.getAttribute("title");
+  if (prevTitle) anchor.removeAttribute("title");
+  positionPopMenu(anchor, menu, 188);
   document.body.appendChild(menu);
 
   const close = () => {
     menu.remove();
+    if (prevTitle) anchor.setAttribute("title", prevTitle);
     onClose?.();
   };
   const apply = () => {
@@ -261,14 +272,10 @@ export function showMultiChartPicker(state: DemoState, anchor: HTMLElement, onSa
   ];
   const menu = document.createElement("div");
   menu.className = "pop-menu glass multi-picker";
-  menu.innerHTML = `<p class="muted small">Multi Chart</p>${layouts
+  menu.innerHTML = `<p class="pop-menu-title">Multi Chart</p>${layouts
     .map((l) => `<button type="button" class="mc-opt ${state.multiChartLayout === l.id ? "active" : ""}" data-l="${l.id}"><span>${l.icon}</span>${l.label}</button>`)
     .join("")}`;
-  const r = anchor.getBoundingClientRect();
-  menu.style.position = "fixed";
-  menu.style.top = `${r.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, r.left - 80)}px`;
-  menu.style.zIndex = "999";
+  positionPopMenu(anchor, menu, 176);
   document.body.appendChild(menu);
   menu.querySelectorAll(".mc-opt").forEach((btn) => {
     btn.addEventListener("click", () => {

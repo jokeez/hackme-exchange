@@ -146,6 +146,11 @@ export type MultiPaneTfs = [Timeframe, Timeframe, Timeframe];
 
 export const DEFAULT_MULTI_PANE_TFS: MultiPaneTfs = ["15m", "1H", "1D"];
 
+/** Trading pairs for secondary panes (hosts 2–4). Pane 1 uses activePair. */
+export type MultiPanePairs = [PairId, PairId, PairId];
+
+export const DEFAULT_MULTI_PANE_PAIRS: MultiPanePairs = ["SUP_USDT", "HMC_BTC", "HMC_SUP"];
+
 export type IndicatorId = "ema20" | "ema50" | "ema100" | "ema200" | "sma20" | "bb" | "vwap" | "rsi" | "macd" | "stoch";
 
 export type ChartSettings = {
@@ -319,6 +324,8 @@ export type DemoState = {
   secondaryTf: Timeframe;
   /** Per-pane TF for multi-chart hosts 2/3/4 (index 0 → host-2). */
   multiPaneTfs: MultiPaneTfs;
+  /** Per-pane pair for multi-chart hosts 2/3/4 (index 0 → host-2). */
+  multiPanePairs: MultiPanePairs;
   chartFullscreen: boolean;
   multiChart: boolean;
   multiChartLayout: MultiChartLayout;
