@@ -11,6 +11,11 @@ export type CrosshairPane = {
 const panes = new Map<string, CrosshairPane>();
 let syncing = false;
 let enabled = true;
+let lastSyncedTime: number | null = null;
+
+export function getCrosshairSyncDebug(): { enabled: boolean; paneCount: number; lastSyncedTime: number | null } {
+  return { enabled, paneCount: panes.size, lastSyncedTime };
+}
 
 export function setCrosshairSyncEnabled(on: boolean): void {
   enabled = on;
@@ -74,9 +79,11 @@ function propagate(fromId: string, time: number | null, price: number | null): v
   syncing = true;
   try {
     if (time == null) {
+      lastSyncedTime = null;
       clearAllCrosshairs();
       return;
     }
+    lastSyncedTime = time;
     for (const [id, pane] of panes) {
       if (id === fromId) continue;
       const p = id === fromId ? price : priceAtTime(pane, time);

@@ -99,7 +99,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
         "",
         `<span class="price-row"><input id="${side}-price" class="inp mono" type="text" inputmode="decimal" value="${
           uiType === "limit" ? (isBuy ? buyLimitTick : sellLimitTick) : midTick
-        }" /><button type="button" class="btn-bbo" data-bbo="${side}" title="Best bid/offer">BBO</button></span>`,
+        }" /><button type="button" class="btn-bbo" data-bbo="${side}" title="Best bid/offer" aria-label="${isBuy ? "Fill best ask (BBO)" : "Fill best bid (BBO)"}">BBO</button></span>`,
         `field-limit ${hidePrice ? "hidden" : ""}`,
       )}
       ${fld(
