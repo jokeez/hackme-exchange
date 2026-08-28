@@ -1347,13 +1347,16 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
 }
 .asset-coin-logo img {
   width: 100%; height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   border-radius: 50%;
 }
 .asset-usdt { border-color: rgba(38, 161, 123, 0.45); }
 .asset-btc { border-color: rgba(247, 147, 26, 0.45); }
-.asset-sup { border-color: rgba(168, 85, 247, 0.42); }
+.asset-sup {
+  border-color: rgba(168, 85, 247, 0.55);
+  background: #0a0618;
+}
 .asset-unk { background: #1a2230; color: var(--muted); }
 
 /* Order book — dense Binance ladder */
