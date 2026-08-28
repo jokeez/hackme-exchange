@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Cloudflare ↔ this origin stalls mid-body above ~16–19 KiB.
- * Split built JS/CSS into ≤12 KiB parts so orange-cloud delivery works.
+ * Split built JS/CSS into ≤10 KiB parts so orange-cloud delivery works.
  */
 import { readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";

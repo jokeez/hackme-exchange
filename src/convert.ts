@@ -166,6 +166,16 @@ export function previewConvert(
   };
 }
 
+/** Net receive after quote-side taker fee (USDT/BTC/SUP legs); HMC-fee routes credit gross. */
+export function convertNetReceive(preview: Pick<ConvertPreview, "got" | "fee" | "to" | "pair">): number {
+  const { got, fee, to, pair } = preview;
+  if (fee.paidInHmc) return got;
+  if (to === "usdt") return Math.max(0, got - fee.feeQuote);
+  if (pair.endsWith("_BTC") && to === "btc") return Math.max(0, got - fee.feeQuote);
+  if (pair.endsWith("_SUP") && to === "sup") return Math.max(0, got - fee.feeQuote);
+  return got;
+}
+
 export function convert(
   state: DemoState,
   market: MarketSnapshot,

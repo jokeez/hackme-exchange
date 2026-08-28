@@ -106,6 +106,7 @@ import {
   convert,
   convertChipDefaultAmount,
   convertFeeHintLine,
+  convertNetReceive,
   convertRateLabel,
   pairQuoteSym,
   feeQuoteFromLabConvert,
@@ -1137,14 +1138,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     return;
   }
   const p = prev as ConvertPreview;
-  const net =
-    !p.fee.paidInHmc && p.to === "usdt"
-      ? Math.max(0, p.got - p.fee.feeQuote)
-      : !p.fee.paidInHmc && p.pair.endsWith("_BTC") && p.to === "btc"
-        ? Math.max(0, p.got - p.fee.feeQuote)
-        : !p.fee.paidInHmc && p.pair.endsWith("_SUP") && p.to === "sup"
-          ? Math.max(0, p.got - p.fee.feeQuote)
-          : p.got;
+  const net = convertNetReceive(p);
   gotEl.textContent = formatPrice(net);
   rateEl.textContent = convertRateLabel(
     assetSymbol(convertFrom),
@@ -1158,7 +1152,9 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     hint.textContent =
       avail < amt
         ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
-        : `You receive ≈ ${formatPrice(net)} ${assetSymbol(convertTo)} net · fee charged separately`;
+        : `You receive ≈ ${formatPrice(net)} ${assetSymbol(convertTo)} net${
+            p.fee.paidInHmc ? " · fee in HMC" : p.fee.feeQuote > 0 ? " · fee from quote" : ""
+          }`;
   }
   if (go) go.disabled = avail < amt;
 
@@ -1277,11 +1273,16 @@ async function runConvertDesk(): Promise<void> {
   }
   recordConvert(state, from, to, amt, res.got, market, res.fee, def?.pair);
   saveState(state);
+  const net = def
+    ? convertNetReceive({ got: res.got, fee: res.fee, to: def.to, pair: def.pair })
+    : res.got;
   const feeHint =
-    res.fee.feeQuote > 0
-      ? ` · fee ${res.fee.paidInHmc ? `${formatNum(res.fee.feeHmc, 4)} HMC` : formatNum(res.fee.feeQuote, 6)}`
+    res.fee.feeQuote > 0 || res.fee.feeHmc > 0
+      ? res.fee.paidInHmc
+        ? ` · fee ${formatNum(res.fee.feeHmc, 4)} HMC`
+        : ` · fee ${formatNum(res.fee.feeQuote, 6)}`
       : "";
-  toast(`Swapped → ${formatNum(res.got, 4)}${feeHint}`, "ok");
+  toast(`Swapped → ${formatNum(net, 4)} net${feeHint}`, "ok");
   softPatchConvertDesk();
   } finally {
     convertInFlight = false;
@@ -4810,7 +4811,10 @@ function maybeShowTour(): void {
       paint();
     });
   };
-  // Esc / Skip / Next dismiss — backdrop must not steal the first desk click.
+  // Block desk clicks while tour is open; backdrop click dismisses.
+  bd.addEventListener("click", (e) => {
+    if (e.target === bd) dismiss();
+  });
   window.addEventListener("keydown", onKey);
   document.body.appendChild(bd);
   paint();

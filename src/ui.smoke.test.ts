@@ -416,7 +416,7 @@ describe("visual CSS tokens & critical rules", () => {
     expect(css).not.toMatch(/\.ob-mid\s*\{[^}]*max-height:\s*28px/s);
     expect(css).toContain(".ob-mid-src");
     expect(css).toContain("text-overflow: ellipsis");
-    expect(css).toMatch(/\.tour-backdrop\s*\{[^}]*pointer-events:\s*none/s);
+    expect(css).toMatch(/\.tour-backdrop\s*\{[^}]*pointer-events:\s*auto/s);
   });
 
   it("styles cancel muted and volume-ratio / pnl-calendar / quick-size", () => {

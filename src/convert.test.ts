@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertRateLabel, feeQuoteFromLabConvert, flipRoute, formatLabConvertFeeToast, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
+import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, feeQuoteFromLabConvert, flipRoute, formatLabConvertFeeToast, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("convert", () => {
@@ -61,6 +61,8 @@ describe("convert", () => {
     expect(res.fee.feeQuote).toBeCloseTo(gross * 0.001, 10);
     expect(s.wallet.hmc).toBe(9000);
     expect(s.wallet.usdt).toBeCloseTo(100 + gross - res.fee.feeQuote, 10);
+    const prev = previewConvert(s, market, "HMC_USDT", amt) as ConvertPreview;
+    expect(convertNetReceive(prev)).toBeCloseTo(gross - res.fee.feeQuote, 10);
   });
 
   it("USDT → HMC inverts mid and charges taker on USDT notional", () => {
