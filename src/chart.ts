@@ -2849,3 +2849,27 @@ export function getChartMountOpts(
     ...extras,
   };
 }
+
+export function getMainCrosshairPane(): {
+  id: string;
+  chart: IChartApi;
+  series: ISeriesApi<"Candlestick">;
+  candles: () => Candle[];
+} | null {
+  if (!chart || !candleSeries) return null;
+  return {
+    id: "chart-host",
+    chart,
+    series: candleSeries,
+    candles: () => (rawCandlesCache.length ? rawCandlesCache : currentCandles),
+  };
+}
+
+export function setChartCrosshairMode(mode: 0 | 1): void {
+  if (!chart) return;
+  try {
+    chart.applyOptions({ crosshair: { mode } });
+  } catch {
+    /* ignore */
+  }
+}

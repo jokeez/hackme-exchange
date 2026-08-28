@@ -636,6 +636,20 @@ export function secondaryPaneTf(hostId: string): Timeframe | null {
   return slots.get(hostId)?.tf ?? null;
 }
 
+export function listSecondaryCrosshairPanes(): Array<{
+  id: string;
+  chart: IChartApi;
+  series: ISeriesApi<"Candlestick">;
+  candles: () => Candle[];
+}> {
+  return [...slots.entries()].map(([id, s]) => ({
+    id,
+    chart: s.chart,
+    series: s.series,
+    candles: () => s.candles,
+  }));
+}
+
 export function resetSecondaryPaneView(hostId: string): void {
   const slot = slots.get(hostId);
   if (!slot) return;

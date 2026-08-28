@@ -6,9 +6,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 describe("binance-inspired UI contracts", () => {
-  it("book renderer drops inline depth mini-chart from book view", () => {
+  it("book renderer includes inline depth mini-chart above ladder", () => {
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
-    expect(app).not.toContain('class="depth-wrap"');
+    expect(app).toContain('class="depth-wrap"');
+    expect(app).toContain("renderDepthSvg(bids, asks)");
     expect(app).toContain("Price (${pair.quote})");
     expect(app).toContain("Amount (${pair.base})");
   });
