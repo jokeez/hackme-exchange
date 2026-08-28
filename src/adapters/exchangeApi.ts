@@ -238,7 +238,16 @@ function persistSession(address: string, csrf: string): void {
 }
 
 export function exchangeApiBase(): string {
-  return INTEGRATION.exchangeApiOrigin.replace(/\/$/, "");
+  const configured = INTEGRATION.exchangeApiOrigin.replace(/\/$/, "");
+  if (!configured) return "";
+  if (typeof window !== "undefined") {
+    const page = window.location.origin.replace(/\/$/, "");
+    // Vite dev (:5199) and preview — same-origin proxy, avoids direct :18443 spam.
+    if (page !== configured && isLoopbackOrigin(page)) {
+      return `${page}/exchange-api`;
+    }
+  }
+  return configured;
 }
 
 function resolveBase(baseOverride?: string): string {

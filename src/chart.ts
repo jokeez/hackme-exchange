@@ -64,6 +64,7 @@ let hostEl: HTMLElement | null = null;
 let mounted = false;
 let hostResizeObs: ResizeObserver | null = null;
 let resizeRaf = 0;
+let healRaf = 0;
 let currentMode: ChartMode = "candles";
 let currentSettings: ChartSettings | null = null;
 let currentCandles: Candle[] = [];
@@ -1477,7 +1478,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   const hostW = Math.max(320, shell.clientWidth || el.clientWidth || 800);
   const spacing = barSpacingForWidth(hostW, opts.tf);
   chart = createChart(shell, {
-    autoSize: true,
+    autoSize: false,
     layout: {
       background: { color: opts.settings.bgGradient ? "transparent" : "#05070d" },
       textColor: "#9bb0cc",
@@ -2426,13 +2427,21 @@ export function resizeChart(): void {
   const w = Math.floor(inner?.clientWidth ?? hostEl.clientWidth);
   const h = Math.floor(inner?.clientHeight ?? hostEl.clientHeight);
   if (w > 2 && h > 2) chart.resize(w, h);
-  requestAnimationFrame(() => healVisiblePriceScale());
+  if (healRaf) cancelAnimationFrame(healRaf);
+  healRaf = requestAnimationFrame(() => {
+    healRaf = 0;
+    healVisiblePriceScale();
+  });
 }
 
 export function destroyChart(): void {
   if (resizeRaf) {
     cancelAnimationFrame(resizeRaf);
     resizeRaf = 0;
+  }
+  if (healRaf) {
+    cancelAnimationFrame(healRaf);
+    healRaf = 0;
   }
   hostResizeObs?.disconnect();
   hostResizeObs = null;

@@ -15,9 +15,16 @@ describe("resolveNodeProbeUrl", () => {
     expect(resolveNodeProbeUrl()).toBe("https://exchange.hackme.tech/hub-proxy/api/status?lite=1");
   });
 
-  it("uses loopback node origin in local dev", () => {
+  it("uses hub-proxy on vite dev (5199) to avoid cross-port CORS", () => {
     vi.stubGlobal("window", {
       location: { origin: "http://127.0.0.1:5199" },
+    });
+    expect(resolveNodeProbeUrl()).toBe("http://127.0.0.1:5199/hub-proxy/api/status?lite=1");
+  });
+
+  it("uses direct node when page is the hub itself", () => {
+    vi.stubGlobal("window", {
+      location: { origin: "http://127.0.0.1:8080" },
     });
     expect(resolveNodeProbeUrl()).toBe("http://127.0.0.1:8080/api/status?lite=1");
   });

@@ -216,7 +216,7 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain('html:not(.mobile-layout) .btn-mobile-tools');
     expect(css).toContain("html.mobile-layout .btn-ico");
     expect(css).toContain("html.mobile-layout .activity-panel");
-    expect(css).toContain("touch-action: pan-x pinch-zoom");
+    expect(css).toContain("touch-action: none");
     expect(app).toContain("applyLayoutToDom()");
     expect(app).toContain("loadMobileTradeSide");
     expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("setupMobileChartPan");
