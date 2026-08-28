@@ -932,7 +932,7 @@ a:hover { text-decoration: underline; }
   html.mobile-layout .chart-host,
   html.mobile-layout .chart-shell,
   html.mobile-layout .chart-inner {
-    touch-action: none;
+    touch-action: pan-x pinch-zoom;
   }
   html.mobile-layout .btn-ico,
   html.mobile-layout .tfq,
@@ -1738,6 +1738,11 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   overflow: hidden;
 }
 .chart-shell { position: relative; width: 100%; height: 100%; min-height: 0; }
+.chart-host,
+.chart-shell,
+.chart-inner {
+  touch-action: pan-x pinch-zoom;
+}
 .chart-inner { width: 100%; height: 100%; min-height: 0; }
 .draw-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .draw-layer.active { pointer-events: auto; cursor: crosshair; }
@@ -3582,6 +3587,33 @@ body.sys-menu-open .sys-backdrop:not(.hidden) { display: block; }
 .tf-block { display: flex; align-items: center; gap: 0.2rem; }
 .tf-block .tf-more { margin-left: 0.15rem; }
 .chart-topbar .chart-actions { margin-left: auto; }
+.layout-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+.layout-chip {
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,.25);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.68rem;
+  cursor: pointer;
+  line-height: 1.2;
+  touch-action: manipulation;
+}
+.layout-chip:hover { color: var(--text); border-color: rgba(77,228,255,.35); }
+.layout-chip.active {
+  color: var(--primary);
+  border-color: rgba(77,228,255,.45);
+  background: rgba(77,228,255,.1);
+}
+html.mobile-layout .layout-chip-row,
+html.ex-chart-fs .layout-chip-row {
+  display: none !important;
+}
 html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
 .ind-tabs.compact { padding: 0.2rem 0.6rem; border-bottom: 1px solid var(--line); }
 
@@ -3613,6 +3645,17 @@ html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
 .avail-chip:hover { border-color: var(--primary); color: var(--text); }
 .avail-chip b { color: var(--text); }
 .pct-slider-row { margin: 0.04rem 0 0.1rem; }
+.pct-slider-head {
+  display: flex; align-items: center; justify-content: flex-end;
+  margin-bottom: 0.12rem;
+}
+.pct-live {
+  font-size: 0.68rem; color: var(--muted);
+  padding: 0.08rem 0.35rem; border-radius: 6px;
+  border: 1px solid var(--line); background: rgba(0,0,0,.22);
+}
+.order-col.buy .pct-live { color: var(--buy); border-color: rgba(0,230,118,.25); }
+.order-col.sell .pct-live { color: var(--sell); border-color: rgba(255,82,82,.25); }
 .pct-slider {
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 3px; cursor: pointer; margin: 0.15rem 0 0.05rem;
@@ -3787,6 +3830,19 @@ html[data-embed="hub"] .ex-header {
   background: rgba(8, 12, 20, 0.98);
   backdrop-filter: none;
   border-bottom-color: rgba(0, 209, 255, 0.18);
+  z-index: 30;
+  overflow: visible;
+}
+html[data-embed="hub"] .sys-menu-wrap {
+  position: relative;
+  z-index: 31;
+}
+html[data-embed="hub"] .sys-drop:not(.hidden) {
+  position: fixed !important;
+  z-index: 1000 !important;
+  max-height: min(72vh, 520px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 html[data-embed="hub"] .brand-logo {
   width: 1.75rem;
@@ -3804,9 +3860,9 @@ html[data-embed="hub"] .pill-live { font-size: 0.58rem; padding: 0.15rem 0.4rem;
 html[data-embed="hub"] .btn-sm { padding: 0.28rem 0.55rem; font-size: 0.72rem; }
 html[data-embed="hub"] .ticker-bar { padding-top: 0.35rem; padding-bottom: 0.35rem; }
 html[data-embed="hub"] .tour-backdrop { display: none !important; }
-html[data-embed="hub"] .mining-strip,
-html[data-embed="hub"] .kbd-hint,
-html[data-embed="hub"] .mobile-panel-wrap {
+html[data-embed="hub"]:not(.mobile-layout) .mining-strip,
+html[data-embed="hub"]:not(.mobile-layout) .kbd-hint,
+html[data-embed="hub"]:not(.mobile-layout) .mobile-panel-wrap {
   display: none !important;
 }
 
@@ -4212,6 +4268,104 @@ html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .panel-rail {
 }
 
 
+
+/* Hub embed on phone-sized viewports — mobile-layout beats desk !important grids above. */
+html.mobile-layout[data-embed="hub"] .mobile-panel-wrap {
+  display: block !important;
+  flex-shrink: 0;
+}
+html.mobile-layout[data-embed="hub"] .terminal,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: 1fr !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  align-content: stretch;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack .col-book,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack .col-center,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack .col-right {
+  display: none !important;
+  max-height: none;
+  border-right: none;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="chart"] .col-center {
+  display: flex !important;
+  min-height: 0;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="chart"] .col-center .order-zone {
+  display: none !important;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] {
+  flex-direction: row !important;
+  align-items: stretch;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-center {
+  display: flex !important;
+  flex: 1.08;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--edge);
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .chart-topbar,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .ind-tabs,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .chart-body {
+  display: none !important;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .order-zone {
+  display: block !important;
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="trade"] .col-book {
+  display: flex !important;
+  flex: 0.92;
+  min-width: 0;
+  max-width: 46%;
+  min-height: 0;
+  border-bottom: none;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="markets"] .col-right,
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="orders"] .col-right {
+  display: flex !important;
+  min-height: 0;
+  max-height: none;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="markets"] .col-right .activity-panel {
+  display: none !important;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack[data-mobile-panel="orders"] .col-right .markets-panel {
+  display: none !important;
+}
+html.mobile-layout[data-embed="hub"] .order-zone {
+  min-height: unset !important;
+  max-height: none !important;
+}
+html.mobile-layout[data-embed="hub"] .trade-side-toggle {
+  display: inline-flex !important;
+}
+html.mobile-layout[data-embed="hub"] .terminal.mobile-stack .col-center .chart-body,
+html.mobile-layout[data-embed="hub"] .chart-body {
+  min-height: 0 !important;
+  flex: 1 !important;
+}
+html.mobile-layout[data-embed="hub"] .chart-main,
+html.mobile-layout[data-embed="hub"] .chart-host,
+html.mobile-layout[data-embed="hub"] .chart-shell,
+html.mobile-layout[data-embed="hub"] .chart-inner {
+  min-height: 0 !important;
+  touch-action: pan-x pinch-zoom;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

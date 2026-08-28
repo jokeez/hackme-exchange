@@ -129,7 +129,10 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
         <button type="button" data-qs="max" data-side="${side}">MAX</button>
       </div>
       <div class="pct-slider-row">
-        <input type="range" class="pct-slider" id="${side}-pct" data-side="${side}" min="0" max="100" step="25" value="0" />
+        <div class="pct-slider-head">
+          <span class="pct-live mono" id="${side}-pct-label" aria-live="polite">0%</span>
+        </div>
+        <input type="range" class="pct-slider" id="${side}-pct" data-side="${side}" min="0" max="100" step="1" value="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${isBuy ? "Buy" : "Sell"} amount percent" />
         <div class="pct-marks" data-side="${side}">
           <button type="button" data-pct="0" data-side="${side}">0%</button>
           <button type="button" data-pct="25" data-side="${side}">25%</button>
@@ -257,7 +260,10 @@ export function applyRestingLimitPrices(mid: number, pairId: PairId): void {
 export function syncPctMarks(side: "buy" | "sell"): void {
   const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
   if (!slider) return;
-  const v = Number(slider.value);
+  const v = Math.max(0, Math.min(100, Math.round(Number(slider.value) || 0)));
+  slider.setAttribute("aria-valuenow", String(v));
+  const label = document.getElementById(`${side}-pct-label`);
+  if (label) label.textContent = `${v}%`;
   document.querySelectorAll(`.pct-marks[data-side="${side}"] button`).forEach((btn) => {
     const pct = Number((btn as HTMLElement).dataset.pct);
     btn.classList.toggle("on", pct <= v);

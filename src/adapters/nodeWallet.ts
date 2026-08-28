@@ -113,14 +113,30 @@ export function mergeNodeIntoDemoWallet(demo: Wallet, node: Extract<NodeWalletSn
 let nodeProbeCache: { at: number; ok: boolean } | null = null;
 const NODE_PROBE_TTL_MS = 30_000;
 
+/** Loopback node in dev; same-origin /hub-proxy on exchange.hackme.tech (connect-src 'self'). */
+export function resolveNodeProbeUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const pageOrigin = window.location.origin.replace(/\/$/, "");
+  if (isLoopbackOrigin(pageOrigin)) {
+    const base = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+    if (!isLoopbackOrigin(base)) return null;
+    return `${base}/api/status?lite=1`;
+  }
+  return `${pageOrigin}/hub-proxy/api/status?lite=1`;
+}
+
 export async function probeNodeOnline(): Promise<boolean> {
   const now = Date.now();
   if (nodeProbeCache && now - nodeProbeCache.at < NODE_PROBE_TTL_MS) {
     return nodeProbeCache.ok;
   }
-  const base = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+  const url = resolveNodeProbeUrl();
+  if (!url) {
+    nodeProbeCache = { at: now, ok: false };
+    return false;
+  }
   try {
-    const res = await fetch(`${base}/api/status?lite=1`, { cache: "no-store", mode: "cors" });
+    const res = await fetch(url, { cache: "no-store", mode: "cors" });
     nodeProbeCache = { at: now, ok: res.ok };
     return res.ok;
   } catch {

@@ -159,10 +159,20 @@ describe("orderPanel HTML & controls", () => {
     const slider = document.getElementById("buy-pct") as HTMLInputElement;
     slider.value = "50";
     syncPctMarks("buy");
+    expect(document.getElementById("buy-pct-label")?.textContent).toBe("50%");
     const marks = [...document.querySelectorAll('.pct-marks[data-side="buy"] button')];
     expect(marks.find((b) => b.getAttribute("data-pct") === "0")!.classList.contains("on")).toBe(true);
     expect(marks.find((b) => b.getAttribute("data-pct") === "50")!.classList.contains("on")).toBe(true);
     expect(marks.find((b) => b.getAttribute("data-pct") === "75")!.classList.contains("on")).toBe(false);
+  });
+
+  it("pct slider supports 1% steps for arbitrary sizing", () => {
+    mountPanel();
+    const slider = document.getElementById("buy-pct") as HTMLInputElement;
+    expect(slider.step).toBe("1");
+    slider.value = "27";
+    syncPctMarks("buy");
+    expect(document.getElementById("buy-pct-label")?.textContent).toBe("27%");
   });
 
   it("mounts dual columns into DOM with interactive ids", () => {

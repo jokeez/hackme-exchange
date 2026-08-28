@@ -43,10 +43,23 @@ describe("mobile layout helpers", () => {
     expect(MOBILE_LAYOUT_MAX_PX).toBe(1024);
   });
 
-  it("isMobileLayout stays desktop in hub embed", () => {
+  it("isMobileLayout uses viewport width in hub embed too", () => {
+    const orig = window.matchMedia;
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: q.includes(String(MOBILE_LAYOUT_MAX_PX)),
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
     document.documentElement.dataset.embed = "hub";
-    expect(isMobileLayout()).toBe(false);
+    expect(isMobileLayout()).toBe(true);
     delete document.documentElement.dataset.embed;
+    window.matchMedia = orig;
   });
 
   it("syncMobileLayoutClass toggles html.mobile-layout", () => {
@@ -88,7 +101,7 @@ describe("mobile layout helpers", () => {
     expect(loadMobileTradeSide()).toBe("buy");
   });
 
-  it("chartInteractionOptions locks price-axis drag on mobile", () => {
+  it("chartInteractionOptions enables pinch and touch pan on mobile", () => {
     const orig = window.matchMedia;
     window.matchMedia = ((q: string) =>
       ({
@@ -103,9 +116,9 @@ describe("mobile layout helpers", () => {
       }) as MediaQueryList) as typeof window.matchMedia;
     const mobile = chartInteractionOptions();
     expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
-    expect(mobile.handleScale.pinch).toBe(false);
-    expect(mobile.handleScroll.horzTouchDrag).toBe(false);
-    expect(mobile.handleScroll.pressedMouseMove).toBe(false);
+    expect(mobile.handleScale.pinch).toBe(true);
+    expect(mobile.handleScroll.horzTouchDrag).toBe(true);
+    expect(mobile.handleScroll.pressedMouseMove).toBe(true);
     expect(mobilePanelResizeEnabled()).toBe(false);
     window.matchMedia = orig;
   });
@@ -171,7 +184,8 @@ describe("mobile CSS contracts", () => {
 
   it("ships hub-embed desktop desk overrides", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(css).toContain('html[data-embed="hub"] .mobile-panel-wrap');
+    expect(css).toContain('html[data-embed="hub"]:not(.mobile-layout) .mobile-panel-wrap');
+    expect(css).toContain('html.mobile-layout[data-embed="hub"] .mobile-panel-wrap');
     expect(css).toContain('html[data-embed="hub"] .terminal.mobile-stack');
     expect(css).toContain("grid-template-columns: 200px minmax(0, 1fr) 248px");
     expect(css).toContain('html[data-embed="hub"] .chart-host');
@@ -202,7 +216,7 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain('html:not(.mobile-layout) .btn-mobile-tools');
     expect(css).toContain("html.mobile-layout .btn-ico");
     expect(css).toContain("html.mobile-layout .activity-panel");
-    expect(css).toContain("touch-action: none");
+    expect(css).toContain("touch-action: pan-x pinch-zoom");
     expect(app).toContain("applyLayoutToDom()");
     expect(app).toContain("loadMobileTradeSide");
     expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("setupMobileChartPan");

@@ -25,7 +25,7 @@ import { sanitizeImportedCandles, sanitizeImportedOrder, sanitizeImportedTrade }
 import { MAX_DRAWINGS, sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 
 /** Persist 1m base only — higher TFs re-derived (+ padded) on load. */
-const STORAGE_BASE_CAP = 2000;
+const STORAGE_BASE_CAP = 800;
 const STORAGE_TRADES_CAP = 120;
 const STORAGE_LEDGER_CAP = 80;
 const STORAGE_EQUITY_CAP = 72;
@@ -285,8 +285,8 @@ export function healStorage(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    if (raw.length > 900_000) {
-      console.warn("[hackme-exchange] trimming oversized localStorage state");
+    // Proactively compact before quota / CSP-heavy sessions — silent under 1.2MB.
+    if (raw.length > 520_000) {
       const s = loadState();
       if (!saveState(s)) {
         localStorage.removeItem(STORAGE_KEY);
