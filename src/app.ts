@@ -1695,6 +1695,11 @@ function renderSpot(): string {
             ${QUICK_TFS.map((tf) => `<option value="${tf}" ${tf === state.activeTf ? "selected" : ""}>${tf} ✓</option>`).join("")}
           </select>
         </div>
+        <div class="layout-chip-row" id="layout-chip-row" aria-label="Panel visibility">
+          <button type="button" class="layout-chip ${!layoutPrefs.bookCollapsed ? "active" : ""}" id="chip-book" data-panel="book" title="Order book" aria-pressed="${!layoutPrefs.bookCollapsed ? "true" : "false"}">Book</button>
+          <button type="button" class="layout-chip ${!layoutPrefs.toolsCollapsed ? "active" : ""}" id="chip-tools" data-panel="tools" title="Drawing tools" aria-pressed="${!layoutPrefs.toolsCollapsed ? "true" : "false"}">Tools</button>
+          <button type="button" class="layout-chip ${!layoutPrefs.rightCollapsed ? "active" : ""}" id="chip-right" data-panel="right" title="Markets" aria-pressed="${!layoutPrefs.rightCollapsed ? "true" : "false"}">Mkts</button>
+        </div>
         <div class="chart-mode-menu">
           <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type" aria-label="Chart type">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}${Ico.chevronDown()}</button>
           <div class="mode-drop hidden" id="chart-type-drop">
@@ -1963,6 +1968,39 @@ function wireBookClicks(): void {
 
 let sysDropCloser: ((ev: MouseEvent) => void) | null = null;
 
+function positionSystemDrop(): void {
+  const drop = document.getElementById("sys-drop");
+  const btn = document.getElementById("btn-system-status");
+  if (!drop || !btn || drop.classList.contains("hidden")) return;
+
+  const margin = 8;
+  const useFixed = isHubEmbed() || window.matchMedia("(max-width: 1024px)").matches;
+  if (!useFixed) {
+    drop.style.position = "";
+    drop.style.top = "";
+    drop.style.right = "";
+    drop.style.bottom = "";
+    drop.style.left = "";
+    drop.style.maxHeight = "";
+    return;
+  }
+
+  drop.style.position = "fixed";
+  drop.style.left = "auto";
+  drop.style.zIndex = "1000";
+  const rect = btn.getBoundingClientRect();
+  drop.style.right = `${Math.max(margin, window.innerWidth - rect.right)}px`;
+  const maxH = Math.min(
+    window.innerHeight * 0.72,
+    520,
+    Math.max(160, window.innerHeight - rect.bottom - margin * 2),
+  );
+  drop.style.maxHeight = `${maxH}px`;
+  drop.style.overflowY = "auto";
+  drop.style.top = `${rect.bottom + margin}px`;
+  drop.style.bottom = "auto";
+}
+
 function showSystemDrop(show?: boolean): void {
   const drop = document.getElementById("sys-drop");
   const backdrop = document.getElementById("sys-backdrop");
@@ -1974,6 +2012,9 @@ function showSystemDrop(show?: boolean): void {
   backdrop?.classList.toggle("hidden", !willOpen);
   document.body.classList.toggle("sys-menu-open", willOpen);
   btn?.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  if (willOpen) {
+    requestAnimationFrame(() => positionSystemDrop());
+  }
   if (sysDropCloser) {
     document.removeEventListener("click", sysDropCloser);
     sysDropCloser = null;
@@ -3538,6 +3579,20 @@ function showSettings(): void {
   (bd.querySelector("#anchor-inp") as HTMLInputElement | null)?.focus();
 }
 
+function syncLayoutChips(): void {
+  if (isMobileLayout()) return;
+  const fs = state.chartFullscreen;
+  const set = (id: string, visible: boolean) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle("active", visible);
+    el.setAttribute("aria-pressed", visible ? "true" : "false");
+  };
+  set("chip-book", !fs && !layoutPrefs.bookCollapsed);
+  set("chip-tools", !layoutPrefs.toolsCollapsed);
+  set("chip-right", !fs && !layoutPrefs.rightCollapsed);
+}
+
 function applyLayoutToDom(): void {
   const term = document.getElementById("terminal");
   const fs = state.chartFullscreen;
@@ -3602,6 +3657,7 @@ function applyLayoutToDom(): void {
   syncExpandRail("btn-expand-right", !fs && !isMobileLayout() && layoutPrefs.rightCollapsed);
   syncExpandRail("btn-expand-tools", !fs && !isMobileLayout() && layoutPrefs.toolsCollapsed);
   syncFullscreenButton();
+  syncLayoutChips();
   scheduleChartResize();
 }
 
@@ -3763,9 +3819,10 @@ function wireLayoutPanels(): void {
   term.addEventListener("click", (ev) => {
     const t = (ev.target as HTMLElement | null)?.closest?.("button") as HTMLElement | null;
     if (!t) return;
-    if (t.id === "btn-collapse-book" || t.id === "btn-expand-book") collapseBook();
-    else if (t.id === "btn-collapse-right" || t.id === "btn-expand-right") collapseRight();
-    else if (t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") collapseTools();
+    const panel = t.dataset.panel;
+    if (panel === "book" || t.id === "btn-collapse-book" || t.id === "btn-expand-book") collapseBook();
+    else if (panel === "right" || t.id === "btn-collapse-right" || t.id === "btn-expand-right") collapseRight();
+    else if (panel === "tools" || t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") collapseTools();
   });
   wirePanelResize("resize-book", "book");
   wirePanelResize("resize-right", "right");
@@ -4902,6 +4959,7 @@ export async function boot(): Promise<void> {
   }, 350);
   window.addEventListener("resize", () => {
     onMobileLayoutChange();
+    positionSystemDrop();
     if (!chartMounted || state.mainView !== "spot") return;
     requestAnimationFrame(() => {
       resizeChart();

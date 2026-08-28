@@ -10,21 +10,6 @@ const MOBILE_TRADE_SIDE_KEY = "hackme-ex-mobile-trade-side-v1";
 export type MobileTradeSide = "buy" | "sell";
 
 export function isMobileLayout(): boolean {
-  // Hub iframe must stay full desktop desk (Book | Chart | Trade), never phone tabs.
-  try {
-    if (typeof document !== "undefined" && document.documentElement?.dataset?.embed === "hub") {
-      return false;
-    }
-  } catch {
-    /* ignore */
-  }
-  try {
-    if (typeof location !== "undefined" && new URLSearchParams(location.search).get("embed") === "hub") {
-      return false;
-    }
-  } catch {
-    /* ignore */
-  }
   return typeof window !== "undefined" && window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_PX}px)`).matches;
 }
 
@@ -86,13 +71,13 @@ export function chartInteractionOptions(): {
     handleScale: {
       axisPressedMouseMove: { time: true, price: !mobile },
       mouseWheel: !mobile,
-      pinch: !mobile,
+      pinch: true,
       axisDoubleClickReset: { time: true, price: !mobile },
     },
     handleScroll: {
       mouseWheel: !mobile,
-      pressedMouseMove: !mobile,
-      horzTouchDrag: !mobile,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
       vertTouchDrag: false,
     },
   };

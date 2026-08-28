@@ -435,7 +435,7 @@ function renderOrderLines(
       color: lastUp ? "#00e676" : "#ff5252",
       lineWidth: 1,
       lineStyle: 0,
-      axisLabelVisible: true,
+      axisLabelVisible: false,
       title: "",
     });
     priceLines.push(lastPriceLine);
@@ -1016,6 +1016,7 @@ export function wheelZoomStep(deltaY: number, accumulated = 0): { step: number; 
 export function clampVisiblePriceRange(
   range: { from: number; to: number },
   refPrice: number,
+  chartHeightPx = 0,
 ): { from: number; to: number } {
   const ref = Number.isFinite(refPrice) && refPrice > 0 ? refPrice : 0;
   let from = range.from;
@@ -1037,9 +1038,11 @@ export function clampVisiblePriceRange(
   }
 
   let span = to - from;
-  // Floor must stay above formatter precision so axis ticks stay distinct
-  // (8dp around 1e-4 ⇒ ~1e-8; 0.2% of price is comfortably above that).
-  const minSpan = Math.max(ref * 0.002, ref * 1e-5, 1e-12);
+  // Floor must stay above formatter precision so axis ticks stay distinct.
+  const labelPx = 26;
+  const maxLabels = chartHeightPx > 80 ? Math.max(5, Math.floor(chartHeightPx / labelPx)) : 10;
+  const spanFromHeight = chartHeightPx > 0 ? (ref * 0.14) / Math.sqrt(maxLabels) : 0;
+  const minSpan = Math.max(ref * 0.008, spanFromHeight, ref * 1e-5, 1e-12);
   const maxSpan = ref * 3; // ~±150% around mid at worst
   span = Math.min(Math.max(span, minSpan), maxSpan);
 
@@ -1491,6 +1494,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       scaleMargins: { top: 0.08, bottom: 0.14 },
       mode: opts.settings.logScale ? 1 : 0,
       entireTextOnly: true,
+      minimumWidth: hostW < 360 ? 76 : hostW < 520 ? 68 : 56,
       autoScale: true,
     },
     handleScale: chartInteractionOptions().handleScale,
@@ -1945,7 +1949,7 @@ export function updateLivePriceHud(price: number, up: boolean, countdown: string
         color: up ? "#00e676" : "#ff5252",
         lineWidth: 1,
         lineStyle: 0,
-        axisLabelVisible: true,
+        axisLabelVisible: false,
         title: "",
       });
       priceLines.push(lastPriceLine);
@@ -1998,6 +2002,8 @@ export function healVisiblePriceScale(): boolean {
   if (!chart) return false;
   const refPrice = refClosePrice();
   if (!(refPrice > 0)) return false;
+  const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
+  const chartH = Math.floor(inner?.clientHeight ?? hostEl?.clientHeight ?? 0);
   const ps = chart.priceScale("right");
   let range = ps.getVisibleRange();
   if (!range || !(range.to > range.from)) {
@@ -2012,7 +2018,7 @@ export function healVisiblePriceScale(): boolean {
     range = { from: robust.minValue, to: robust.maxValue };
   }
   if (!priceRangeNeedsHeal(range, refPrice)) return false;
-  const next = clampVisiblePriceRange(range, refPrice);
+  const next = clampVisiblePriceRange(range, refPrice, chartH);
   if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return false;
   priceScaleManual = true;
   try {
@@ -2066,82 +2072,101 @@ function setupMobileChartPan(shell: HTMLElement): void {
   mobilePanCleanup?.();
   if (!isMobileLayout() || !chart) return;
 
-  let panning = false;
-  let decided = false;
-  let startX = 0;
-  let startY = 0;
-  let startRange: { from: number; to: number } | null = null;
-  let pointerId = -1;
-  const DRAG_THRESH = 6;
-
-  const cancelPan = () => {
-    panning = false;
-    decided = false;
-    startRange = null;
-    pointerId = -1;
+  const cleanups: Array<() => void> = [];
+  let healTimer = 0;
+  const scheduleHeal = () => {
+    if (healTimer) window.clearTimeout(healTimer);
+    healTimer = window.setTimeout(() => {
+      healTimer = 0;
+      healVisiblePriceScale();
+    }, 180);
   };
+  shell.addEventListener("touchend", scheduleHeal, { passive: true });
+  cleanups.push(() => shell.removeEventListener("touchend", scheduleHeal));
 
-  const onDown = (e: PointerEvent) => {
-    if (!chart || e.pointerType === "mouse" || activeTool !== "cursor") return;
-    const rect = shell.getBoundingClientRect();
-    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
-    const lr = chart.timeScale().getVisibleLogicalRange();
-    if (!lr) return;
-    panning = true;
-    decided = false;
-    pointerId = e.pointerId;
-    startX = e.clientX;
-    startY = e.clientY;
-    startRange = { from: lr.from, to: lr.to };
-  };
+  if (!chartInteractionOptions().handleScroll.horzTouchDrag) {
+    let panning = false;
+    let decided = false;
+    let startX = 0;
+    let startY = 0;
+    let startRange: { from: number; to: number } | null = null;
+    let pointerId = -1;
+    const DRAG_THRESH = 6;
 
-  const onMove = (e: PointerEvent) => {
-    if (!panning || !chart || !startRange || e.pointerId !== pointerId) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (!decided) {
-      if (Math.abs(dx) < DRAG_THRESH && Math.abs(dy) < DRAG_THRESH) return;
-      decided = true;
-      if (Math.abs(dy) > Math.abs(dx)) {
-        cancelPan();
-        return;
+    const cancelPan = () => {
+      panning = false;
+      decided = false;
+      startRange = null;
+      pointerId = -1;
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (!chart || e.pointerType === "mouse" || activeTool !== "cursor") return;
+      const rect = shell.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+      const lr = chart.timeScale().getVisibleLogicalRange();
+      if (!lr) return;
+      panning = true;
+      decided = false;
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      startRange = { from: lr.from, to: lr.to };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!panning || !chart || !startRange || e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!decided) {
+        if (Math.abs(dx) < DRAG_THRESH && Math.abs(dy) < DRAG_THRESH) return;
+        decided = true;
+        if (Math.abs(dy) > Math.abs(dx)) {
+          cancelPan();
+          return;
+        }
+        try {
+          shell.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
       }
+      const spacing = chart.timeScale().options().barSpacing ?? 8;
       try {
-        shell.setPointerCapture(e.pointerId);
+        chart.timeScale().setVisibleLogicalRange(shiftLogicalRangeByPx(startRange, dx, spacing));
       } catch {
         /* ignore */
       }
-    }
-    const spacing = chart.timeScale().options().barSpacing ?? 8;
-    try {
-      chart.timeScale().setVisibleLogicalRange(shiftLogicalRangeByPx(startRange, dx, spacing));
-    } catch {
-      /* ignore */
-    }
-    e.preventDefault();
-    e.stopPropagation();
-  };
+      e.preventDefault();
+      e.stopPropagation();
+    };
 
-  const onUp = (e: PointerEvent) => {
-    if (e.pointerId !== pointerId) return;
-    try {
-      shell.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    cancelPan();
-  };
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      try {
+        shell.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      cancelPan();
+    };
 
-  shell.addEventListener("pointerdown", onDown, { passive: true });
-  shell.addEventListener("pointermove", onMove, { passive: false, capture: true });
-  shell.addEventListener("pointerup", onUp, { capture: true });
-  shell.addEventListener("pointercancel", onUp, { capture: true });
+    shell.addEventListener("pointerdown", onDown, { passive: true });
+    shell.addEventListener("pointermove", onMove, { passive: false, capture: true });
+    shell.addEventListener("pointerup", onUp, { capture: true });
+    shell.addEventListener("pointercancel", onUp, { capture: true });
+    cleanups.push(() => {
+      shell.removeEventListener("pointerdown", onDown);
+      shell.removeEventListener("pointermove", onMove, true);
+      shell.removeEventListener("pointerup", onUp, true);
+      shell.removeEventListener("pointercancel", onUp, true);
+      cancelPan();
+    });
+  }
+
   mobilePanCleanup = () => {
-    shell.removeEventListener("pointerdown", onDown);
-    shell.removeEventListener("pointermove", onMove, true);
-    shell.removeEventListener("pointerup", onUp, true);
-    shell.removeEventListener("pointercancel", onUp, true);
-    cancelPan();
+    if (healTimer) window.clearTimeout(healTimer);
+    cleanups.forEach((fn) => fn());
     mobilePanCleanup = null;
   };
 }
@@ -2191,7 +2216,9 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
     // Heal an already-corrupted scale (e.g. leftover 1e-14 window) before zooming.
     if (refPrice > 0) {
-      range = clampVisiblePriceRange(range, refPrice);
+      const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
+      const chartH = Math.floor(inner?.clientHeight ?? hostEl?.clientHeight ?? 0);
+      range = clampVisiblePriceRange(range, refPrice, chartH);
     }
 
     const rect = hostEl.getBoundingClientRect();
@@ -2399,6 +2426,7 @@ export function resizeChart(): void {
   const w = Math.floor(inner?.clientWidth ?? hostEl.clientWidth);
   const h = Math.floor(inner?.clientHeight ?? hostEl.clientHeight);
   if (w > 2 && h > 2) chart.resize(w, h);
+  requestAnimationFrame(() => healVisiblePriceScale());
 }
 
 export function destroyChart(): void {
