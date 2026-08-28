@@ -41,3 +41,39 @@ export function saveMobilePanel(panel: MobilePanel): void {
     /* ignore */
   }
 }
+
+/** LWC interaction profile — phones lock the price axis, desktop keeps full desk. */
+export function chartInteractionOptions(): {
+  handleScale: {
+    axisPressedMouseMove: { time: boolean; price: boolean };
+    mouseWheel: boolean;
+    pinch: boolean;
+    axisDoubleClickReset: { time: boolean; price: boolean };
+  };
+  handleScroll: {
+    mouseWheel: boolean;
+    pressedMouseMove: boolean;
+    horzTouchDrag: boolean;
+    vertTouchDrag: boolean;
+  };
+} {
+  const mobile = isMobileLayout();
+  return {
+    handleScale: {
+      axisPressedMouseMove: { time: true, price: !mobile },
+      mouseWheel: !mobile,
+      pinch: !mobile,
+      axisDoubleClickReset: { time: true, price: !mobile },
+    },
+    handleScroll: {
+      mouseWheel: !mobile,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
+  };
+}
+
+export function mobilePanelResizeEnabled(): boolean {
+  return !isMobileLayout();
+}
