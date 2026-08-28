@@ -44,11 +44,14 @@ export const Ico = {
   chevronDown: () => svg(`<path d="m6 9 6 6 6-6"/>`, 12),
 } as const;
 
+/** Bump when coin SVG/PNG art changes — busts CDN cache on exchange.hackme.tech. */
+const COIN_ICON_REV = 2;
+
 const COIN_ICON_SRC: Record<string, string> = {
-  HMC: "/logo-hex.png",
-  USDT: "/assets/coins/usdt.svg",
-  BTC: "/assets/coins/btc.svg",
-  SUP: "/assets/coins/sup.svg",
+  HMC: `/logo-hex.png?v=${COIN_ICON_REV}`,
+  USDT: `/assets/coins/usdt.svg?v=${COIN_ICON_REV}`,
+  BTC: `/assets/coins/btc.svg?v=${COIN_ICON_REV}`,
+  SUP: `/assets/coins/sup.svg?v=${COIN_ICON_REV}`,
 };
 
 const COIN_ICON_CLASS: Record<string, string> = {

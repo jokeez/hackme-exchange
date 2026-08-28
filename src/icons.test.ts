@@ -40,12 +40,12 @@ describe("icons", () => {
   });
 
   it("assetBadge: known coins use logo images", () => {
-    expect(assetBadge("HMC")).toContain("logo-hex.png");
+    expect(assetBadge("HMC")).toContain("logo-hex.png?v=2");
     expect(assetBadge("HMC")).toContain("asset-hmc");
-    expect(assetBadge("SUP")).toContain("/assets/coins/sup.svg");
+    expect(assetBadge("SUP")).toContain("/assets/coins/sup.svg?v=2");
     expect(assetBadge("SUP")).toContain("asset-coin-logo");
-    expect(assetBadge("USDT")).toContain("/assets/coins/usdt.svg");
-    expect(assetBadge("BTC")).toContain("/assets/coins/btc.svg");
+    expect(assetBadge("USDT")).toContain("/assets/coins/usdt.svg?v=2");
+    expect(assetBadge("BTC")).toContain("/assets/coins/btc.svg?v=2");
     expect(assetBadge("USDT")).not.toContain("₮");
     expect(assetBadge("BTC")).not.toContain("₿");
   });
@@ -54,7 +54,7 @@ describe("icons", () => {
     const html = pairAssetIcons("HMC", "USDT");
     expect(html).toContain("pair-icons");
     expect(html).toContain("asset-hmc");
-    expect(html).toContain("logo-hex.png");
+    expect(html).toContain("logo-hex.png?v=2");
     expect(html).not.toContain("asset-usdt");
     expect(html).not.toContain("₮");
     expect(pairAssetIcons("SUP", "BTC")).toContain("asset-sup");
