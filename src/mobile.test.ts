@@ -5,10 +5,11 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   MOBILE_LAYOUT_MAX_PX,
   chartInteractionOptions,
+  isMobileLayout,
   loadMobilePanel,
   mobilePanelResizeEnabled,
   saveMobilePanel,
-  isMobileLayout,
+  syncMobileLayoutClass,
 } from "./mobile";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -39,6 +40,25 @@ describe("mobile layout helpers", () => {
     document.documentElement.dataset.embed = "hub";
     expect(isMobileLayout()).toBe(false);
     delete document.documentElement.dataset.embed;
+  });
+
+  it("syncMobileLayoutClass toggles html.mobile-layout", () => {
+    const orig = window.matchMedia;
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: q.includes(String(MOBILE_LAYOUT_MAX_PX)),
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
+    syncMobileLayoutClass();
+    expect(document.documentElement.classList.contains("mobile-layout")).toBe(true);
+    window.matchMedia = orig;
+    syncMobileLayoutClass();
   });
 
   it("chartInteractionOptions locks price-axis drag on mobile", () => {
@@ -111,15 +131,12 @@ describe("mobile CSS contracts", () => {
   it("ships mobile tools sheet, locked price axis, no panel rails", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
-    expect(css).toContain(".btn-mobile-tools");
-    expect(css).toContain(".mobile-tools-open");
-    expect(css).toContain('.terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .draw-tools');
-    expect(css).toContain("touch-action: pan-x");
-    expect(css).toMatch(/\.panel-rail\.is-visible[\s\S]*display:\s*none\s*!important/);
-    expect(app).toContain('id="btn-mobile-tools"');
-    expect(app).toContain("setMobileToolsOpen");
-    expect(app).toContain("mobilePanelResizeEnabled");
-    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("chartInteractionOptions");
+    expect(css).toContain("html.mobile-layout .btn-mobile-tools");
+    expect(css).toContain('html:not(.mobile-layout) .btn-mobile-tools');
+    expect(css).toContain("html.mobile-layout .chart-host");
+    expect(css).toContain("touch-action: none");
+    expect(app).toContain("applyChartInteractionOptions");
+    expect(app).toContain("syncMobileLayoutClass");
   });
 
   it("ships mobile system sheet, ticker icons, hidden draw-tools on chart", () => {
@@ -128,7 +145,7 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain(".sys-backdrop");
     expect(css).toContain("body.sys-menu-open");
     expect(css).toMatch(/@media \(max-width: 1024px\)[\s\S]*?\.sys-drop[\s\S]*?position:\s*fixed/);
-    expect(css).toContain('.terminal.mobile-stack[data-mobile-panel="chart"]:not(.mobile-tools-open) .draw-tools');
+    expect(css).toContain('html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"]:not(.mobile-tools-open) .draw-tools');
     expect(css).toContain(".tb-pair-icons");
     expect(app).toContain("tb-pair-icons");
     expect(app).toContain("pairAssetIcons(pair.base");

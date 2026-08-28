@@ -27,6 +27,7 @@ import {
   refreshDrawings,
   refreshOrderLines,
   resetChartView,
+  applyChartInteractionOptions,
   resizeChart,
   scrollToTimestamp,
   setActiveDrawTool,
@@ -193,7 +194,7 @@ import {
   walletEquityFromMarket,
 } from "./store";
 import { toast } from "./toast";
-import { isMobileLayout, loadMobilePanel, mobilePanelResizeEnabled, saveMobilePanel, type MobilePanel } from "./mobile";
+import { isMobileLayout, loadMobilePanel, mobilePanelResizeEnabled, MOBILE_LAYOUT_MAX_PX, saveMobilePanel, syncMobileLayoutClass, type MobilePanel } from "./mobile";
 import { loadTheme, saveTheme } from "./theme";
 import type {
   Candle,
@@ -273,11 +274,28 @@ function applyHubEmbedLayoutPrefs(): void {
   };
 }
 
-/** Phone chart view: hide draw toolbar by default (no overlap with candles). */
+/** Phone: session-only tools sheet — never fold desktop draw-tools prefs. */
 function applyMobileLayoutPrefs(): void {
-  if (!isMobileLayout() || isHubEmbed()) return;
-  if (!layoutPrefs.toolsCollapsed) {
-    layoutPrefs = { ...layoutPrefs, toolsCollapsed: true };
+  syncMobileLayoutClass();
+  if (isHubEmbed()) return;
+  if (isMobileLayout()) {
+    mobileToolsOpen = false;
+    document.getElementById("terminal")?.classList.remove("mobile-tools-open");
+    return;
+  }
+  mobileToolsOpen = false;
+  document.getElementById("terminal")?.classList.remove("mobile-tools-open");
+}
+
+function onMobileLayoutChange(): void {
+  const wasMobile = document.documentElement.classList.contains("mobile-layout");
+  syncMobileLayoutClass();
+  const nowMobile = isMobileLayout();
+  if (wasMobile !== nowMobile) {
+    mobileToolsOpen = false;
+    document.getElementById("terminal")?.classList.remove("mobile-tools-open");
+    applyLayoutToDom();
+    if (chartMounted) applyChartInteractionOptions();
   }
 }
 
@@ -3561,17 +3579,20 @@ function applyLayoutToDom(): void {
     if (fs) rails.style.setProperty("display", "none", "important");
   }
   if (tools) {
-    tools.classList.toggle("hidden", layoutPrefs.toolsCollapsed || fs);
+    const hideToolsMobile = isMobileLayout() && !mobileToolsOpen;
+    const hideToolsDesktop = !isMobileLayout() && layoutPrefs.toolsCollapsed;
+    const hideTools = fs || hideToolsMobile || hideToolsDesktop;
+    tools.classList.toggle("hidden", hideTools);
     if (fs) tools.style.setProperty("display", "none", "important");
     else tools.style.removeProperty("display");
   }
   if (chartBody) {
-    chartBody.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
+    chartBody.classList.toggle("tools-collapsed", !isMobileLayout() && layoutPrefs.toolsCollapsed);
   }
-  // Expand rails: force visible when collapsed and not fullscreen (beats leftover !important).
-  syncExpandRail("btn-expand-book", !fs && layoutPrefs.bookCollapsed);
-  syncExpandRail("btn-expand-right", !fs && layoutPrefs.rightCollapsed);
-  syncExpandRail("btn-expand-tools", !fs && layoutPrefs.toolsCollapsed);
+  // Expand rails: desktop only — mobile uses topbar tools toggle.
+  syncExpandRail("btn-expand-book", !fs && !isMobileLayout() && layoutPrefs.bookCollapsed);
+  syncExpandRail("btn-expand-right", !fs && !isMobileLayout() && layoutPrefs.rightCollapsed);
+  syncExpandRail("btn-expand-tools", !fs && !isMobileLayout() && layoutPrefs.toolsCollapsed);
   syncFullscreenButton();
   scheduleChartResize();
 }
@@ -3721,6 +3742,10 @@ function wireLayoutPanels(): void {
     applyLayoutToDom();
   };
   const collapseTools = () => {
+    if (isMobileLayout()) {
+      setMobileToolsOpen();
+      return;
+    }
     layoutPrefs = togglePanelCollapsed(layoutPrefs, "tools");
     saveLayoutPrefs(layoutPrefs);
     applyLayoutToDom();
@@ -3731,10 +3756,7 @@ function wireLayoutPanels(): void {
     if (!t) return;
     if (t.id === "btn-collapse-book" || t.id === "btn-expand-book") collapseBook();
     else if (t.id === "btn-collapse-right" || t.id === "btn-expand-right") collapseRight();
-    else if (t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") {
-      if (isMobileLayout()) return;
-      collapseTools();
-    }
+    else if (t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") collapseTools();
   });
   wirePanelResize("resize-book", "book");
   wirePanelResize("resize-right", "right");
@@ -4831,12 +4853,18 @@ export async function boot(): Promise<void> {
     })();
   }, 350);
   window.addEventListener("resize", () => {
+    onMobileLayoutChange();
     if (!chartMounted || state.mainView !== "spot") return;
     requestAnimationFrame(() => {
       resizeChart();
       requestAnimationFrame(() => resizeChart());
     });
   });
+  try {
+    window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_PX}px)`).addEventListener("change", onMobileLayoutChange);
+  } catch {
+    /* ignore */
+  }
   window.addEventListener("hashchange", () => {
     applyHashToState();
     saveState(state);

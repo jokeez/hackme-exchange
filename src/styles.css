@@ -648,7 +648,7 @@ a:hover { text-decoration: underline; }
   #resize-book,
   #resize-right,
   .panel-resize { display: none !important; }
-  .btn-mobile-tools { display: inline-flex !important; }
+  html.mobile-layout .btn-mobile-tools { display: inline-flex !important; }
   .kbd-hint { display: none !important; }
   .announce {
     font-size: 0.68rem;
@@ -700,10 +700,10 @@ a:hover { text-decoration: underline; }
     overflow-y: auto;
     flex-shrink: 0;
   }
-  .terminal.mobile-stack[data-mobile-panel="chart"]:not(.mobile-tools-open) .draw-tools {
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"]:not(.mobile-tools-open) .draw-tools {
     display: none !important;
   }
-  .terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .draw-tools {
+  html.mobile-layout .terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .draw-tools {
     display: flex !important;
     position: absolute;
     left: 0;
@@ -723,12 +723,13 @@ a:hover { text-decoration: underline; }
     -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
   }
-  .terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .btn-collapse-tools {
+  html.mobile-layout .terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .btn-collapse-tools {
     display: none !important;
   }
-  .chart-host,
-  .chart-shell {
-    touch-action: pan-x;
+  html.mobile-layout .chart-host,
+  html.mobile-layout .chart-shell,
+  html.mobile-layout .chart-inner {
+    touch-action: none;
   }
   .chart-topbar {
     flex-wrap: nowrap;
@@ -3359,7 +3360,7 @@ body.sys-menu-open .sys-backdrop:not(.hidden) { display: block; }
 .tf-block { display: flex; align-items: center; gap: 0.2rem; }
 .tf-block .tf-more { margin-left: 0.15rem; }
 .chart-topbar .chart-actions { margin-left: auto; }
-.btn-mobile-tools { display: none; }
+html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
 .ind-tabs.compact { padding: 0.2rem 0.6rem; border-bottom: 1px solid var(--line); }
 
 /* Book segmented + hide total on narrow */
