@@ -112,6 +112,6 @@ describe("mobile CSS contracts", () => {
     expect(svg).toContain('aria-label="SUP"');
     expect(svg).toContain("#a855f7");
     expect(svg).toContain("#22d3ee");
-    expect(svg).toMatch(/<path[\s\S]*#sup-s/);
+    expect(svg).toContain(">SUP<");
   });
 });
