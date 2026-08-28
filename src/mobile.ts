@@ -4,6 +4,9 @@ export const MOBILE_LAYOUT_MAX_PX = 1024;
 export type MobilePanel = "book" | "chart" | "trade" | "markets";
 
 const MOBILE_PANEL_KEY = "hackme-ex-mobile-panel-v1";
+const MOBILE_TRADE_SIDE_KEY = "hackme-ex-mobile-trade-side-v1";
+
+export type MobileTradeSide = "buy" | "sell";
 
 export function isMobileLayout(): boolean {
   // Hub iframe must stay full desktop desk (Book | Chart | Trade), never phone tabs.
@@ -42,6 +45,24 @@ export function saveMobilePanel(panel: MobilePanel): void {
   }
 }
 
+export function loadMobileTradeSide(): MobileTradeSide {
+  try {
+    const raw = sessionStorage.getItem(MOBILE_TRADE_SIDE_KEY);
+    if (raw === "buy" || raw === "sell") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "buy";
+}
+
+export function saveMobileTradeSide(side: MobileTradeSide): void {
+  try {
+    sessionStorage.setItem(MOBILE_TRADE_SIDE_KEY, side);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** LWC interaction profile — phones lock the price axis, desktop keeps full desk. */
 export function chartInteractionOptions(): {
   handleScale: {
@@ -67,8 +88,8 @@ export function chartInteractionOptions(): {
     },
     handleScroll: {
       mouseWheel: !mobile,
-      pressedMouseMove: true,
-      horzTouchDrag: true,
+      pressedMouseMove: !mobile,
+      horzTouchDrag: !mobile,
       vertTouchDrag: false,
     },
   };

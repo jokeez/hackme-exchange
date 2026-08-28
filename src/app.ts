@@ -194,7 +194,7 @@ import {
   walletEquityFromMarket,
 } from "./store";
 import { toast } from "./toast";
-import { isMobileLayout, loadMobilePanel, mobilePanelResizeEnabled, MOBILE_LAYOUT_MAX_PX, saveMobilePanel, syncMobileLayoutClass, type MobilePanel } from "./mobile";
+import { isMobileLayout, loadMobilePanel, loadMobileTradeSide, mobilePanelResizeEnabled, MOBILE_LAYOUT_MAX_PX, saveMobilePanel, saveMobileTradeSide, syncMobileLayoutClass, type MobilePanel } from "./mobile";
 import { loadTheme, saveTheme } from "./theme";
 import type {
   Candle,
@@ -350,20 +350,20 @@ function renderPanelRail(
 }
 
 function renderMobilePanelTabs(): string {
-  const tabs: { id: MobilePanel; label: string }[] = [
-    { id: "book", label: "Book" },
-    { id: "chart", label: "Chart" },
-    { id: "trade", label: "Trade" },
-    { id: "markets", label: "Markets" },
+  const tabs: { id: MobilePanel; label: string; panelId: string }[] = [
+    { id: "book", label: "Book", panelId: "col-book" },
+    { id: "chart", label: "Chart", panelId: "col-center" },
+    { id: "trade", label: "Trade", panelId: "order-zone" },
+    { id: "markets", label: "Markets", panelId: "col-right" },
   ];
   return `<div class="mobile-panel-tabs" id="mobile-panel-tabs" role="tablist" aria-label="Trading panels">
     ${tabs
-      .map(
-        (t) =>
-          `<button type="button" role="tab" class="mp-tab ${mobilePanel === t.id ? "active" : ""}" data-mp="${t.id}" aria-selected="${mobilePanel === t.id}">${t.label}</button>`,
-      )
+      .map((t) => {
+        const on = mobilePanel === t.id;
+        return `<button type="button" role="tab" class="mp-tab ${on ? "active" : ""}" data-mp="${t.id}" id="mp-tab-${t.id}" aria-selected="${on}" aria-controls="${t.panelId}" tabindex="${on ? "0" : "-1"}">${t.label}</button>`;
+      })
       .join("")}
-  </div>`;
+  </div></div>`;
 }
 
 const app = document.getElementById("app")!;
@@ -1690,20 +1690,20 @@ function renderSpot(): string {
           </select>
         </div>
         <div class="chart-mode-menu">
-          <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}${Ico.chevronDown()}</button>
+          <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type" aria-label="Chart type">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}${Ico.chevronDown()}</button>
           <div class="mode-drop hidden" id="chart-type-drop">
             ${chartModes.map((m) => `<button type="button" class="cm ${m.id === state.chartMode ? "active" : ""}" data-mode="${m.id}">${m.label}</button>`).join("")}
           </div>
         </div>
         <div class="chart-actions">
-          <button type="button" class="btn-ico btn-mobile-tools ${mobileToolsOpen ? "active" : ""}" id="btn-mobile-tools" title="Drawing tools" aria-pressed="${mobileToolsOpen ? "true" : "false"}">${Ico.mousePointer()}</button>
-          <button type="button" class="btn-ico" id="btn-goto-date" title="Go to date">${Ico.clock()}</button>
-          <button type="button" class="btn-ico" id="btn-indicators" title="Indicators">${Ico.activity()}</button>
-          <button type="button" class="btn-ico" id="btn-overlays" title="Overlays">${Ico.list()}</button>
-          <button type="button" class="btn-ico" id="btn-chart-settings" title="Chart style">${Ico.settings()}</button>
-          <button type="button" class="btn-ico" id="btn-screenshot" title="Screenshot">${Ico.camera()}</button>
-          <button type="button" class="btn-ico ${state.multiChartLayout !== "1" ? "active" : ""}" id="btn-multi" title="Multi chart">${Ico.layout()}</button>
-          <button type="button" class="btn-ico ${state.chartFullscreen ? "active" : ""}" id="btn-fullscreen" title="${state.chartFullscreen ? "Exit fullscreen" : "Fullscreen"}" aria-pressed="${state.chartFullscreen ? "true" : "false"}">${state.chartFullscreen ? Ico.minimize() : Ico.maximize()}</button>
+          <button type="button" class="btn-ico btn-mobile-tools ${mobileToolsOpen ? "active" : ""}" id="btn-mobile-tools" title="Drawing tools" aria-label="Drawing tools" aria-pressed="${mobileToolsOpen ? "true" : "false"}">${Ico.mousePointer()}</button>
+          <button type="button" class="btn-ico" id="btn-goto-date" title="Go to date" aria-label="Go to date">${Ico.clock()}</button>
+          <button type="button" class="btn-ico" id="btn-indicators" title="Indicators" aria-label="Indicators">${Ico.activity()}</button>
+          <button type="button" class="btn-ico" id="btn-overlays" title="Overlays" aria-label="Overlays">${Ico.list()}</button>
+          <button type="button" class="btn-ico" id="btn-chart-settings" title="Chart style" aria-label="Chart style">${Ico.settings()}</button>
+          <button type="button" class="btn-ico" id="btn-screenshot" title="Screenshot" aria-label="Screenshot">${Ico.camera()}</button>
+          <button type="button" class="btn-ico ${state.multiChartLayout !== "1" ? "active" : ""}" id="btn-multi" title="Multi chart" aria-label="Multi chart">${Ico.layout()}</button>
+          <button type="button" class="btn-ico ${state.chartFullscreen ? "active" : ""}" id="btn-fullscreen" title="${state.chartFullscreen ? "Exit fullscreen" : "Fullscreen"}" aria-label="${state.chartFullscreen ? "Exit fullscreen" : "Fullscreen"}" aria-pressed="${state.chartFullscreen ? "true" : "false"}">${state.chartFullscreen ? Ico.minimize() : Ico.maximize()}</button>
         </div>
       </div>
       <div class="ind-tabs compact" id="ind-tabs">
@@ -3644,6 +3644,7 @@ function setMobileToolsOpen(open?: boolean): void {
   const btn = document.getElementById("btn-mobile-tools");
   btn?.classList.toggle("active", mobileToolsOpen);
   btn?.setAttribute("aria-pressed", mobileToolsOpen ? "true" : "false");
+  applyLayoutToDom();
   scheduleChartResize();
 }
 
@@ -3772,6 +3773,7 @@ function switchMobilePanel(mp: MobilePanel): void {
     const on = (b as HTMLElement).dataset.mp === mp;
     b.classList.toggle("active", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
+    b.setAttribute("tabindex", on ? "0" : "-1");
   });
   if (mp === "chart") {
     requestAnimationFrame(() => {
@@ -3802,13 +3804,14 @@ function wireMobileTradeSide(): void {
   if (!dual || !tabs.length) return;
   const setSide = (side: "buy" | "sell") => {
     dual.setAttribute("data-mobile-side", side);
+    saveMobileTradeSide(side);
     tabs.forEach((tab) => {
       const on = tab.dataset.mobileSide === side;
       tab.classList.toggle("active", on);
       tab.setAttribute("aria-selected", on ? "true" : "false");
     });
   };
-  setSide("buy");
+  setSide(loadMobileTradeSide());
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => setSide((tab.dataset.mobileSide as "buy" | "sell") || "buy"));
   });
