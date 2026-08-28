@@ -45,7 +45,7 @@ export function renderOracleStatusHtml(meta: OracleMeta, now = Date.now()): stri
     <span class="oracle-dot" aria-hidden="true"></span>
     <span class="oracle-label">${label}</span>
     <span class="oracle-hint dim">· ${sourceHint}</span>
-    <button type="button" class="btn-sm oracle-retry" id="btn-oracle-retry" title="Refresh oracle now">↻</button>
+    <button type="button" class="btn-sm oracle-retry" id="btn-oracle-retry" title="Refresh oracle now" aria-label="Refresh oracle now">↻</button>
   </div>`;
 }
 

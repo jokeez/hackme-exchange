@@ -34,6 +34,7 @@ describe("hardening UI contracts", () => {
     expect(html).toContain("order-head-meta");
     expect(html).toContain("trade-side-toggle");
     expect(html).toContain('aria-label="Buy HMC — paper synthetic demo"');
+    expect(html).toContain('aria-label="Fill best ask (BBO)"');
     expect(html).toContain('aria-label="Sell HMC — paper synthetic demo"');
   });
 
@@ -65,7 +66,7 @@ describe("hardening UI contracts", () => {
       fetchedAt: Date.now(),
       poolStatus: "offline",
     });
-    expect(html).toContain("btn-oracle-retry");
+    expect(html).toContain('aria-label="Refresh oracle now"');
     expect(html).toContain("local fallback");
     expect(html).toContain("oracle-status offline");
   });

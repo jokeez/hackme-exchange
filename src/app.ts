@@ -58,8 +58,9 @@ import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
 import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, listSecondaryCrosshairPanes } from "./chartSecondary";
-import { registerCrosshairPane, setCrosshairSyncEnabled } from "./chartCrosshairSync";
-import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled } from "./chartTimeSync";
+import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
+import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
+import { renderOracleSettingsModal, trapModalFocus } from "./oracleSettings";
 import {
   authLogout,
   authRevokeAll,
@@ -377,8 +378,8 @@ function renderMobilePanelTabs(): string {
 
 function renderMobileChartTradeBar(): string {
   return `<div class="mobile-chart-trade-bar" id="mobile-chart-trade-bar" hidden aria-hidden="true">
-    <button type="button" class="mctb buy" data-goto-trade="buy">Buy</button>
-    <button type="button" class="mctb sell" data-goto-trade="sell">Sell</button>
+    <button type="button" class="mctb buy" data-goto-trade="buy" aria-label="Open buy order form">Buy</button>
+    <button type="button" class="mctb sell" data-goto-trade="sell" aria-label="Open sell order form">Sell</button>
   </div>`;
 }
 
@@ -857,13 +858,14 @@ function renderBook(): string {
     </div>${renderVolumeRatio()}${renderDepthPanel(bids, asks, pair.base, pair.quote, { labLive })}`;
   }
   const max = Math.max(...bids.map((b) => b.amountBase), ...asks.map((a) => a.amountBase), 1);
-  const rowTitle = labLive
-    ? (side: "bid" | "ask") => `Set ${side === "ask" ? "Buy" : "Sell"} limit to this lab price`
-    : () => "Paper demo · synthetic depth (not a live fill)";
   const row = (l: (typeof bids)[0], side: "bid" | "ask") => {
     const pct = (l.amountBase / max) * 100;
     const price = l.price;
-    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" tabindex="0" title="${rowTitle(side)}">
+    const title = labLive
+      ? `Set ${side === "ask" ? "Buy" : "Sell"} limit to this lab price`
+      : `Set ${side === "ask" ? "Buy" : "Sell"} limit to ${formatPrice(price)}`;
+    const aria = side === "ask" ? `Buy at ${formatPrice(price)}` : `Sell at ${formatPrice(price)}`;
+    return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" tabindex="0" title="${title}" aria-label="${aria}">
       <div class="ob-bar" style="width:${pct}%"></div>
       <span class="ob-price">${formatPrice(price)}</span>
       <span>${formatNum(l.amountBase, 1)}</span>
@@ -1745,7 +1747,7 @@ function renderSpot(): string {
         <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
       </div>
       <button type="button" class="btn-sm alerts-chip" id="btn-open-alerts" title="Price alerts">Alerts${alertCount ? ` · ${alertCount}` : ""}</button>
-      <button type="button" class="btn-sm" id="btn-hotkeys" title="Keyboard shortcuts (?)">?</button>
+      <button type="button" class="btn-sm" id="btn-hotkeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
       <div class="pnl-chip mono">PnL <span class="${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</span></div>
     </div>
   </div>
@@ -1816,7 +1818,10 @@ function renderSpot(): string {
         ${renderPanelRail("tools", "btn-expand-tools", "Tools", "Show drawing tools")}
         <aside class="draw-tools ${layoutPrefs.toolsCollapsed ? "hidden" : ""}" id="draw-tools">
           <button type="button" class="btn-panel-toggle btn-collapse-tools" id="btn-collapse-tools" title="Hide drawing tools" aria-label="Hide drawing tools">‹</button>
-          ${drawTools.map((d) => `<button type="button" class="dt ${d.id === "lock" && state.drawingsLocked ? "active" : ""} ${state.activeDrawTool === d.id ? "active" : ""}" data-dt="${d.id}" title="${d.title}">${drawToolIcon(d.id as DrawIconId)}</button>`).join("")}
+          ${drawTools.map((d) => {
+            const active = d.id === "lock" ? state.drawingsLocked : state.activeDrawTool === d.id;
+            return `<button type="button" class="dt ${active ? "active" : ""}" data-dt="${d.id}" title="${d.title}" aria-label="${d.title}" aria-pressed="${active}">${drawToolIcon(d.id as DrawIconId)}</button>`;
+          }).join("")}
         </aside>
         <div class="chart-main">
           <div class="ohlc-legend mono" id="ohlc-legend">${ohlc}</div>
@@ -3871,19 +3876,11 @@ function showSettings(): void {
   const bd = document.createElement("div");
   bd.className = "modal-backdrop";
   const anchor = sanitizeOracleAnchor(state.oracleAnchor);
-  bd.innerHTML = `<div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="oracle-settings-title">
-    <h3 id="oracle-settings-title">Oracle settings</h3>
-    <label>Reference mid (USDT per HMC)
-      <input class="inp mono" id="anchor-inp" type="number" step="0.001" value="${anchor}" />
-    </label>
-    <p class="muted small">Operator reference for paper charts — not scaled by pool GH/s. D0 default 0.05.</p>
-    <div class="modal-actions">
-      <button type="button" class="btn-sm" id="modal-close">Cancel</button>
-      <button type="button" class="btn-primary" id="modal-save">Apply</button>
-    </div>
-  </div>`;
+  bd.innerHTML = renderOracleSettingsModal(anchor);
+  const modal = bd.querySelector(".modal") as HTMLElement;
   const close = () => {
     window.removeEventListener("keydown", onKey);
+    untrap?.();
     bd.remove();
   };
   const onKey = (e: KeyboardEvent) => {
@@ -3895,6 +3892,7 @@ function showSettings(): void {
   };
   document.body.appendChild(bd);
   window.addEventListener("keydown", onKey);
+  const untrap = modal ? trapModalFocus(modal) : undefined;
   bd.querySelector("#modal-close")?.addEventListener("click", close);
   bd.addEventListener("click", (e) => {
     if (e.target === bd) close();
@@ -4173,6 +4171,7 @@ function syncMobileChrome(mp: MobilePanel): void {
   const root = document.documentElement;
   if (mobile) root.setAttribute("data-mobile-panel", mp);
   else root.removeAttribute("data-mobile-panel");
+  document.getElementById("terminal")?.setAttribute("data-mobile-panel", mp);
   const bar = document.getElementById("mobile-chart-trade-bar");
   if (bar) {
     const onChart = mp === "chart" && mobile;
@@ -4196,12 +4195,7 @@ function switchMobilePanel(mp: MobilePanel, opts?: { tradeSide?: "buy" | "sell" 
   mobilePanel = mp;
   saveMobilePanel(mp);
   document.getElementById("terminal")?.setAttribute("data-mobile-panel", mp);
-  document.querySelectorAll("#mobile-panel-tabs .mp-tab").forEach((b) => {
-    const on = (b as HTMLElement).dataset.mp === mp;
-    b.classList.toggle("active", on);
-    b.setAttribute("aria-selected", on ? "true" : "false");
-    b.setAttribute("tabindex", on ? "0" : "-1");
-  });
+  syncMobileTabAria(mp);
   syncMobileChrome(mp);
   applyLayoutToDom();
   if (mp === "chart") {
@@ -4218,26 +4212,42 @@ function switchMobilePanel(mp: MobilePanel, opts?: { tradeSide?: "buy" | "sell" 
   }
 }
 
-function wireMobilePanels(): void {
-  document.querySelectorAll("#mobile-panel-tabs .mp-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const mp = (btn as HTMLElement).dataset.mp as MobilePanel;
-      switchMobilePanel(mp);
-    });
+let mobilePanelsDelegated = false;
+
+function syncMobileTabAria(mp: MobilePanel): void {
+  document.querySelectorAll("#mobile-panel-tabs .mp-tab").forEach((b) => {
+    const on = (b as HTMLElement).dataset.mp === mp;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+    b.setAttribute("tabindex", on ? "0" : "-1");
   });
-  document.querySelectorAll("#mobile-chart-trade-bar [data-goto-trade]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const side = (btn as HTMLElement).dataset.gotoTrade as "buy" | "sell";
+}
+
+function wireMobilePanels(): void {
+  if (!mobilePanelsDelegated) {
+    mobilePanelsDelegated = true;
+    app.addEventListener("click", (e) => {
+      const tab = (e.target as HTMLElement).closest("#mobile-panel-tabs .mp-tab") as HTMLElement | null;
+      if (!tab) return;
+      const mp = tab.dataset.mp as MobilePanel;
+      if (mp) switchMobilePanel(mp);
+    });
+    app.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest("#mobile-chart-trade-bar [data-goto-trade]") as HTMLElement | null;
+      if (!btn) return;
+      const side = btn.dataset.gotoTrade as "buy" | "sell";
       switchMobilePanel("trade", { tradeSide: side });
     });
-  });
-  document.querySelector(".chart-body")?.addEventListener("click", (e) => {
-    if (!mobileToolsOpen || !isMobileLayout()) return;
-    const t = e.target as HTMLElement;
-    if (t.closest(".draw-tools") || t.closest("#btn-mobile-tools")) return;
-    if (t.closest(".chart-topbar") || t.closest(".ind-tabs")) return;
-    setMobileToolsOpen(false);
-  });
+    app.addEventListener("click", (e) => {
+      if (!mobileToolsOpen || !isMobileLayout()) return;
+      const t = e.target as HTMLElement;
+      if (!t.closest(".chart-body")) return;
+      if (t.closest(".draw-tools") || t.closest("#btn-mobile-tools")) return;
+      if (t.closest(".chart-topbar") || t.closest(".ind-tabs")) return;
+      setMobileToolsOpen(false);
+    });
+  }
+  syncMobileTabAria(mobilePanel);
   syncMobileChrome(mobilePanel);
 }
 
@@ -4603,6 +4613,11 @@ function wireEvents(): void {
   });
   document.getElementById("btn-multi")?.addEventListener("click", (e) => {
     showMultiChartPicker(state, e.currentTarget as HTMLElement, (patch) => {
+      if (patch.multiChartLayout === "4" && isMobileLayout()) {
+        patch.multiChartLayout = "2v";
+        patch.multiChart = true;
+        toast("2×2 grid works best on desktop — using 2 vertical on mobile", "info");
+      }
       Object.assign(state, patch);
       saveState(state);
       render();
@@ -5386,6 +5401,10 @@ export async function boot(): Promise<void> {
     ensurePublicTape(true);
     render();
   });
+  if (typeof window !== "undefined") {
+    const w = window as Window & { __hackmeExchangeDebug?: Record<string, unknown> };
+    w.__hackmeExchangeDebug = { getCrosshairSyncDebug, getTimeSyncDebug };
+  }
 }
 
 function maybeShowTour(): void {

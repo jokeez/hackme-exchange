@@ -9,6 +9,15 @@ const panes = new Map<string, TimeSyncPane>();
 const unbinders = new Map<string, () => void>();
 let syncing = false;
 let enabled = true;
+let lastSyncedRange: { from: Time; to: Time } | null = null;
+
+export function getTimeSyncDebug(): {
+  enabled: boolean;
+  paneCount: number;
+  lastSyncedRange: { from: Time; to: Time } | null;
+} {
+  return { enabled, paneCount: panes.size, lastSyncedRange };
+}
 
 export function setTimeSyncEnabled(on: boolean): void {
   enabled = on;
@@ -52,6 +61,7 @@ function unbindPane(id: string): void {
 }
 
 function propagate(fromId: string, range: { from: Time; to: Time }): void {
+  lastSyncedRange = range;
   syncing = true;
   try {
     for (const [id, pane] of panes) {
