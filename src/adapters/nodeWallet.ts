@@ -113,14 +113,13 @@ export function mergeNodeIntoDemoWallet(demo: Wallet, node: Extract<NodeWalletSn
 let nodeProbeCache: { at: number; ok: boolean } | null = null;
 const NODE_PROBE_TTL_MS = 30_000;
 
-/** Loopback node in dev; same-origin /hub-proxy on exchange.hackme.tech (connect-src 'self'). */
+/** Loopback node when page is the hub; same-origin /hub-proxy elsewhere (no cross-port CORS). */
 export function resolveNodeProbeUrl(): string | null {
   if (typeof window === "undefined") return null;
   const pageOrigin = window.location.origin.replace(/\/$/, "");
-  if (isLoopbackOrigin(pageOrigin)) {
-    const base = INTEGRATION.nodeOrigin.replace(/\/$/, "");
-    if (!isLoopbackOrigin(base)) return null;
-    return `${base}/api/status?lite=1`;
+  const nodeBase = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+  if (pageOrigin === nodeBase) {
+    return `${nodeBase}/api/status?lite=1`;
   }
   return `${pageOrigin}/hub-proxy/api/status?lite=1`;
 }

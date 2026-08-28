@@ -630,6 +630,15 @@ a:hover { text-decoration: underline; }
   .terminal.mobile-stack[data-mobile-panel="chart"] .col-center {
     display: flex !important;
     min-height: 0;
+    flex: 1;
+  }
+  .terminal.mobile-stack[data-mobile-panel="chart"] .chart-body {
+    flex: 1 1 0;
+    min-height: min(52vh, 420px);
+  }
+  .terminal.mobile-stack[data-mobile-panel="chart"] .chart-host {
+    min-height: min(48vh, 380px);
+    flex: 1;
   }
   .terminal.mobile-stack[data-mobile-panel="chart"] .col-center .order-zone { display: none !important; }
   /* Binance-style trade: order form + book side-by-side */
@@ -932,7 +941,7 @@ a:hover { text-decoration: underline; }
   html.mobile-layout .chart-host,
   html.mobile-layout .chart-shell,
   html.mobile-layout .chart-inner {
-    touch-action: pan-x pinch-zoom;
+    touch-action: none;
   }
   html.mobile-layout .btn-ico,
   html.mobile-layout .tfq,
@@ -4364,7 +4373,7 @@ html.mobile-layout[data-embed="hub"] .chart-host,
 html.mobile-layout[data-embed="hub"] .chart-shell,
 html.mobile-layout[data-embed="hub"] .chart-inner {
   min-height: 0 !important;
-  touch-action: pan-x pinch-zoom;
+  touch-action: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

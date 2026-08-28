@@ -571,14 +571,23 @@ function labOrderOpts(extra?: {
   };
 }
 
+let healthBackoffUntil = 0;
+
 async function refreshTradingGuardsFromHealth(): Promise<void> {
   if (!isLabApiEnabled()) return;
+  if (Date.now() < healthBackoffUntil) return;
   const prevSeeded = tradingGuards.labMmSeeded;
   const prevFee = labFeeWallet;
   const prevDisc = state.feeConfig.hmcDiscountPct;
   try {
     const h = await exchangeHealth(2_000);
-    if (!h.ok) return;
+    if (!h.ok) {
+      if (h.code === "unreachable" || h.status === 0) {
+        healthBackoffUntil = Date.now() + 60_000;
+      }
+      return;
+    }
+    healthBackoffUntil = 0;
     tradingGuards = parseHealthTradingGuards(h);
     labFeeWallet = parseHealthFeeWallet(h);
     if (tradingGuards.hmcDiscountPctServer != null) {
