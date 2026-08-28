@@ -510,7 +510,13 @@ a:hover { text-decoration: underline; }
   .tb-right { width: 100%; margin-left: 0; }
   .tb-quote { width: 100%; }
   .tb-stats { display: none; }
-  .vip-badge { display: none; }
+  .vip-badge {
+    font-size: 0.58rem;
+    max-width: min(44vw, 9.5rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .pnl-chip { margin-left: 0; font-size: 0.72rem; }
   .alerts-chip { font-size: 0.68rem; padding: 0.3rem 0.5rem; }
   .terminal.mobile-stack {
@@ -2301,7 +2307,7 @@ body.resizing-panels iframe, body.resizing-panels canvas { pointer-events: none;
   background: rgba(0,0,0,.58); display: grid; place-items: center;
   padding: 1rem;
   backdrop-filter: blur(4px);
-  pointer-events: none; /* desk stays clickable; only the card captures input */
+  pointer-events: auto;
 }
 .tour-card {
   width: min(420px, 100%);
@@ -3633,11 +3639,10 @@ html[data-embed="hub"] .order-head-meta {
 }
 html[data-embed="hub"] .order-head-meta .demo-badge,
 html[data-embed="hub"] .order-head-meta .fee-hint {
-  font-size: 0.5rem;
+  font-size: 0.52rem;
 }
-html[data-embed="hub"] .order-head-meta .fee-hint { display: none; }
 html[data-embed="hub"] .fee-toggle.fee-meta { font-size: 0.52rem; }
-html[data-embed="hub"] .order-mode-row .demo-badge.meta-compact { max-width: 3.2rem; overflow: hidden; text-overflow: ellipsis; }
+html[data-embed="hub"] .order-mode-row .demo-badge.meta-compact { flex-shrink: 0; }
 html[data-embed="hub"] .binance-type-tabs .type,
 html[data-embed="hub"] .type-adv-select {
   font-size: 0.68rem;

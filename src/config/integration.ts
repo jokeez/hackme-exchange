@@ -1,5 +1,3 @@
-/** Runtime integration targets — override via Vite env at build time. */
-
 import { isLoopbackOrigin, sanitizeHttpUrl } from "../sanitize";
 
 export type IntegrationMode = "demo" | "paper" | "live" | "lab";
@@ -114,6 +112,20 @@ function resolveExchangeApiOrigin(): string {
   return candidate;
 }
 
+function resolvePoolOrigin(): string {
+  const explicit = env("VITE_POOL_ORIGIN", "").trim();
+  // Browser same-origin deploy must use /pool-proxy — copied .env must not bypass CORS.
+  if (useHubProxy) {
+    if (explicit && typeof console !== "undefined") {
+      console.warn(
+        "[hackme-exchange] VITE_POOL_ORIGIN ignored on same-origin deploy — using /pool-proxy.",
+      );
+    }
+    return defaultPool;
+  }
+  return sanitizeHttpUrl(explicit || defaultPool, defaultPool);
+}
+
 export const INTEGRATION: IntegrationConfig = {
   mode: effectiveMode(RAW_MODE),
   hubOrigin: sanitizeHttpUrl(env("VITE_HUB_ORIGIN", defaultHub), defaultHub),
@@ -123,7 +135,7 @@ export const INTEGRATION: IntegrationConfig = {
   ),
   exchangeApiOrigin: resolveExchangeApiOrigin(),
   nodeOrigin,
-  poolCoordinatorOrigin: sanitizeHttpUrl(env("VITE_POOL_ORIGIN", defaultPool), defaultPool),
+  poolCoordinatorOrigin: resolvePoolOrigin(),
   adminToken: undefined,
 };
 
@@ -158,21 +170,4 @@ export function isLabModeRequested(): boolean {
   return RAW_MODE === "lab" || wantsLabApi;
 }
 
-/** Short UI label for header / announce chrome. */
-export function modeChromeLabel(): string {
-  if (isLiveModeBlocked()) return "Live blocked — use paper/lab, not public live";
-  if (isLabApiEnabled()) return "Lab API wiring (loopback) — DEMO/LAB only";
-  switch (INTEGRATION.mode) {
-    case "paper":
-      return "Paper / synthetic — not real exchange";
-    default:
-      return "Demo / paper balances — not real exchange";
-  }
-}
-
-/** Header pill text — never implies real CEX live trading. */
-export function modeStatusPill(): string {
-  if (isLiveModeBlocked()) return "⛔ Live blocked";
-  if (isLabApiEnabled()) return "◎ Lab API · not public";
-  return "◎ Paper / Synthetic";
-}
+export { modeChromeLabel, modeStatusPill } from "../modeChrome";
