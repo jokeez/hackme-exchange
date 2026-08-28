@@ -128,6 +128,16 @@ describe("mobile CSS contracts", () => {
     expect(after).toMatch(/\.dual-order\s*\{[\s\S]*?grid-template-columns:\s*1fr\s*!important/);
   });
 
+  it("mobile panel tabs markup keeps terminal inside spot-layout", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    const m = src.match(/function renderMobilePanelTabs\(\)[\s\S]*?return `([\s\S]*?)`;/);
+    expect(m?.[1]).toBeTruthy();
+    expect(m![1]).not.toContain("</div></div>");
+    expect(src).toMatch(
+      /<div class="mobile-panel-wrap">\$\{renderMobilePanelTabs\(\)\}<\/div>[\s\S]*?<div class="terminal mobile-stack/,
+    );
+  });
+
   it("index.html has viewport-fit and theme-color", () => {
     const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
     expect(html).toContain("viewport-fit=cover");
