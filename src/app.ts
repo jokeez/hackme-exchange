@@ -350,19 +350,26 @@ function renderPanelRail(
 }
 
 function renderMobilePanelTabs(): string {
-  const tabs: { id: MobilePanel; label: string; panelId: string }[] = [
-    { id: "book", label: "Book", panelId: "col-book" },
-    { id: "chart", label: "Chart", panelId: "col-center" },
-    { id: "trade", label: "Trade", panelId: "order-zone" },
-    { id: "markets", label: "Markets", panelId: "col-right" },
+  const tabs: { id: MobilePanel; label: string; ico: string; panelId: string }[] = [
+    { id: "trade", label: "Trade", ico: "trade", panelId: "order-zone" },
+    { id: "chart", label: "Chart", ico: "chart", panelId: "col-center" },
+    { id: "markets", label: "Markets", ico: "markets", panelId: "col-right" },
+    { id: "orders", label: "Orders", ico: "orders", panelId: "activity-panel" },
   ];
-  return `<div class="mobile-panel-tabs" id="mobile-panel-tabs" role="tablist" aria-label="Trading panels">
+  return `<nav class="mobile-panel-tabs" id="mobile-panel-tabs" role="tablist" aria-label="Spot trading">
     ${tabs
       .map((t) => {
         const on = mobilePanel === t.id;
-        return `<button type="button" role="tab" class="mp-tab ${on ? "active" : ""}" data-mp="${t.id}" id="mp-tab-${t.id}" aria-selected="${on}" aria-controls="${t.panelId}" tabindex="${on ? "0" : "-1"}">${t.label}</button>`;
+        return `<button type="button" role="tab" class="mp-tab ${on ? "active" : ""}" data-mp="${t.id}" id="mp-tab-${t.id}" aria-selected="${on}" aria-controls="${t.panelId}" tabindex="${on ? "0" : "-1"}"><span class="mp-ico mp-ico-${t.ico}" aria-hidden="true"></span><span class="mp-label">${t.label}</span></button>`;
       })
       .join("")}
+  </nav>`;
+}
+
+function renderMobileChartTradeBar(): string {
+  return `<div class="mobile-chart-trade-bar" id="mobile-chart-trade-bar" hidden aria-hidden="true">
+    <button type="button" class="mctb buy" data-goto-trade="buy">Buy</button>
+    <button type="button" class="mctb sell" data-goto-trade="sell">Sell</button>
   </div>`;
 }
 
@@ -1613,7 +1620,7 @@ function renderSpot(): string {
   <div class="spot-layout">
   <div class="ticker-bar binance-ticker">
     <div class="tb-left">
-      <div class="tb-pair">
+      <button type="button" class="tb-pair tb-pair-btn" id="btn-mobile-pair" aria-label="Switch trading pair">
         <span class="tb-pair-icons">${pairAssetIcons(pair.base, pair.quote)}</span>
         <div>
           <h1>${pair.label}</h1>
@@ -1621,7 +1628,8 @@ function renderSpot(): string {
             useLabMatching() ? "Lab book · DEMO matching" : "Pool oracle · paper demo"
           }</span>
         </div>
-      </div>
+        <span class="tb-chev" aria-hidden="true">▾</span>
+      </button>
       <div class="tb-quote">
         <span class="tb-price ${ch >= 0 ? "up" : "down"}">${formatPrice(tradeMid)}</span>
         <span class="tb-chg ${pctTone(ch)}">${formatPct(ch)}</span>
@@ -1666,8 +1674,6 @@ function renderSpot(): string {
           .join("")}</div>`
       : ""
   }
-
-  <div class="mobile-panel-wrap">${renderMobilePanelTabs()}</div>
 
   <div class="terminal mobile-stack ${state.chartFullscreen ? "chart-fullscreen" : ""} ${layoutPrefs.bookCollapsed ? "book-collapsed" : ""} ${layoutPrefs.rightCollapsed ? "right-collapsed" : ""} ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""} ${mobileToolsOpen ? "mobile-tools-open" : ""}" id="terminal" data-mobile-panel="${mobilePanel}" style="grid-template-columns:${terminalGridColumnsForView(layoutPrefs, state.chartFullscreen)}">
     <aside class="col-book ${state.chartFullscreen || layoutPrefs.bookCollapsed ? "hidden" : ""}" id="col-book">
@@ -1779,6 +1785,8 @@ function renderSpot(): string {
   <div class="mining-strip mono" id="mining-strip">
     ${pair.label} · ${formatGh(poolLive!.poolGh)} · ${poolLive!.workers} workers · reward/M ${formatRewardPerM(poolLive!.rewardPerM)} · #${formatNum(poolLive!.blockHeight, 0)}
   </div>
+  ${renderMobileChartTradeBar()}
+  <div class="mobile-panel-wrap mobile-bottom-nav">${renderMobilePanelTabs()}</div>
   </div>
   <div class="kbd-hint">? help · Shift+B/S market · Esc cancel all · 1-0 TF · Alt+R reset · charts by TradingView</div>`;
 }
@@ -3763,8 +3771,26 @@ function wireLayoutPanels(): void {
   wirePanelResize("resize-right", "right");
 }
 
-function switchMobilePanel(mp: MobilePanel): void {
-  if (!mp || mp === mobilePanel) return;
+function syncMobileChrome(mp: MobilePanel): void {
+  const bar = document.getElementById("mobile-chart-trade-bar");
+  if (bar) {
+    const onChart = mp === "chart" && isMobileLayout();
+    bar.hidden = !onChart;
+    bar.setAttribute("aria-hidden", onChart ? "false" : "true");
+  }
+}
+
+function switchMobilePanel(mp: MobilePanel, opts?: { tradeSide?: "buy" | "sell" }): void {
+  if (opts?.tradeSide) {
+    saveMobileTradeSide(opts.tradeSide);
+    const dual = document.getElementById("dual-order");
+    if (dual) dual.setAttribute("data-mobile-side", opts.tradeSide);
+    wireMobileTradeSide();
+  }
+  if (!mp || mp === mobilePanel) {
+    syncMobileChrome(mobilePanel);
+    return;
+  }
   if (mp !== "chart") setMobileToolsOpen(false);
   mobilePanel = mp;
   saveMobilePanel(mp);
@@ -3775,6 +3801,7 @@ function switchMobilePanel(mp: MobilePanel): void {
     b.setAttribute("aria-selected", on ? "true" : "false");
     b.setAttribute("tabindex", on ? "0" : "-1");
   });
+  syncMobileChrome(mp);
   if (mp === "chart") {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -3784,6 +3811,7 @@ function switchMobilePanel(mp: MobilePanel): void {
     });
   }
   if (mp === "trade") {
+    wireMobileTradeSide();
     document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 }
@@ -3795,6 +3823,13 @@ function wireMobilePanels(): void {
       switchMobilePanel(mp);
     });
   });
+  document.querySelectorAll("#mobile-chart-trade-bar [data-goto-trade]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const side = (btn as HTMLElement).dataset.gotoTrade as "buy" | "sell";
+      switchMobilePanel("trade", { tradeSide: side });
+    });
+  });
+  syncMobileChrome(mobilePanel);
 }
 
 function wireMobileTradeSide(): void {
@@ -3842,6 +3877,12 @@ function wireEvents(): void {
     if (!postHubGotoTab("wallet")) return;
     ev.preventDefault();
     showSystemDrop(false);
+  });
+
+  document.getElementById("btn-mobile-pair")?.addEventListener("click", () => {
+    if (!isMobileLayout()) return;
+    switchMobilePanel("markets");
+    document.getElementById("market-search")?.focus();
   });
 
   wireLayoutPanels();
@@ -4285,7 +4326,7 @@ function openAlertsPanel(): void {
   } else {
     applyLayoutToDom();
   }
-  switchMobilePanel("markets");
+  switchMobilePanel("orders");
   document.querySelectorAll("#activity-tabs button").forEach((b) => {
     const on = (b as HTMLElement).dataset.tab === "alerts";
     b.classList.toggle("active", on);
@@ -4339,6 +4380,10 @@ function wireMarketRows(): void {
     btn.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).classList.contains("star")) return;
       const pair = (btn as HTMLElement).dataset.pair as PairId;
+      if (isMobileLayout()) {
+        mobilePanel = "trade";
+        saveMobilePanel("trade");
+      }
       state.activePair = pair;
       pushRecentPair(pair);
       saveState(state);

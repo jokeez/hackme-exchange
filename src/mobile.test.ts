@@ -28,9 +28,14 @@ describe("mobile layout helpers", () => {
     expect(loadMobilePanel()).toBe("markets");
   });
 
-  it("defaults to chart for unknown stored value", () => {
+  it("defaults to trade for unknown stored value", () => {
     sessionStorage.setItem("hackme-ex-mobile-panel-v1", "nope");
-    expect(loadMobilePanel()).toBe("chart");
+    expect(loadMobilePanel()).toBe("trade");
+  });
+
+  it("migrates legacy book tab to trade split", () => {
+    sessionStorage.setItem("hackme-ex-mobile-panel-v1", "book");
+    expect(loadMobilePanel()).toBe("trade");
   });
 
   it("isMobileLayout reflects matchMedia breakpoint", () => {
@@ -128,13 +133,12 @@ describe("mobile CSS contracts", () => {
     expect(after).toMatch(/\.dual-order\s*\{[\s\S]*?grid-template-columns:\s*1fr\s*!important/);
   });
 
-  it("mobile panel tabs markup keeps terminal inside spot-layout", () => {
+  it("mobile bottom nav keeps terminal before nav in spot shell", () => {
     const src = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
-    const m = src.match(/function renderMobilePanelTabs\(\)[\s\S]*?return `([\s\S]*?)`;/);
-    expect(m?.[1]).toBeTruthy();
-    expect(m![1]).not.toContain("</div></div>");
+    expect(src).toContain('mp-ico mp-ico-${t.ico}');
+    expect(src).not.toMatch(/function renderMobilePanelTabs\(\)[\s\S]*?<\/div><\/div>/);
     expect(src).toMatch(
-      /<div class="mobile-panel-wrap">\$\{renderMobilePanelTabs\(\)\}<\/div>[\s\S]*?<div class="terminal mobile-stack/,
+      /id="terminal"[\s\S]*?mobile-bottom-nav">\$\{renderMobilePanelTabs\(\)\}/,
     );
   });
 
@@ -182,6 +186,15 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain("text-overflow: ellipsis");
   });
 
+  it("ships Binance-style mobile trade split and bottom nav", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(css).toContain(".mobile-bottom-nav");
+    expect(css).toContain('[data-mobile-panel="trade"]');
+    expect(css).toContain("flex-direction: row !important");
+    expect(css).toContain('[data-mobile-panel="orders"]');
+    expect(css).toContain(".mobile-chart-trade-bar");
+  });
+
   it("ships mobile tools sheet, locked price axis, no panel rails", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
@@ -209,7 +222,8 @@ describe("mobile CSS contracts", () => {
     expect(app).not.toContain("tb-star");
     expect(app).not.toContain("◆");
     expect(app).toContain('aria-controls="${t.panelId}"');
-    expect(app).toContain('panelId: "col-book"');
+    expect(app).toContain('id="btn-mobile-pair"');
+    expect(app).toContain('panelId: "activity-panel"');
     expect(app).toContain('aria-label="Indicators"');
     expect(app).toContain('id="sys-backdrop"');
   });

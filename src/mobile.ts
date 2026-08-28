@@ -1,7 +1,8 @@
 /** Shared mobile layout breakpoint — matches CSS @media max-width. */
 export const MOBILE_LAYOUT_MAX_PX = 1024;
 
-export type MobilePanel = "book" | "chart" | "trade" | "markets";
+/** Binance-style mobile spot panels (bottom nav). */
+export type MobilePanel = "trade" | "chart" | "markets" | "orders";
 
 const MOBILE_PANEL_KEY = "hackme-ex-mobile-panel-v1";
 const MOBILE_TRADE_SIDE_KEY = "hackme-ex-mobile-trade-side-v1";
@@ -30,11 +31,13 @@ export function isMobileLayout(): boolean {
 export function loadMobilePanel(): MobilePanel {
   try {
     const raw = sessionStorage.getItem(MOBILE_PANEL_KEY);
-    if (raw === "book" || raw === "chart" || raw === "trade" || raw === "markets") return raw;
+    // Legacy: standalone book tab → trade split (form + book).
+    if (raw === "book") return "trade";
+    if (raw === "trade" || raw === "chart" || raw === "markets" || raw === "orders") return raw;
   } catch {
     /* ignore */
   }
-  return "chart";
+  return "trade";
 }
 
 export function saveMobilePanel(panel: MobilePanel): void {

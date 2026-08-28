@@ -276,35 +276,124 @@ a:hover { text-decoration: underline; }
 }
 
 .mobile-panel-wrap { display: none; }
+.mobile-bottom-nav {
+  order: 99;
+}
 .mobile-panel-tabs {
   display: flex;
-  gap: 0.35rem;
-  padding: 0.35rem 0.65rem;
-  border-bottom: 1px solid var(--edge);
-  background: rgba(8, 12, 22, 0.65);
-  position: sticky;
-  top: 0;
-  z-index: 6;
+  gap: 0;
+  padding: 0.2rem 0.35rem calc(0.35rem + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid var(--edge);
+  background: rgba(8, 12, 22, 0.96);
+  backdrop-filter: blur(10px);
+  flex-shrink: 0;
 }
 .mp-tab {
   flex: 1;
-  border: 1px solid var(--edge);
-  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.12rem;
+  border: none;
+  background: transparent;
   color: var(--muted);
-  border-radius: 8px;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.72rem;
+  border-radius: 0;
+  padding: 0.35rem 0.2rem 0.25rem;
+  font-size: 0.62rem;
   font-weight: 600;
   cursor: pointer;
+  min-height: 3.1rem;
+  touch-action: manipulation;
 }
+.mp-ico {
+  width: 1.35rem;
+  height: 1.35rem;
+  display: block;
+  opacity: 0.7;
+  background: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+.mp-ico-trade {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4'/%3E%3C/svg%3E");
+}
+.mp-ico-chart {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 19V5M4 19h16M8 17V9M12 17V7M16 17v-5'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 19V5M4 19h16M8 17V9M12 17V7M16 17v-5'/%3E%3C/svg%3E");
+}
+.mp-ico-markets {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 6h16M4 12h16M4 18h16'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M4 6h16M4 12h16M4 18h16'/%3E%3C/svg%3E");
+}
+.mp-ico-orders {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='4' y='5' width='16' height='14' rx='2'/%3E%3Cpath d='M8 10h8M8 14h5'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='4' y='5' width='16' height='14' rx='2'/%3E%3Cpath d='M8 10h8M8 14h5'/%3E%3C/svg%3E");
+}
+.mp-label { line-height: 1.1; }
 .mp-tab.active {
   color: var(--primary);
-  border-color: rgba(77, 228, 255, 0.45);
-  background: rgba(77, 228, 255, 0.08);
+  background: transparent;
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+.tb-pair-btn {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tb-chev {
+  display: none;
+  margin-left: 0.15rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1;
+}
+.mp-tab.active .mp-ico { opacity: 1; }
+.mp-tab.active .mp-label {
+  font-weight: 700;
 }
 .mp-tab:focus-visible {
   outline: 2px solid var(--primary);
-  outline-offset: 2px;
+  outline-offset: -2px;
+}
+.mobile-chart-trade-bar {
+  display: none;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem calc(0.45rem + env(safe-area-inset-bottom, 0));
+  background: rgba(8, 12, 22, 0.94);
+  border-top: 1px solid var(--edge);
+}
+.mobile-chart-trade-bar:not([hidden]) {
+  display: flex;
+}
+.mobile-chart-trade-bar .mctb {
+  flex: 1;
+  min-height: 2.85rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.mobile-chart-trade-bar .mctb.buy {
+  background: var(--buy);
+  color: #041018;
+}
+.mobile-chart-trade-bar .mctb.sell {
+  background: var(--sell);
+  color: #fff;
 }
 
 .role-badge.syn-badge {
@@ -509,9 +598,7 @@ a:hover { text-decoration: underline; }
     padding: 0.5rem 0.75rem;
   }
   .tb-left { gap: 0.5rem; }
-  .tb-right { width: 100%; margin-left: 0; }
-  .tb-quote { width: 100%; }
-  .tb-stats { display: none; }
+  .tb-quote { width: auto; margin-left: auto; }
   .vip-badge {
     font-size: 0.58rem;
     max-width: min(44vw, 9.5rem);
@@ -540,19 +627,22 @@ a:hover { text-decoration: underline; }
     flex: 1;
     overflow: hidden;
   }
-  .terminal.mobile-stack[data-mobile-panel="book"] .col-book {
-    display: flex !important;
-    min-height: 0;
-    border-bottom: 1px solid var(--edge);
-  }
   .terminal.mobile-stack[data-mobile-panel="chart"] .col-center {
     display: flex !important;
     min-height: 0;
   }
   .terminal.mobile-stack[data-mobile-panel="chart"] .col-center .order-zone { display: none !important; }
+  /* Binance-style trade: order form + book side-by-side */
+  .terminal.mobile-stack[data-mobile-panel="trade"] {
+    flex-direction: row !important;
+    align-items: stretch;
+  }
   .terminal.mobile-stack[data-mobile-panel="trade"] .col-center {
     display: flex !important;
+    flex: 1.08;
+    min-width: 0;
     min-height: 0;
+    border-right: 1px solid var(--edge);
   }
   .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .chart-topbar,
   .terminal.mobile-stack[data-mobile-panel="trade"] .col-center .ind-tabs,
@@ -563,11 +653,59 @@ a:hover { text-decoration: underline; }
     display: block !important;
     max-height: none;
     flex: 1;
+    min-height: 0;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
+    padding: 0.35rem 0.45rem 0.5rem;
+  }
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book {
+    display: flex !important;
+    flex: 0.92;
+    min-width: 0;
+    max-width: 46%;
+    min-height: 0;
+    border-bottom: none;
+  }
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book .col-title {
+    padding: 0.35rem 0.45rem;
+    font-size: 0.68rem;
+  }
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book #book {
+    font-size: 0.68rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book .ob-head,
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book .ob-row {
+    font-size: 0.62rem;
+  }
+  .terminal.mobile-stack[data-mobile-panel="trade"] .col-book .btn-panel-toggle {
+    display: none !important;
   }
   .terminal.mobile-stack[data-mobile-panel="markets"] .col-right {
     display: flex !important;
+    min-height: 0;
+    max-height: none;
+  }
+  .terminal.mobile-stack[data-mobile-panel="markets"] .col-right .activity-panel {
+    display: none !important;
+  }
+  .terminal.mobile-stack[data-mobile-panel="markets"] .col-right .markets-panel {
+    flex: 1;
+    min-height: 0;
+  }
+  .terminal.mobile-stack[data-mobile-panel="orders"] .col-right {
+    display: flex !important;
+    min-height: 0;
+    max-height: none;
+  }
+  .terminal.mobile-stack[data-mobile-panel="orders"] .col-right .markets-panel {
+    display: none !important;
+  }
+  .terminal.mobile-stack[data-mobile-panel="orders"] .col-right .activity-panel {
+    flex: 1;
     min-height: 0;
     max-height: none;
   }
@@ -641,6 +779,47 @@ a:hover { text-decoration: underline; }
   }
   .markets-panel { flex: 1; }
   .activity-panel { flex: 0 0 min(42%, 260px); min-height: 140px; max-height: 48%; }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .order-panel-head .order-head-meta,
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .spot-mode-tabs {
+    display: none;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .order-col-head h4 {
+    display: none;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .order-col {
+    padding: 0.35rem 0;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .fld-label {
+    font-size: 0.58rem;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .inp {
+    padding: 0.32rem 8px;
+    font-size: 0.78rem;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .exec {
+    min-height: 2.65rem;
+    font-size: 0.88rem;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .type-tabs.scroll-x {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .type-tabs.scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+  html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .binance-type-tabs .type {
+    flex-shrink: 0;
+  }
+  html.mobile-layout .spot-layout {
+    padding-bottom: 0;
+  }
+  html.mobile-layout .nav-btn {
+    padding: 0.45rem 0.6rem;
+    font-size: 0.74rem;
+    min-height: 2.5rem;
+  }
   .panel-rail,
   .panel-rail.is-visible,
   .btn-panel-toggle,
@@ -662,11 +841,35 @@ a:hover { text-decoration: underline; }
     padding: 0.4rem 0.65rem;
     min-height: 1.75rem;
   }
-  .mp-tab {
+  html.mobile-layout .recent-pairs { display: none; }
+  html.mobile-layout .announce { display: none; }
+  html.mobile-layout .tb-right { display: none !important; }
+  html.mobile-layout .tb-stats { display: none; }
+  html.mobile-layout .mining-strip { display: none; }
+  html.mobile-layout .tb-chev { display: inline-block; }
+  html.mobile-layout .tb-pair-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     min-height: 2.75rem;
-    font-size: 0.75rem;
-    touch-action: manipulation;
+    border-radius: 8px;
+    padding: 0.15rem 0.35rem 0.15rem 0;
   }
+  html.mobile-layout .tb-pair-btn:active {
+    background: rgba(77, 228, 255, 0.08);
+  }
+  html.mobile-layout .tb-sub { display: none; }
+  html.mobile-layout .ticker-bar {
+    gap: 0.35rem;
+    padding: 0.4rem 0.65rem;
+  }
+  html.mobile-layout .tb-left {
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+  }
+  html.mobile-layout .tb-pair h1 { font-size: 1rem; }
+  html.mobile-layout .tb-price { font-size: 1.15rem; }
   .exec, .dt, .btn-bbo, .quick-size button {
     min-height: 2.75rem;
     touch-action: manipulation;
