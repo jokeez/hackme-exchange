@@ -282,6 +282,23 @@ async function testOverlayMenu(page, vpId) {
   else ok(`${vpId} overlay menu closes`);
 }
 
+async function testBookDepthStrip(page, vpId) {
+  if (page.viewportSize().width <= 1024) return;
+  const book = page.locator("#col-book");
+  if (!(await book.isVisible().catch(() => false))) {
+    note("P2", `${vpId}-book-col`, "book column hidden");
+    return;
+  }
+  const depth = book.locator(".depth-wrap svg");
+  if (!(await depth.isVisible().catch(() => false))) {
+    note("P1", `${vpId}-depth-wrap`, "depth strip missing in book panel");
+    return;
+  }
+  const paths = await depth.locator("path").count();
+  if (paths < 2) note("P1", `${vpId}-depth-paths`, `expected bid/ask paths, got ${paths}`);
+  else ok(`${vpId} book depth strip`);
+}
+
 async function testMultiChartGrid(page, vpId) {
   if (page.viewportSize().width < 1280) return;
   const btn = page.locator("#btn-multi");
@@ -304,6 +321,9 @@ async function testMultiChartGrid(page, vpId) {
     note("P0", `${vpId}-multi-grid`, "layout-4 not applied");
     return;
   }
+  if (!(await split.evaluate((el) => el.classList.contains("multi-chart-sync")))) {
+    note("P1", `${vpId}-multi-sync`, "multi-chart-sync class missing");
+  } else ok(`${vpId} multi-chart sync class`);
   ok(`${vpId} multi 2x2 layout`);
   for (const id of ["chart-host", "chart-host-2", "chart-host-3", "chart-host-4"]) {
     const canvas = page.locator(`#${id} .chart-inner canvas`).first();
@@ -341,6 +361,7 @@ async function runViewport(browser, vp) {
     if (mobile) await testMobilePanels(page, vp.id);
     else {
       await testDesktopChips(page, vp.id);
+      await testBookDepthStrip(page, vp.id);
       await testOverlayMenu(page, vp.id);
       await testMultiChartGrid(page, vp.id);
     }
