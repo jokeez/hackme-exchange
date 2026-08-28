@@ -582,7 +582,7 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
   try {
     const h = await exchangeHealth(2_000);
     if (!h.ok) {
-      if (h.code === "unreachable" || h.status === 0) {
+      if ("code" in h && (h.code === "unreachable" || h.status === 0)) {
         healthBackoffUntil = Date.now() + 60_000;
       }
       return;
