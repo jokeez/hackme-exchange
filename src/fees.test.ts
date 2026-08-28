@@ -13,8 +13,8 @@ import { executeFill } from "./execution";
 import { placeOrder, processOpenOrders } from "./orders";
 import { tickerFromMarket } from "./market";
 import type { DemoState, PairId, Ticker } from "./types";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_TFS, STATE_VERSION } from "./types";
-import type { MultiPaneTfs } from "./types";
+import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION } from "./types";
+import type { MultiPanePairs, MultiPaneTfs } from "./types";
 import { sampleMarket } from "./testFixtures";
 
 function baseState(): DemoState {
@@ -42,6 +42,7 @@ function baseState(): DemoState {
     feeConfig: structuredClone(DEFAULT_FEE_CONFIG),
     secondaryTf: "4H",
     multiPaneTfs: [...DEFAULT_MULTI_PANE_TFS] as MultiPaneTfs,
+    multiPanePairs: [...DEFAULT_MULTI_PANE_PAIRS] as MultiPanePairs,
     chartFullscreen: false,
     multiChart: false,
     multiChartLayout: "1" as const,

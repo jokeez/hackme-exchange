@@ -19,11 +19,12 @@ import type {
   IndicatorConfig,
   IndicatorId,
   Order,
+  PairId,
   Trade,
   Timeframe,
 } from "./types";
 import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
-import { chartPriceFormatter } from "./format";
+import { chartLocalization, chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
 import {
@@ -107,6 +108,7 @@ let priceWheelCleanup: (() => void) | null = null;
 let mobilePanCleanup: (() => void) | null = null;
 /** Trackpad residual — apply zoom only when a full notch accumulates. */
 let priceWheelResidual = 0;
+let plotWheelResidual = 0;
 /** Min ms between applied price-scale notches (mice that spam 100px events). */
 let priceWheelLastApplyMs = 0;
 const PRICE_WHEEL_MIN_INTERVAL_MS = 50;
@@ -114,6 +116,129 @@ const PRICE_WHEEL_MIN_INTERVAL_MS = 50;
 const PRICE_WHEEL_SPAN_FACTOR = 0.03;
 /** Pixels that accumulate into one notch (mouse ≈100; bump so partial rolls need more). */
 const PRICE_WHEEL_UNIT = 140;
+
+export type PaneDrawHost = {
+  id: string;
+  hostEl: HTMLElement;
+  drawCanvas: HTMLCanvasElement;
+  chart: IChartApi;
+  candleSeries: ISeriesApi<"Candlestick">;
+  tf: Timeframe;
+  pairId: PairId;
+  getDrawings: () => Drawing[];
+  isLocked: () => boolean;
+  onAdd: (d: Drawing) => void;
+  onUpdate: (d: Drawing) => void;
+};
+
+let focusedPaneId = "chart-host";
+let drawSurfOverride: PaneDrawHost | null = null;
+let interactionHost: PaneDrawHost | null = null;
+const secondaryPaneHosts = new Map<string, PaneDrawHost>();
+
+function mainPaneHost(): PaneDrawHost | null {
+  if (!drawCanvas || !hostEl || !chart || !candleSeries) return null;
+  return {
+    id: "chart-host",
+    hostEl,
+    drawCanvas,
+    chart,
+    candleSeries,
+    tf: (lastOpts?.tf ?? "15m") as Timeframe,
+    pairId: (lastOpts?.pairId ?? "HMC_USDT") as PairId,
+    getDrawings: () => liveDrawings,
+    isLocked: () => !!lastOpts?.drawingsLocked,
+    onAdd: (d) => onAddDrawingCb?.(d),
+    onUpdate: (d) => lastOpts?.onUpdateDrawing?.(d),
+  };
+}
+
+function activeSurf(): PaneDrawHost {
+  if (drawSurfOverride) return drawSurfOverride;
+  if (interactionHost) return interactionHost;
+  const sec = secondaryPaneHosts.get(focusedPaneId);
+  if (sec) return sec;
+  const main = mainPaneHost();
+  if (main) return main;
+  throw new Error("no chart surface");
+}
+
+function withSurf<T>(host: PaneDrawHost, fn: () => T): T {
+  const prev = drawSurfOverride;
+  drawSurfOverride = host;
+  try {
+    return fn();
+  } finally {
+    drawSurfOverride = prev;
+  }
+}
+
+function syncDrawCanvasCursors(): void {
+  const focused = focusedPaneId;
+  const tool = activeTool;
+  if (drawCanvas) {
+    const on = focused === "chart-host" && tool !== "cursor";
+    drawCanvas.classList.toggle("active", on);
+    drawCanvas.style.cursor = tool !== "cursor" && focused === "chart-host" ? "crosshair" : "default";
+  }
+  for (const h of secondaryPaneHosts.values()) {
+    const on = h.id === focused && tool !== "cursor";
+    h.drawCanvas.classList.toggle("active", on);
+    h.drawCanvas.style.cursor = tool !== "cursor" && h.id === focused ? "crosshair" : "default";
+  }
+}
+
+function repaintAllPanes(mainDrawings?: Drawing[]): void {
+  const main = mainPaneHost();
+  if (main) {
+    const d = mainDrawings ?? liveDrawings;
+    withSurf(main, () => paintDrawingsOnHost(main, d, focusedPaneId === "chart-host", true));
+  }
+  for (const h of secondaryPaneHosts.values()) {
+    withSurf(h, () => paintDrawingsOnHost(h, h.getDrawings(), focusedPaneId === h.id, false));
+  }
+}
+
+export function setFocusedChartPane(id: string): void {
+  focusedPaneId = id;
+  document.querySelectorAll(".chart-host").forEach((el) => {
+    el.classList.toggle("chart-pane-focused", el.id === id);
+  });
+  syncDrawCanvasCursors();
+  repaintAllPanes();
+}
+
+export function getFocusedChartPaneId(): string {
+  return focusedPaneId;
+}
+
+export function registerSecondaryPaneDraw(host: PaneDrawHost): () => void {
+  secondaryPaneHosts.set(host.id, host);
+  bindPaneDrawInteraction(host, false);
+  const onRange = () => {
+    withSurf(host, () => paintDrawingsOnHost(host, host.getDrawings(), focusedPaneId === host.id, false));
+  };
+  const ts = host.chart.timeScale();
+  if (typeof ts.subscribeVisibleLogicalRangeChange === "function") {
+    ts.subscribeVisibleLogicalRangeChange(onRange);
+  }
+  withSurf(host, () => paintDrawingsOnHost(host, host.getDrawings(), focusedPaneId === host.id, false));
+  return () => {
+    if (typeof ts.unsubscribeVisibleLogicalRangeChange === "function") {
+      ts.unsubscribeVisibleLogicalRangeChange(onRange);
+    }
+    secondaryPaneHosts.delete(host.id);
+    if (focusedPaneId === host.id) setFocusedChartPane("chart-host");
+  };
+}
+
+export function updateSecondaryPaneMeta(id: string, patch: { pairId?: PairId; tf?: Timeframe }): void {
+  const h = secondaryPaneHosts.get(id);
+  if (!h) return;
+  if (patch.pairId) h.pairId = patch.pairId;
+  if (patch.tf) h.tf = patch.tf;
+  repaintAllPanes();
+}
 
 /** Prefetch when the left of the visible logical range is within this many bars of index 0. */
 export const HISTORY_LEFT_EDGE = 40;
@@ -528,9 +653,9 @@ function ensureTradeTip(): void {
 }
 
 function xyOf(pt: { time: number; price: number }): { x: number; y: number } | null {
-  if (!chart || !candleSeries) return null;
-  const x = chart.timeScale().timeToCoordinate(pt.time as UTCTimestamp);
-  const y = candleSeries.priceToCoordinate(pt.price);
+  const s = activeSurf();
+  const x = s.chart.timeScale().timeToCoordinate(pt.time as UTCTimestamp);
+  const y = s.candleSeries.priceToCoordinate(pt.price);
   if (x == null || y == null) return null;
   return { x, y };
 }
@@ -594,7 +719,7 @@ function measureHud(
   const boxH = 86;
   const mx = (x1 + x2) / 2 - boxW / 2;
   const my = Math.min(y1, y2) - boxH - 12;
-  const left = Math.max(4, Math.min(mx, (hostEl?.clientWidth ?? 400) - boxW - 4));
+  const left = Math.max(4, Math.min(mx, (activeSurf().hostEl.clientWidth || 400) - boxW - 4));
   let top = my;
   if (top < 4) top = Math.max(y1, y2) + 12;
   const r = 7;
@@ -639,15 +764,15 @@ function paintFibLevels(
   selected: boolean,
   hovered: boolean,
 ): void {
-  if (!candleSeries || !chart) return;
-  const ts = chart.timeScale();
+  const s = activeSurf();
+  const ts = s.chart.timeScale();
   const hi = Math.max(a.price, b.price);
   const lo = Math.min(a.price, b.price);
   const x0 = ts.timeToCoordinate(a.time as UTCTimestamp);
   const x1 = ts.timeToCoordinate(b.time as UTCTimestamp);
   for (const lv of FIB_LEVELS) {
     const p = hi - (hi - lo) * lv;
-    const y = candleSeries.priceToCoordinate(p);
+    const y = s.candleSeries.priceToCoordinate(p);
     if (y == null) continue;
     ctx.globalAlpha = selected || hovered ? 0.9 : 0.75;
     ctx.beginPath();
@@ -666,23 +791,32 @@ function paintFibLevels(
 }
 
 function redrawDrawings(drawings: Drawing[]): void {
-  if (!drawCanvas || !hostEl || !chart || !candleSeries) return;
   syncDrawingsStore(drawings);
-  const ctx = drawCanvas.getContext("2d");
+  repaintAllPanes(drawings);
+}
+
+function paintDrawingsOnHost(
+  host: PaneDrawHost,
+  drawings: Drawing[],
+  showPreviews: boolean,
+  paintTradeMarksLayer: boolean,
+): void {
+  const { drawCanvas: canvas, hostEl: hostElRef, chart: chartRef, candleSeries: seriesRef } = host;
+  if (!canvas || !hostElRef || !chartRef || !seriesRef) return;
+  const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const w = hostEl.clientWidth;
-  const h = hostEl.clientHeight;
-  drawCanvas.width = w;
-  drawCanvas.height = h;
+  const w = hostElRef.clientWidth;
+  const h = hostElRef.clientHeight;
+  canvas.width = w;
+  canvas.height = h;
   ctx.clearRect(0, 0, w, h);
-  // Reset canvas state so long sessions never stack shadows/filters
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
   ctx.globalAlpha = 1;
   ctx.filter = "none";
-  const ts = chart.timeScale();
-  drawTradeMarks(ctx, w, h);
-  const tf = (lastOpts?.tf ?? "15m") as Timeframe;
+  const ts = chartRef.timeScale();
+  if (paintTradeMarksLayer) drawTradeMarks(ctx, w, h);
+  const tf = host.tf;
 
   const paint = (d: Drawing) => {
     const selected = d.id === selectedDrawingId;
@@ -700,7 +834,7 @@ function redrawDrawings(drawings: Drawing[]): void {
     }
 
     if (d.tool === "hline" && d.points[0]) {
-      const y = candleSeries!.priceToCoordinate(d.points[0].price);
+      const y = seriesRef.priceToCoordinate(d.points[0].price);
       if (y != null) {
         ctx.beginPath();
         ctx.moveTo(0, y);
@@ -720,7 +854,7 @@ function redrawDrawings(drawings: Drawing[]): void {
       }
     }
     if (d.tool === "cross" && d.points[0]) {
-      const y = candleSeries!.priceToCoordinate(d.points[0].price);
+      const y = seriesRef.priceToCoordinate(d.points[0].price);
       const x = ts.timeToCoordinate(d.points[0].time as UTCTimestamp);
       if (y != null) {
         ctx.beginPath();
@@ -809,7 +943,7 @@ function redrawDrawings(drawings: Drawing[]): void {
 
   for (const d of drawings) paint(d);
 
-  if (ghostPreview) {
+  if (showPreviews && ghostPreview) {
     const p0 = xyOf(ghostPreview.a);
     const p1 = xyOf(ghostPreview.b);
     if (p0 && p1) {
@@ -842,7 +976,7 @@ function redrawDrawings(drawings: Drawing[]): void {
     }
   }
 
-  if (measurePreview) {
+  if (showPreviews && measurePreview) {
     const p0 = xyOf(measurePreview.a);
     const p1 = xyOf(measurePreview.b);
     if (p0 && p1) {
@@ -879,20 +1013,21 @@ function distToSegment(
 }
 
 function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | null {
+  const s = activeSurf();
   const thresh = 8;
   for (let i = drawings.length - 1; i >= 0; i--) {
     const d = drawings[i];
     if (d.tool === "hline" && d.points[0]) {
-      const y = candleSeries?.priceToCoordinate(d.points[0].price);
+      const y = s.candleSeries.priceToCoordinate(d.points[0].price);
       if (y != null && Math.abs(my - y) <= thresh) return { id: d.id, mode: "move" };
     }
     if (d.tool === "vline" && d.points[0]) {
-      const x = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
+      const x = s.chart.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
       if (x != null && Math.abs(mx - x) <= thresh) return { id: d.id, mode: "move" };
     }
     if (d.tool === "cross" && d.points[0]) {
-      const y = candleSeries?.priceToCoordinate(d.points[0].price);
-      const x = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
+      const y = s.candleSeries.priceToCoordinate(d.points[0].price);
+      const x = s.chart.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
       const onH = y != null && Math.abs(my - y) <= thresh;
       const onV = x != null && Math.abs(mx - x) <= thresh;
       if (onH || onV) return { id: d.id, mode: "move" };
@@ -907,7 +1042,7 @@ function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | 
       if (p1 && Math.hypot(mx - p1.x, my - p1.y) <= thresh + 2) return { id: d.id, mode: "p1" };
       if (p0 && p1) {
         if (d.tool === "ray") {
-          const end = extendRayToBounds(p0, p1, hostEl?.clientWidth ?? 800, hostEl?.clientHeight ?? 400);
+          const end = extendRayToBounds(p0, p1, s.hostEl.clientWidth || 800, s.hostEl.clientHeight || 400);
           if (distToSegment(mx, my, p0, end) <= thresh) return { id: d.id, mode: "move" };
         } else if (distToSegment(mx, my, p0, p1) <= thresh) {
           return { id: d.id, mode: "move" };
@@ -940,12 +1075,12 @@ function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | 
       if (p1 && Math.hypot(mx - p1.x, my - p1.y) <= thresh + 2) return { id: d.id, mode: "p1" };
       const hi = Math.max(d.points[0].price, d.points[1].price);
       const lo = Math.min(d.points[0].price, d.points[1].price);
-      const x0 = chart?.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
-      const x1 = chart?.timeScale().timeToCoordinate(d.points[1].time as UTCTimestamp);
+      const x0 = s.chart.timeScale().timeToCoordinate(d.points[0].time as UTCTimestamp);
+      const x1 = s.chart.timeScale().timeToCoordinate(d.points[1].time as UTCTimestamp);
       const levels = FIB_LEVELS;
       for (const lv of levels) {
         const price = hi - (hi - lo) * lv;
-        const y = candleSeries?.priceToCoordinate(price);
+        const y = s.candleSeries.priceToCoordinate(price);
         if (y == null || Math.abs(my - y) > thresh) continue;
         if (x0 != null && x1 != null) {
           const left = Math.min(x0, x1) - thresh;
@@ -965,15 +1100,14 @@ function hitTestDrawing(mx: number, my: number, drawings: Drawing[]): HitKind | 
 }
 
 function ptFromEvent(e: MouseEvent | PointerEvent): { time: number; price: number } | null {
-  if (!drawCanvas || !chart || !candleSeries || !hostEl) return null;
-  const rect = drawCanvas.getBoundingClientRect();
-  const scaleW = Math.max(48, chart.priceScale("right").width() || 56);
-  // Keep interactions in the pane — not on the price axis strip.
+  const s = activeSurf();
+  const rect = s.drawCanvas.getBoundingClientRect();
+  const scaleW = Math.max(48, s.chart.priceScale("right").width() || 56);
   const maxX = Math.max(4, rect.width - scaleW - 2);
   const x = Math.min(Math.max(0, e.clientX - rect.left), maxX);
   const y = Math.min(Math.max(0, e.clientY - rect.top), rect.height - 1);
-  const time = chart.timeScale().coordinateToTime(x);
-  const price = candleSeries.coordinateToPrice(y);
+  const time = s.chart.timeScale().coordinateToTime(x);
+  const price = s.candleSeries.coordinateToPrice(y);
   if (time == null || price == null) return null;
   if (!Number.isFinite(price as number) || (price as number) <= 0) return null;
   return { time: time as number, price: price as number };
@@ -1088,7 +1222,7 @@ export function clampVisiblePriceRange(
   return { from, to };
 }
 
-/** True when the visible window needs healing vs the live instrument. */
+/** True only for corrupted windows — not legitimate user zoom/pan. */
 export function priceRangeNeedsHeal(
   range: { from: number; to: number } | null | undefined,
   refPrice: number,
@@ -1097,9 +1231,13 @@ export function priceRangeNeedsHeal(
   if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to) || !(range.to > range.from)) {
     return true;
   }
-  const healed = clampVisiblePriceRange(range, refPrice);
-  const tol = Math.max(refPrice * 1e-9, 1e-18);
-  return Math.abs(healed.from - range.from) > tol || Math.abs(healed.to - range.to) > tol;
+  const span = range.to - range.from;
+  const minSpan = Math.max(refPrice * 1e-6, 1e-14);
+  if (span < minSpan) return true;
+  if (span > refPrice * 5) return true;
+  const mid = (range.from + range.to) / 2;
+  if (!Number.isFinite(mid) || mid <= 0 || mid < refPrice * 1e-3 || mid > refPrice * 1e3) return true;
+  return false;
 }
 
 /** Zoom price scale under the mouse wheel (TradingView-like). Exported for tests. */
@@ -1192,6 +1330,23 @@ export function shiftLogicalRangeByPx(
 }
 
 /** How many bars fit in the pane (Binance/TV-like default window). */
+export function zoomBarSpacing(current: number, step: number): number {
+  if (!step) return current;
+  const factor = step > 0 ? 1.1 : 0.9;
+  return Math.max(2, Math.min(40, current * factor));
+}
+
+/** Shift visible logical range horizontally (shift+wheel pan). */
+export function panLogicalRangeByWheel(
+  range: { from: number; to: number },
+  deltaPx: number,
+  barSpacing: number,
+): { from: number; to: number } {
+  const delta = deltaPx / Math.max(1, barSpacing);
+  return { from: range.from + delta, to: range.to + delta };
+}
+
+/** How many bars fit in the pane (Binance/TV-like default window). */
 export function visibleBarBudget(hostWidth: number, barSpacing: number): number {
   const usable = Math.max(160, hostWidth - 80);
   const spacing = Math.max(3, barSpacing || 8);
@@ -1200,10 +1355,11 @@ export function visibleBarBudget(hostWidth: number, barSpacing: number): number 
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
-  const base = tf === "30s" || tf === "1m" ? 6 : tf === "1D" || tf === "1W" ? 8 : 8;
-  if (hostWidth < 480) return Math.max(4, base - 2);
-  if (hostWidth < 720) return Math.max(5, base - 1);
-  if (hostWidth > 1600) return base; // was +1 — fat bars on ultrawide
+  const base = tf === "30s" || tf === "1m" ? 7 : tf === "1D" || tf === "1W" ? 9 : 8;
+  if (hostWidth < 400) return Math.max(9, base + 2);
+  if (hostWidth < 640) return Math.max(8, base + 1);
+  if (hostWidth < 720) return Math.max(7, base);
+  if (hostWidth > 1600) return base;
   return base;
 }
 
@@ -1212,130 +1368,139 @@ export function chartRightOffset(hostWidth: number, tf: Timeframe): number {
   return hostWidth < 640 ? 4 : 6;
 }
 
-function setupDrawInteraction(
-  drawings: Drawing[],
-  pairId: string,
-  onAdd: (d: Drawing) => void,
-): void {
-  if (!drawCanvas || !chart || !candleSeries || !hostEl) return;
-  syncDrawingsStore(drawings);
-  onAddDrawingCb = onAdd;
-
-  const locked = () => !!lastOpts?.drawingsLocked;
+function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
+  const drawingsOf = () => (isMain ? liveDrawings : host.getDrawings());
+  const locked = () => host.isLocked();
+  const onAdd = (d: Drawing) => host.onAdd(d);
+  const onUpdate = (d: Drawing) => host.onUpdate(d);
+  const repaint = () => {
+    if (isMain) redrawDrawings(liveDrawings);
+    else repaintAllPanes();
+  };
 
   const syncPointer = (mx: number, my: number) => {
-    if (!drawCanvas) return;
+    if (focusedPaneId !== host.id) return;
+    const canvas = host.drawCanvas;
     if (activeTool !== "cursor") {
-      drawCanvas.classList.add("active");
-      drawCanvas.style.cursor = "crosshair";
+      canvas.classList.add("active");
+      canvas.style.cursor = "crosshair";
       hoveredDrawingId = null;
       return;
     }
-    const hit = hitTestDrawing(mx, my, liveDrawings);
+    const hit = withSurf(host, () => hitTestDrawing(mx, my, drawingsOf()));
     const nextHover = hit?.id ?? null;
     if (nextHover !== hoveredDrawingId) {
       hoveredDrawingId = nextHover;
-      redrawDrawings(liveDrawings);
+      repaint();
     }
     const want = !!(hit || selectedDrawingId || dragDraw);
-    drawCanvas.classList.toggle("active", want);
-    if (dragDraw) drawCanvas.style.cursor = "grabbing";
-    else if (hit) drawCanvas.style.cursor = hit.mode === "move" ? "grab" : "nwse-resize";
-    else drawCanvas.style.cursor = "default";
+    canvas.classList.toggle("active", want);
+    if (dragDraw) canvas.style.cursor = "grabbing";
+    else if (hit) canvas.style.cursor = hit.mode === "move" ? "grab" : "nwse-resize";
+    else canvas.style.cursor = "default";
   };
 
-  hostEl.onmousemove = (e) => {
-    if (!hostEl) return;
-    const rect = hostEl.getBoundingClientRect();
+  host.hostEl.onmousemove = (e) => {
+    if (focusedPaneId !== host.id) return;
+    const rect = host.hostEl.getBoundingClientRect();
     syncPointer(e.clientX - rect.left, e.clientY - rect.top);
   };
 
-  drawCanvas.onmousedown = (e) => {
+  host.drawCanvas.onmousedown = (e) => {
     if (e.button !== 0) return;
-    const rect = drawCanvas!.getBoundingClientRect();
+    setFocusedChartPane(host.id);
+    interactionHost = host;
+    const rect = host.drawCanvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const pt = ptFromEvent(e);
-    if (!pt) return;
+    const pt = withSurf(host, () => ptFromEvent(e));
+    if (!pt) {
+      interactionHost = null;
+      return;
+    }
 
     if (activeTool === "cursor") {
       if (locked()) {
-        // Still allow selection highlight when locked, but no drag
-        const hit = hitTestDrawing(mx, my, liveDrawings);
+        const hit = withSurf(host, () => hitTestDrawing(mx, my, drawingsOf()));
         selectedDrawingId = hit?.id ?? null;
-        redrawDrawings(liveDrawings);
+        repaint();
+        interactionHost = null;
         return;
       }
-      const hit = hitTestDrawing(mx, my, liveDrawings);
+      const hit = withSurf(host, () => hitTestDrawing(mx, my, drawingsOf()));
       if (!hit) {
         selectedDrawingId = null;
-        redrawDrawings(liveDrawings);
-        drawCanvas!.classList.remove("active");
+        repaint();
+        host.drawCanvas.classList.remove("active");
+        interactionHost = null;
         return;
       }
       e.preventDefault();
       e.stopPropagation();
       selectedDrawingId = hit.id;
-      const d = liveDrawings.find((x) => x.id === hit.id);
-      if (!d) return;
+      const d = drawingsOf().find((x) => x.id === hit.id);
+      if (!d) {
+        interactionHost = null;
+        return;
+      }
       dragDraw = {
         id: d.id,
         mode: hit.mode,
         startMouse: { x: mx, y: my },
         startPoints: d.points.map((p) => ({ ...p })),
       };
-      drawCanvas!.style.cursor = "grabbing";
-      redrawDrawings(liveDrawings);
+      host.drawCanvas.style.cursor = "grabbing";
+      repaint();
       clearDrawPointerListeners();
       drawPointerMove = (ev: PointerEvent) => {
-        if (!dragDraw || !candleSeries || !chart || !drawCanvas) return;
-        const target = liveDrawings.find((x) => x.id === dragDraw!.id);
+        if (!dragDraw) return;
+        const target = drawingsOf().find((x) => x.id === dragDraw!.id);
         if (!target || locked()) return;
-        const r = drawCanvas.getBoundingClientRect();
-        const cmx = ev.clientX - r.left;
-        const cmy = ev.clientY - r.top;
-        const npt = ptFromEvent(ev);
-        if (dragDraw.mode === "p0") {
-          if (npt) target.points[0] = npt;
-        } else if (dragDraw.mode === "p1" && target.points[1]) {
-          if (npt) target.points[1] = npt;
-        } else if (target.tool === "hline" && target.points[0]) {
-          if (npt) target.points[0] = { ...target.points[0], price: npt.price };
-        } else if (target.tool === "vline" && target.points[0]) {
-          if (npt) target.points[0] = { ...target.points[0], time: npt.time };
-        } else if (target.tool === "cross" && target.points[0]) {
-          if (npt) target.points[0] = npt;
-        } else {
-          const dx = cmx - dragDraw.startMouse.x;
-          const dy = cmy - dragDraw.startMouse.y;
-          const nextPts = dragDraw.startPoints.map((sp) => {
-            const xy = xyOf(sp);
-            if (!xy) return sp;
-            const nx = xy.x + dx;
-            const ny = xy.y + dy;
-            const time = chart!.timeScale().coordinateToTime(nx);
-            const price = candleSeries!.coordinateToPrice(ny);
-            // Keep previous vertex if coordinate maps off-pane (prevents "broken" tools).
-            if (time == null || price == null || !Number.isFinite(price as number)) return sp;
-            return { time: time as number, price: price as number };
-          });
-          if (nextPts.every((p, i) => p.time === target.points[i]?.time && p.price === target.points[i]?.price)) {
-            return;
+        withSurf(host, () => {
+          const r = host.drawCanvas.getBoundingClientRect();
+          const cmx = ev.clientX - r.left;
+          const cmy = ev.clientY - r.top;
+          const npt = ptFromEvent(ev);
+          if (dragDraw!.mode === "p0") {
+            if (npt) target.points[0] = npt;
+          } else if (dragDraw!.mode === "p1" && target.points[1]) {
+            if (npt) target.points[1] = npt;
+          } else if (target.tool === "hline" && target.points[0]) {
+            if (npt) target.points[0] = { ...target.points[0], price: npt.price };
+          } else if (target.tool === "vline" && target.points[0]) {
+            if (npt) target.points[0] = { ...target.points[0], time: npt.time };
+          } else if (target.tool === "cross" && target.points[0]) {
+            if (npt) target.points[0] = npt;
+          } else {
+            const dx = cmx - dragDraw!.startMouse.x;
+            const dy = cmy - dragDraw!.startMouse.y;
+            const nextPts = dragDraw!.startPoints.map((sp) => {
+              const xy = xyOf(sp);
+              if (!xy) return sp;
+              const nx = xy.x + dx;
+              const ny = xy.y + dy;
+              const time = host.chart.timeScale().coordinateToTime(nx);
+              const price = host.candleSeries.coordinateToPrice(ny);
+              if (time == null || price == null || !Number.isFinite(price as number)) return sp;
+              return { time: time as number, price: price as number };
+            });
+            if (nextPts.every((p, i) => p.time === target.points[i]?.time && p.price === target.points[i]?.price)) {
+              return;
+            }
+            target.points = nextPts;
           }
-          target.points = nextPts;
-        }
-        redrawDrawings(liveDrawings);
+          repaint();
+        });
       };
       drawPointerUp = () => {
         if (dragDraw) {
-          const done = liveDrawings.find((x) => x.id === dragDraw!.id);
-          if (done && lastOpts?.onUpdateDrawing) {
-            lastOpts.onUpdateDrawing({ ...done, points: done.points.map((p) => ({ ...p })) });
-          }
+          const done = drawingsOf().find((x) => x.id === dragDraw!.id);
+          if (done) onUpdate({ ...done, points: done.points.map((p) => ({ ...p })) });
           dragDraw = null;
         }
         clearDrawPointerListeners();
-        if (drawCanvas) drawCanvas.style.cursor = "grab";
+        host.drawCanvas.style.cursor = "grab";
+        interactionHost = null;
       };
       window.addEventListener("pointermove", drawPointerMove);
       window.addEventListener("pointerup", drawPointerUp);
@@ -1343,26 +1508,35 @@ function setupDrawInteraction(
       return;
     }
 
-    if (locked()) return;
+    if (locked()) {
+      interactionHost = null;
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
 
     if (activeTool === "hline") {
       const id = `d-${Date.now()}`;
-      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "hline", points: [pt], color: "#00e5ff" });
+      onAdd({ id, pairId: host.pairId, tool: "hline", points: [pt], color: "#00e5ff" });
       selectedDrawingId = id;
+      interactionHost = null;
+      repaint();
       return;
     }
     if (activeTool === "vline") {
       const id = `d-${Date.now()}`;
-      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "vline", points: [pt], color: "#4de4ff" });
+      onAdd({ id, pairId: host.pairId, tool: "vline", points: [pt], color: "#4de4ff" });
       selectedDrawingId = id;
+      interactionHost = null;
+      repaint();
       return;
     }
     if (activeTool === "cross") {
       const id = `d-${Date.now()}`;
-      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "cross", points: [pt], color: "#81d4fa" });
+      onAdd({ id, pairId: host.pairId, tool: "cross", points: [pt], color: "#81d4fa" });
       selectedDrawingId = id;
+      interactionHost = null;
+      repaint();
       return;
     }
     if (activeTool === "text") {
@@ -1374,8 +1548,10 @@ function setupDrawInteraction(
           .replace(/<[^>]*>/g, "")
           .replace(/[<>]/g, "") || "Note";
       const id = `d-${Date.now()}`;
-      onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "text", points: [pt], text, color: "#ffd54f" });
+      onAdd({ id, pairId: host.pairId, tool: "text", points: [pt], text, color: "#ffd54f" });
       selectedDrawingId = id;
+      interactionHost = null;
+      repaint();
       return;
     }
 
@@ -1391,67 +1567,85 @@ function setupDrawInteraction(
       ghostPreview = activeTool !== "measure" ? { tool: activeTool, a: pt, b: pt } : null;
       clearDrawPointerListeners();
       drawPointerMove = (ev: PointerEvent) => {
-        const p = ptFromEvent(ev);
-        if (!p || !drawPoints[0]) return;
-        if (activeTool === "measure") {
-          measurePreview = { a: drawPoints[0], b: p };
-        } else {
-          ghostPreview = { tool: activeTool, a: drawPoints[0], b: p };
-        }
-        redrawDrawings(liveDrawings);
+        withSurf(host, () => {
+          const p = ptFromEvent(ev);
+          if (!p || !drawPoints[0]) return;
+          if (activeTool === "measure") {
+            measurePreview = { a: drawPoints[0], b: p };
+          } else {
+            ghostPreview = { tool: activeTool, a: drawPoints[0], b: p };
+          }
+          repaint();
+        });
       };
       drawPointerUp = (ev: PointerEvent) => {
-        clearDrawPointerListeners();
-        const p = ptFromEvent(ev) ?? drawPoints[0];
-        ghostPreview = null;
-        if (!drawPoints[0] || !p) {
-          drawPoints = [];
-          measurePreview = null;
-          redrawDrawings(liveDrawings);
-          return;
-        }
-        const points = [drawPoints[0], p];
-        const id = `d-${Date.now()}`;
-        if (activeTool === "measure") {
-          if (!isMeaningfulMeasure(points[0], points[1])) {
-            measurePreview = null;
+        withSurf(host, () => {
+          clearDrawPointerListeners();
+          const p = ptFromEvent(ev) ?? drawPoints[0];
+          ghostPreview = null;
+          if (!drawPoints[0] || !p) {
             drawPoints = [];
-            redrawDrawings(liveDrawings);
+            measurePreview = null;
+            repaint();
+            interactionHost = null;
             return;
           }
-          const st = computeMeasureStats(points[0], points[1], (lastOpts?.tf ?? "15m") as Timeframe);
-          onAdd({
-            id,
-            pairId: pairId as Drawing["pairId"],
-            tool: "measure",
-            points,
-            color: st.up ? "#00c073" : "#db4455",
-          });
-          selectedDrawingId = id;
-        } else if (activeTool === "trend") {
-          onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "trend", points, color: "#00e5ff" });
-          selectedDrawingId = id;
-        } else if (activeTool === "ray") {
-          onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "ray", points, color: "#26c6da" });
-          selectedDrawingId = id;
-        } else if (activeTool === "fib") {
-          onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "fib", points, color: "#ab47bc" });
-          selectedDrawingId = id;
-        } else if (activeTool === "rect") {
-          onAdd({ id, pairId: pairId as Drawing["pairId"], tool: "rect", points, color: "#4de4ff" });
-          selectedDrawingId = id;
-        }
-        drawPoints = [];
-        measurePreview = null;
-        redrawDrawings(liveDrawings);
+          const points = [drawPoints[0], p];
+          const id = `d-${Date.now()}`;
+          if (activeTool === "measure") {
+            if (!isMeaningfulMeasure(points[0], points[1])) {
+              measurePreview = null;
+              drawPoints = [];
+              repaint();
+              interactionHost = null;
+              return;
+            }
+            const st = computeMeasureStats(points[0], points[1], host.tf);
+            onAdd({
+              id,
+              pairId: host.pairId,
+              tool: "measure",
+              points,
+              color: st.up ? "#00c073" : "#db4455",
+            });
+            selectedDrawingId = id;
+          } else if (activeTool === "trend") {
+            onAdd({ id, pairId: host.pairId, tool: "trend", points, color: "#00e5ff" });
+            selectedDrawingId = id;
+          } else if (activeTool === "ray") {
+            onAdd({ id, pairId: host.pairId, tool: "ray", points, color: "#26c6da" });
+            selectedDrawingId = id;
+          } else if (activeTool === "fib") {
+            onAdd({ id, pairId: host.pairId, tool: "fib", points, color: "#ab47bc" });
+            selectedDrawingId = id;
+          } else if (activeTool === "rect") {
+            onAdd({ id, pairId: host.pairId, tool: "rect", points, color: "#4de4ff" });
+            selectedDrawingId = id;
+          }
+          drawPoints = [];
+          measurePreview = null;
+          repaint();
+          interactionHost = null;
+        });
       };
       window.addEventListener("pointermove", drawPointerMove);
       window.addEventListener("pointerup", drawPointerUp);
       window.addEventListener("pointercancel", drawPointerUp);
     }
   };
+}
 
-  // Legacy window.onmousemove/up removed — pointer listeners above handle drag/draw.
+function setupDrawInteraction(
+  drawings: Drawing[],
+  pairId: string,
+  onAdd: (d: Drawing) => void,
+): void {
+  if (!drawCanvas || !chart || !candleSeries || !hostEl) return;
+  syncDrawingsStore(drawings);
+  onAddDrawingCb = onAdd;
+  const main = mainPaneHost();
+  if (main) bindPaneDrawInteraction(main, true);
+
   window.onmousemove = null;
   window.onmouseup = null;
 }
@@ -1508,7 +1702,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       barSpacing: spacing,
     },
     crosshair: { mode: 0 },
-    localization: { priceFormatter: chartPriceFormatter },
+    localization: chartLocalization(),
   });
 
   candleSeries = chart.addSeries(CandlestickSeries, {
@@ -1636,11 +1830,12 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   }
 
   chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-    // Always paint from liveDrawings — never rehydrate from a stale lastOpts snapshot.
-    redrawDrawings(resolvePaintDrawings(liveDrawings, lastOpts?.drawings));
+    repaintAllPanes();
     if (!range) return;
     maybeLoadHistory(range);
   });
+
+  el.addEventListener("pointerdown", () => setFocusedChartPane("chart-host"));
 
   if (opts.onContextMenu) {
     const ctxHandler = (e: MouseEvent) => {
@@ -1698,11 +1893,12 @@ export function setActiveDrawTool(tool: Drawing["tool"]): void {
     selectedDrawingId = null;
     hoveredDrawingId = null;
   }
-  if (drawCanvas) {
-    drawCanvas.classList.toggle("active", tool !== "cursor");
-    drawCanvas.style.cursor = tool === "cursor" ? "default" : "crosshair";
-  }
-  redrawDrawings(liveDrawings);
+  syncDrawCanvasCursors();
+  repaintAllPanes();
+}
+
+export function getActiveDrawTool(): Drawing["tool"] {
+  return activeTool;
 }
 
 export function getSelectedDrawingId(): string | null {
@@ -2072,18 +2268,49 @@ function bindChartDebugProbe(): void {
 function setupMobileChartPan(shell: HTMLElement): void {
   mobilePanCleanup?.();
   if (!isMobileLayout() || !chart) return;
+  mobilePanCleanup = setupPortableChartPan(shell, chart, {
+    getActiveTool: () => activeTool,
+    healPriceScale: healVisiblePriceScale,
+  });
+}
 
+export function setupPortableChartPan(
+  shell: HTMLElement,
+  chartApi: IChartApi,
+  opts?: {
+    getActiveTool?: () => Drawing["tool"];
+    healPriceScale?: () => void;
+  },
+): () => void {
+  const getTool = opts?.getActiveTool ?? (() => activeTool);
+  const heal = opts?.healPriceScale ?? (() => {});
   const cleanups: Array<() => void> = [];
   let healTimer = 0;
+  let activeTouches = 0;
   const scheduleHeal = () => {
+    if (activeTouches > 0) return;
     if (healTimer) window.clearTimeout(healTimer);
     healTimer = window.setTimeout(() => {
       healTimer = 0;
-      healVisiblePriceScale();
-    }, 180);
+      if (activeTouches > 0) return;
+      heal();
+    }, 280);
   };
-  shell.addEventListener("touchend", scheduleHeal, { passive: true });
-  cleanups.push(() => shell.removeEventListener("touchend", scheduleHeal));
+  const onTouchStart = (e: TouchEvent) => {
+    activeTouches = e.touches.length;
+  };
+  const onTouchEnd = (e: TouchEvent) => {
+    activeTouches = e.touches.length;
+    if (activeTouches === 0 && e.changedTouches.length === 1) scheduleHeal();
+  };
+  shell.addEventListener("touchstart", onTouchStart, { passive: true });
+  shell.addEventListener("touchend", onTouchEnd, { passive: true });
+  shell.addEventListener("touchcancel", onTouchEnd, { passive: true });
+  cleanups.push(() => {
+    shell.removeEventListener("touchstart", onTouchStart);
+    shell.removeEventListener("touchend", onTouchEnd);
+    shell.removeEventListener("touchcancel", onTouchEnd);
+  });
 
   if (!chartInteractionOptions().handleScroll.horzTouchDrag) {
     let panning = false;
@@ -2102,10 +2329,10 @@ function setupMobileChartPan(shell: HTMLElement): void {
     };
 
     const onDown = (e: PointerEvent) => {
-      if (!chart || e.pointerType === "mouse" || activeTool !== "cursor") return;
+      if (e.pointerType === "mouse" || getTool() !== "cursor") return;
       const rect = shell.getBoundingClientRect();
       if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
-      const lr = chart.timeScale().getVisibleLogicalRange();
+      const lr = chartApi.timeScale().getVisibleLogicalRange();
       if (!lr) return;
       panning = true;
       decided = false;
@@ -2116,7 +2343,7 @@ function setupMobileChartPan(shell: HTMLElement): void {
     };
 
     const onMove = (e: PointerEvent) => {
-      if (!panning || !chart || !startRange || e.pointerId !== pointerId) return;
+      if (!panning || !startRange || e.pointerId !== pointerId) return;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
       if (!decided) {
@@ -2132,9 +2359,9 @@ function setupMobileChartPan(shell: HTMLElement): void {
           /* ignore */
         }
       }
-      const spacing = chart.timeScale().options().barSpacing ?? 8;
+      const spacing = chartApi.timeScale().options().barSpacing ?? 8;
       try {
-        chart.timeScale().setVisibleLogicalRange(shiftLogicalRangeByPx(startRange, dx, spacing));
+        chartApi.timeScale().setVisibleLogicalRange(shiftLogicalRangeByPx(startRange, dx, spacing));
       } catch {
         /* ignore */
       }
@@ -2165,82 +2392,121 @@ function setupMobileChartPan(shell: HTMLElement): void {
     });
   }
 
-  mobilePanCleanup = () => {
+  return () => {
     if (healTimer) window.clearTimeout(healTimer);
     cleanups.forEach((fn) => fn());
-    mobilePanCleanup = null;
   };
 }
 
 function setupPriceScaleWheel(shell: HTMLElement): void {
   priceWheelCleanup?.();
   priceWheelResidual = 0;
+  plotWheelResidual = 0;
   priceWheelLastApplyMs = 0;
   let axisPointerDown = false;
+  let plotWheelLastApplyMs = 0;
 
   const onWheel = (e: WheelEvent) => {
     if (isMobileLayout()) return;
     if (!chart || !candleSeries || !hostEl) return;
-    if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
-    // Capture + stopImmediate: LWC also zooms the price axis on wheel —
-    // without this both fire and one notch "flies away".
+    const target = e.target as Node | null;
+    if (!target || !shell.contains(target)) return;
+
+    if (isOverPriceScaleEl(e.clientX, e.clientY, shell)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      const dy = normalizeWheelDeltaY(e, hostEl.clientHeight || 400);
+      const { step, residual } = wheelZoomStep(dy, priceWheelResidual);
+      priceWheelResidual = residual;
+      if (step === 0) return;
+
+      const now = performance.now();
+      if (now - priceWheelLastApplyMs < PRICE_WHEEL_MIN_INTERVAL_MS) {
+        return;
+      }
+      priceWheelLastApplyMs = now;
+
+      const refPrice = refClosePrice();
+
+      const ps = chart.priceScale("right");
+      let range = ps.getVisibleRange();
+      if (!range || !(range.to > range.from)) {
+        const lr = chart.timeScale().getVisibleLogicalRange();
+        const { fromIdx, toIdx } = logicalRangeToIndices(
+          lr?.from ?? 0,
+          lr?.to ?? currentCandles.length - 1,
+          currentCandles.length,
+        );
+        const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
+        if (!robust) return;
+        range = { from: robust.minValue, to: robust.maxValue };
+      }
+      if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
+        const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
+        const chartH = Math.floor(inner?.clientHeight ?? hostEl?.clientHeight ?? 0);
+        range = clampVisiblePriceRange(range, refPrice, chartH);
+      }
+
+      const rect = hostEl.getBoundingClientRect();
+      const scaleW = Math.max(48, ps.width() || 56);
+      let anchor: number | undefined;
+      if (e.clientX < rect.right - scaleW - 2) {
+        try {
+          const y = e.clientY - rect.top;
+          const p = candleSeries.coordinateToPrice(y);
+          if (p != null && Number.isFinite(p as number)) anchor = p as number;
+        } catch {
+          /* mid */
+        }
+      }
+
+      const next = zoomPriceRange(range, step, { step, anchor, refPrice });
+      if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return;
+
+      priceScaleManual = true;
+      ps.setAutoScale(false);
+      try {
+        ps.setVisibleRange(next);
+      } catch {
+        /* ignore invalid range */
+      }
+      return;
+    }
+
+    // Plot area — Binance-like: wheel zooms time; shift+wheel pans horizontally.
     e.preventDefault();
     e.stopImmediatePropagation();
+    const ts = chart.timeScale();
+    const spacing = ts.options().barSpacing ?? 8;
+    const lr = ts.getVisibleLogicalRange();
+    if (!lr) return;
+
+    if (e.shiftKey) {
+      const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const next = panLogicalRangeByWheel(lr, deltaPx, spacing);
+      try {
+        ts.setVisibleLogicalRange(next);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
     const dy = normalizeWheelDeltaY(e, hostEl.clientHeight || 400);
-    const { step, residual } = wheelZoomStep(dy, priceWheelResidual);
-    priceWheelResidual = residual;
+    const { step, residual } = wheelZoomStep(dy, plotWheelResidual);
+    plotWheelResidual = residual;
     if (step === 0) return;
 
     const now = performance.now();
-    if (now - priceWheelLastApplyMs < PRICE_WHEEL_MIN_INTERVAL_MS) {
-      // Eat the notch but don't apply — high-Hz mice otherwise stack 20×/s.
-      return;
-    }
-    priceWheelLastApplyMs = now;
+    if (now - plotWheelLastApplyMs < PRICE_WHEEL_MIN_INTERVAL_MS) return;
+    plotWheelLastApplyMs = now;
 
-    const refPrice = refClosePrice();
-
-    const ps = chart.priceScale("right");
-    let range = ps.getVisibleRange();
-    // Seed from robust visible candles — never full-series min/max (outliers → fling).
-    if (!range || !(range.to > range.from)) {
-      const lr = chart.timeScale().getVisibleLogicalRange();
-      const { fromIdx, toIdx } = logicalRangeToIndices(
-        lr?.from ?? 0,
-        lr?.to ?? currentCandles.length - 1,
-        currentCandles.length,
-      );
-      const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
-      if (!robust) return;
-      range = { from: robust.minValue, to: robust.maxValue };
-    }
-    // Heal an already-corrupted scale (e.g. leftover 1e-14 window) before zooming.
-    if (refPrice > 0) {
-      const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
-      const chartH = Math.floor(inner?.clientHeight ?? hostEl?.clientHeight ?? 0);
-      range = clampVisiblePriceRange(range, refPrice, chartH);
-    }
-
-    const rect = hostEl.getBoundingClientRect();
-    let anchor: number | undefined;
+    const nextSpacing = zoomBarSpacing(spacing, step);
     try {
-      const y = e.clientY - rect.top;
-      const p = candleSeries.coordinateToPrice(y);
-      if (p != null && Number.isFinite(p as number)) anchor = p as number;
+      ts.applyOptions({ barSpacing: nextSpacing, minBarSpacing: 2 });
     } catch {
-      /* mid */
-    }
-
-    const next = zoomPriceRange(range, step, { step, anchor, refPrice });
-    if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return;
-
-    priceScaleManual = true;
-    ps.setAutoScale(false);
-    try {
-      ps.setVisibleRange(next);
-    } catch {
-      /* ignore invalid range */
+      /* ignore */
     }
   };
   const onDblClick = (e: MouseEvent) => {
@@ -2308,7 +2574,7 @@ export function anchorToLatestCandle(barCount?: number): void {
     chart.timeScale().applyOptions({
       barSpacing: spacing,
       rightOffset: rightPad,
-      minBarSpacing: 2,
+      minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
     });
   } catch {
     /* ignore */
@@ -2427,6 +2693,17 @@ export function resizeChart(): void {
   const w = Math.floor(inner?.clientWidth ?? hostEl.clientWidth);
   const h = Math.floor(inner?.clientHeight ?? hostEl.clientHeight);
   if (w > 2 && h > 2) chart.resize(w, h);
+  if (lastOpts && w > 2) {
+    const spacing = barSpacingForWidth(w, lastOpts.tf);
+    try {
+      chart.timeScale().applyOptions({
+        barSpacing: spacing,
+        minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   if (healRaf) cancelAnimationFrame(healRaf);
   healRaf = requestAnimationFrame(() => {
     healRaf = 0;

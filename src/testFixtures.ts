@@ -4,10 +4,11 @@ import {
   DEFAULT_CHART_SETTINGS,
   DEFAULT_FEE_CONFIG,
   DEFAULT_INDICATOR_CONFIG,
+  DEFAULT_MULTI_PANE_PAIRS,
   DEFAULT_MULTI_PANE_TFS,
   STATE_VERSION,
 } from "./types";
-import type { MultiPaneTfs } from "./types";
+import type { MultiPanePairs, MultiPaneTfs } from "./types";
 
 export function sampleMarket(over: Partial<MarketSnapshot> = {}): MarketSnapshot {
   const baseHmcUsdt = 0.05;
@@ -73,6 +74,7 @@ export function baseState(over: Partial<DemoState> = {}): DemoState {
     feeConfig: structuredClone(DEFAULT_FEE_CONFIG),
     secondaryTf: "4H",
     multiPaneTfs: [...DEFAULT_MULTI_PANE_TFS] as MultiPaneTfs,
+    multiPanePairs: [...DEFAULT_MULTI_PANE_PAIRS] as MultiPanePairs,
     chartFullscreen: false,
     multiChart: false,
     multiChartLayout: "1",

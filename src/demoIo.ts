@@ -24,7 +24,7 @@ import {
 } from "./sanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 import { sanitizeFeeConfig } from "./fees";
-import { defaultDemoState } from "./store";
+import { defaultDemoState, sanitizeMultiPanePairs } from "./store";
 import { uid } from "./id";
 import {
   MAX_IMPORT_TRADE_QUOTE,
@@ -198,6 +198,7 @@ export function parseDemoImport(raw: string): DemoState {
   state.activeTf = sanitizeTf(incoming.activeTf);
   state.secondaryTf = sanitizeTf(incoming.secondaryTf, "4H");
   state.multiPaneTfs = sanitizeImportedMultiPaneTfs(incoming.multiPaneTfs, state.secondaryTf);
+  state.multiPanePairs = sanitizeMultiPanePairs(incoming.multiPanePairs);
   state.oracleAnchor = migrateOracleAnchor(incoming.oracleAnchor);
   state.mainView = sanitizeMainView(incoming.mainView);
   state.chartMode = sanitizeChartMode(incoming.chartMode);

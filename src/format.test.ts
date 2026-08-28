@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  chartLocaleTag,
+  chartLocalization,
   chartPriceFormatter,
   formatGh,
   formatNum,
@@ -61,6 +63,12 @@ describe("formatPrice", () => {
     const s = chartPriceFormatter(6.4123e-9);
     expect(s).not.toMatch(/e/i);
     expect(s).not.toBe("—");
+  });
+
+  it("chartLocaleTag returns a valid Intl locale", () => {
+    const tag = chartLocaleTag();
+    expect(() => new Intl.NumberFormat(tag).format(1)).not.toThrow();
+    expect(chartLocalization().priceFormatter(0.05)).toContain("0.05");
   });
 });
 

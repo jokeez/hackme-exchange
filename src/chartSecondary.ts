@@ -6,18 +6,29 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, Timeframe } from "./types";
+import type { Candle, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
-import { chartPriceFormatter } from "./format";
+import { chartLocalization, chartPriceFormatter } from "./format";
 import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { barSpacingForWidth, clampVisiblePriceRange, priceRangeNeedsHeal, visibleBarBudget, wheelZoomStep, zoomPriceRange } from "./chart";
+import { barSpacingForWidth, clampVisiblePriceRange, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange } from "./chart";
+import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
+import { chartInteractionOptions, isMobileLayout } from "./mobile";
 
 export type SecondaryMountOpts = {
+  pairId: PairId;
   pairLabel: string;
   tf: Timeframe;
+  pairs?: readonly { id: PairId; label: string }[];
   timeframes?: readonly Timeframe[];
   onTfChange?: (tf: Timeframe) => void;
+  onPairChange?: (pairId: PairId) => void;
+  onContextMenu?: (price: number, clientX: number, clientY: number) => void;
+  onPaneFocus?: () => void;
+  getDrawings?: () => Drawing[];
+  drawingsLocked?: () => boolean;
+  onAddDrawing?: (d: Drawing) => void;
+  onUpdateDrawing?: (d: Drawing) => void;
 };
 
 type Slot = {
@@ -25,12 +36,16 @@ type Slot = {
   series: ISeriesApi<"Candlestick">;
   host: HTMLElement;
   shell: HTMLElement;
+  drawCanvas: HTMLCanvasElement;
   tf: Timeframe;
+  pairId: PairId;
   pairLabel: string;
   ro: ResizeObserver | null;
   savedRange: LogicalRange | null;
   candles: Candle[];
   cleanup: (() => void) | null;
+  drawCleanup: (() => void) | null;
+  mountOpts: SecondaryMountOpts;
 };
 
 const slots = new Map<string, Slot>();
@@ -100,15 +115,23 @@ function restoreRange(slot: Slot): void {
 function paintChrome(host: HTMLElement, opts: SecondaryMountOpts): void {
   let chrome = host.querySelector(".sub-chart-chrome") as HTMLElement | null;
   const tfs = opts.timeframes ?? TIMEFRAMES;
+  const pairs = opts.pairs ?? [];
   if (!chrome) {
     chrome = document.createElement("div");
     chrome.className = "sub-chart-chrome";
     host.prepend(chrome);
   }
-  const label = escapeHtml(opts.pairLabel ?? "");
+  const pairOpts = pairs.length
+    ? pairs.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === opts.pairId ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("")
+    : `<option value="${escapeHtml(opts.pairId)}" selected>${escapeHtml(opts.pairLabel)}</option>`;
   chrome.innerHTML = `
-    <span class="sub-chart-meta mono" title="${label}">${label}</span>
+    <select class="sub-pair-select mono" aria-label="Pane symbol">${pairOpts}</select>
     <select class="sub-tf-select mono" aria-label="Pane timeframe"></select>`;
+  const pairSel = chrome.querySelector(".sub-pair-select") as HTMLSelectElement;
+  pairSel.addEventListener("change", () => {
+    const next = pairSel.value as PairId;
+    if (next && next !== opts.pairId) opts.onPairChange?.(next);
+  });
   const sel = chrome.querySelector(".sub-tf-select") as HTMLSelectElement;
   sel.innerHTML = tfs.map((tf) => `<option value="${tf}" ${tf === opts.tf ? "selected" : ""}>${tf}</option>`).join("");
   sel.addEventListener("change", () => {
@@ -174,7 +197,9 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
 
 export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: SecondaryMountOpts | Timeframe): void {
   const resolved: SecondaryMountOpts =
-    typeof opts === "string" ? { pairLabel: "", tf: opts } : opts;
+    typeof opts === "string"
+      ? { pairId: "HMC_USDT", pairLabel: "", tf: opts }
+      : opts;
   const key = slotKey(el);
   destroySecondarySlot(key);
 
@@ -185,6 +210,10 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   const shell = document.createElement("div");
   shell.className = "chart-inner sub-inner";
   el.appendChild(shell);
+
+  const drawCanvas = document.createElement("canvas");
+  drawCanvas.className = "draw-layer";
+  el.appendChild(drawCanvas);
 
   const hostW = Math.max(200, shell.clientWidth || el.clientWidth || 320);
   const spacing = barSpacingForWidth(hostW, resolved.tf);
@@ -219,19 +248,19 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       barSpacing: spacing,
     },
     handleScale: {
-      mouseWheel: true,
+      mouseWheel: false,
       pinch: true,
       axisPressedMouseMove: { time: true, price: true },
       axisDoubleClickReset: { time: true, price: true },
     },
     handleScroll: {
-      mouseWheel: true,
+      mouseWheel: false,
       pressedMouseMove: true,
-      horzTouchDrag: true,
-      vertTouchDrag: true,
+      horzTouchDrag: chartInteractionOptions().handleScroll.horzTouchDrag,
+      vertTouchDrag: chartInteractionOptions().handleScroll.vertTouchDrag,
     },
     crosshair: { mode: 1 },
-    localization: { priceFormatter: chartPriceFormatter },
+    localization: chartLocalization(),
   });
 
   const series = chart.addSeries(CandlestickSeries, {
@@ -262,21 +291,91 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     series,
     host: el,
     shell,
+    drawCanvas,
     tf: resolved.tf,
+    pairId: resolved.pairId,
     pairLabel: resolved.pairLabel,
     ro: null,
     savedRange: null,
     candles: [],
     cleanup: null,
+    drawCleanup: null,
+    mountOpts: resolved,
   };
   slots.set(key, slot);
   setSecondaryData(slot, candles, true);
   bindResize(slot);
 
+  const healAxis = () => {
+    const last = slot.candles[slot.candles.length - 1]?.close;
+    const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
+    if (!(refPrice > 0)) return;
+    const ps = slot.chart.priceScale("right");
+    const range = ps.getVisibleRange();
+    if (!priceRangeNeedsHeal(range, refPrice) || !range) return;
+    const next = clampVisiblePriceRange(range, refPrice);
+    try {
+      ps.setAutoScale(false);
+      ps.setVisibleRange(next);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  slot.drawCleanup = registerSecondaryPaneDraw({
+    id: key,
+    hostEl: el,
+    drawCanvas,
+    chart,
+    candleSeries: series,
+    tf: resolved.tf,
+    pairId: resolved.pairId,
+    getDrawings: () => slots.get(key)?.mountOpts.getDrawings?.() ?? [],
+    isLocked: () => slots.get(key)?.mountOpts.drawingsLocked?.() ?? false,
+    onAdd: (d) => slots.get(key)?.mountOpts.onAddDrawing?.(d),
+    onUpdate: (d) => slots.get(key)?.mountOpts.onUpdateDrawing?.(d),
+  });
+
+  const focusPane = () => {
+    setFocusedChartPane(key);
+    resolved.onPaneFocus?.();
+  };
+  el.addEventListener("pointerdown", focusPane);
+  shell.addEventListener("pointerdown", focusPane);
+
+  if (resolved.onContextMenu) {
+    const ctxHandler = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      focusPane();
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const price = series.coordinateToPrice(y);
+      if (price == null || !Number.isFinite(price) || price <= 0) return;
+      resolved.onContextMenu?.(price as number, e.clientX, e.clientY);
+    };
+    el.addEventListener("contextmenu", ctxHandler);
+    drawCanvas.addEventListener("contextmenu", ctxHandler);
+  }
+
+  if (isMobileLayout()) {
+    const panCleanup = setupPortableChartPan(shell, chart, {
+      getActiveTool: () => getActiveDrawTool(),
+      healPriceScale: healAxis,
+    });
+    const prevCleanup = slot.cleanup;
+    slot.cleanup = () => {
+      panCleanup();
+      prevCleanup?.();
+    };
+  }
+
   // Soft price-axis wheel — notch-capped + ref-clamped so trackpads can't fling the scale.
   // Also heal after native LWC axis drag (same collapse path as the main chart).
   let residual = 0;
+  let plotResidual = 0;
   let lastApply = 0;
+  let plotLastApply = 0;
   let axisPointerDown = false;
   let axisHealRaf = 0;
   const overPriceScale = (clientX: number, clientY: number): boolean => {
@@ -293,21 +392,6 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     const scaleW = Math.max(48, slot.chart.priceScale("right").width() || 56);
     return clientX >= rect.right - scaleW - 4;
   };
-  const healAxis = () => {
-    const last = slot.candles[slot.candles.length - 1]?.close;
-    const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
-    if (!(refPrice > 0)) return;
-    const ps = slot.chart.priceScale("right");
-    const range = ps.getVisibleRange();
-    if (!priceRangeNeedsHeal(range, refPrice) || !range) return;
-    const next = clampVisiblePriceRange(range, refPrice);
-    try {
-      ps.setAutoScale(false);
-      ps.setVisibleRange(next);
-    } catch {
-      /* ignore */
-    }
-  };
   const scheduleHeal = () => {
     if (axisHealRaf) return;
     axisHealRaf = requestAnimationFrame(() => {
@@ -318,29 +402,59 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   shell.addEventListener(
     "wheel",
     (e: WheelEvent) => {
+      const target = e.target as Node | null;
+      if (!target || !shell.contains(target)) return;
       const overScale = overPriceScale(e.clientX, e.clientY);
-      if (!overScale) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16;
-      else if (e.deltaMode === 2) dy *= shell.clientHeight || 200;
-      const z = wheelZoomStep(dy, residual);
-      residual = z.residual;
+      const dy = normalizeWheelDeltaY(e, shell.clientHeight || 200);
+
+      if (overScale) {
+        const z = wheelZoomStep(dy, residual);
+        residual = z.residual;
+        if (z.step === 0) return;
+        const now = performance.now();
+        if (now - lastApply < 50) return;
+        lastApply = now;
+        const ps = slot.chart.priceScale("right");
+        let range = ps.getVisibleRange();
+        if (!range || !(range.to > range.from)) return;
+        const last = slot.candles[slot.candles.length - 1]?.close;
+        const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
+        if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
+          range = clampVisiblePriceRange(range, refPrice);
+        }
+        const next = zoomPriceRange(range, z.step, { step: z.step, refPrice });
+        try {
+          ps.setAutoScale(false);
+          ps.setVisibleRange(next);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
+      const ts = slot.chart.timeScale();
+      const spacing = ts.options().barSpacing ?? 8;
+      const lr = ts.getVisibleLogicalRange();
+      if (!lr) return;
+      if (e.shiftKey) {
+        const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        try {
+          ts.setVisibleLogicalRange(panLogicalRangeByWheel(lr, deltaPx, spacing));
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const z = wheelZoomStep(dy, plotResidual);
+      plotResidual = z.residual;
       if (z.step === 0) return;
       const now = performance.now();
-      if (now - lastApply < 50) return;
-      lastApply = now;
-      const ps = slot.chart.priceScale("right");
-      let range = ps.getVisibleRange();
-      if (!range || !(range.to > range.from)) return;
-      const last = slot.candles[slot.candles.length - 1]?.close;
-      const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
-      if (refPrice > 0) range = clampVisiblePriceRange(range, refPrice);
-      const next = zoomPriceRange(range, z.step, { step: z.step, refPrice });
+      if (now - plotLastApply < 50) return;
+      plotLastApply = now;
       try {
-        ps.setAutoScale(false);
-        ps.setVisibleRange(next);
+        ts.applyOptions({ barSpacing: zoomBarSpacing(spacing, z.step), minBarSpacing: 2 });
       } catch {
         /* ignore */
       }
@@ -387,7 +501,18 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
 export function syncSecondaryChart(el: HTMLElement, candles: Candle[], opts: SecondaryMountOpts): void {
   const key = slotKey(el);
   const existing = slots.get(key);
-  if (existing && existing.tf === opts.tf && existing.host === el) {
+  if (existing && existing.host === el) {
+    existing.mountOpts = opts;
+    const metaChanged = existing.tf !== opts.tf || existing.pairId !== opts.pairId;
+    if (metaChanged) {
+      existing.tf = opts.tf;
+      existing.pairId = opts.pairId;
+      existing.pairLabel = opts.pairLabel;
+      updateSecondaryPaneMeta(key, { pairId: opts.pairId, tf: opts.tf });
+      paintChrome(el, opts);
+      setSecondaryData(existing, candles, true);
+      return;
+    }
     if (existing.pairLabel !== opts.pairLabel) {
       existing.pairLabel = opts.pairLabel;
       paintChrome(el, opts);
@@ -402,6 +527,7 @@ function destroySecondarySlot(key: string): void {
   const slot = slots.get(key);
   if (!slot) return;
   slot.cleanup?.();
+  slot.drawCleanup?.();
   slot.ro?.disconnect();
   try {
     slot.chart.remove();
@@ -508,4 +634,23 @@ export function secondaryChartCount(): number {
 
 export function secondaryPaneTf(hostId: string): Timeframe | null {
   return slots.get(hostId)?.tf ?? null;
+}
+
+export function resetSecondaryPaneView(hostId: string): void {
+  const slot = slots.get(hostId);
+  if (!slot) return;
+  try {
+    slot.chart.priceScale("right").setAutoScale(true);
+    const n = slot.candles.length;
+    if (n < 2) return;
+    const w = slot.shell.clientWidth || 320;
+    const spacing = barSpacingForWidth(w, slot.tf);
+    const budget = visibleBarBudget(w, spacing);
+    const to = n - 1 + 2;
+    const from = to - budget;
+    slot.chart.timeScale().setVisibleLogicalRange({ from, to });
+    slot.savedRange = null;
+  } catch {
+    /* ignore */
+  }
 }

@@ -2,6 +2,7 @@ import type { OrderKind, PairId, PairMeta, TimeInForce } from "./types";
 import { formatBps, type LiquidityRole } from "./fees";
 import { formatNum } from "./market";
 import { tickInputValue } from "./tick";
+import { loadMobileTradeSide } from "./mobile";
 
 export type OrderPanelCtx = {
   pair: PairMeta;
@@ -193,7 +194,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       </label>
       <label class="fee-toggle mono post-only"><input type="checkbox" id="post-only" ${uiPostOnly ? "checked" : ""} /> Post Only</label>
     </div>
-    <div class="dual-order" id="dual-order">${sideCol("buy")}${sideCol("sell")}</div>
+    <div class="dual-order" id="dual-order" data-mobile-side="${loadMobileTradeSide()}">${sideCol("buy")}${sideCol("sell")}</div>
   </div>`;
 }
 
