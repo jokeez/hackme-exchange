@@ -39,11 +39,13 @@ describe("icons", () => {
     expect(Ico.chevronDown()).toContain('width="12"');
   });
 
-  it("assetBadge: HMC uses logo image; SUP letter; no USDT/BTC glyphs", () => {
+  it("assetBadge: known coins use logo images", () => {
     expect(assetBadge("HMC")).toContain("logo-hex.png");
     expect(assetBadge("HMC")).toContain("asset-hmc");
-    expect(assetBadge("SUP")).toContain("asset-sup");
-    expect(assetBadge("SUP")).toContain(">S<");
+    expect(assetBadge("SUP")).toContain("/assets/coins/sup.svg");
+    expect(assetBadge("SUP")).toContain("asset-coin-logo");
+    expect(assetBadge("USDT")).toContain("/assets/coins/usdt.svg");
+    expect(assetBadge("BTC")).toContain("/assets/coins/btc.svg");
     expect(assetBadge("USDT")).not.toContain("₮");
     expect(assetBadge("BTC")).not.toContain("₿");
   });

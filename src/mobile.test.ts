@@ -84,4 +84,34 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain("pnl-cards.inline");
     expect(css).toContain("text-overflow: ellipsis");
   });
+
+  it("ships mobile system sheet, ticker icons, hidden draw-tools on chart", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(css).toContain(".sys-backdrop");
+    expect(css).toContain("body.sys-menu-open");
+    expect(css).toMatch(/@media \(max-width: 1024px\)[\s\S]*?\.sys-drop[\s\S]*?position:\s*fixed/);
+    expect(css).toContain('.terminal.mobile-stack[data-mobile-panel="chart"] .draw-tools');
+    expect(css).toContain(".tb-pair-icons");
+    expect(app).toContain("tb-pair-icons");
+    expect(app).toContain("pairAssetIcons(pair.base");
+    expect(app).not.toContain("tb-star");
+    expect(app).not.toContain("◆");
+    expect(app).toContain('id="sys-backdrop"');
+  });
+
+  it("ships coin svg assets for USDT BTC SUP", () => {
+    for (const coin of ["usdt", "btc", "sup"]) {
+      const svg = readFileSync(resolve(process.cwd(), `public/assets/coins/${coin}.svg`), "utf8");
+      expect(svg).toContain("<svg");
+    }
+  });
+
+  it("SUP icon matches HackMe support branding", () => {
+    const svg = readFileSync(resolve(process.cwd(), "public/assets/coins/sup.svg"), "utf8");
+    expect(svg).toContain('aria-label="SUP"');
+    expect(svg).toContain("#a855f7");
+    expect(svg).toContain("#22d3ee");
+    expect(svg).toMatch(/<path[\s\S]*#sup-s/);
+  });
 });

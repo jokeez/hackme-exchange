@@ -113,8 +113,9 @@ function main() {
   unlinkSync(join(ASSETS, jsName));
   unlinkSync(join(ASSETS, cssName));
 
-  const sizes = readdirSync(ASSETS)
-    .map((f) => [f, readFileSync(join(ASSETS, f)).length])
+  const sizes = readdirSync(ASSETS, { withFileTypes: true })
+    .filter((d) => d.isFile())
+    .map((d) => [d.name, readFileSync(join(ASSETS, d.name)).length])
     .filter(([, n]) => n > MAX);
   if (sizes.length) {
     console.error("oversized assets:", sizes);
