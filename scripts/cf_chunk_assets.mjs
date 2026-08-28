@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
  * Cloudflare ↔ this origin stalls mid-body above ~16–19 KiB.
- * Split built JS/CSS into ≤10 KiB parts so orange-cloud delivery works.
+ * Split built JS/CSS into ≤14 KiB parts; boot loader fetches all parts in parallel.
  */
 import { readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "dist");
 const ASSETS = join(DIST, "assets");
-/** Stay under CF stall threshold (~16–19 KiB on this origin). */
-const MAX = 10 * 1024;
+/** Verified safe through CF orange-cloud on exchange.hackme.tech (Aug 2026). */
+const MAX = 14 * 1024;
 
 function byteLen(s) {
   return Buffer.byteLength(s, "utf8");
@@ -20,7 +21,6 @@ function hardSlice(s) {
   const out = [];
   let buf = Buffer.from(s, "utf8");
   while (buf.length > MAX) {
-    // Split on UTF-8 boundary: walk back from MAX if mid-codepoint.
     let n = MAX;
     while (n > 0 && (buf[n] & 0xc0) === 0x80) n--;
     if (n === 0) n = MAX;
@@ -48,6 +48,16 @@ function splitCss(css) {
 
 function splitJs(js) {
   return hardSlice(js);
+}
+
+function buildLoader(partUrls) {
+  const list = JSON.stringify(partUrls);
+  const loader = `(async()=>{const P=${list};const C=await Promise.all(P.map(async u=>{let e;for(let a=1;a<=3;a++){try{const r=await fetch(u);if(!r.ok)throw new Error(r.status);return await r.text()}catch(x){e=x;await new Promise(t=>setTimeout(t,60*a))}}throw new Error(u+" "+e)}));await import(URL.createObjectURL(new Blob([C.join("")],{type:"text/javascript"})))})().catch(e=>{console.error(e);const el=document.createElement("pre");el.style.cssText="padding:24px;color:#f88;font:14px/1.4 monospace";el.textContent="Boot failed: "+e;document.body.appendChild(el)});`;
+  if (byteLen(loader) > MAX) {
+    console.error(`loader too large: ${byteLen(loader)} (max ${MAX})`);
+    process.exit(1);
+  }
+  return loader;
 }
 
 function main() {
@@ -80,33 +90,11 @@ function main() {
     jsPartUrls.push(`/assets/${name}`);
   });
 
-  const loaderName = `boot-${tag}.js`;
-  // Keep loader tiny: part URLs live in a sidecar JSON under MAX.
   const manifestName = `boot-${tag}.json`;
+  const loaderBody = buildLoader(jsPartUrls);
+  const loaderName = `boot-${tag}-${createHash("sha256").update(`${MAX}:${jsParts.length}:${loaderBody}`).digest("hex").slice(0, 8)}.js`;
   writeFileSync(join(ASSETS, manifestName), JSON.stringify(jsPartUrls));
-  const loader = `(async()=>{
-  const parts=await(await fetch("/assets/${manifestName}",{cache:"no-store"})).json();
-  let code="";
-  for(const u of parts){
-    let last;
-    for(let a=1;a<=4;a++){
-      try{
-        const r=await fetch(u,{cache:"no-store"});
-        if(!r.ok) throw new Error(r.status);
-        code+=await r.text();
-        last=null; break;
-      }catch(e){ last=e; await new Promise(r=>setTimeout(r,120*a)); }
-    }
-    if(last) throw new Error("chunk "+u+" "+last);
-  }
-  await import(URL.createObjectURL(new Blob([code],{type:"text/javascript"})));
-})().catch((e)=>{console.error(e);const el=document.createElement("pre");el.style.cssText="padding:24px;color:#f88;font:14px/1.4 monospace";el.textContent="Boot failed: "+e;document.body.appendChild(el);});
-`;
-  if (byteLen(loader) > MAX || byteLen(JSON.stringify(jsPartUrls)) > MAX) {
-    console.error(`loader/manifest too large: loader=${byteLen(loader)} manifest=${byteLen(JSON.stringify(jsPartUrls))}`);
-    process.exit(1);
-  }
-  writeFileSync(join(ASSETS, loaderName), loader);
+  writeFileSync(join(ASSETS, loaderName), loaderBody);
 
   let html = readFileSync(join(DIST, "index.html"), "utf8");
   html = html.replace(
@@ -115,9 +103,8 @@ function main() {
   );
   html = html.replace(
     /<script type="module"[^>]*src="\/assets\/index-[^"]+\.js"[^>]*><\/script>/,
-    `<script type="module" crossorigin src="/assets/${loaderName}"></script>`,
+    `<link rel="modulepreload" crossorigin href="/assets/${loaderName}">\n    <script type="module" crossorigin src="/assets/${loaderName}"></script>`,
   );
-  // Idempotent: allow blob: module import for reconstituted bundle.
   if (!/script-src 'self' blob:/.test(html)) {
     html = html.replace(/script-src 'self'/g, "script-src 'self' blob:");
   }
@@ -134,7 +121,7 @@ function main() {
     process.exit(1);
   }
   console.log(
-    `cf_chunk_assets: js=${jsParts.length} parts css=${cssParts.length} parts loader=${byteLen(loader)}B tag=${tag}`,
+    `cf_chunk_assets: js=${jsParts.length} parts css=${cssParts.length} parts loader=${byteLen(readFileSync(join(ASSETS, loaderName), "utf8"))}B tag=${tag}`,
   );
 }
 
