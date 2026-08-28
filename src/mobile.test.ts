@@ -7,8 +7,10 @@ import {
   chartInteractionOptions,
   isMobileLayout,
   loadMobilePanel,
+  loadMobileTradeSide,
   mobilePanelResizeEnabled,
   saveMobilePanel,
+  saveMobileTradeSide,
   syncMobileLayoutClass,
 } from "./mobile";
 import { readFileSync } from "node:fs";
@@ -57,8 +59,28 @@ describe("mobile layout helpers", () => {
       }) as MediaQueryList) as typeof window.matchMedia;
     syncMobileLayoutClass();
     expect(document.documentElement.classList.contains("mobile-layout")).toBe(true);
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: false,
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
+    syncMobileLayoutClass();
+    expect(document.documentElement.classList.contains("mobile-layout")).toBe(false);
     window.matchMedia = orig;
     syncMobileLayoutClass();
+  });
+
+  it("persists mobile trade side in sessionStorage", () => {
+    saveMobileTradeSide("sell");
+    expect(loadMobileTradeSide()).toBe("sell");
+    saveMobileTradeSide("buy");
+    expect(loadMobileTradeSide()).toBe("buy");
   });
 
   it("chartInteractionOptions locks price-axis drag on mobile", () => {
@@ -77,7 +99,8 @@ describe("mobile layout helpers", () => {
     const mobile = chartInteractionOptions();
     expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
     expect(mobile.handleScale.pinch).toBe(false);
-    expect(mobile.handleScroll.horzTouchDrag).toBe(true);
+    expect(mobile.handleScroll.horzTouchDrag).toBe(false);
+    expect(mobile.handleScroll.pressedMouseMove).toBe(false);
     expect(mobilePanelResizeEnabled()).toBe(false);
     window.matchMedia = orig;
   });
@@ -133,12 +156,13 @@ describe("mobile CSS contracts", () => {
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
     expect(css).toContain("html.mobile-layout .btn-mobile-tools");
     expect(css).toContain('html:not(.mobile-layout) .btn-mobile-tools');
-    expect(css).toContain("html.mobile-layout .chart-host");
+    expect(css).toContain("html.mobile-layout .btn-ico");
+    expect(css).toContain("html.mobile-layout .activity-panel");
     expect(css).toContain("touch-action: none");
-    expect(app).toContain("applyChartInteractionOptions");
-    expect(app).toContain("syncMobileLayoutClass");
-    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("shiftLogicalRangeByPx");
-    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("gutterPanning");
+    expect(app).toContain("applyLayoutToDom()");
+    expect(app).toContain("loadMobileTradeSide");
+    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("setupMobileChartPan");
+    expect(readFileSync(resolve(process.cwd(), "src/main.ts"), "utf8")).toContain("syncMobileLayoutClass");
   });
 
   it("ships mobile system sheet, ticker icons, hidden draw-tools on chart", () => {
@@ -153,6 +177,9 @@ describe("mobile CSS contracts", () => {
     expect(app).toContain("pairAssetIcons(pair.base");
     expect(app).not.toContain("tb-star");
     expect(app).not.toContain("◆");
+    expect(app).toContain('aria-controls="${t.panelId}"');
+    expect(app).toContain('panelId: "col-book"');
+    expect(app).toContain('aria-label="Indicators"');
     expect(app).toContain('id="sys-backdrop"');
   });
 

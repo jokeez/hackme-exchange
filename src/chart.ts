@@ -103,6 +103,7 @@ let priceScaleManual = false;
 let drawPointerMove: ((e: PointerEvent) => void) | null = null;
 let drawPointerUp: ((e: PointerEvent) => void) | null = null;
 let priceWheelCleanup: (() => void) | null = null;
+let mobilePanCleanup: (() => void) | null = null;
 /** Trackpad residual — apply zoom only when a full notch accumulates. */
 let priceWheelResidual = 0;
 /** Min ms between applied price-scale notches (mice that spam 100px events). */
@@ -1582,6 +1583,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   if (onAddDrawing) setupDrawInteraction(opts.drawings, opts.pairId, onAddDrawing);
   redrawDrawings(opts.drawings);
   setupPriceScaleWheel(shell);
+  setupMobileChartPan(el);
   bindChartDebugProbe();
   anchorToLatestCandle(visibleBarBudget(hostW, spacing));
 
@@ -2060,19 +2062,98 @@ function bindChartDebugProbe(): void {
   };
 }
 
+function setupMobileChartPan(shell: HTMLElement): void {
+  mobilePanCleanup?.();
+  if (!isMobileLayout() || !chart) return;
+
+  let panning = false;
+  let decided = false;
+  let startX = 0;
+  let startY = 0;
+  let startRange: { from: number; to: number } | null = null;
+  let pointerId = -1;
+  const DRAG_THRESH = 6;
+
+  const cancelPan = () => {
+    panning = false;
+    decided = false;
+    startRange = null;
+    pointerId = -1;
+  };
+
+  const onDown = (e: PointerEvent) => {
+    if (!chart || e.pointerType === "mouse" || activeTool !== "cursor") return;
+    const rect = shell.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    const lr = chart.timeScale().getVisibleLogicalRange();
+    if (!lr) return;
+    panning = true;
+    decided = false;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    startRange = { from: lr.from, to: lr.to };
+  };
+
+  const onMove = (e: PointerEvent) => {
+    if (!panning || !chart || !startRange || e.pointerId !== pointerId) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!decided) {
+      if (Math.abs(dx) < DRAG_THRESH && Math.abs(dy) < DRAG_THRESH) return;
+      decided = true;
+      if (Math.abs(dy) > Math.abs(dx)) {
+        cancelPan();
+        return;
+      }
+      try {
+        shell.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    const spacing = chart.timeScale().options().barSpacing ?? 8;
+    try {
+      chart.timeScale().setVisibleLogicalRange(shiftLogicalRangeByPx(startRange, dx, spacing));
+    } catch {
+      /* ignore */
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onUp = (e: PointerEvent) => {
+    if (e.pointerId !== pointerId) return;
+    try {
+      shell.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    cancelPan();
+  };
+
+  shell.addEventListener("pointerdown", onDown, { passive: true });
+  shell.addEventListener("pointermove", onMove, { passive: false, capture: true });
+  shell.addEventListener("pointerup", onUp, { capture: true });
+  shell.addEventListener("pointercancel", onUp, { capture: true });
+  mobilePanCleanup = () => {
+    shell.removeEventListener("pointerdown", onDown);
+    shell.removeEventListener("pointermove", onMove, true);
+    shell.removeEventListener("pointerup", onUp, true);
+    shell.removeEventListener("pointercancel", onUp, true);
+    cancelPan();
+    mobilePanCleanup = null;
+  };
+}
+
 function setupPriceScaleWheel(shell: HTMLElement): void {
   priceWheelCleanup?.();
   priceWheelResidual = 0;
   priceWheelLastApplyMs = 0;
-  const mobile = isMobileLayout();
   let axisPointerDown = false;
-  let gutterPanning = false;
-  let gutterStartX = 0;
-  let gutterStartRange: { from: number; to: number } | null = null;
-  let gutterPointerId = -1;
 
   const onWheel = (e: WheelEvent) => {
-    if (mobile) return;
+    if (isMobileLayout()) return;
     if (!chart || !candleSeries || !hostEl) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
     // Capture + stopImmediate: LWC also zooms the price axis on wheel —
@@ -2135,7 +2216,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
   };
   const onDblClick = (e: MouseEvent) => {
-    if (mobile) return;
+    if (isMobileLayout()) return;
     if (!chart || !hostEl) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
     e.preventDefault();
@@ -2148,40 +2229,11 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   // LWC axisPressedMouseMove.price can collapse the window without our wheel
   // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
-    if (!chart) return;
+    if (isMobileLayout()) return;
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
-    if (mobile) {
-      const lr = chart.timeScale().getVisibleLogicalRange();
-      if (!lr) return;
-      gutterPanning = true;
-      gutterPointerId = e.pointerId;
-      gutterStartX = e.clientX;
-      gutterStartRange = { from: lr.from, to: lr.to };
-      try {
-        shell.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
     axisPointerDown = true;
   };
   const onPointerMove = (e: PointerEvent) => {
-    if (gutterPanning && chart && gutterStartRange) {
-      if (e.pointerId !== gutterPointerId) return;
-      const spacing = chart.timeScale().options().barSpacing ?? 8;
-      const next = shiftLogicalRangeByPx(gutterStartRange, e.clientX - gutterStartX, spacing);
-      try {
-        chart.timeScale().setVisibleLogicalRange(next);
-      } catch {
-        /* ignore invalid transient range */
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
     if (!axisPointerDown) return;
     if ((e.buttons & 1) === 0) {
       axisPointerDown = false;
@@ -2189,18 +2241,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
     // Intentionally no heal-while-dragging — that made vertical scale feel sticky/broken.
   };
-  const onPointerUp = (e: PointerEvent) => {
-    if (gutterPanning && e.pointerId === gutterPointerId) {
-      gutterPanning = false;
-      gutterStartRange = null;
-      gutterPointerId = -1;
-      try {
-        shell.releasePointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
+  const onPointerUp = () => {
     if (!axisPointerDown) return;
     axisPointerDown = false;
     healVisiblePriceScale();
@@ -2212,9 +2253,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   window.addEventListener("pointerup", onPointerUp, { capture: true });
   window.addEventListener("pointercancel", onPointerUp, { capture: true });
   priceWheelCleanup = () => {
-    gutterPanning = false;
-    gutterStartRange = null;
-    gutterPointerId = -1;
     shell.removeEventListener("wheel", onWheel, true);
     shell.removeEventListener("dblclick", onDblClick, true);
     shell.removeEventListener("pointerdown", onPointerDown, true);
@@ -2351,6 +2389,7 @@ export function applyChartInteractionOptions(): void {
   });
   const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
   if (inner) setupPriceScaleWheel(inner);
+  if (hostEl) setupMobileChartPan(hostEl);
 }
 
 /** Re-measure after panel drag, iframe chrome, or orientation change. */
@@ -2370,6 +2409,7 @@ export function destroyChart(): void {
   hostResizeObs?.disconnect();
   hostResizeObs = null;
   priceWheelCleanup?.();
+  mobilePanCleanup?.();
   clearDrawPointerListeners();
   // Drop any previous viewport — remounts (TF/pair) must re-anchor to the live candle.
   savedLogicalRange = null;

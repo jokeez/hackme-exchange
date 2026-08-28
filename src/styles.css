@@ -731,6 +731,25 @@ a:hover { text-decoration: underline; }
   html.mobile-layout .chart-inner {
     touch-action: none;
   }
+  html.mobile-layout .btn-ico,
+  html.mobile-layout .tfq,
+  html.mobile-layout .ind-tabs.compact .ind {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    padding: 0.35rem 0.5rem;
+    touch-action: manipulation;
+  }
+  html.mobile-layout .tfq {
+    min-width: 2.5rem;
+    font-size: 0.74rem;
+  }
+  html.mobile-layout .ind-tabs.compact .ind {
+    min-width: auto;
+    font-size: 0.68rem;
+  }
+  html.mobile-layout .activity-panel {
+    max-height: 38%;
+  }
   .chart-topbar {
     flex-wrap: nowrap;
     overflow-x: auto;
