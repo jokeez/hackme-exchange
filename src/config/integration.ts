@@ -126,9 +126,22 @@ function resolvePoolOrigin(): string {
   return sanitizeHttpUrl(explicit || defaultPool, defaultPool);
 }
 
+function resolveHubOrigin(): string {
+  const explicit = env("VITE_HUB_ORIGIN", "").trim();
+  if (useHubProxy) {
+    if (explicit && typeof console !== "undefined") {
+      console.warn(
+        "[hackme-exchange] VITE_HUB_ORIGIN ignored on same-origin deploy — using /hub-proxy.",
+      );
+    }
+    return defaultHub;
+  }
+  return sanitizeHttpUrl(explicit || defaultHub, defaultHub);
+}
+
 export const INTEGRATION: IntegrationConfig = {
   mode: effectiveMode(RAW_MODE),
-  hubOrigin: sanitizeHttpUrl(env("VITE_HUB_ORIGIN", defaultHub), defaultHub),
+  hubOrigin: resolveHubOrigin(),
   exchangeOrigin: sanitizeHttpUrl(
     env("VITE_EXCHANGE_ORIGIN", "https://exchange.hackme.tech"),
     "https://exchange.hackme.tech",

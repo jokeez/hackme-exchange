@@ -111,6 +111,7 @@ import {
   pairQuoteSym,
   feeQuoteFromLabConvert,
   flipRoute,
+  formatConvertFeeToast,
   formatLabConvertFeeToast,
   previewConvert,
   convertRouteDef,
@@ -379,6 +380,57 @@ function renderAnnounce(): string {
     ${lab ? LAB_BOOK_BADGE : PAPER_BADGE}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
   </div>`;
+}
+
+/** Refresh mode chrome without full render (lab connect/logout on Spot/Convert). */
+function patchModeChrome(): void {
+  if (!announceDismissed) {
+    const html = renderAnnounce();
+    const existing = document.getElementById("announce-bar");
+    if (html && existing) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      const next = wrap.firstElementChild;
+      if (next) {
+        existing.replaceWith(next);
+        document.getElementById("btn-announce-x")?.addEventListener("click", () => {
+          announceDismissed = true;
+          sessionStorage.setItem("hackme-ex-announce-dismiss", "1");
+          document.getElementById("announce-bar")?.remove();
+        });
+      }
+    } else if (!html) {
+      existing?.remove();
+    }
+  }
+  const nodeEl = document.getElementById("node-status");
+  if (nodeEl) {
+    void probeNodeOnline().then((ok) => {
+      const el = document.getElementById("node-status");
+      if (!el) return;
+      const base = modeStatusPill();
+      el.textContent = ok ? `${base} · node up` : base;
+    });
+  }
+  const tbSub = document.querySelector(".tb-sub");
+  if (tbSub) {
+    tbSub.textContent = useLabMatching() ? "Lab book · DEMO matching" : "Pool oracle · paper demo";
+  }
+  const bookTitle = document.querySelector(".col-book .col-title > span");
+  if (bookTitle) {
+    bookTitle.innerHTML = `Order Book ${bookHeaderBadge()}`;
+  }
+  const meta = document.getElementById("order-head-meta");
+  const modeBadge = meta?.querySelector(".demo-badge.meta-compact:not([data-lab-mm-badge])");
+  if (modeBadge) {
+    if (useLabMatching()) {
+      modeBadge.textContent = "LAB";
+      modeBadge.setAttribute("title", "Private lab matching — not production");
+    } else {
+      modeBadge.textContent = "PAPER";
+      modeBadge.setAttribute("title", "Simulated exchange — not real CEX");
+    }
+  }
 }
 
 function availBalance(pair = pairById(state.activePair)): { base: number; quote: number } {
@@ -1245,11 +1297,14 @@ async function runConvertDesk(): Promise<void> {
       recordConvert(state, from, to, amt, got, market, labFee, def.pair);
       saveState(state);
       toast(
-        `Lab convert → ${formatNum(net, 4)} net${formatLabConvertFeeToast({
-          ...apiRes,
-          feeQuoteDisplay,
-          feeHmcDisplay,
-        })}`,
+        `Lab convert → ${formatNum(net, 4)} net${formatLabConvertFeeToast(
+          {
+            ...apiRes,
+            feeQuoteDisplay,
+            feeHmcDisplay,
+          },
+          def ? pairQuoteSym(def.pair) : "USDT",
+        )}`,
         "ok",
       );
       softPatchConvertDesk();
@@ -1276,13 +1331,7 @@ async function runConvertDesk(): Promise<void> {
   const net = def
     ? convertNetReceive({ got: res.got, fee: res.fee, to: def.to, pair: def.pair })
     : res.got;
-  const feeHint =
-    res.fee.feeQuote > 0 || res.fee.feeHmc > 0
-      ? res.fee.paidInHmc
-        ? ` · fee ${formatNum(res.fee.feeHmc, 4)} HMC`
-        : ` · fee ${formatNum(res.fee.feeQuote, 6)}`
-      : "";
-  toast(`Swapped → ${formatNum(net, 4)} net${feeHint}`, "ok");
+  toast(`Swapped → ${formatNum(net, 4)} net${def ? formatConvertFeeToast(res.fee, def.pair) : ""}`, "ok");
   softPatchConvertDesk();
   } finally {
     convertInFlight = false;
@@ -1906,6 +1955,7 @@ function showSystemDrop(show?: boolean): void {
 
 function refreshAfterLabTrade(): void {
   saveState(state);
+  patchModeChrome();
   patchLive();
   patchAvailChips();
   refreshOpenOrderChartLines();
@@ -2048,6 +2098,7 @@ async function labApiLogoutUi(): Promise<void> {
   else {
     const addrEl = document.getElementById("lab-session-addr");
     if (addrEl) addrEl.textContent = "not connected";
+    patchModeChrome();
     if (state.mainView === "spot") {
       const book = document.getElementById("book");
       if (book) {
@@ -2068,6 +2119,7 @@ async function labRevokeAllUi(): Promise<void> {
   else {
     const addrEl = document.getElementById("lab-session-addr");
     if (addrEl) addrEl.textContent = "not connected";
+    patchModeChrome();
   }
 }
 
@@ -2515,9 +2567,11 @@ function quickPlaceFromChart(side: "buy" | "sell", kind: "limit" | "stop_limit",
     }
     if (check.immediate && market) {
       const quote = price * amt;
+      const pair = pairById(state.activePair);
+      const fee = calcFee(state, market, state.activePair, quote, "taker");
       const res = executeFill(state, market, state.activePair, side, price, amt, quote, "limit", false, true);
       if (!res.ok) { toast(res.reason, "warn"); return; }
-      toast(`${side.toUpperCase()} filled @ ${formatPrice(price)}`, "ok");
+      toast(`${side.toUpperCase()} filled @ ${formatPrice(price)} · ${previewFeeLabel(fee, pair.quote)}`, "ok");
       saveState(state);
       patchLive();
       document.getElementById("activity-body")!.innerHTML = renderActivityBody();

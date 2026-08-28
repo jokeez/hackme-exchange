@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, feeQuoteFromLabConvert, flipRoute, formatLabConvertFeeToast, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
+import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, feeQuoteFromLabConvert, flipRoute, formatConvertFeeToast, formatLabConvertFeeToast, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("convert", () => {
@@ -206,5 +206,18 @@ describe("convert", () => {
     expect(convert(s, market, "USDT_HMC", okAmt).ok).toBe(true);
     expect(s.wallet.usdt).toBeLessThan(100);
     expect(s.wallet.hmc).toBeGreaterThan(0);
+  });
+
+  it("formatLabConvertFeeToast includes quote asset", () => {
+    expect(formatLabConvertFeeToast({ feeQuoteDisplay: 0.01 }, "USDT")).toContain("USDT");
+    expect(formatLabConvertFeeToast({ paid_in_hmc: true, feeHmcDisplay: 1.5 })).toContain("HMC");
+  });
+
+  it("formatConvertFeeToast matches preview fee line units", () => {
+    const s = baseState();
+    const prev = previewConvert(s, market, "HMC_USDT", 1000) as ConvertPreview;
+    const suffix = formatConvertFeeToast(prev.fee, prev.pair);
+    expect(suffix).toContain("USDT");
+    expect(convertFeeHintLine(prev)).toContain("USDT");
   });
 });

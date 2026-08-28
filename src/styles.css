@@ -3632,10 +3632,10 @@ html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .order-zone {
 }
 html[data-embed="hub"] .order-panel-head { gap: 0.04rem; margin-bottom: 0.1rem; }
 html[data-embed="hub"] .order-head-meta {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.2rem;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 html[data-embed="hub"] .order-head-meta .demo-badge,
 html[data-embed="hub"] .order-head-meta .fee-hint {
@@ -3865,5 +3865,6 @@ html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .panel-rail {
     scroll-behavior: auto !important;
   }
   .last-pill.pulse { animation: none !important; }
+  .spinner { animation: none !important; }
   .bg-glow { opacity: 0.12; filter: none; }
 }

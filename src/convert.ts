@@ -277,21 +277,31 @@ export function feeQuoteFromLabConvert(
   };
 }
 
+/** Toast suffix for paper/lab convert — quote asset or HMC. */
+export function formatConvertFeeToast(fee: FeeQuote, pair: PairId): string {
+  if (!(fee.feeQuote > 0) && !(fee.feeHmc > 0)) return "";
+  if (fee.paidInHmc) return ` · fee ${formatFeeAmt(fee.feeHmc)} HMC`;
+  return ` · fee ${formatFeeAmt(fee.feeQuote)} ${pairQuoteSym(pair)}`;
+}
+
 /** Toast suffix for lab convert — quote fee or HMC fee (never silent when fee charged). */
-export function formatLabConvertFeeToast(api: {
-  fee_quote?: number;
-  fee_hmc?: number;
-  paid_in_hmc?: boolean;
-  feeQuoteDisplay?: number;
-  feeHmcDisplay?: number;
-}): string {
+export function formatLabConvertFeeToast(
+  api: {
+    fee_quote?: number;
+    fee_hmc?: number;
+    paid_in_hmc?: boolean;
+    feeQuoteDisplay?: number;
+    feeHmcDisplay?: number;
+  },
+  quoteAsset = "USDT",
+): string {
   const fq = api.feeQuoteDisplay ?? 0;
   const fh = api.feeHmcDisplay ?? 0;
   if (api.paid_in_hmc && fh > 0) {
     return ` · fee ${formatFeeAmt(fh)} HMC`;
   }
   if (fq > 0) {
-    return ` · fee ${formatFeeAmt(fq)}`;
+    return ` · fee ${formatFeeAmt(fq)} ${quoteAsset}`;
   }
   return "";
 }
