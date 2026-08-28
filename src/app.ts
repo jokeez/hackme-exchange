@@ -22,6 +22,8 @@ import {
   destroyChart,
   getDisplayedLastCandle,
   getChartMountOpts,
+  getFocusedChartPaneId,
+  getMainCrosshairPane,
   getSelectedDrawingId,
   mountChart,
   refreshDrawings,
@@ -31,6 +33,7 @@ import {
   resizeChart,
   scrollToTimestamp,
   setActiveDrawTool,
+  setChartCrosshairMode,
   setCandleData,
   setChartMode,
   setContextPriceMarker,
@@ -54,7 +57,8 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart } from "./chartSecondary";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, listSecondaryCrosshairPanes } from "./chartSecondary";
+import { clearCrosshairRegistry, registerCrosshairPane, setCrosshairSyncEnabled } from "./chartCrosshairSync";
 import {
   authLogout,
   authRevokeAll,
@@ -122,7 +126,7 @@ import {
 } from "./convert";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
-import { renderDepthPanel } from "./depth";
+import { renderDepthPanel, renderDepthSvg } from "./depth";
 import { renderOracleStatusHtml, patchOracleStatusDom, type OracleMeta } from "./oracleStatus";
 import { parseRouteHash, writeRouteHash } from "./routeHash";
 import { appendSyntheticTrade, mergeTapeRows, seedPublicTape, type TapePrint } from "./tape";
@@ -883,6 +887,7 @@ function renderBook(): string {
       <button type="button" class="bv" data-bv="depth">Depth</button>
     </div>
     ${renderVolumeRatio()}
+    <div class="depth-wrap" aria-hidden="true">${renderDepthSvg(bids, asks)}</div>
     <div class="book-group-row">
       <label class="muted small">Group</label>
       <select id="book-group-select" class="book-select mono">
@@ -1688,7 +1693,7 @@ function renderSpot(): string {
     { id: "clear", title: "Delete selected (or clear all)" },
     { id: "lock", title: "Lock drawings (no edit)" },
   ];
-  const layoutClass = state.multiChartLayout !== "1" ? `layout-${state.multiChartLayout}` : "";
+  const layoutClass = state.multiChartLayout !== "1" ? `layout-${state.multiChartLayout} multi-chart-sync` : "";
 
   const vip = activeVipTier(state, market);
   const vipProg = nextVipProgress(state, market);
@@ -3180,9 +3185,26 @@ function setPaneTf(pane: number, tf: Timeframe): void {
   syncMultiCharts();
 }
 
+let crosshairPaneCleanups: Array<() => void> = [];
+
+function syncCrosshairPanes(): void {
+  crosshairPaneCleanups.forEach((fn) => fn());
+  crosshairPaneCleanups = [];
+  const multi = state.multiChartLayout !== "1";
+  setCrosshairSyncEnabled(multi);
+  setChartCrosshairMode(multi ? 1 : 0);
+  if (!multi) return;
+  const main = getMainCrosshairPane();
+  if (main) crosshairPaneCleanups.push(registerCrosshairPane(main));
+  for (const pane of listSecondaryCrosshairPanes()) {
+    crosshairPaneCleanups.push(registerCrosshairPane(pane));
+  }
+}
+
 function syncMultiCharts(): void {
   if (state.multiChartLayout === "1") {
     destroySecondaryChart();
+    syncCrosshairPanes();
     return;
   }
   if (market) ensureCandles(state, market);
@@ -3235,7 +3257,10 @@ function syncMultiCharts(): void {
     resizeAll();
     requestAnimationFrame(() => {
       resizeAll();
-      requestAnimationFrame(resizeAll);
+      requestAnimationFrame(() => {
+        resizeAll();
+        syncCrosshairPanes();
+      });
     });
   });
 }
@@ -3262,13 +3287,15 @@ function patchLive(): void {
     updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
     if (state.multiChartLayout !== "1") {
       const n = state.multiChartLayout === "4" ? 4 : 2;
+      const focused = getFocusedChartPaneId();
+      const mobileSkip = isMobileLayout() && state.multiChartLayout === "4";
       for (let i = 2; i <= n; i++) {
+        const hostId = `chart-host-${i}`;
+        if (mobileSkip && focused !== hostId && liveTickN % 3 !== 0) continue;
         const tf = paneTf(i);
         const pid = panePair(i);
         const c2 = state.candles[pid]?.[tf] ?? [];
-        if (c2.length) {
-          updateSecondaryChart(c2, `chart-host-${i}`);
-        }
+        if (c2.length) updateSecondaryChart(c2, hostId);
       }
     }
   }
@@ -5078,11 +5105,15 @@ function microTickPrices(): void {
   }
   if (state.multiChartLayout !== "1") {
     const n = state.multiChartLayout === "4" ? 4 : 2;
+    const focused = getFocusedChartPaneId();
+    const mobileSkip = isMobileLayout() && state.multiChartLayout === "4";
     for (let i = 2; i <= n; i++) {
+      const hostId = `chart-host-${i}`;
+      if (mobileSkip && focused !== hostId && liveTickN % 3 !== 0) continue;
       const tf = paneTf(i);
       const pid = panePair(i);
       const c2 = state.candles[pid]?.[tf] ?? [];
-      if (c2.length) updateSecondaryChart(c2, `chart-host-${i}`);
+      if (c2.length) updateSecondaryChart(c2, hostId);
     }
   }
   const quote = activePairQuote();

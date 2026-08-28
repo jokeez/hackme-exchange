@@ -2129,6 +2129,9 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   outline-offset: -1px;
   box-shadow: inset 0 0 0 1px rgba(77, 228, 255, 0.12);
 }
+.multi-chart-sync .chart-host.chart-pane-focused {
+  outline: 1px solid rgba(77, 228, 255, 0.55);
+}
 .chart-host-sub .draw-layer {
   z-index: 4;
 }
