@@ -58,7 +58,8 @@ import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
 import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, listSecondaryCrosshairPanes } from "./chartSecondary";
-import { clearCrosshairRegistry, registerCrosshairPane, setCrosshairSyncEnabled } from "./chartCrosshairSync";
+import { registerCrosshairPane, setCrosshairSyncEnabled } from "./chartCrosshairSync";
+import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled } from "./chartTimeSync";
 import {
   authLogout,
   authRevokeAll,
@@ -3186,18 +3187,26 @@ function setPaneTf(pane: number, tf: Timeframe): void {
 }
 
 let crosshairPaneCleanups: Array<() => void> = [];
+let timeSyncPaneCleanups: Array<() => void> = [];
 
 function syncCrosshairPanes(): void {
   crosshairPaneCleanups.forEach((fn) => fn());
   crosshairPaneCleanups = [];
+  timeSyncPaneCleanups.forEach((fn) => fn());
+  timeSyncPaneCleanups = [];
   const multi = state.multiChartLayout !== "1";
   setCrosshairSyncEnabled(multi);
+  setTimeSyncEnabled(multi);
   setChartCrosshairMode(multi ? 1 : 0);
   if (!multi) return;
   const main = getMainCrosshairPane();
-  if (main) crosshairPaneCleanups.push(registerCrosshairPane(main));
+  if (main) {
+    crosshairPaneCleanups.push(registerCrosshairPane(main));
+    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: main.id, chart: main.chart }));
+  }
   for (const pane of listSecondaryCrosshairPanes()) {
     crosshairPaneCleanups.push(registerCrosshairPane(pane));
+    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: pane.id, chart: pane.chart }));
   }
 }
 
@@ -5451,5 +5460,6 @@ window.addEventListener("beforeunload", () => {
   if (tickTimer) clearInterval(tickTimer);
   if (oracleAgeTimer) clearInterval(oracleAgeTimer);
   if (labBookTimer) clearInterval(labBookTimer);
+  clearTimeSyncRegistry();
   destroyChart();
 });
