@@ -193,7 +193,7 @@ import {
   walletEquityFromMarket,
 } from "./store";
 import { toast } from "./toast";
-import { isMobileLayout, loadMobilePanel, saveMobilePanel, type MobilePanel } from "./mobile";
+import { isMobileLayout, loadMobilePanel, mobilePanelResizeEnabled, saveMobilePanel, type MobilePanel } from "./mobile";
 import { loadTheme, saveTheme } from "./theme";
 import type {
   Candle,
@@ -260,6 +260,7 @@ let announceDismissed =
   sessionStorage.getItem("hackme-ex-announce-dismiss") === "1" || isHubEmbed();
 let liveTickN = 0;
 let mobilePanel: MobilePanel = loadMobilePanel();
+let mobileToolsOpen = false;
 
 /** Session-only denser desk for hub iframe — do not persist over standalone prefs. */
 function applyHubEmbedLayoutPrefs(): void {
@@ -1650,7 +1651,7 @@ function renderSpot(): string {
 
   <div class="mobile-panel-wrap">${renderMobilePanelTabs()}</div>
 
-  <div class="terminal mobile-stack ${state.chartFullscreen ? "chart-fullscreen" : ""} ${layoutPrefs.bookCollapsed ? "book-collapsed" : ""} ${layoutPrefs.rightCollapsed ? "right-collapsed" : ""} ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""}" id="terminal" data-mobile-panel="${mobilePanel}" style="grid-template-columns:${terminalGridColumnsForView(layoutPrefs, state.chartFullscreen)}">
+  <div class="terminal mobile-stack ${state.chartFullscreen ? "chart-fullscreen" : ""} ${layoutPrefs.bookCollapsed ? "book-collapsed" : ""} ${layoutPrefs.rightCollapsed ? "right-collapsed" : ""} ${layoutPrefs.toolsCollapsed ? "tools-collapsed" : ""} ${mobileToolsOpen ? "mobile-tools-open" : ""}" id="terminal" data-mobile-panel="${mobilePanel}" style="grid-template-columns:${terminalGridColumnsForView(layoutPrefs, state.chartFullscreen)}">
     <aside class="col-book ${state.chartFullscreen || layoutPrefs.bookCollapsed ? "hidden" : ""}" id="col-book">
       <div class="col-title">
         <span>Order Book ${bookHeaderBadge()}</span>
@@ -1677,6 +1678,7 @@ function renderSpot(): string {
           </div>
         </div>
         <div class="chart-actions">
+          <button type="button" class="btn-ico btn-mobile-tools ${mobileToolsOpen ? "active" : ""}" id="btn-mobile-tools" title="Drawing tools" aria-pressed="${mobileToolsOpen ? "true" : "false"}">${Ico.mousePointer()}</button>
           <button type="button" class="btn-ico" id="btn-goto-date" title="Go to date">${Ico.clock()}</button>
           <button type="button" class="btn-ico" id="btn-indicators" title="Indicators">${Ico.activity()}</button>
           <button type="button" class="btn-ico" id="btn-overlays" title="Overlays">${Ico.list()}</button>
@@ -3610,9 +3612,28 @@ function ensurePanelRails(): void {
   }
 }
 
+function setMobileToolsOpen(open?: boolean): void {
+  if (!isMobileLayout()) {
+    mobileToolsOpen = false;
+    return;
+  }
+  mobileToolsOpen = open === undefined ? !mobileToolsOpen : open;
+  const term = document.getElementById("terminal");
+  term?.classList.toggle("mobile-tools-open", mobileToolsOpen);
+  const btn = document.getElementById("btn-mobile-tools");
+  btn?.classList.toggle("active", mobileToolsOpen);
+  btn?.setAttribute("aria-pressed", mobileToolsOpen ? "true" : "false");
+  scheduleChartResize();
+}
+
 function syncExpandRail(id: string, show: boolean): void {
   const el = document.getElementById(id);
   if (!el) return;
+  if (isMobileLayout()) {
+    el.classList.remove("is-visible");
+    el.style.removeProperty("display");
+    return;
+  }
   el.classList.toggle("is-visible", show);
   if (show) {
     el.style.setProperty("display", "flex", "important");
@@ -3660,6 +3681,7 @@ function toggleChartFullscreen(): void {
 }
 
 function wirePanelResize(handleId: string, side: "book" | "right"): void {
+  if (!mobilePanelResizeEnabled()) return;
   const handle = document.getElementById(handleId);
   if (!handle) return;
   handle.addEventListener("mousedown", (e) => {
@@ -3709,7 +3731,10 @@ function wireLayoutPanels(): void {
     if (!t) return;
     if (t.id === "btn-collapse-book" || t.id === "btn-expand-book") collapseBook();
     else if (t.id === "btn-collapse-right" || t.id === "btn-expand-right") collapseRight();
-    else if (t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") collapseTools();
+    else if (t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") {
+      if (isMobileLayout()) return;
+      collapseTools();
+    }
   });
   wirePanelResize("resize-book", "book");
   wirePanelResize("resize-right", "right");
@@ -3717,6 +3742,7 @@ function wireLayoutPanels(): void {
 
 function switchMobilePanel(mp: MobilePanel): void {
   if (!mp || mp === mobilePanel) return;
+  if (mp !== "chart") setMobileToolsOpen(false);
   mobilePanel = mp;
   saveMobilePanel(mp);
   document.getElementById("terminal")?.setAttribute("data-mobile-panel", mp);
@@ -3798,6 +3824,8 @@ function wireEvents(): void {
   wireMobilePanels();
   wireMobileTradeSide();
   wireOracleRetry();
+
+  document.getElementById("btn-mobile-tools")?.addEventListener("click", () => setMobileToolsOpen());
 
   document.getElementById("btn-reset")?.addEventListener("click", () => {
     if (useLabMatching()) {

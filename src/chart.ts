@@ -35,6 +35,7 @@ import {
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { chartInteractionOptions, isMobileLayout } from "./mobile";
 
 const SCHEMES = {
   classic: { up: "#00e676", down: "#ff5252" },
@@ -1476,20 +1477,8 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       entireTextOnly: true,
       autoScale: true,
     },
-    handleScale: {
-      axisPressedMouseMove: { time: true, price: true },
-      // Keep time-scale wheel zoom; price-axis wheel is owned by setupPriceScaleWheel
-      // (capture + stopImmediate) so LWC cannot double-apply / fly away.
-      mouseWheel: true,
-      pinch: true,
-      axisDoubleClickReset: { time: true, price: true },
-    },
-    handleScroll: {
-      mouseWheel: true,
-      pressedMouseMove: true,
-      horzTouchDrag: true,
-      vertTouchDrag: false,
-    },
+    handleScale: chartInteractionOptions().handleScale,
+    handleScroll: chartInteractionOptions().handleScroll,
     timeScale: {
       borderColor: "rgba(255,255,255,0.08)",
       timeVisible: true,
@@ -2138,6 +2127,11 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
+    if (isMobileLayout()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     axisPointerDown = true;
   };
   const onPointerMove = (e: PointerEvent) => {
