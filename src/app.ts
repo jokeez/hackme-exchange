@@ -363,7 +363,7 @@ function renderMobilePanelTabs(): string {
         return `<button type="button" role="tab" class="mp-tab ${on ? "active" : ""}" data-mp="${t.id}" id="mp-tab-${t.id}" aria-selected="${on}" aria-controls="${t.panelId}" tabindex="${on ? "0" : "-1"}">${t.label}</button>`;
       })
       .join("")}
-  </div></div>`;
+  </div>`;
 }
 
 const app = document.getElementById("app")!;

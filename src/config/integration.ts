@@ -1,6 +1,6 @@
 import { isLoopbackOrigin, sanitizeHttpUrl } from "../sanitize";
 
-export type IntegrationMode = "demo" | "paper" | "live" | "lab";
+export type IntegrationMode = "demo" | "paper" | "live" | "lab" | "staging";
 
 export type IntegrationConfig = {
   mode: IntegrationMode;
@@ -32,7 +32,7 @@ function env(key: string, fallback: string): string {
 const RAW_MODE = parseModeRaw(env("VITE_INTEGRATION_MODE", "paper"));
 
 function parseModeRaw(raw: string): IntegrationMode {
-  if (raw === "paper" || raw === "live" || raw === "demo" || raw === "lab") return raw;
+  if (raw === "paper" || raw === "live" || raw === "demo" || raw === "lab" || raw === "staging") return raw;
   return "paper";
 }
 
@@ -50,7 +50,7 @@ function effectiveMode(raw: IntegrationMode): IntegrationMode {
     }
     return "paper";
   }
-  if (raw === "lab") return "paper";
+  if (raw === "lab" || raw === "staging") return "paper";
   return raw;
 }
 
@@ -89,6 +89,7 @@ const defaultPool = useHubProxy
 /** Opt-in lab API: explicit origin, VITE_LAB_API=1, or INTEGRATION_MODE=lab. */
 const wantsLabApi =
   RAW_MODE === "lab" ||
+  RAW_MODE === "staging" ||
   rawLabFlag === "1" ||
   rawLabFlag.toLowerCase() === "true" ||
   !!rawApiOrigin.trim();
@@ -178,9 +179,47 @@ export function isLabApiEnabled(): boolean {
   return !!INTEGRATION.exchangeApiOrigin;
 }
 
-/** Raw mode was lab (chrome may still say paper). */
+/** Raw mode was lab or D1 staging (chrome may still say paper). */
 export function isLabModeRequested(): boolean {
-  return RAW_MODE === "lab" || wantsLabApi;
+  return RAW_MODE === "lab" || RAW_MODE === "staging" || wantsLabApi;
+}
+
+/** D1 local staging — loopback API + Postgres backend; never public edge. */
+export function isStagingMode(): boolean {
+  return RAW_MODE === "staging";
+}
+
+/** Pure resolver for unit tests (Vitest inlines VITE_* via define). */
+export type IntegrationFlags = {
+  rawMode: IntegrationMode;
+  effectiveMode: IntegrationMode;
+  staging: boolean;
+  labApi: boolean;
+  exchangeApiOrigin: string;
+};
+
+export function resolveIntegrationFlags(vars: Record<string, string>): IntegrationFlags {
+  const raw = parseModeRaw(vars.VITE_INTEGRATION_MODE ?? "paper");
+  const rawLabFlag = (vars.VITE_LAB_API ?? "").trim();
+  const rawApiOrigin = (vars.VITE_EXCHANGE_API_ORIGIN ?? "").trim();
+  const wants =
+    raw === "lab" ||
+    raw === "staging" ||
+    rawLabFlag === "1" ||
+    rawLabFlag.toLowerCase() === "true" ||
+    !!rawApiOrigin;
+  let api = "";
+  if (wants) {
+    const candidate = sanitizeHttpUrl(rawApiOrigin || "http://127.0.0.1:18443", "http://127.0.0.1:18443");
+    if (isLoopbackOrigin(candidate)) api = candidate;
+  }
+  return {
+    rawMode: raw,
+    effectiveMode: effectiveMode(raw),
+    staging: raw === "staging",
+    labApi: !!api,
+    exchangeApiOrigin: api,
+  };
 }
 
 export { modeChromeLabel, modeStatusPill } from "../modeChrome";

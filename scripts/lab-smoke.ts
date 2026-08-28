@@ -9,7 +9,10 @@ import * as ed from "@noble/ed25519";
 import { sha256 } from "@noble/hashes/sha256";
 import { sha512 } from "@noble/hashes/sha512";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 
@@ -37,13 +40,32 @@ function addrFromPub(pub: Uint8Array): string {
 }
 function loadAdminToken(): string {
   if (process.env.EXCHANGE_ADMIN_TOKEN) return process.env.EXCHANGE_ADMIN_TOKEN;
-  try {
-    const env = readFileSync(resolve("/home/kapa/Desktop/hackme-exchange-api/.env"), "utf8");
-    const m = env.match(/^EXCHANGE_ADMIN_TOKEN=(.+)$/m);
-    return m ? m[1].trim() : "";
-  } catch {
-    return "";
+  const roots = [
+    process.env.HACKME_EXCHANGE_API,
+    resolve(here, "../hackme-exchange-api"),
+    "/home/kapa/Desktop/hackme-exchange-api",
+  ].filter(Boolean) as string[];
+  const files = [".env.d1.local", ".env"];
+  for (const root of roots) {
+    for (const name of files) {
+      try {
+        const env = readFileSync(resolve(root, name), "utf8");
+        const m = env.match(/^EXCHANGE_ADMIN_TOKEN=(.+)$/m);
+        if (m?.[1]?.trim()) return m[1].trim();
+      } catch {
+        /* try next */
+      }
+    }
   }
+  return "";
+}
+
+/** Quote-minor notional floor: price×qty/1e8 ≥ minNotional → min qty in base minor. */
+function minQtyMinor(priceMinor: number, minNotional: number): number {
+  if (priceMinor <= 0 || minNotional <= 0) return 100_000_000;
+  const raw = Math.ceil((minNotional * 100_000_000) / priceMinor);
+  const whole = Math.ceil(raw / 100_000_000) * 100_000_000;
+  return Math.max(whole, 100_000_000);
 }
 function noteCookies(res: Response): void {
   const raw = res.headers.getSetCookie?.() ?? [];
@@ -110,9 +132,11 @@ async function main(): Promise<number> {
   console.log(`Lab smoke → ${API} (hub ${HUB})\n`);
 
   // 0) health + CORS DELETE
+  let minNotional = 1_000_000;
   {
     const h = await api("/health");
-    record("health", h.status === 200 && h.body?.ok === true, `matching=${h.body?.matching}`);
+    minNotional = Number(h.body?.min_notional) || minNotional;
+    record("health", h.status === 200 && h.body?.ok === true, `matching=${h.body?.matching} db=${h.body?.db_driver ?? "?"}`);
     const pre = await fetch(`${API}/orders/x`, {
       method: "OPTIONS",
       headers: {
@@ -161,12 +185,24 @@ async function main(): Promise<number> {
     const hmc = await api("/admin/credit", {
       method: "POST",
       admin: true,
-      json: { address, asset: "HMC", amount: 100_000_000_000, reason: "lab-smoke" },
+      json: {
+        address,
+        asset: "HMC",
+        amount: 100_000_000_000,
+        reason: "lab-smoke",
+        tx_id: `smoke-hmc-${Date.now()}`,
+      },
     });
     const usdt = await api("/admin/credit", {
       method: "POST",
       admin: true,
-      json: { address, asset: "USDT", amount: 100_000_000_000, reason: "lab-smoke" },
+      json: {
+        address,
+        asset: "USDT",
+        amount: 100_000_000_000,
+        reason: "lab-smoke",
+        tx_id: `smoke-usdt-${Date.now()}`,
+      },
     });
     record(
       "admin/credit HMC+USDT",
@@ -198,17 +234,31 @@ async function main(): Promise<number> {
     record("GET /balances", b.status === 200 && (has("HMC") || has("USDT")), JSON.stringify(list).slice(0, 120));
   }
 
-  // book mid for realistic prices
-  const book = await api("/book?pair=HMC/USDT");
-  const bestAsk = Number(book.body?.asks?.[0]?.price || book.body?.asks?.[0]?.[0] || 0);
-  const bestBid = Number(book.body?.bids?.[0]?.price || book.body?.bids?.[0]?.[0] || 0);
-  const midPx = bestAsk > 0 && bestBid > 0 ? Math.round((bestAsk + bestBid) / 2) : bestAsk || bestBid || 42_000;
-  record("book mid for smoke", midPx > 0, `mid=${midPx} bid=${bestBid} ask=${bestAsk}`);
+  // book mid for realistic prices (seed mark when MM off / empty book)
+  let book = await api("/book?pair=HMC/USDT");
+  let bestAsk = Number(book.body?.asks?.[0]?.price || book.body?.asks?.[0]?.[0] || 0);
+  let bestBid = Number(book.body?.bids?.[0]?.price || book.body?.bids?.[0]?.[0] || 0);
+  if (bestAsk <= 0 && bestBid <= 0) {
+    const markPx = 5_000_000; // soft profile ~0.05 USDT/HMC
+    const mark = await api("/lab/mark", {
+      method: "POST",
+      csrf,
+      admin: true,
+      json: { pair: "HMC/USDT", price: markPx },
+    });
+    record("lab/mark seed", mark.status === 200, `price=${markPx}`);
+    book = await api("/book?pair=HMC/USDT");
+    bestAsk = Number(book.body?.asks?.[0]?.price || book.body?.asks?.[0]?.[0] || 0);
+    bestBid = Number(book.body?.bids?.[0]?.price || book.body?.bids?.[0]?.[0] || 0);
+  }
+  const midPx = bestAsk > 0 && bestBid > 0 ? Math.round((bestAsk + bestBid) / 2) : bestAsk || bestBid || 5_000_000;
+  const smokeQty = minQtyMinor(midPx, minNotional);
+  record("book mid for smoke", midPx > 0, `mid=${midPx} bid=${bestBid} ask=${bestAsk} qty=${smokeQty}`);
 
   // 4) place limit sell ABOVE ask (resting) then cancel
   let orderId = "";
   {
-    const sellPx = Math.max(midPx + Math.max(1, Math.round(midPx * 0.05)), midPx + 100);
+    const sellPx = bestAsk > 0 ? bestAsk + Math.max(1, Math.round(midPx * 0.001)) : midPx + 100;
     const place = await api("/orders", {
       method: "POST",
       csrf,
@@ -217,7 +267,7 @@ async function main(): Promise<number> {
         side: "sell",
         type: "limit",
         price: sellPx,
-        qty: 100_000_000, // 1 HMC — clears min_notional at mid≈1e8
+        qty: smokeQty,
         pay_fee_in_hmc: true,
       },
     });
@@ -244,7 +294,7 @@ async function main(): Promise<number> {
 
   // 5) counterparty cross fill
   {
-    const buyPx = Math.max(1, midPx);
+    const buyPx = bestBid > 0 ? bestBid : Math.max(1, midPx);
     const place = await api("/orders", {
       method: "POST",
       csrf,
@@ -253,7 +303,7 @@ async function main(): Promise<number> {
         side: "buy",
         type: "limit",
         price: buyPx,
-        qty: 100_000_000,
+        qty: smokeQty,
         pay_fee_in_hmc: true,
       },
     });
@@ -292,7 +342,7 @@ async function main(): Promise<number> {
   // Soft-launch mid≈5_000_000 (0.05 USDT/HMC). Size convert to a few HMC of notional
   // so MM inventory pad is not exhausted on one quote.
   {
-    const targetHmc = 200_000_000; // 2 HMC minor
+    const targetHmc = smokeQty;
     const convertAmount = Math.max(1, Math.floor((targetHmc * midPx) / 100_000_000));
     const c = await api("/convert", {
       method: "POST",
@@ -341,7 +391,7 @@ async function main(): Promise<number> {
     const wd = await api("/withdraw", {
       method: "POST",
       csrf,
-      json: { asset: "HMC", amount: 10_000_000, destination: dest },
+      json: { asset: "HMC", amount: 10_000_000, destination: dest, client_withdraw_id: `smoke-wd-${Date.now()}` },
     });
     const ok =
       wd.status === 200 &&
