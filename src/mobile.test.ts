@@ -138,6 +138,27 @@ describe("mobile CSS contracts", () => {
     );
   });
 
+  it("desktop shell keeps mining-strip inside spot-layout (chart layout regression)", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    const shell = src.match(/return `\s*<div class="spot-layout">([\s\S]*?)<div class="kbd-hint">/);
+    expect(shell?.[1]).toBeTruthy();
+    const body = shell![1];
+    expect(body).toContain('id="terminal"');
+    expect(body).toContain('id="mining-strip"');
+    const termIdx = body.indexOf('id="terminal"');
+    const stripIdx = body.indexOf('id="mining-strip"');
+    expect(termIdx).toBeGreaterThan(0);
+    expect(stripIdx).toBeGreaterThan(termIdx);
+    expect(body.indexOf("</div>", stripIdx)).toBeGreaterThan(stripIdx);
+  });
+
+  it("desktop terminal grid uses minmax center column (no chart squash)", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(css).toMatch(/\.terminal\s*\{[\s\S]*?grid-template-columns:\s*248px minmax\(0,\s*1fr\) 300px/);
+    expect(css).toMatch(/\.spot-layout\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).toMatch(/#app:has\(\.spot-layout\)\s*\{[\s\S]*?height:\s*100dvh/);
+  });
+
   it("index.html has viewport-fit and theme-color", () => {
     const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
     expect(html).toContain("viewport-fit=cover");
