@@ -35,7 +35,7 @@ import {
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { chartInteractionOptions, isMobileLayout } from "./mobile";
+import { chartInteractionOptions } from "./mobile";
 
 const SCHEMES = {
   classic: { up: "#00e676", down: "#ff5252" },
@@ -2127,11 +2127,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
     if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
-    if (isMobileLayout()) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
     axisPointerDown = true;
   };
   const onPointerMove = (e: PointerEvent) => {
@@ -2278,6 +2273,16 @@ export function chartScreenshot(): void {
       /* ignore */
     }
   }
+}
+
+/** Re-measure after panel drag, iframe chrome, or orientation change. */
+export function applyChartInteractionOptions(): void {
+  if (!chart) return;
+  const io = chartInteractionOptions();
+  chart.applyOptions({
+    handleScale: io.handleScale,
+    handleScroll: io.handleScroll,
+  });
 }
 
 /** Re-measure after panel drag, iframe chrome, or orientation change. */

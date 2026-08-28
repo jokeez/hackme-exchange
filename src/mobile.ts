@@ -77,3 +77,9 @@ export function chartInteractionOptions(): {
 export function mobilePanelResizeEnabled(): boolean {
   return !isMobileLayout();
 }
+
+/** Keep CSS + JS on the same breakpoint (not only @media). */
+export function syncMobileLayoutClass(): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.toggle("mobile-layout", isMobileLayout());
+}
