@@ -94,6 +94,10 @@ function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
       typeof incoming.quickOrder === "boolean"
         ? incoming.quickOrder
         : DEFAULT_CHART_OVERLAYS.quickOrder,
+    quickOrderSkipConfirm:
+      typeof incoming.quickOrderSkipConfirm === "boolean"
+        ? incoming.quickOrderSkipConfirm
+        : DEFAULT_CHART_OVERLAYS.quickOrderSkipConfirm,
   });
 }
 

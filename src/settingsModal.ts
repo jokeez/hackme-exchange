@@ -58,6 +58,7 @@ export function renderUnifiedSettingsModal(
       <div class="settings-grid">
         <label><input type="checkbox" id="set-ov-preview" ${state.chartOverlays.orderPreview && state.chartOverlays.quickOrder ? "checked" : ""} ${state.chartOverlays.quickOrder ? "" : "disabled"} /> Order preview (ghost line)</label>
         <label><input type="checkbox" id="set-ov-quick" ${state.chartOverlays.quickOrder ? "checked" : ""} /> Quick order (chart click)</label>
+        <label><input type="checkbox" id="set-ov-skip-confirm" ${state.chartOverlays.quickOrderSkipConfirm ? "checked" : ""} ${state.chartOverlays.quickOrder ? "" : "disabled"} /> Skip confirm (instant place)</label>
       </div>
       <div class="settings-btn-row">
         <button type="button" class="btn-sm" id="set-chart-style">Chart style…</button>
@@ -198,12 +199,18 @@ export function showUnifiedSettingsModal(
   });
   const quickInp = bd.querySelector("#set-ov-quick") as HTMLInputElement | null;
   const previewInp = bd.querySelector("#set-ov-preview") as HTMLInputElement | null;
+  const skipInp = bd.querySelector("#set-ov-skip-confirm") as HTMLInputElement | null;
   const syncPreviewGate = () => {
     if (!quickInp || !previewInp) return;
     const on = quickInp.checked;
     previewInp.disabled = !on;
+    skipInp && (skipInp.disabled = !on);
     previewInp.closest("label")?.classList.toggle("ov-disabled", !on);
-    if (!on) previewInp.checked = false;
+    skipInp?.closest("label")?.classList.toggle("ov-disabled", !on);
+    if (!on) {
+      previewInp.checked = false;
+      if (skipInp) skipInp.checked = false;
+    }
   };
   syncPreviewGate();
   quickInp?.addEventListener("change", (e) => {
@@ -211,7 +218,12 @@ export function showUnifiedSettingsModal(
     actions.onChartOverlays({
       quickOrder: (e.target as HTMLInputElement).checked,
       orderPreview: previewInp?.checked ?? false,
+      quickOrderSkipConfirm: skipInp?.checked ?? false,
     });
+  });
+  skipInp?.addEventListener("change", (e) => {
+    if (!quickInp?.checked) return;
+    actions.onChartOverlays({ quickOrderSkipConfirm: (e.target as HTMLInputElement).checked });
   });
   bd.querySelector("#set-chart-overlays")?.addEventListener("click", () => {
     const btn = bd.querySelector("#set-chart-overlays") as HTMLElement;
