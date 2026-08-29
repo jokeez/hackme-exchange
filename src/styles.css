@@ -1703,6 +1703,11 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   border-radius: 4px;
 }
 .pop-menu label:hover { background: rgba(77, 228, 255, 0.06); }
+.pop-menu label.ov-disabled,
+.settings-grid label.ov-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
 .pop-menu label input[type="checkbox"] {
   width: 0.9rem;
   height: 0.9rem;

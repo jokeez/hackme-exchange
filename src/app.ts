@@ -232,7 +232,7 @@ import type {
   TimeInForce,
   Wallet,
 } from "./types";
-import { QUICK_TFS, TIMEFRAMES, TF_SEC, DEFAULT_MULTI_PANE_PAIRS } from "./types";
+import { QUICK_TFS, TIMEFRAMES, TF_SEC, DEFAULT_MULTI_PANE_PAIRS, normalizeChartOverlays } from "./types";
 
 let bookFlashSnap: BookLevelSnap = new Map();
 let state = loadState();
@@ -4070,6 +4070,12 @@ function syncChartOverlayEffects(): void {
 }
 
 function saveChartPatch(patch: Partial<typeof state>, opts?: { silent?: boolean }): void {
+  if (patch.chartOverlays) {
+    patch = {
+      ...patch,
+      chartOverlays: normalizeChartOverlays({ ...state.chartOverlays, ...patch.chartOverlays }),
+    };
+  }
   Object.assign(state, patch);
   saveState(state);
   if (patch.chartOverlays) syncChartOverlayEffects();

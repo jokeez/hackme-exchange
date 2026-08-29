@@ -6,7 +6,7 @@ import type {
   Trade,
   Wallet,
 } from "./types";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_MULTI_PANE_TFS, TIMEFRAMES } from "./types";
+import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_MULTI_PANE_TFS, TIMEFRAMES, normalizeChartOverlays } from "./types";
 import {
   finiteNonNegCapped,
   MAX_WALLET_ASSET,
@@ -65,7 +65,7 @@ const PAIR_IDS = new Set<PairId>(["HMC_USDT", "SUP_USDT", "HMC_SUP", "HMC_BTC", 
 
 function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
   const incoming = raw && typeof raw === "object" ? (raw as Partial<DemoState["chartOverlays"]>) : {};
-  return {
+  return normalizeChartOverlays({
     showVolume: typeof incoming.showVolume === "boolean" ? incoming.showVolume : DEFAULT_CHART_OVERLAYS.showVolume,
     showOrderLines:
       typeof incoming.showOrderLines === "boolean"
@@ -83,7 +83,7 @@ function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
       typeof incoming.quickOrder === "boolean"
         ? incoming.quickOrder
         : DEFAULT_CHART_OVERLAYS.quickOrder,
-  };
+  });
 }
 
 function sanitizePairId(raw: unknown, fallback: PairId = "HMC_USDT"): PairId {

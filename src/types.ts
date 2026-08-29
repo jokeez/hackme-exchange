@@ -124,6 +124,12 @@ export const DEFAULT_CHART_OVERLAYS: ChartOverlaySettings = {
   quickOrder: false,
 };
 
+/** Preview ghost line only applies when quick-order chart click is enabled. */
+export function normalizeChartOverlays(o: ChartOverlaySettings): ChartOverlaySettings {
+  if (!o.quickOrder && o.orderPreview) return { ...o, orderPreview: false };
+  return o;
+}
+
 export type MaLineConfig = { enabled: boolean; period: number; color: string };
 
 export type IndicatorConfig = {
@@ -297,7 +303,7 @@ export const DEFAULT_FEE_CONFIG: FeeConfig = {
   hmcDiscountPct: 25,
 };
 
-export const STATE_VERSION = 20;
+export const STATE_VERSION = 21;
 
 export type DemoState = {
   wallet: Wallet;

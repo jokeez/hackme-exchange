@@ -1,5 +1,5 @@
 import type { ChartOverlaySettings, ChartSettings, DemoState, IndicatorConfig, MultiChartLayout, Timeframe } from "./types";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG, TIMEFRAMES } from "./types";
+import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG, TIMEFRAMES, type ChartOverlaySettings, normalizeChartOverlays } from "./types";
 import { sanitizeCandleStyle, sanitizeChartSettings, sanitizeCssColor, sanitizeIndicatorConfig } from "./sanitize";
 
 type SaveCb = (patch: Partial<DemoState>) => void;
@@ -230,12 +230,22 @@ export function showOverlayMenu(
     <label><input type="checkbox" id="ov-vol" ${o.showVolume ? "checked" : ""} /> Volume</label>
     <label><input type="checkbox" id="ov-orders" ${o.showOrderLines ? "checked" : ""} /> Order lines</label>
     <label><input type="checkbox" id="ov-last" ${o.showLastPrice ? "checked" : ""} /> Last price line</label>
-    <label><input type="checkbox" id="ov-preview" ${o.orderPreview ? "checked" : ""} /> Order preview</label>
+    <label><input type="checkbox" id="ov-preview" ${o.orderPreview && o.quickOrder ? "checked" : ""} ${o.quickOrder ? "" : "disabled"} /> Order preview</label>
     <label><input type="checkbox" id="ov-quick" ${o.quickOrder ? "checked" : ""} /> Quick order</label>`;
   const prevTitle = anchor.getAttribute("title");
   if (prevTitle) anchor.removeAttribute("title");
   positionPopMenu(anchor, menu, 188);
   document.body.appendChild(menu);
+
+  const quickInp = menu.querySelector("#ov-quick") as HTMLInputElement;
+  const previewInp = menu.querySelector("#ov-preview") as HTMLInputElement;
+  const syncPreviewGate = () => {
+    const on = quickInp.checked;
+    previewInp.disabled = !on;
+    previewInp.closest("label")?.classList.toggle("ov-disabled", !on);
+    if (!on) previewInp.checked = false;
+  };
+  syncPreviewGate();
 
   const close = () => {
     menu.remove();
@@ -243,13 +253,15 @@ export function showOverlayMenu(
     onClose?.();
   };
   const apply = () => {
-    const patch: ChartOverlaySettings = {
+    syncPreviewGate();
+    const patch: ChartOverlaySettings = normalizeChartOverlays({
       showVolume: (menu.querySelector("#ov-vol") as HTMLInputElement).checked,
       showOrderLines: (menu.querySelector("#ov-orders") as HTMLInputElement).checked,
       showLastPrice: (menu.querySelector("#ov-last") as HTMLInputElement).checked,
-      orderPreview: (menu.querySelector("#ov-preview") as HTMLInputElement).checked,
-      quickOrder: (menu.querySelector("#ov-quick") as HTMLInputElement).checked,
-    };
+      orderPreview: previewInp.checked,
+      quickOrder: quickInp.checked,
+    });
+    previewInp.checked = patch.orderPreview;
     // Keep menu open so multiple overlays can be toggled in one pass.
     onSave({ chartOverlays: patch });
   };
