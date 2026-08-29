@@ -456,12 +456,22 @@ export function cancelAllOpenOrders(state: DemoState): number {
   return n;
 }
 
-export function updateOrderPrice(state: DemoState, id: string, price: number): void {
+export function updateOrderPrice(state: DemoState, id: string, price: number): boolean {
   const o = state.orders.find((x) => x.id === id);
-  if (o && o.status === "open") {
-    o.price = price;
-    saveState(state);
-  }
+  if (!o || (o.status !== "open" && o.status !== "triggered")) return false;
+  if (!(price > 0)) return false;
+  o.price = price;
+  saveState(state);
+  return true;
+}
+
+export function updateOrderAmount(state: DemoState, id: string, amountBase: number): boolean {
+  const o = state.orders.find((x) => x.id === id);
+  if (!o || (o.status !== "open" && o.status !== "triggered")) return false;
+  if (!(amountBase > 0)) return false;
+  o.amountBase = amountBase;
+  saveState(state);
+  return true;
 }
 
 export function toggleFavorite(state: DemoState, pairId: PairId): void {

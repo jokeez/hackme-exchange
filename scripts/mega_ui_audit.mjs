@@ -94,20 +94,25 @@ async function testOracleSettingsApply(page) {
   }
   ok("oracle settings modal opens");
 
-  const cancelAria = await page.locator("#modal-close").getAttribute("aria-label");
-  const applyAria = await page.locator("#modal-save").getAttribute("aria-label");
-  if (!cancelAria?.includes("Cancel")) note("P1", "oracle-cancel-aria", `aria=${cancelAria}`);
+  await page.locator('.settings-nav [data-tab="oracle"]').click();
+  await sleep(150);
+
+  const closeBtn = page.locator("#set-close, .modal-x").first();
+  const applyBtn = page.locator("#set-oracle-save");
+  const cancelAria = await closeBtn.getAttribute("aria-label").catch(() => "");
+  const applyAria = await applyBtn.getAttribute("aria-label").catch(() => "");
+  if (!cancelAria?.includes("Close")) note("P1", "oracle-cancel-aria", `aria=${cancelAria}`);
   else ok("oracle cancel aria-label");
   if (!applyAria?.includes("Apply")) note("P1", "oracle-apply-aria", `aria=${applyAria}`);
   else ok("oracle apply aria-label");
 
-  const desc = await page.locator("#oracle-settings-desc").count();
-  if (!desc) note("P1", "oracle-desc", "aria-describedby target missing");
+  const desc = await page.locator('#pane-oracle .muted.small').count();
+  if (!desc) note("P1", "oracle-desc", "oracle pane hint missing");
   else ok("oracle settings describedby");
 
-  const inp = page.locator("#anchor-inp");
+  const inp = page.locator("#set-anchor");
   await inp.fill("0.061");
-  await page.locator("#modal-save").click();
+  await applyBtn.click();
   await sleep(600);
   if (await page.locator(".modal-backdrop").count()) {
     note("P0", "oracle-apply-close", "modal stayed open after Apply");

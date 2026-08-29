@@ -79,6 +79,10 @@ let drawPoints: { time: number; price: number }[] = [];
 let activeTool: Drawing["tool"] = "cursor";
 let lastOpts: ChartMountOpts | null = null;
 let contextPriceLine: IPriceLine | null = null;
+let previewPriceLine: IPriceLine | null = null;
+let chartPreviewPrice: number | null = null;
+let chartPreviewSide: "buy" | "sell" | null = null;
+let chartPricePickCleanup: (() => void) | null = null;
 let ydayPriceLine: IPriceLine | null = null;
 let lastPriceLine: IPriceLine | null = null;
 let tradeMarks: Trade[] = [];
@@ -264,6 +268,7 @@ export function mergeMountOpts(prev: ChartMountOpts | null, next: ChartMountOpts
     onCrosshair: next.onCrosshair ?? prev.onCrosshair,
     onOrderPriceDrag: next.onOrderPriceDrag ?? prev.onOrderPriceDrag,
     onContextMenu: next.onContextMenu ?? prev.onContextMenu,
+    onChartPricePick: next.onChartPricePick ?? prev.onChartPricePick,
     onUpdateDrawing: next.onUpdateDrawing ?? prev.onUpdateDrawing,
     onNeedHistory: next.onNeedHistory ?? prev.onNeedHistory,
   };
@@ -355,10 +360,12 @@ function clearPriceLines(): void {
   };
   for (const pl of priceLines) drop(pl);
   drop(contextPriceLine);
+  drop(previewPriceLine);
   drop(lastPriceLine);
   drop(ydayPriceLine);
   priceLines = [];
   contextPriceLine = null;
+  previewPriceLine = null;
   lastPriceLine = null;
   ydayPriceLine = null;
   priceLineOwner = null;
@@ -567,6 +574,33 @@ function renderOrderLines(
     });
     priceLines.push(lastPriceLine);
   }
+  if (overlays.orderPreview && chartPreviewPrice && chartPreviewPrice > 0) {
+    const sideColor = chartPreviewSide === "sell" ? "#ff5252" : chartPreviewSide === "buy" ? "#00e676" : "rgba(77, 228, 255, 0.85)";
+    previewPriceLine = series.createPriceLine({
+      price: chartPreviewPrice,
+      color: sideColor,
+      lineWidth: 2,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: chartPreviewSide ? `${chartPreviewSide} preview` : "Preview",
+    });
+    priceLines.push(previewPriceLine);
+  }
+}
+
+/** Ghost limit line before order confirmation (Binance-style order preview). */
+export function setChartPreviewPrice(price: number | null, side: "buy" | "sell" | null = null): void {
+  chartPreviewPrice = price && price > 0 ? price : null;
+  chartPreviewSide = chartPreviewPrice ? side : null;
+  if (!lastOpts || !candleSeries) return;
+  renderOrderLines(
+    lastOpts.orders,
+    lastOpts.overlays,
+    lastOpts.lastPrice,
+    lastOpts.lastPriceUp ?? true,
+    lastOpts.yesterdayClose,
+    lastOpts.alerts,
+  );
 }
 
 /**
@@ -1853,6 +1887,69 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     if (drawCanvas) drawCanvas.addEventListener("contextmenu", ctxHandler);
   }
 
+  chartPricePickCleanup?.();
+  const CLICK_DRAG_PX = 8;
+  let pickDown: { x: number; y: number; price: number } | null = null;
+  let pickDragged = false;
+  const priceAt = (clientY: number): number | null => {
+    if (!candleSeries || !hostEl) return null;
+    const rect = hostEl.getBoundingClientRect();
+    const y = clientY - rect.top;
+    const price = candleSeries.coordinateToPrice(y);
+    if (price == null || !Number.isFinite(price) || price <= 0) return null;
+    return price;
+  };
+  const overlaysOn = () => {
+    const o = lastOpts?.overlays;
+    return !!(o?.quickOrder || o?.orderPreview);
+  };
+  const onPickDown = (e: PointerEvent) => {
+    if (e.button !== 0 || activeTool !== "cursor") return;
+    if (!overlaysOn()) return;
+    const price = priceAt(e.clientY);
+    if (price == null) return;
+    pickDown = { x: e.clientX, y: e.clientY, price };
+    pickDragged = false;
+  };
+  const onPickMove = (e: PointerEvent) => {
+    if (!pickDown || (e.buttons & 1) === 0) return;
+    const dx = e.clientX - pickDown.x;
+    const dy = e.clientY - pickDown.y;
+    if (dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) pickDragged = true;
+    if (!lastOpts?.overlays.orderPreview) return;
+    const price = priceAt(e.clientY);
+    if (price == null) return;
+    pickDown.price = price;
+    setChartPreviewPrice(price, chartPreviewSide);
+    lastOpts.onChartPricePick?.(price, e.clientX, e.clientY, true);
+  };
+  const onPickUp = (e: PointerEvent) => {
+    if (!pickDown || e.button !== 0) return;
+    const down = pickDown;
+    pickDown = null;
+    if (!overlaysOn() || activeTool !== "cursor") return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    if (!pickDragged && dx * dx + dy * dy <= CLICK_DRAG_PX * CLICK_DRAG_PX) {
+      const price = priceAt(e.clientY) ?? down.price;
+      lastOpts?.onChartPricePick?.(price, e.clientX, e.clientY, false);
+    } else if (pickDragged && lastOpts?.overlays.quickOrder) {
+      const price = priceAt(e.clientY) ?? down.price;
+      lastOpts.onChartPricePick?.(price, e.clientX, e.clientY, false);
+    }
+    pickDragged = false;
+  };
+  el.addEventListener("pointerdown", onPickDown, { capture: true });
+  window.addEventListener("pointermove", onPickMove, { capture: true });
+  window.addEventListener("pointerup", onPickUp, { capture: true });
+  chartPricePickCleanup = () => {
+    el.removeEventListener("pointerdown", onPickDown, true);
+    window.removeEventListener("pointermove", onPickMove, true);
+    window.removeEventListener("pointerup", onPickUp, true);
+    chartPricePickCleanup = null;
+    pickDown = null;
+  };
+
   mounted = true;
   if (typeof ResizeObserver !== "undefined") {
     hostResizeObs?.disconnect();
@@ -2727,6 +2824,7 @@ export function destroyChart(): void {
   hostResizeObs = null;
   priceWheelCleanup?.();
   mobilePanCleanup?.();
+  chartPricePickCleanup?.();
   clearDrawPointerListeners();
   // Drop any previous viewport — remounts (TF/pair) must re-anchor to the live candle.
   savedLogicalRange = null;
@@ -2753,6 +2851,9 @@ export function destroyChart(): void {
     mounted = false;
     lastOpts = null;
     contextPriceLine = null;
+    previewPriceLine = null;
+    chartPreviewPrice = null;
+    chartPreviewSide = null;
     lastPriceLine = null;
     lastHudUp = null;
     ydayPriceLine = null;

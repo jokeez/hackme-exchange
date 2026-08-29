@@ -131,10 +131,10 @@ describe("store order mutations", () => {
   it("updateOrderPrice only for open orders", () => {
     const s = baseState();
     const o = placeLimitOrder(s, "HMC_USDT", "buy", 0.0004, 1);
-    updateOrderPrice(s, o.id, 0.00041);
+    expect(updateOrderPrice(s, o.id, 0.00041)).toBe(true);
     expect(s.orders[0].price).toBe(0.00041);
     s.orders[0].status = "filled";
-    updateOrderPrice(s, o.id, 0.0005);
+    expect(updateOrderPrice(s, o.id, 0.0005)).toBe(false);
     expect(s.orders[0].price).toBe(0.00041);
   });
 
