@@ -3207,11 +3207,11 @@ function syncCrosshairPanes(): void {
   const main = getMainCrosshairPane();
   if (main) {
     crosshairPaneCleanups.push(registerCrosshairPane(main));
-    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: main.id, chart: main.chart }));
+    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: main.id, chart: main.chart, barCount: () => main.candles().length }));
   }
   for (const pane of listSecondaryCrosshairPanes()) {
     crosshairPaneCleanups.push(registerCrosshairPane(pane));
-    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: pane.id, chart: pane.chart }));
+    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: pane.id, chart: pane.chart, barCount: () => pane.candles().length }));
   }
 }
 

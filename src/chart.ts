@@ -24,6 +24,7 @@ import type {
   Timeframe,
 } from "./types";
 import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
+import { bumpTimeSyncPane } from "./chartTimeSync";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
@@ -2487,6 +2488,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
       const next = panLogicalRangeByWheel(lr, deltaPx, spacing);
       try {
         ts.setVisibleLogicalRange(next);
+        bumpTimeSyncPane("chart-host");
       } catch {
         /* ignore */
       }
@@ -2505,6 +2507,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     const nextSpacing = zoomBarSpacing(spacing, step);
     try {
       ts.applyOptions({ barSpacing: nextSpacing, minBarSpacing: 2 });
+      bumpTimeSyncPane("chart-host");
     } catch {
       /* ignore */
     }
