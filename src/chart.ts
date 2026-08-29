@@ -37,7 +37,7 @@ import {
   resolvePaintDrawings,
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
-import { logicalRangeToIndices, maxBodyFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 import { chartInteractionOptions, isMobileLayout } from "./mobile";
 
 const SCHEMES = {
@@ -123,6 +123,11 @@ const PRICE_WHEEL_MIN_INTERVAL_MS = 50;
 const PRICE_WHEEL_SPAN_FACTOR = 0.03;
 /** Pixels that accumulate into one notch (mouse ≈100; bump so partial rolls need more). */
 const PRICE_WHEEL_UNIT = 140;
+/** Plot zoom: min/max bar spacing (px) — 3px floor keeps candles crisp on small TFs. */
+export const MIN_PLOT_BAR_SPACING = 3;
+export const MAX_PLOT_BAR_SPACING = 56;
+/** Binance-like: wheel away (deltaY > 0) zooms in; smooth exponential per frame. */
+export const PLOT_WHEEL_ZOOM_SENSITIVITY = 0.0022;
 
 export type PaneDrawHost = {
   id: string;
@@ -400,7 +405,8 @@ function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
     else deduped.push(c);
   }
   const bodyCap = maxBodyFracForTf(tf ?? lastOpts?.tf ?? "15m");
-  const cleaned = sanitizeCandleExtremes(deduped, bodyCap);
+  const wickCap = maxWickFracForTf(tf ?? lastOpts?.tf ?? "15m");
+  const cleaned = sanitizeCandleExtremes(deduped, bodyCap, { maxWick: wickCap });
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 
@@ -1383,7 +1389,65 @@ export function shiftLogicalRangeByPx(
 export function zoomBarSpacing(current: number, step: number): number {
   if (!step) return current;
   const factor = step > 0 ? 1.1 : 0.9;
-  return Math.max(2, Math.min(40, current * factor));
+  return Math.max(MIN_PLOT_BAR_SPACING, Math.min(MAX_PLOT_BAR_SPACING, current * factor));
+}
+
+/** Smooth CEX plot zoom — positive deltaY (wheel away) increases bar spacing (zoom in). */
+export function smoothPlotBarSpacing(current: number, deltaY: number): number {
+  if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.25) return current;
+  const expArg = Math.max(-0.16, Math.min(0.16, deltaY * PLOT_WHEEL_ZOOM_SENSITIVITY));
+  const factor = Math.exp(expArg);
+  const next = current * factor;
+  const quantized = Math.round(next * 80) / 80;
+  return Math.max(MIN_PLOT_BAR_SPACING, Math.min(MAX_PLOT_BAR_SPACING, quantized));
+}
+
+type PlotWheelTimeScale = {
+  options: () => { barSpacing?: number };
+  applyOptions: (o: { barSpacing?: number; minBarSpacing?: number }) => void;
+  getVisibleLogicalRange: () => { from: number; to: number } | null;
+  setVisibleLogicalRange: (r: { from: number; to: number }) => void;
+  coordinateToTime: (x: number) => unknown;
+  timeToCoordinate: (time: UTCTimestamp) => number | null;
+};
+
+/** Zoom time scale under cursor — keeps anchor bar under the mouse (Binance/TV feel). */
+export function applyPlotWheelZoom(
+  ts: PlotWheelTimeScale,
+  shellRect: DOMRect,
+  clientX: number,
+  deltaY: number,
+): number {
+  const prev = ts.options().barSpacing ?? 8;
+  const next = smoothPlotBarSpacing(prev, deltaY);
+  if (Math.abs(next - prev) < 1e-4) return prev;
+
+  const lr = ts.getVisibleLogicalRange();
+  const x = clientX - shellRect.left;
+  const anchorTime = ts.coordinateToTime(x);
+
+  if (!lr || anchorTime == null) {
+    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+    return next;
+  }
+
+  const coordBefore = ts.timeToCoordinate(anchorTime as UTCTimestamp);
+  if (coordBefore == null) {
+    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+    return next;
+  }
+
+  const deltaLogical = ((coordBefore * (prev / next - 1)) / Math.max(MIN_PLOT_BAR_SPACING, next));
+  try {
+    ts.setVisibleLogicalRange({
+      from: (lr.from as number) - deltaLogical,
+      to: (lr.to as number) - deltaLogical,
+    });
+  } catch {
+    /* ignore */
+  }
+  ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+  return next;
 }
 
 /** Shift visible logical range horizontally (shift+wheel pan). */
@@ -1405,12 +1469,17 @@ export function visibleBarBudget(hostWidth: number, barSpacing: number): number 
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
-  const base = tf === "30s" || tf === "1m" ? 7 : tf === "1D" || tf === "1W" ? 9 : 8;
-  if (hostWidth < 400) return Math.max(9, base + 2);
-  if (hostWidth < 640) return Math.max(8, base + 1);
-  if (hostWidth < 720) return Math.max(7, base);
+  const base =
+    tf === "30s" ? 8.5 : tf === "1m" ? 8 : tf === "3m" || tf === "5m" ? 7.5 : tf === "1D" || tf === "1W" ? 9 : 8;
+  if (hostWidth < 400) return Math.max(9.5, base + 2);
+  if (hostWidth < 640) return Math.max(8.5, base + 1);
+  if (hostWidth < 720) return Math.max(7.5, base);
   if (hostWidth > 1600) return base;
   return base;
+}
+
+function secondsVisibleForTf(tf: Timeframe): boolean {
+  return tf === "30s" || tf === "1m" || tf === "3m" || tf === "5m";
 }
 
 export function chartRightOffset(hostWidth: number, tf: Timeframe): number {
@@ -1747,7 +1816,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     timeScale: {
       borderColor: "rgba(255,255,255,0.08)",
       timeVisible: true,
-      secondsVisible: opts.tf === "30s" || opts.tf === "1m",
+      secondsVisible: secondsVisibleForTf(opts.tf),
       rightOffset: chartRightOffset(hostW, opts.tf),
       barSpacing: spacing,
     },
@@ -2368,6 +2437,16 @@ function bindChartDebugProbe(): void {
     clampVisiblePriceRange,
     zoomPriceRange,
     wheelZoomStep,
+    smoothPlotBarSpacing,
+    applyPlotWheelZoom,
+    applyMainPlotWheel(dy: number, clientX: number) {
+      if (!chart || !hostEl) return null;
+      const inner = hostEl.querySelector(".chart-inner") as HTMLElement | null;
+      const rect = (inner ?? hostEl).getBoundingClientRect();
+      applyPlotWheelZoom(chart.timeScale(), rect, clientX, dy);
+      bumpTimeSyncPane("chart-host");
+      return getMainViewportDebug();
+    },
   };
 }
 
@@ -2505,24 +2584,25 @@ export function setupPortableChartPan(
 }
 
 function setupPriceScaleWheel(shell: HTMLElement): void {
+  const host = hostEl;
+  if (!host) return;
   priceWheelCleanup?.();
   priceWheelResidual = 0;
   plotWheelResidual = 0;
   priceWheelLastApplyMs = 0;
   let axisPointerDown = false;
-  let plotWheelLastApplyMs = 0;
 
   const onWheel = (e: WheelEvent) => {
     if (isMobileLayout()) return;
-    if (!chart || !candleSeries || !hostEl) return;
+    if (!chart || !candleSeries) return;
     const target = e.target as Node | null;
-    if (!target || !shell.contains(target)) return;
+    if (!target || !host.contains(target)) return;
 
     if (isOverPriceScaleEl(e.clientX, e.clientY, shell)) {
       e.preventDefault();
       e.stopImmediatePropagation();
 
-      const dy = normalizeWheelDeltaY(e, hostEl.clientHeight || 400);
+      const dy = normalizeWheelDeltaY(e, host.clientHeight || 400);
       const { step, residual } = wheelZoomStep(dy, priceWheelResidual);
       priceWheelResidual = residual;
       if (step === 0) return;
@@ -2549,12 +2629,12 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
         range = { from: robust.minValue, to: robust.maxValue };
       }
       if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
-        const inner = hostEl?.querySelector(".chart-inner") as HTMLElement | null;
-        const chartH = Math.floor(inner?.clientHeight ?? hostEl?.clientHeight ?? 0);
+        const inner = host.querySelector(".chart-inner") as HTMLElement | null;
+        const chartH = Math.floor(inner?.clientHeight ?? host.clientHeight ?? 0);
         range = clampVisiblePriceRange(range, refPrice, chartH);
       }
 
-      const rect = hostEl.getBoundingClientRect();
+      const rect = host.getBoundingClientRect();
       const scaleW = Math.max(48, ps.width() || 56);
       let anchor: number | undefined;
       if (e.clientX < rect.right - scaleW - 2) {
@@ -2600,22 +2680,10 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
       return;
     }
 
-    const dy = normalizeWheelDeltaY(e, hostEl.clientHeight || 400);
-    const { step, residual } = wheelZoomStep(dy, plotWheelResidual);
-    plotWheelResidual = residual;
-    if (step === 0) return;
-
-    const now = performance.now();
-    if (now - plotWheelLastApplyMs < PRICE_WHEEL_MIN_INTERVAL_MS) return;
-    plotWheelLastApplyMs = now;
-
-    const nextSpacing = zoomBarSpacing(spacing, step);
-    try {
-      ts.applyOptions({ barSpacing: nextSpacing, minBarSpacing: 2 });
-      bumpTimeSyncPane("chart-host");
-    } catch {
-      /* ignore */
-    }
+    const dy = normalizeWheelDeltaY(e, host.clientHeight || 400);
+    const rect = host.getBoundingClientRect();
+    applyPlotWheelZoom(chart.timeScale(), rect, e.clientX, dy);
+    bumpTimeSyncPane("chart-host");
   };
   const onDblClick = (e: MouseEvent) => {
     if (isMobileLayout()) return;
@@ -2648,14 +2716,14 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     axisPointerDown = false;
     healVisiblePriceScale();
   };
-  shell.addEventListener("wheel", onWheel, { passive: false, capture: true });
+  host.addEventListener("wheel", onWheel, { passive: false, capture: true });
   shell.addEventListener("dblclick", onDblClick, { capture: true });
   shell.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
   window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
   window.addEventListener("pointerup", onPointerUp, { capture: true });
   window.addEventListener("pointercancel", onPointerUp, { capture: true });
   priceWheelCleanup = () => {
-    shell.removeEventListener("wheel", onWheel, true);
+    host?.removeEventListener("wheel", onWheel, true);
     shell.removeEventListener("dblclick", onDblClick, true);
     shell.removeEventListener("pointerdown", onPointerDown, true);
     window.removeEventListener("pointermove", onPointerMove, true);
@@ -2664,6 +2732,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     axisPointerDown = false;
     priceWheelCleanup = null;
     priceWheelResidual = 0;
+    plotWheelResidual = 0;
     priceWheelLastApplyMs = 0;
   };
 }

@@ -11,8 +11,8 @@ import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
-import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { barSpacingForWidth, clampVisiblePriceRange, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange } from "./chart";
+import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { applyPlotWheelZoom, barSpacingForWidth, clampVisiblePriceRange, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomPriceRange } from "./chart";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
@@ -295,7 +295,7 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
       to: ((slot.savedRange.to as number) + prepended) as LogicalRange["to"],
     };
   }
-  const cleaned = sanitizeCandleExtremes(candles);
+  const cleaned = sanitizeCandleExtremes(candles, maxBodyFracForTf(slot.tf), { maxWick: maxWickFracForTf(slot.tf) });
   slot.candles = cleaned;
   slot.series.setData(candlePoints(cleaned));
   if (fit) {
@@ -303,7 +303,7 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
     const w = slot.shell.clientWidth || 320;
     const spacing = barSpacingForWidth(w, slot.tf);
     try {
-      slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: 2 });
+      slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: MIN_PLOT_BAR_SPACING });
     } catch {
       /* ignore */
     }
@@ -369,7 +369,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       borderVisible: true,
       borderColor: "rgba(255,255,255,0.1)",
       timeVisible: true,
-      secondsVisible: resolved.tf === "30s" || resolved.tf === "1m",
+      secondsVisible: resolved.tf === "30s" || resolved.tf === "1m" || resolved.tf === "3m" || resolved.tf === "5m",
       rightOffset: 4,
       barSpacing: spacing,
     },
@@ -555,9 +555,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   // Soft price-axis wheel — notch-capped + ref-clamped so trackpads can't fling the scale.
   // Also heal after native LWC axis drag (same collapse path as the main chart).
   let residual = 0;
-  let plotResidual = 0;
   let lastApply = 0;
-  let plotLastApply = 0;
   let axisPointerDown = false;
   let axisHealRaf = 0;
   const overPriceScale = (clientX: number, clientY: number): boolean => {
@@ -581,11 +579,11 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       healAxis();
     });
   };
-  shell.addEventListener(
+  el.addEventListener(
     "wheel",
     (e: WheelEvent) => {
       const target = e.target as Node | null;
-      if (!target || !shell.contains(target)) return;
+      if (!target || !el.contains(target)) return;
       const overScale = overPriceScale(e.clientX, e.clientY);
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -630,18 +628,8 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
         }
         return;
       }
-      const z = wheelZoomStep(dy, plotResidual);
-      plotResidual = z.residual;
-      if (z.step === 0) return;
-      const now = performance.now();
-      if (now - plotLastApply < 50) return;
-      plotLastApply = now;
-      try {
-        ts.applyOptions({ barSpacing: zoomBarSpacing(spacing, z.step), minBarSpacing: 2 });
-        bumpTimeSyncPane(key);
-      } catch {
-        /* ignore */
-      }
+      applyPlotWheelZoom(slot.chart.timeScale(), el.getBoundingClientRect(), e.clientX, dy);
+      bumpTimeSyncPane(key);
     },
     { passive: false, capture: true },
   );
@@ -845,7 +833,7 @@ export function resetSecondaryPaneView(hostId: string): void {
     if (n < 2) return;
     const w = slot.shell.clientWidth || 320;
     const spacing = barSpacingForWidth(w, slot.tf);
-    slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: 2 });
+    slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: MIN_PLOT_BAR_SPACING });
     const budget = visibleBarBudget(w, spacing);
     const to = n - 1 + 2;
     const from = to - budget;

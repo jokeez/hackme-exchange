@@ -7,6 +7,7 @@ import {
   isPriceDiscontinuity,
   maxBodyFracForTf,
   maxJumpFracForTf,
+  maxWickFracForTf,
   sanitizeCandleExtremes,
 } from "./chartScale";
 
@@ -158,6 +159,7 @@ function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Tim
       volume: candleVolume(pairId, tf, t),
     },
     maxBodyFracForTf(tf),
+    maxWickFracForTf(tf),
   );
 }
 

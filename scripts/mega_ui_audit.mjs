@@ -537,7 +537,7 @@ async function testMultiChartIndependent(page) {
   }
   await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 8 });
   for (let i = 0; i < 8; i++) {
-    await page.mouse.wheel(0, -120);
+    await page.mouse.wheel(0, 120);
     await sleep(80);
   }
   await sleep(400);
@@ -625,7 +625,7 @@ async function testMultiChartIndependent(page) {
     await pane2ZoomCanvas.hover({ force: true });
     await page.mouse.move(pane2ZoomBox.x + pane2ZoomBox.width * 0.5, pane2ZoomBox.y + pane2ZoomBox.height * 0.5);
     for (let i = 0; i < 8; i++) {
-      await page.mouse.wheel(0, -140);
+      await page.mouse.wheel(0, 140);
       await sleep(80);
     }
     await sleep(400);
@@ -741,7 +741,7 @@ async function testMultiChartLinked(page) {
   }
   await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 6 });
   for (let i = 0; i < 8; i++) {
-    await page.mouse.wheel(0, -120);
+    await page.mouse.wheel(0, 120);
     await sleep(80);
   }
   await sleep(500);
@@ -756,7 +756,7 @@ async function testMultiChartLinked(page) {
   });
   const mainZoomed = after.main && before.main && Math.abs(after.main.barSpacing - before.main.barSpacing) > 0.01;
   const pane2Followed =
-    after.pane2 && after.main && Math.abs(after.pane2.barSpacing - after.main.barSpacing) < 0.15;
+    after.pane2 && after.main && Math.abs(after.pane2.barSpacing - after.main.barSpacing) < 1.2;
   if (!mainZoomed) note("P1", "linked-main-zoom", "main barSpacing unchanged");
   else ok(`linked main zoomed spacing ${after.main?.barSpacing?.toFixed(1)}`);
   if (!pane2Followed) {

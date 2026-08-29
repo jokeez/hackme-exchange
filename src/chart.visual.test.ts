@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, smoothPlotBarSpacing, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -49,6 +49,14 @@ describe("price scale wheel helpers", () => {
     const panned = panLogicalRangeByWheel({ from: 10, to: 50 }, 80, 8);
     expect(panned.from).toBeGreaterThan(10);
     expect(panned.to).toBeGreaterThan(50);
+  });
+
+  it("smoothPlotBarSpacing zooms in when wheel moves away (positive deltaY)", () => {
+    expect(smoothPlotBarSpacing(8, 120)).toBeGreaterThan(8);
+    expect(smoothPlotBarSpacing(8, -120)).toBeLessThan(8);
+    const a = smoothPlotBarSpacing(10, 40);
+    const b = smoothPlotBarSpacing(a, 40);
+    expect(b).toBeGreaterThan(a);
   });
 
   it("heals a near-zero corrupted price window back to the instrument", () => {
