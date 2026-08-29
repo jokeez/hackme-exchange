@@ -1,4 +1,4 @@
-import type { ChartOverlaySettings, ChartSettings, DemoState, IndicatorConfig, MultiChartLayout, Timeframe } from "./types";
+import type { ChartSettings, DemoState, IndicatorConfig, MultiChartLayout, Timeframe } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG, TIMEFRAMES, type ChartOverlaySettings, normalizeChartOverlays } from "./types";
 import { sanitizeCandleStyle, sanitizeChartSettings, sanitizeCssColor, sanitizeIndicatorConfig } from "./sanitize";
 
