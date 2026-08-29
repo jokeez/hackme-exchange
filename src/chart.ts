@@ -1921,7 +1921,6 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     if (price == null) return;
     pickDown.price = price;
     setChartPreviewPrice(price, chartPreviewSide);
-    lastOpts.onChartPricePick?.(price, e.clientX, e.clientY, true);
   };
   const onPickUp = (e: PointerEvent) => {
     if (!pickDown || e.button !== 0) return;
@@ -1933,9 +1932,6 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     if (!pickDragged && dx * dx + dy * dy <= CLICK_DRAG_PX * CLICK_DRAG_PX) {
       const price = priceAt(e.clientY) ?? down.price;
       lastOpts?.onChartPricePick?.(price, e.clientX, e.clientY, false);
-    } else if (pickDragged && lastOpts?.overlays.quickOrder) {
-      const price = priceAt(e.clientY) ?? down.price;
-      lastOpts.onChartPricePick?.(price, e.clientX, e.clientY, false);
     }
     pickDragged = false;
   };

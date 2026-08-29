@@ -12,8 +12,11 @@ export type QuickOrderHandlers = {
 
 let openPopup: HTMLElement | null = null;
 let dismissHandler: ((e: MouseEvent) => void) | null = null;
+let dismissCallback: (() => void) | null = null;
 
 export function closeQuickOrderPopup(): void {
+  const cb = dismissCallback;
+  dismissCallback = null;
   if (openPopup) {
     openPopup.remove();
     openPopup = null;
@@ -23,6 +26,7 @@ export function closeQuickOrderPopup(): void {
     document.removeEventListener("keydown", onEsc, true);
     dismissHandler = null;
   }
+  cb?.();
 }
 
 function onEsc(e: KeyboardEvent): void {
@@ -74,45 +78,60 @@ export function showQuickOrderPopup(
   pop.style.top = `${top}px`;
 
   const amtInp = pop.querySelector(".cqo-amt") as HTMLInputElement;
-  const close = () => {
+  let hoverSide: "buy" | "sell" | null = null;
+  const finish = () => {
     handlers.onSidePreview?.(null);
     handlers.onClose?.();
-    closeQuickOrderPopup();
+    dismissCallback = null;
+    if (openPopup) {
+      openPopup.remove();
+      openPopup = null;
+    }
+    if (dismissHandler) {
+      document.removeEventListener("mousedown", dismissHandler, true);
+      document.removeEventListener("keydown", onEsc, true);
+      dismissHandler = null;
+    }
+  };
+  dismissCallback = finish;
+
+  const place = (side: "buy" | "sell") => {
+    const amt = Number(amtInp.value);
+    if (!(amt > 0)) {
+      amtInp.focus();
+      amtInp.classList.add("invalid");
+      return;
+    }
+    handlers.onPlace(side, price, amt);
+    finish();
   };
 
-  pop.querySelector(".cqo-close")?.addEventListener("click", close);
-  pop.querySelector(".cqo-buy")?.addEventListener("mouseenter", () => handlers.onSidePreview?.("buy"));
-  pop.querySelector(".cqo-sell")?.addEventListener("mouseenter", () => handlers.onSidePreview?.("sell"));
-  pop.querySelector(".cqo-buy")?.addEventListener("click", () => {
-    const amt = Number(amtInp.value);
-    if (!(amt > 0)) {
-      amtInp.focus();
-      amtInp.classList.add("invalid");
-      return;
-    }
-    handlers.onPlace("buy", price, amt);
-    closeQuickOrderPopup();
+  pop.querySelector(".cqo-close")?.addEventListener("click", finish);
+  const actions = pop.querySelector(".cqo-actions");
+  pop.querySelector(".cqo-buy")?.addEventListener("mouseenter", () => {
+    hoverSide = "buy";
+    handlers.onSidePreview?.("buy");
   });
-  pop.querySelector(".cqo-sell")?.addEventListener("click", () => {
-    const amt = Number(amtInp.value);
-    if (!(amt > 0)) {
-      amtInp.focus();
-      amtInp.classList.add("invalid");
-      return;
-    }
-    handlers.onPlace("sell", price, amt);
-    closeQuickOrderPopup();
+  pop.querySelector(".cqo-sell")?.addEventListener("mouseenter", () => {
+    hoverSide = "sell";
+    handlers.onSidePreview?.("sell");
   });
+  actions?.addEventListener("mouseleave", () => {
+    hoverSide = null;
+    handlers.onSidePreview?.(null);
+  });
+  pop.querySelector(".cqo-buy")?.addEventListener("click", () => place("buy"));
+  pop.querySelector(".cqo-sell")?.addEventListener("click", () => place("sell"));
   amtInp.addEventListener("input", () => amtInp.classList.remove("invalid"));
   amtInp.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      (pop.querySelector(".cqo-buy") as HTMLButtonElement)?.click();
+      place(hoverSide ?? "buy");
     }
   });
 
   dismissHandler = (e: MouseEvent) => {
-    if (openPopup && !openPopup.contains(e.target as Node)) close();
+    if (openPopup && !openPopup.contains(e.target as Node)) finish();
   };
   setTimeout(() => {
     document.addEventListener("mousedown", dismissHandler!, true);
