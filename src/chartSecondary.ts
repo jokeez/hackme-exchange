@@ -2,11 +2,12 @@ import {
   createChart,
   CandlestickSeries,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, PairId, Timeframe } from "./types";
+import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
@@ -25,6 +26,7 @@ export type SecondaryMountOpts = {
   onTfChange?: (tf: Timeframe) => void;
   onPairChange?: (pairId: PairId) => void;
   onContextMenu?: (price: number, clientX: number, clientY: number) => void;
+  onChartPricePick?: (price: number, clientX: number, clientY: number, dragging: boolean) => void;
   onPaneFocus?: () => void;
   getDrawings?: () => Drawing[];
   drawingsLocked?: () => boolean;
@@ -47,10 +49,126 @@ type Slot = {
   cleanup: (() => void) | null;
   drawCleanup: (() => void) | null;
   mountOpts: SecondaryMountOpts;
+  orderPriceLines: IPriceLine[];
+  previewPriceLine: IPriceLine | null;
+  pricePickCleanup: (() => void) | null;
 };
 
 const slots = new Map<string, Slot>();
 const CHART_BG = "#05070d";
+
+export type SecondaryPaneOverlayOpts = {
+  showOrderLines: boolean;
+  orderPreview: boolean;
+};
+
+export type SecondaryPaneLineOpts = {
+  orders: Order[];
+  alerts?: { price: number; fired: boolean }[];
+  overlays: SecondaryPaneOverlayOpts;
+  previewPrice?: number | null;
+  previewSide?: "buy" | "sell" | null;
+  previewPaneId?: string;
+};
+
+function priceAtClientY(slot: Slot, clientY: number): number | null {
+  const rect = slot.shell.getBoundingClientRect();
+  const y = clientY - rect.top;
+  const price = slot.series.coordinateToPrice(y);
+  if (price == null || !Number.isFinite(price) || price <= 0) return null;
+  return price as number;
+}
+
+function clearSlotPriceLines(slot: Slot): void {
+  for (const pl of slot.orderPriceLines) {
+    try {
+      slot.series.removePriceLine(pl);
+    } catch {
+      /* already detached */
+    }
+  }
+  slot.orderPriceLines = [];
+  if (slot.previewPriceLine) {
+    try {
+      slot.series.removePriceLine(slot.previewPriceLine);
+    } catch {
+      /* already detached */
+    }
+    slot.previewPriceLine = null;
+  }
+}
+
+export function refreshSecondaryPaneOrderLines(hostId: string, opts: SecondaryPaneLineOpts): void {
+  const slot = slots.get(hostId);
+  if (!slot) return;
+  clearSlotPriceLines(slot);
+  const { overlays } = opts;
+  if (overlays.showOrderLines) {
+    for (const o of opts.orders.filter((x) => x.status === "open" || x.status === "triggered")) {
+      const color = o.side === "buy" ? "#00e676" : "#ff5252";
+      slot.orderPriceLines.push(
+        slot.series.createPriceLine({
+          price: o.price,
+          color,
+          lineWidth: 2,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `${o.side} ${o.kind}`,
+        }),
+      );
+      if (o.stopPrice) {
+        slot.orderPriceLines.push(
+          slot.series.createPriceLine({
+            price: o.stopPrice,
+            color: "#ffb347",
+            lineWidth: 1,
+            lineStyle: 3,
+            axisLabelVisible: true,
+            title: "Stop",
+          }),
+        );
+      }
+    }
+  }
+  if (opts.alerts?.length) {
+    for (const a of opts.alerts) {
+      if (!(a.price > 0)) continue;
+      slot.orderPriceLines.push(
+        slot.series.createPriceLine({
+          price: a.price,
+          color: a.fired ? "rgba(255, 183, 77, 0.45)" : "rgba(77, 228, 255, 0.85)",
+          lineWidth: 1,
+          lineStyle: a.fired ? 3 : 2,
+          axisLabelVisible: true,
+          title: a.fired ? "Alert✓" : "Alert",
+        }),
+      );
+    }
+  }
+  const preview = opts.previewPrice;
+  if (overlays.orderPreview && preview && preview > 0 && opts.previewPaneId === hostId) {
+    const side = opts.previewSide;
+    const sideColor = side === "sell" ? "#ff5252" : side === "buy" ? "#00e676" : "rgba(77, 228, 255, 0.85)";
+    slot.previewPriceLine = slot.series.createPriceLine({
+      price: preview,
+      color: sideColor,
+      lineWidth: 2,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: side ? `${side} preview` : "Preview",
+    });
+  }
+}
+
+export function setSecondaryCrosshairMode(mode: 0 | 1): void {
+  for (const slot of slots.values()) {
+    try {
+      slot.chart.applyOptions({ crosshair: { mode } });
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function slotKey(el: HTMLElement): string {
   if (el.id) return el.id;
@@ -266,7 +384,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       horzTouchDrag: chartInteractionOptions().handleScroll.horzTouchDrag,
       vertTouchDrag: chartInteractionOptions().handleScroll.vertTouchDrag,
     },
-    crosshair: { mode: 1 },
+    crosshair: { mode: 0 },
     localization: chartLocalization(),
   });
 
@@ -308,6 +426,9 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     cleanup: null,
     drawCleanup: null,
     mountOpts: resolved,
+    orderPriceLines: [],
+    previewPriceLine: null,
+    pricePickCleanup: null,
   };
   slots.set(key, slot);
   setSecondaryData(slot, candles, true);
@@ -355,15 +476,68 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       e.preventDefault();
       e.stopPropagation();
       focusPane();
-      const rect = el.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const price = series.coordinateToPrice(y);
-      if (price == null || !Number.isFinite(price) || price <= 0) return;
-      resolved.onContextMenu?.(price as number, e.clientX, e.clientY);
+      const price = priceAtClientY(slot, e.clientY);
+      if (price == null) return;
+      slots.get(key)?.mountOpts.onContextMenu?.(price, e.clientX, e.clientY);
     };
     el.addEventListener("contextmenu", ctxHandler);
     drawCanvas.addEventListener("contextmenu", ctxHandler);
+    shell.addEventListener("contextmenu", ctxHandler);
   }
+
+  slot.pricePickCleanup?.();
+  const CLICK_DRAG_PX = 8;
+  let pickDown: { x: number; y: number; price: number } | null = null;
+  let pickDragged = false;
+  const onPickDown = (e: PointerEvent) => {
+    if (e.button !== 0 || getActiveDrawTool() !== "cursor") return;
+    const opts = slots.get(key)?.mountOpts;
+    if (!opts?.onChartPricePick) return;
+    const price = priceAtClientY(slot, e.clientY);
+    if (price == null) return;
+    pickDown = { x: e.clientX, y: e.clientY, price };
+    pickDragged = false;
+  };
+  const onPickMove = (e: PointerEvent) => {
+    if (!pickDown || (e.buttons & 1) === 0) return;
+    const dx = e.clientX - pickDown.x;
+    const dy = e.clientY - pickDown.y;
+    if (dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) pickDragged = true;
+    const opts = slots.get(key)?.mountOpts;
+    if (!opts?.onChartPricePick) return;
+    const price = priceAtClientY(slot, e.clientY);
+    if (price == null) return;
+    pickDown.price = price;
+    opts.onChartPricePick(price, e.clientX, e.clientY, true);
+  };
+  const onPickUp = (e: PointerEvent) => {
+    if (!pickDown || e.button !== 0) return;
+    const down = pickDown;
+    pickDown = null;
+    const opts = slots.get(key)?.mountOpts;
+    if (!opts?.onChartPricePick || getActiveDrawTool() !== "cursor") return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    if (!pickDragged && dx * dx + dy * dy <= CLICK_DRAG_PX * CLICK_DRAG_PX) {
+      const price = priceAtClientY(slot, e.clientY) ?? down.price;
+      opts.onChartPricePick(price, e.clientX, e.clientY, false);
+    }
+    pickDragged = false;
+  };
+  el.addEventListener("pointerdown", onPickDown, { capture: true });
+  shell.addEventListener("pointerdown", onPickDown, { capture: true });
+  drawCanvas.addEventListener("pointerdown", onPickDown, { capture: true });
+  window.addEventListener("pointermove", onPickMove, { capture: true });
+  window.addEventListener("pointerup", onPickUp, { capture: true });
+  slot.pricePickCleanup = () => {
+    el.removeEventListener("pointerdown", onPickDown, true);
+    shell.removeEventListener("pointerdown", onPickDown, true);
+    drawCanvas.removeEventListener("pointerdown", onPickDown, true);
+    window.removeEventListener("pointermove", onPickMove, true);
+    window.removeEventListener("pointerup", onPickUp, true);
+    pickDown = null;
+    pickDragged = false;
+  };
 
   if (isMobileLayout()) {
     const panCleanup = setupPortableChartPan(shell, chart, {
@@ -535,7 +709,9 @@ export function syncSecondaryChart(el: HTMLElement, candles: Candle[], opts: Sec
 function destroySecondarySlot(key: string): void {
   const slot = slots.get(key);
   if (!slot) return;
+  slot.pricePickCleanup?.();
   slot.cleanup?.();
+  clearSlotPriceLines(slot);
   slot.drawCleanup?.();
   slot.ro?.disconnect();
   try {

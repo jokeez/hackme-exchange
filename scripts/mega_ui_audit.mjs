@@ -144,6 +144,32 @@ async function testBookObAmt(page) {
   else ok("book rows expose ob-amt");
 }
 
+async function testChartOverlayDefaults(page) {
+  await dismissOverlays(page);
+  if (!(await openSystemMenu(page))) return;
+  await page.locator("#btn-settings").click();
+  await sleep(250);
+  await page.locator('.settings-nav [data-tab="chart"]').click();
+  await sleep(150);
+  const quick = page.locator("#set-ov-quick");
+  const preview = page.locator("#set-ov-preview");
+  if (await quick.isChecked()) note("P1", "ov-quick-default", "quickOrder should be off by default");
+  else ok("quickOrder off by default");
+  if (await preview.isChecked()) note("P1", "ov-preview-default", "orderPreview should be off by default");
+  else ok("orderPreview off by default");
+  await page.locator("#set-close").click();
+  await sleep(200);
+
+  const host = page.locator("#chart-host");
+  const box = await host.boundingBox();
+  if (!box) return;
+  await page.mouse.click(box.x + box.width * 0.52, box.y + box.height * 0.48);
+  await sleep(350);
+  if (await page.locator(".chart-quick-order").count()) {
+    note("P0", "chart-click-default", "quick order opened while overlays off");
+  } else ok("no chart click popup with default overlays");
+}
+
 async function testChartQuickOrderNoPanPopup(page) {
   await dismissOverlays(page);
   if (!(await openSystemMenu(page))) return;
@@ -426,6 +452,44 @@ async function testMultiChartIndependent(page) {
     else ok(`${id} healthy after wheel stress`);
   }
 
+  const pane2Canvas = page.locator("#chart-host-2 .sub-inner canvas").first();
+  const pane2Box = await pane2Canvas.boundingBox();
+  if (!pane2Box) {
+    note("P1", "pane2-ctx-box", "pane 2 canvas box null");
+  } else {
+    const px = pane2Box.x + pane2Box.width * 0.5;
+    const py = pane2Box.y + pane2Box.height * 0.5;
+    await page.mouse.click(px, py, { button: "right" });
+    await sleep(350);
+    const menu = page.locator(".chart-ctx-menu");
+    if (!(await menu.isVisible().catch(() => false))) {
+      note("P0", "pane2-ctx-menu", "secondary pane context menu missing");
+    } else {
+      ok("secondary pane context menu opens");
+      const alertCountBefore = await page.evaluate(() => {
+        try {
+          const raw = localStorage.getItem("hackme-exchange-demo-v5");
+          return raw ? JSON.parse(raw).priceAlerts?.length ?? 0 : 0;
+        } catch {
+          return 0;
+        }
+      });
+      await menu.locator('[data-a="add_alert"]').click();
+      await sleep(400);
+      const alertCountAfter = await page.evaluate(() => {
+        try {
+          const raw = localStorage.getItem("hackme-exchange-demo-v5");
+          return raw ? JSON.parse(raw).priceAlerts?.length ?? 0 : 0;
+        } catch {
+          return 0;
+        }
+      });
+      if (alertCountAfter <= alertCountBefore) note("P1", "pane2-alert", "alert not added from pane 2 ctx");
+      else ok("secondary pane ctx add alert");
+      await dismissOverlays(page);
+    }
+  }
+
   await btn.click().catch(() => {});
   await sleep(200);
   await page.locator('.pop-menu.multi-picker [data-l="1"]').click({ timeout: 3000 }).catch(() => {});
@@ -520,6 +584,7 @@ async function testDesktopDeep(browser) {
     await testOracleSettingsApply(page);
     await testBookObAmt(page);
     await testBookClickToPrice(page);
+    await testChartOverlayDefaults(page);
     await testChartQuickOrderNoPanPopup(page);
     await testInlineOrderAmend(page);
     await testAdvancedOrderTypes(page);

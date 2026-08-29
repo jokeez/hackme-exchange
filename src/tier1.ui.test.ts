@@ -8,6 +8,7 @@ import { snapshotBookLevels } from "./bookFlash";
 import { renderUnifiedSettingsModal } from "./settingsModal";
 import { baseState } from "./testFixtures";
 import { LAYOUT_DEFAULTS } from "./layoutPrefs";
+import { DEFAULT_CHART_OVERLAYS } from "./types";
 
 describe("bookFlash", () => {
   it("snapshots ob-amt cell (not price column)", () => {
@@ -25,11 +26,12 @@ describe("bookFlash", () => {
 });
 
 describe("tier1 UI contracts", () => {
-  it("chart exposes preview price API and click-only quick order", () => {
+  it("chart click is gated by quickOrder only (preview is optional ghost line)", () => {
     const chart = readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8");
-    expect(chart).toContain("export function setChartPreviewPrice");
-    expect(chart).toContain("onChartPricePick");
-    expect(chart).not.toContain("pickDragged && lastOpts?.overlays.quickOrder");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(chart).toContain("!!lastOpts?.overlays.quickOrder");
+    expect(chart).not.toMatch(/quickOrder\s*\|\|\s*o\?\.orderPreview/);
+    expect(app).toContain("if (!overlays.quickOrder) return;");
   });
 
   it("app wires quick order popup and order amend", () => {
@@ -52,6 +54,11 @@ describe("tier1 UI contracts", () => {
   it("quick order popup uses dismiss callback", () => {
     const mod = readFileSync(resolve(process.cwd(), "src/chartQuickOrder.ts"), "utf8");
     expect(mod).toContain("dismissCallback");
+  });
+
+  it("default chart overlays disable click-to-preview", () => {
+    expect(DEFAULT_CHART_OVERLAYS.orderPreview).toBe(false);
+    expect(DEFAULT_CHART_OVERLAYS.quickOrder).toBe(false);
   });
 
   it("book rows expose ob-amt class", () => {

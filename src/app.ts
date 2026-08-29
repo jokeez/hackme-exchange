@@ -38,6 +38,7 @@ import {
   setCandleData,
   setChartMode,
   setChartPreviewPrice,
+  getChartPreviewState,
   setContextPriceMarker,
   setDrawingsLockedFlag,
   softRefreshChart,
@@ -64,7 +65,7 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes } from "./chartSecondary";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes, refreshSecondaryPaneOrderLines, setSecondaryCrosshairMode } from "./chartSecondary";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
 import { showUnifiedSettingsModal } from "./settingsModal";
@@ -679,6 +680,30 @@ function chartAlertsForPair(pairId: PairId = state.activePair) {
   return state.priceAlerts.filter((a) => a.pairId === pairId).map((a) => ({ price: a.price, fired: a.fired }));
 }
 
+function secondaryPaneLineOpts(hostId: string, pairId: PairId) {
+  const preview = getChartPreviewState();
+  return {
+    orders: state.orders.filter((o) => o.pairId === pairId),
+    alerts: chartAlertsForPair(pairId),
+    overlays: {
+      showOrderLines: state.chartOverlays.showOrderLines,
+      orderPreview: state.chartOverlays.orderPreview,
+    },
+    previewPrice: preview.price,
+    previewSide: preview.side,
+    previewPaneId: preview.paneId,
+  };
+}
+
+function refreshSecondaryChartOrderLines(): void {
+  if (state.multiChartLayout === "1") return;
+  const n = state.multiChartLayout === "4" ? 4 : 2;
+  for (let i = 2; i <= n; i++) {
+    const hostId = `chart-host-${i}`;
+    refreshSecondaryPaneOrderLines(hostId, secondaryPaneLineOpts(hostId, panePair(i)));
+  }
+}
+
 function refreshActivityPanel(): void {
   const body = document.getElementById("activity-body");
   if (!body) return;
@@ -694,6 +719,7 @@ function refreshOpenOrderChartLines(): void {
     state.orders.filter((o) => o.pairId === state.activePair),
     chartAlertsForPair(),
   );
+  refreshSecondaryChartOrderLines();
 }
 
 let lastMidForAlerts = 0;
@@ -2974,22 +3000,24 @@ function handleChartPricePick(
   clientY: number,
   pairId: PairId,
   dragging: boolean,
+  paneHostId = "chart-host",
 ): void {
   const overlays = state.chartOverlays;
-  if (!overlays.quickOrder && !overlays.orderPreview) return;
+  if (!overlays.quickOrder) return;
   const side = activeTradeSide();
   if (dragging) {
     if (overlays.orderPreview) {
-      setChartPreviewPrice(price, side);
+      setChartPreviewPrice(price, side, paneHostId);
       fillOrderPanelAtPrice(side, "limit", price, pairId, { scroll: false });
+      refreshSecondaryChartOrderLines();
     }
     return;
   }
   if (overlays.orderPreview) {
-    setChartPreviewPrice(price, side);
+    setChartPreviewPrice(price, side, paneHostId);
     fillOrderPanelAtPrice(side, "limit", price, pairId);
+    refreshSecondaryChartOrderLines();
   }
-  if (!overlays.quickOrder) return;
   const pair = pairById(pairId);
   const buyAmt = Number((document.getElementById("buy-amt") as HTMLInputElement | null)?.value ?? 0);
   const sellAmt = Number((document.getElementById("sell-amt") as HTMLInputElement | null)?.value ?? 0);
@@ -2999,15 +3027,24 @@ function handleChartPricePick(
     quoteSymbol: pair.quote,
     defaultAmount,
     onSidePreview: (side) => {
-      if (overlays.orderPreview) setChartPreviewPrice(price, side);
+      if (overlays.orderPreview) {
+        setChartPreviewPrice(price, side, paneHostId);
+        refreshSecondaryChartOrderLines();
+      }
     },
     onPlace: (side, p, amt) => {
-      if (overlays.orderPreview) setChartPreviewPrice(p, side);
+      if (overlays.orderPreview) {
+        setChartPreviewPrice(p, side, paneHostId);
+        refreshSecondaryChartOrderLines();
+      }
       quickPlaceFromChart(side, "limit", p, pairId, amt);
-      if (!overlays.orderPreview) setChartPreviewPrice(null);
+      if (!overlays.orderPreview) setChartPreviewPrice(null, null, paneHostId);
     },
     onClose: () => {
-      if (!overlays.orderPreview) setChartPreviewPrice(null);
+      if (!overlays.orderPreview) {
+        setChartPreviewPrice(null, null, paneHostId);
+        refreshSecondaryChartOrderLines();
+      }
     },
   });
 }
@@ -3246,7 +3283,7 @@ function mountChartPanel(): void {
     },
     onContextMenu: (price, x, y) => openPaneContextMenu(state.activePair, "chart-host", price, x, y),
     onChartPricePick: (price, x, y, dragging) =>
-      handleChartPricePick(price, x, y, state.activePair, dragging),
+      handleChartPricePick(price, x, y, state.activePair, dragging, "chart-host"),
     onUpdateDrawing: (d) => {
       const i = state.drawings.findIndex((x) => x.id === d.id);
       if (i >= 0) state.drawings[i] = d;
@@ -3366,6 +3403,7 @@ function wireMultiChartSync(): void {
   setCrosshairSyncEnabled(linked);
   setTimeSyncEnabled(linked);
   setChartCrosshairMode(linked ? 1 : 0);
+  setSecondaryCrosshairMode(linked ? 1 : 0);
   if (!linked) return;
   const main = getMainCrosshairPane();
   if (main) {
@@ -3411,6 +3449,8 @@ function syncMultiCharts(): void {
       onTfChange: (next) => setPaneTf(i, next),
       onPairChange: (next) => setPanePair(i, next),
       onContextMenu: (price, x, y) => openPaneContextMenu(pairId, `chart-host-${i}`, price, x, y),
+      onChartPricePick: (price, x, y, dragging) =>
+        handleChartPricePick(price, x, y, pairId, dragging, `chart-host-${i}`),
       getDrawings: () => state.drawings.filter((d) => d.pairId === pairId),
       drawingsLocked: () => state.drawingsLocked,
       onAddDrawing: (d) => {
@@ -3420,13 +3460,13 @@ function syncMultiCharts(): void {
         }
         state.drawings.push(d);
         saveState(state);
-        refreshDrawings(state.drawings.filter((x) => x.pairId === state.activePair));
+        refreshDrawings(state.drawings.filter((x) => x.pairId === pairId));
       },
       onUpdateDrawing: (d) => {
         const idx = state.drawings.findIndex((x) => x.id === d.id);
         if (idx >= 0) state.drawings[idx] = d;
         saveState(state);
-        refreshDrawings(state.drawings.filter((x) => x.pairId === state.activePair));
+        refreshDrawings(state.drawings.filter((x) => x.pairId === pairId));
       },
     });
   }
@@ -3441,6 +3481,7 @@ function syncMultiCharts(): void {
       requestAnimationFrame(() => {
         resizeAll();
         wireMultiChartSync();
+        refreshSecondaryChartOrderLines();
       });
     });
   });
@@ -3475,6 +3516,7 @@ function patchLive(): void {
         const c2 = state.candles[pid]?.[tf] ?? [];
         if (c2.length) updateSecondaryChart(c2, hostId);
       }
+      refreshSecondaryChartOrderLines();
     }
   }
   evaluatePriceAlerts(quote.mid);
@@ -4020,7 +4062,10 @@ function submitMarketHotkey(side: "buy" | "sell"): void {
 }
 
 function syncChartOverlayEffects(): void {
-  if (!state.chartOverlays.orderPreview) setChartPreviewPrice(null);
+  if (!state.chartOverlays.orderPreview) {
+    setChartPreviewPrice(null);
+    refreshSecondaryChartOrderLines();
+  }
   if (!state.chartOverlays.quickOrder) closeQuickOrderPopup();
 }
 
