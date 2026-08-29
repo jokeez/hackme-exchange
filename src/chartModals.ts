@@ -272,7 +272,8 @@ export function showMultiChartPicker(state: DemoState, anchor: HTMLElement, onSa
   ];
   const menu = document.createElement("div");
   menu.className = "pop-menu glass multi-picker";
-  menu.innerHTML = `<p class="pop-menu-title">Multi Chart</p>${layouts
+  menu.innerHTML = `<p class="pop-menu-title">Multi Chart</p>
+    <p class="pop-menu-hint muted small">Independent panes — zoom &amp; scroll each chart separately.</p>${layouts
     .map((l) => `<button type="button" class="mc-opt ${state.multiChartLayout === l.id ? "active" : ""}" data-l="${l.id}"><span>${l.icon}</span>${l.label}</button>`)
     .join("")}`;
   positionPopMenu(anchor, menu, 176);

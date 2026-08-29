@@ -23,12 +23,12 @@ import {
   getDisplayedLastCandle,
   getChartMountOpts,
   getFocusedChartPaneId,
-  getMainCrosshairPane,
   getSelectedDrawingId,
   mountChart,
   refreshDrawings,
   refreshOrderLines,
   resetChartView,
+  getMainViewportDebug,
   applyChartInteractionOptions,
   resizeChart,
   scrollToTimestamp,
@@ -57,9 +57,9 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, listSecondaryCrosshairPanes } from "./chartSecondary";
-import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
-import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug } from "./chartSecondary";
+import { setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
+import { clearTimeSyncRegistry, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
 import { renderOracleSettingsModal, trapModalFocus } from "./oracleSettings";
 import {
   authLogout,
@@ -1696,7 +1696,7 @@ function renderSpot(): string {
     { id: "clear", title: "Delete selected (or clear all)" },
     { id: "lock", title: "Lock drawings (no edit)" },
   ];
-  const layoutClass = state.multiChartLayout !== "1" ? `layout-${state.multiChartLayout} multi-chart-sync` : "";
+  const layoutClass = state.multiChartLayout !== "1" ? `layout-${state.multiChartLayout} multi-chart-grid` : "";
 
   const vip = activeVipTier(state, market);
   const vipProg = nextVipProgress(state, market);
@@ -3191,34 +3191,17 @@ function setPaneTf(pane: number, tf: Timeframe): void {
   syncMultiCharts();
 }
 
-let crosshairPaneCleanups: Array<() => void> = [];
-let timeSyncPaneCleanups: Array<() => void> = [];
-
-function syncCrosshairPanes(): void {
-  crosshairPaneCleanups.forEach((fn) => fn());
-  crosshairPaneCleanups = [];
-  timeSyncPaneCleanups.forEach((fn) => fn());
-  timeSyncPaneCleanups = [];
-  const multi = state.multiChartLayout !== "1";
-  setCrosshairSyncEnabled(multi);
-  setTimeSyncEnabled(multi);
-  setChartCrosshairMode(multi ? 1 : 0);
-  if (!multi) return;
-  const main = getMainCrosshairPane();
-  if (main) {
-    crosshairPaneCleanups.push(registerCrosshairPane(main));
-    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: main.id, chart: main.chart, barCount: () => main.candles().length }));
-  }
-  for (const pane of listSecondaryCrosshairPanes()) {
-    crosshairPaneCleanups.push(registerCrosshairPane(pane));
-    timeSyncPaneCleanups.push(registerTimeSyncPane({ id: pane.id, chart: pane.chart, barCount: () => pane.candles().length }));
-  }
+/** Multi-chart panes are fully independent — no linked zoom or crosshair. */
+function wireMultiChartIndependence(): void {
+  setCrosshairSyncEnabled(false);
+  setTimeSyncEnabled(false);
+  setChartCrosshairMode(0);
 }
 
 function syncMultiCharts(): void {
   if (state.multiChartLayout === "1") {
     destroySecondaryChart();
-    syncCrosshairPanes();
+    wireMultiChartIndependence();
     return;
   }
   if (market) ensureCandles(state, market);
@@ -3273,7 +3256,7 @@ function syncMultiCharts(): void {
       resizeAll();
       requestAnimationFrame(() => {
         resizeAll();
-        syncCrosshairPanes();
+        wireMultiChartIndependence();
       });
     });
   });
@@ -3301,11 +3284,8 @@ function patchLive(): void {
     updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
     if (state.multiChartLayout !== "1") {
       const n = state.multiChartLayout === "4" ? 4 : 2;
-      const focused = getFocusedChartPaneId();
-      const mobileSkip = isMobileLayout() && state.multiChartLayout === "4";
       for (let i = 2; i <= n; i++) {
         const hostId = `chart-host-${i}`;
-        if (mobileSkip && focused !== hostId && liveTickN % 3 !== 0) continue;
         const tf = paneTf(i);
         const pid = panePair(i);
         const c2 = state.candles[pid]?.[tf] ?? [];
@@ -5129,11 +5109,8 @@ function microTickPrices(): void {
   }
   if (state.multiChartLayout !== "1") {
     const n = state.multiChartLayout === "4" ? 4 : 2;
-    const focused = getFocusedChartPaneId();
-    const mobileSkip = isMobileLayout() && state.multiChartLayout === "4";
     for (let i = 2; i <= n; i++) {
       const hostId = `chart-host-${i}`;
-      if (mobileSkip && focused !== hostId && liveTickN % 3 !== 0) continue;
       const tf = paneTf(i);
       const pid = panePair(i);
       const c2 = state.candles[pid]?.[tf] ?? [];
@@ -5403,7 +5380,13 @@ export async function boot(): Promise<void> {
   });
   if (typeof window !== "undefined") {
     const w = window as Window & { __hackmeExchangeDebug?: Record<string, unknown> };
-    w.__hackmeExchangeDebug = { getCrosshairSyncDebug, getTimeSyncDebug };
+    w.__hackmeExchangeDebug = {
+      getCrosshairSyncDebug,
+      getTimeSyncDebug,
+      getMainViewport: getMainViewportDebug,
+      getPaneViewport: getSecondaryViewportDebug,
+      multiChartIndependent: true,
+    };
   }
 }
 

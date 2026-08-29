@@ -321,9 +321,9 @@ async function testMultiChartGrid(page, vpId) {
     note("P0", `${vpId}-multi-grid`, "layout-4 not applied");
     return;
   }
-  if (!(await split.evaluate((el) => el.classList.contains("multi-chart-sync")))) {
-    note("P1", `${vpId}-multi-sync`, "multi-chart-sync class missing");
-  } else ok(`${vpId} multi-chart sync class`);
+  if (!(await split.evaluate((el) => el.classList.contains("multi-chart-grid")))) {
+    note("P1", `${vpId}-multi-grid`, "multi-chart-grid class missing");
+  } else ok(`${vpId} multi-chart independent grid class`);
   ok(`${vpId} multi 2x2 layout`);
   for (const id of ["chart-host", "chart-host-2", "chart-host-3", "chart-host-4"]) {
     const canvas = page.locator(`#${id} .chart-inner canvas`).first();

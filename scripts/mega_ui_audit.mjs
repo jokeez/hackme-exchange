@@ -201,22 +201,48 @@ async function testHotkeysOverlay(page) {
   await dismissOverlays(page);
 }
 
-async function testMultiChartSync(page) {
+async function testMultiChartIndependent(page) {
   await dismissOverlays(page);
   const btn = page.locator("#btn-multi");
   if (!(await btn.isVisible().catch(() => false))) return;
   await btn.click({ force: true });
   await sleep(200);
+  const hint = page.locator(".pop-menu.multi-picker .pop-menu-hint");
+  if (!(await hint.isVisible().catch(() => false))) note("P2", "multi-hint", "independent panes hint missing");
+  else ok("multi-chart independent hint");
   await page.locator('.pop-menu.multi-picker [data-l="4"]').click({ timeout: 3000 });
   await sleep(1100);
   await waitChart(page);
 
-  const split = page.locator(".chart-split.layout-4.multi-chart-sync");
+  const split = page.locator(".chart-split.layout-4.multi-chart-grid");
   if (!(await split.isVisible().catch(() => false))) {
-    note("P0", "multi-4", "4-grid sync layout missing");
+    note("P0", "multi-4", "4-grid layout missing");
     return;
   }
-  ok("multi 4-grid with sync class");
+  ok("multi 4-grid independent layout");
+
+  const indep = await page.evaluate(() => window.__hackmeExchangeDebug?.multiChartIndependent === true);
+  if (!indep) note("P0", "multi-indep-flag", "multiChartIndependent not set");
+  else ok("multiChartIndependent flag");
+
+  const syncOff = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    return ex?.getCrosshairSyncDebug?.()?.enabled === false && ex?.getTimeSyncDebug?.()?.enabled === false;
+  });
+  if (!syncOff) note("P0", "multi-sync-off", "crosshair/time sync still enabled");
+  else ok("sync disabled for independent panes");
+
+  const before = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    return {
+      main: ex?.getMainViewport?.(),
+      pane2: ex?.getPaneViewport?.("chart-host-2"),
+    };
+  });
+  if (!before.main || !before.pane2) {
+    note("P1", "multi-viewport-read", "could not read pane viewports");
+    return;
+  }
 
   const canvas = page.locator("#chart-host .chart-inner canvas").first();
   const box = await canvas.boundingBox();
@@ -224,52 +250,46 @@ async function testMultiChartSync(page) {
     note("P1", "multi-canvas-box", "main canvas box null");
     return;
   }
-  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 12 });
-  for (let i = 0; i < 6; i++) {
-    await page.mouse.wheel(0, i % 2 === 0 ? -100 : 80);
-    await sleep(100);
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 8 });
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, -120);
+    await sleep(80);
   }
-  await sleep(500);
-  const canvas2 = page.locator("#chart-host-2 .chart-inner canvas").first();
-  const box2 = await canvas2.boundingBox().catch(() => null);
-  if (box2) {
-    await page.mouse.move(box2.x + box2.width * 0.5, box2.y + box2.height * 0.5, { steps: 8 });
-    await sleep(400);
-  }
+  await sleep(400);
 
-  const dbg = await page.evaluate(() => {
-    const w = window;
-    const ex = w.__hackmeExchangeDebug;
-    const ch = ex?.getCrosshairSyncDebug?.();
-    return { ch };
+  const after = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    return {
+      main: ex?.getMainViewport?.(),
+      pane2: ex?.getPaneViewport?.("chart-host-2"),
+    };
   });
-  if (!dbg.ch || dbg.ch.paneCount < 4) note("P1", "crosshair-panes", `panes=${dbg.ch?.paneCount}`);
-  else ok(`crosshair registry ${dbg.ch.paneCount} panes`);
-  if (!dbg.ch?.lastSyncedTime) note("P2", "crosshair-time", "no synced crosshair time after hover (headless LWC may skip)");
-  else ok("crosshair sync time set on hover");
+  const mainZoomed = after.main && before.main && Math.abs(after.main.barSpacing - before.main.barSpacing) > 0.01;
+  const pane2Stable =
+    after.pane2 &&
+    before.pane2 &&
+    Math.abs(after.pane2.barSpacing - before.pane2.barSpacing) < 0.01 &&
+    Math.abs(after.pane2.from - before.pane2.from) < 0.5;
+  if (!mainZoomed) note("P1", "multi-main-zoom", "main pane barSpacing unchanged after wheel");
+  else ok(`main zoomed spacing ${after.main?.barSpacing?.toFixed(1)}`);
+  if (!pane2Stable) note("P0", "multi-pane2-linked", "pane 2 changed when scrolling main — not independent");
+  else ok("pane 2 unchanged while main zooms (independent)");
 
-  await page.mouse.wheel(-120, 0);
-  await sleep(500);
-  const tdbg = await page.evaluate(() => window.__hackmeExchangeDebug?.getTimeSyncDebug?.());
-  if (!tdbg?.lastSync?.span) {
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.5, { steps: 6 });
-    await page.mouse.up();
-    await sleep(500);
-  }
-  const tdbg2 = await page.evaluate(() => window.__hackmeExchangeDebug?.getTimeSyncDebug?.());
-  if (!tdbg2?.lastSync?.span) note("P2", "time-sync", "no logical sync after wheel (headless)");
-  else ok(`time sync span=${Math.round(tdbg2.lastSync.span)} spacing=${tdbg2.lastSync.barSpacing}`);
+  const resetBtn = page.locator("#chart-host-2 .sub-reset-view");
+  if (await resetBtn.isVisible().catch(() => false)) {
+    await resetBtn.click();
+    await sleep(300);
+    ok("pane 2 reset view button");
+  } else note("P1", "multi-reset-btn", "sub-reset-view missing");
 
   for (const id of ["chart-host", "chart-host-2", "chart-host-3", "chart-host-4"]) {
-    const okRange = await page.evaluate((hostId) => {
-      const host = document.getElementById(hostId);
-      const canvas = host?.querySelector("canvas");
+    const healthy = await page.evaluate((hostId) => {
+      const canvas = document.getElementById(hostId)?.querySelector("canvas");
       if (!canvas) return false;
-      const box = canvas.getBoundingClientRect();
-      return box.width > 40 && box.height > 30;
+      const b = canvas.getBoundingClientRect();
+      return b.width > 40 && b.height > 30;
     }, id);
-    if (!okRange) note("P0", `${id}-wheel-health`, "canvas collapsed after multi wheel zoom");
+    if (!healthy) note("P0", `${id}-wheel-health`, "canvas collapsed after wheel stress");
     else ok(`${id} healthy after wheel stress`);
   }
 
@@ -370,7 +390,7 @@ async function testDesktopDeep(browser) {
     await testActivityTabs(page);
     await testDrawToolsA11y(page);
     await testHotkeysOverlay(page);
-    await testMultiChartSync(page);
+    await testMultiChartIndependent(page);
 
     const bbo = page.locator('.btn-bbo[data-bbo="buy"]');
     if (await bbo.isVisible().catch(() => false)) {

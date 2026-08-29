@@ -24,7 +24,6 @@ import type {
   Timeframe,
 } from "./types";
 import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
-import { bumpTimeSyncPane } from "./chartTimeSync";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
@@ -2488,7 +2487,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
       const next = panLogicalRangeByWheel(lr, deltaPx, spacing);
       try {
         ts.setVisibleLogicalRange(next);
-        bumpTimeSyncPane("chart-host");
       } catch {
         /* ignore */
       }
@@ -2507,7 +2505,6 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     const nextSpacing = zoomBarSpacing(spacing, step);
     try {
       ts.applyOptions({ barSpacing: nextSpacing, minBarSpacing: 2 });
-      bumpTimeSyncPane("chart-host");
     } catch {
       /* ignore */
     }
@@ -2804,6 +2801,18 @@ export function resetChartView(): void {
   chart.priceScale("right").setAutoScale(true);
   anchorToLatestCandle();
   savedLogicalRange = null;
+}
+
+export function getMainViewportDebug(): { barSpacing: number; from: number; to: number } | null {
+  if (!chart) return null;
+  try {
+    const ts = chart.timeScale();
+    const lr = ts.getVisibleLogicalRange();
+    if (!lr) return null;
+    return { barSpacing: ts.options().barSpacing ?? 8, from: lr.from as number, to: lr.to as number };
+  } catch {
+    return null;
+  }
 }
 
 export function countActiveIndicators(settings: ChartSettings, indicatorConfig?: IndicatorConfig): number {
