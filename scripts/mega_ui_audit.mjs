@@ -133,6 +133,102 @@ async function testOracleSettingsApply(page) {
   else ok("oracle anchor persisted");
 }
 
+async function testBookObAmt(page) {
+  const n = await page.locator(".ob-amt").count();
+  if (!n) note("P2", "ob-amt", "book rows missing ob-amt cell");
+  else ok("book rows expose ob-amt");
+}
+
+async function testChartQuickOrderNoPanPopup(page) {
+  await dismissOverlays(page);
+  if (!(await openSystemMenu(page))) return;
+  await page.locator("#btn-settings").click();
+  await sleep(250);
+  await page.locator('.settings-nav [data-tab="chart"]').click();
+  await sleep(150);
+  const quick = page.locator("#set-ov-quick");
+  if (!(await quick.isChecked())) await quick.check();
+  const preview = page.locator("#set-ov-preview");
+  if (!(await preview.isChecked())) await preview.check();
+  await page.locator("#set-close").click();
+  await sleep(250);
+
+  const host = page.locator("#chart-host");
+  const box = await host.boundingBox();
+  if (!box) {
+    note("P2", "chart-box", "chart host not measurable");
+    return;
+  }
+  const cx = box.x + box.width * 0.52;
+  const cy = box.y + box.height * 0.48;
+
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 120, cy, { steps: 10 });
+  await page.mouse.up();
+  await sleep(350);
+  if (await page.locator(".chart-quick-order").count()) {
+    note("P0", "chart-pan-popup", "quick order opened after chart pan");
+  } else ok("chart pan does not open quick order");
+
+  await page.mouse.click(cx, cy);
+  await sleep(400);
+  const pop = page.locator(".chart-quick-order");
+  if (!(await pop.isVisible().catch(() => false))) {
+    note("P1", "chart-quick-popup", "quick order popup missing on chart click");
+    return;
+  }
+  ok("chart click opens quick order popup");
+  await page.keyboard.press("Escape");
+  await sleep(200);
+  if (await pop.count()) note("P1", "chart-popup-esc", "quick order popup stayed after Esc");
+  else ok("quick order Esc closes popup");
+}
+
+async function testInlineOrderAmend(page) {
+  await dismissOverlays(page);
+  await page.locator('.type[data-type="limit"]').click().catch(() => {});
+  await sleep(150);
+  const priceInp = page.locator("#buy-price");
+  const amtInp = page.locator("#buy-amt");
+  if (!(await priceInp.isVisible().catch(() => false))) {
+    note("P2", "amend-skip", "buy form not visible");
+    return;
+  }
+  const mid = await priceInp.inputValue().catch(() => "0.05");
+  const px = Number(mid) > 0 ? (Number(mid) * 0.75).toFixed(6) : "0.035";
+  await priceInp.fill(px);
+  await amtInp.fill("250");
+  await page.locator("#post-only").check().catch(() => {});
+  const placed = await page
+    .locator("#btn-buy")
+    .click({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!placed) {
+    note("P2", "amend-place", "could not place limit for amend test");
+    return;
+  }
+  await sleep(600);
+  await page.locator('#activity-tabs button[data-tab="orders"]').click();
+  await sleep(300);
+  const edit = page.locator('.act-edit[data-amend-field="price"]').first();
+  if (!(await edit.isVisible().catch(() => false))) {
+    note("P2", "amend-btn", "no inline price edit after limit order");
+    return;
+  }
+  await edit.click();
+  const inp = page.locator(".act-edit-inp").first();
+  await inp.waitFor({ state: "visible", timeout: 5000 });
+  const nextPx = (Number(px) * 0.99).toFixed(6);
+  await inp.fill(nextPx);
+  await inp.press("Enter");
+  await sleep(500);
+  const rowText = await page.locator(".act-row").first().textContent().catch(() => "");
+  if (!rowText?.includes(nextPx.slice(0, 4))) note("P1", "amend-price", `row=${rowText?.slice(0, 60)}`);
+  else ok("inline amend updates order price");
+}
+
 async function testBookClickToPrice(page) {
   const ask = page.locator(".ob-asks .ob-row").first();
   if (!(await ask.isVisible().catch(() => false))) {
@@ -393,7 +489,10 @@ async function testDesktopDeep(browser) {
   try {
     await waitChart(page);
     await testOracleSettingsApply(page);
+    await testBookObAmt(page);
     await testBookClickToPrice(page);
+    await testChartQuickOrderNoPanPopup(page);
+    await testInlineOrderAmend(page);
     await testAdvancedOrderTypes(page);
     await testActivityTabs(page);
     await testDrawToolsA11y(page);

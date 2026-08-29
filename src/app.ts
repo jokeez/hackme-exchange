@@ -882,7 +882,7 @@ function renderBook(): string {
     return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" tabindex="0" title="${title}" aria-label="${aria}">
       <div class="ob-bar" style="width:${pct}%"></div>
       <span class="ob-price">${formatPrice(price)}</span>
-      <span>${formatNum(l.amountBase, 1)}</span>
+      <span class="ob-amt">${formatNum(l.amountBase, 1)}</span>
       <span class="dim ob-total">${formatPrice(l.totalQuote)}</span>
     </div>`;
   };
@@ -1061,6 +1061,15 @@ function renderActivityBody(): string {
   return `<div class="act-list">${rows
     .map((o) => {
       const p = pairById(o.pairId);
+      const priceCell =
+        o.kind === "limit"
+          ? `<button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="price" title="Edit price">${formatPrice(o.price)}</button>`
+          : `<span>${formatPrice(o.price)}</span>`;
+      const stopCell = o.stopPrice
+        ? o.kind === "stop_limit"
+          ? `<button type="button" class="link mono act-edit dim" data-amend-id="${escapeHtml(o.id)}" data-amend-field="stop" title="Edit stop">stop ${formatPrice(o.stopPrice)}</button>`
+          : `<span class="dim">stop ${formatPrice(o.stopPrice)}</span>`
+        : "";
       return `<div class="act-row">
       <div class="act-line">
         <span class="${o.side === "buy" ? "up" : "down"}">${escapeHtml(o.side).toUpperCase()}</span>
@@ -1068,8 +1077,8 @@ function renderActivityBody(): string {
         <span class="dim">${p.label}</span>
       </div>
       <div class="act-line mono">
-        <button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="price" title="Edit price">${formatPrice(o.price)}</button>
-        ${o.stopPrice ? `<span class="dim">stop ${formatPrice(o.stopPrice)}</span>` : ""}
+        ${priceCell}
+        ${stopCell}
         <button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="amount" title="Edit amount">×${formatNum(o.amountBase, 2)}</button>
       </div>
       <div class="act-actions">
@@ -2803,11 +2812,18 @@ function runLockedLabOrder(work: () => Promise<void>): void {
   });
 }
 
+function activeTradeSide(): "buy" | "sell" {
+  if (isMobileLayout()) return loadMobileTradeSide();
+  const sellTab = document.querySelector("#trade-side-toggle .ts.sell.active");
+  return sellTab ? "sell" : "buy";
+}
+
 function fillOrderPanelAtPrice(
   side: "buy" | "sell",
   kind: "limit" | "stop_limit",
   price: number,
   pairId: PairId = state.activePair,
+  opts?: { scroll?: boolean },
 ): void {
   uiType = kind;
   setFormPrice(side, price, pairId);
@@ -2817,7 +2833,9 @@ function fillOrderPanelAtPrice(
   toggleOrderFields();
   updatePreviewForSide(side);
   if (isMobileLayout()) setMobileTradeSide(side);
-  document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (opts?.scroll !== false) {
+    document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
 function quickPlaceFromChart(
@@ -2956,16 +2974,17 @@ function handleChartPricePick(
 ): void {
   const overlays = state.chartOverlays;
   if (!overlays.quickOrder && !overlays.orderPreview) return;
+  const side = activeTradeSide();
   if (dragging) {
     if (overlays.orderPreview) {
-      setChartPreviewPrice(price);
-      fillOrderPanelAtPrice("buy", "limit", price, pairId);
+      setChartPreviewPrice(price, side);
+      fillOrderPanelAtPrice(side, "limit", price, pairId, { scroll: false });
     }
     return;
   }
   if (overlays.orderPreview) {
-    setChartPreviewPrice(price);
-    fillOrderPanelAtPrice("buy", "limit", price, pairId);
+    setChartPreviewPrice(price, side);
+    fillOrderPanelAtPrice(side, "limit", price, pairId);
   }
   if (!overlays.quickOrder) return;
   const pair = pairById(pairId);
@@ -2990,19 +3009,43 @@ function handleChartPricePick(
   });
 }
 
-function amendOpenOrder(id: string, field: "price" | "amount", raw: string): void {
+function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: string): void {
   const o = state.orders.find((x) => x.id === id);
   if (!o || (o.status !== "open" && o.status !== "triggered")) {
     toast("Order not open", "warn");
     return;
   }
-  if (o.kind !== "limit" && field === "price") {
+  if (field === "price" && o.kind !== "limit") {
     toast("Only limit price can be edited inline", "warn");
+    return;
+  }
+  if (field === "stop" && o.kind !== "stop_limit") {
+    toast("Stop price only for stop-limit orders", "warn");
     return;
   }
   const n = Number(raw.replace(/,/g, ""));
   if (!Number.isFinite(n) || n <= 0) {
     toast("Invalid value", "warn");
+    return;
+  }
+  if (field === "stop") {
+    if (o.stopPrice === n) {
+      refreshActivityPanel();
+      return;
+    }
+    o.stopPrice = n;
+    saveState(state);
+    toast(`Stop → ${formatPrice(n)}`, "ok");
+    refreshOpenOrderChartLines();
+    refreshActivityPanel();
+    return;
+  }
+  if (field === "price" && o.price === n) {
+    refreshActivityPanel();
+    return;
+  }
+  if (field === "amount" && o.amountBase === n) {
+    refreshActivityPanel();
     return;
   }
   if (field === "price") {
@@ -3881,7 +3924,7 @@ function wireOrderAmendButtons(): void {
     el.replaceWith(next);
     next.addEventListener("click", () => {
       const id = next.dataset.amendId;
-      const field = next.dataset.amendField as "price" | "amount" | undefined;
+      const field = next.dataset.amendField as "price" | "amount" | "stop" | undefined;
       if (!id || !field) return;
       const o = state.orders.find((x) => x.id === id);
       if (!o) return;
@@ -3889,7 +3932,8 @@ function wireOrderAmendButtons(): void {
       inp.type = "number";
       inp.className = "inp mono act-edit-inp";
       inp.step = "any";
-      inp.value = field === "price" ? String(o.price) : String(o.amountBase);
+      inp.value =
+        field === "price" ? String(o.price) : field === "stop" ? String(o.stopPrice ?? "") : String(o.amountBase);
       const commit = () => {
         amendOpenOrder(id, field, inp.value);
       };
@@ -3969,19 +4013,18 @@ function syncChartOverlayEffects(): void {
   if (!state.chartOverlays.quickOrder) closeQuickOrderPopup();
 }
 
-function saveChartPatch(patch: Partial<typeof state>): void {
+function saveChartPatch(patch: Partial<typeof state>, opts?: { silent?: boolean }): void {
   Object.assign(state, patch);
   saveState(state);
   if (patch.chartOverlays) syncChartOverlayEffects();
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
-  if (!softRefreshChart(candles, opts)) mountChartPanel();
+  const chartPatchOpts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
+  if (!softRefreshChart(candles, chartPatchOpts)) mountChartPanel();
   else {
-    // Keep mode/tool in sync without remount
     setChartMode(state.chartMode);
     setActiveDrawTool(state.activeDrawTool);
   }
-  toast("Chart updated", "ok");
+  if (!opts?.silent) toast("Chart updated", "ok");
 }
 
 function toggleOrderFields(): void {
@@ -4084,9 +4127,13 @@ function showSettings(): void {
     },
     onOpenOverlays: (anchor) => {
       showOverlayMenu(state, anchor, (patch) => {
-        saveChartPatch(patch);
+        saveChartPatch(patch, { silent: true });
         applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
       });
+    },
+    onChartOverlays: (patch) => {
+      saveChartPatch({ chartOverlays: { ...state.chartOverlays, ...patch } }, { silent: true });
+      applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
     },
     onToggleMultiLink: (linked) => {
       state.multiChartLinked = linked;

@@ -1,4 +1,4 @@
-import type { DemoState, ThemeId } from "./types";
+import type { ChartOverlaySettings, DemoState, ThemeId } from "./types";
 import { type LayoutPrefs } from "./layoutPrefs";
 import { trapModalFocus } from "./oracleSettings";
 
@@ -12,6 +12,7 @@ export type SettingsModalActions = {
   onResetDemo: () => void;
   onOpenChartStyle: () => void;
   onOpenOverlays: (anchor: HTMLElement) => void;
+  onChartOverlays: (patch: Partial<ChartOverlaySettings>) => void;
   onToggleMultiLink: (linked: boolean) => void;
 };
 
@@ -47,14 +48,14 @@ export function renderUnifiedSettingsModal(
 
     <div class="modal-pane" id="pane-chart" role="tabpanel" hidden>
       <p class="muted small">Chart appearance and trading overlays.</p>
+      <div class="settings-grid">
+        <label><input type="checkbox" id="set-ov-preview" ${state.chartOverlays.orderPreview ? "checked" : ""} /> Order preview (ghost line)</label>
+        <label><input type="checkbox" id="set-ov-quick" ${state.chartOverlays.quickOrder ? "checked" : ""} /> Quick order (chart click)</label>
+      </div>
       <div class="settings-btn-row">
         <button type="button" class="btn-sm" id="set-chart-style">Chart style…</button>
-        <button type="button" class="btn-sm" id="set-chart-overlays">Overlays…</button>
+        <button type="button" class="btn-sm" id="set-chart-overlays">More overlays…</button>
       </div>
-      <ul class="muted small settings-hints">
-        <li>Order preview — ghost line before placing</li>
-        <li>Quick order — click chart price for mini ticket</li>
-      </ul>
     </div>
 
     <div class="modal-pane" id="pane-oracle" role="tabpanel" hidden>
@@ -171,8 +172,15 @@ export function showUnifiedSettingsModal(
     close();
     actions.onOpenChartStyle();
   });
+  bd.querySelector("#set-ov-preview")?.addEventListener("change", (e) => {
+    actions.onChartOverlays({ orderPreview: (e.target as HTMLInputElement).checked });
+  });
+  bd.querySelector("#set-ov-quick")?.addEventListener("change", (e) => {
+    actions.onChartOverlays({ quickOrder: (e.target as HTMLInputElement).checked });
+  });
   bd.querySelector("#set-chart-overlays")?.addEventListener("click", () => {
     const btn = bd.querySelector("#set-chart-overlays") as HTMLElement;
+    close();
     actions.onOpenOverlays(btn);
   });
 

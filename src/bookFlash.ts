@@ -12,7 +12,7 @@ export function snapshotBookLevels(root: HTMLElement | null): BookLevelSnap {
     const price = row.dataset.bookPrice;
     const side = row.dataset.bookSide;
     if (!price || !side) return;
-    const amtCell = row.querySelector("span:nth-child(2)");
+    const amtCell = row.querySelector(".ob-amt");
     const amt = Number(amtCell?.textContent?.replace(/,/g, "") ?? 0);
     if (Number.isFinite(amt)) snap.set(rowKey(side, price), amt);
   });
