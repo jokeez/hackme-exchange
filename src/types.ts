@@ -389,6 +389,8 @@ export type ChartMountOpts = {
   onCrosshair?: (c: Candle | null) => void;
   onOrderPriceDrag?: (orderId: string, newPrice: number) => void;
   onContextMenu?: (price: number, clientX: number, clientY: number) => void;
+  /** LMB click/drag on plot when quick-order or order-preview overlays are on. */
+  onChartPricePick?: (price: number, clientX: number, clientY: number, dragging: boolean) => void;
   onUpdateDrawing?: (d: Drawing) => void;
   /** Called when user pans near the left edge — prepend more bars. Return how many were added. */
   onNeedHistory?: (bars: number) => number;

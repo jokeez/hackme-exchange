@@ -37,6 +37,7 @@ import {
   setChartCrosshairMode,
   setCandleData,
   setChartMode,
+  setChartPreviewPrice,
   setContextPriceMarker,
   setDrawingsLockedFlag,
   softRefreshChart,
@@ -47,12 +48,15 @@ import { MAX_DRAWINGS } from "./chartDraw";
 import { candleCountdown, fireBrowserAlert, yesterdayClose } from "./chartHud";
 import { isHubEmbed, postHubGotoTab } from "./embed";
 import { closeChartContextMenu, showChartContextMenu, showObjectTreeModal } from "./chartContextMenu";
+import { closeQuickOrderPopup, showQuickOrderPopup } from "./chartQuickOrder";
+import { applyBookFlashes, snapshotBookLevels, type BookLevelSnap } from "./bookFlash";
 import {
   loadLayoutPrefs,
   saveLayoutPrefs,
   setPanelWidth,
   terminalGridColumnsForView,
   togglePanelCollapsed,
+  LAYOUT_DEFAULTS,
   type LayoutPrefs,
 } from "./layoutPrefs";
 import { tickInputValue } from "./tick";
@@ -61,7 +65,7 @@ import { uid } from "./id";
 import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes } from "./chartSecondary";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
-import { renderOracleSettingsModal, trapModalFocus } from "./oracleSettings";
+import { showUnifiedSettingsModal } from "./settingsModal";
 import {
   authLogout,
   authRevokeAll,
@@ -198,6 +202,7 @@ import {
   resetDemo,
   saveState,
   toggleFavorite,
+  updateOrderAmount,
   updateOrderPrice,
   walletEquityFromMarket,
 } from "./store";
@@ -226,6 +231,7 @@ import type {
 } from "./types";
 import { QUICK_TFS, TIMEFRAMES, TF_SEC, DEFAULT_MULTI_PANE_PAIRS } from "./types";
 
+let bookFlashSnap: BookLevelSnap = new Map();
 let state = loadState();
 let theme: ThemeId = loadTheme();
 let layoutPrefs: LayoutPrefs = loadLayoutPrefs();
@@ -676,6 +682,7 @@ function refreshActivityPanel(): void {
   if (!body) return;
   body.innerHTML = renderActivityBody();
   wireCancelButtons();
+  wireOrderAmendButtons();
   wireFundsFunding();
   wireAlertButtons();
 }
@@ -1061,9 +1068,9 @@ function renderActivityBody(): string {
         <span class="dim">${p.label}</span>
       </div>
       <div class="act-line mono">
-        <span>${formatPrice(o.price)}</span>
+        <button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="price" title="Edit price">${formatPrice(o.price)}</button>
         ${o.stopPrice ? `<span class="dim">stop ${formatPrice(o.stopPrice)}</span>` : ""}
-        <span>×${formatNum(o.amountBase, 2)}</span>
+        <button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="amount" title="Edit amount">×${formatNum(o.amountBase, 2)}</button>
       </div>
       <div class="act-actions">
         <span class="dim mono">${o.timeInForce ?? "GTC"}</span>
@@ -1959,14 +1966,10 @@ function render(): void {
         <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
         <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
+          <button type="button" class="sys-item" id="btn-settings">Settings…</button>
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
           <button type="button" class="sys-item" id="btn-sync-node-header">↻ Sync HMC/SUP</button>
-          <button type="button" class="sys-item" id="btn-settings">Oracle anchor</button>
-          <button type="button" class="sys-item" id="btn-export-demo">↓ Export state</button>
-          <button type="button" class="sys-item" id="btn-import-demo">↑ Import state</button>
           <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
-          <button type="button" class="sys-item ${theme === "hub" ? "active" : ""}" id="btn-theme-hub" data-theme="hub" aria-pressed="${theme === "hub"}">Theme: Hub (hackme.tech)</button>
-          <button type="button" class="sys-item ${theme === "wallet" ? "active" : ""}" id="btn-theme-wallet" data-theme="wallet" aria-pressed="${theme === "wallet"}">Theme: Wallet (lab)</button>
           <a class="sys-link" href="https://hackme.tech/pool/coordinator" target="_blank" rel="noreferrer">Official pool</a>
           <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>
           <button type="button" class="sys-item danger" id="btn-reset">Reset demo</button>
@@ -2822,10 +2825,11 @@ function quickPlaceFromChart(
   kind: "limit" | "stop_limit",
   price: number,
   pairId: PairId = state.activePair,
+  amountOverride?: number,
 ): void {
   const pair = pairById(pairId);
   const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
-  let amt = Number(amtInp?.value ?? 0);
+  let amt = amountOverride ?? Number(amtInp?.value ?? 0);
   if (amt <= 0) {
     if (!market || !(price > 0)) {
       toast("Insufficient balance — set amount", "warn");
@@ -2941,6 +2945,103 @@ function quickPlaceFromChart(
     b.classList.toggle("active", (b as HTMLElement).dataset.tab === "orders");
   });
   document.getElementById("activity-body")!.innerHTML = renderActivityBody();
+}
+
+function handleChartPricePick(
+  price: number,
+  clientX: number,
+  clientY: number,
+  pairId: PairId,
+  dragging: boolean,
+): void {
+  const overlays = state.chartOverlays;
+  if (!overlays.quickOrder && !overlays.orderPreview) return;
+  if (dragging) {
+    if (overlays.orderPreview) {
+      setChartPreviewPrice(price);
+      fillOrderPanelAtPrice("buy", "limit", price, pairId);
+    }
+    return;
+  }
+  if (overlays.orderPreview) {
+    setChartPreviewPrice(price);
+    fillOrderPanelAtPrice("buy", "limit", price, pairId);
+  }
+  if (!overlays.quickOrder) return;
+  const pair = pairById(pairId);
+  const buyAmt = Number((document.getElementById("buy-amt") as HTMLInputElement | null)?.value ?? 0);
+  const sellAmt = Number((document.getElementById("sell-amt") as HTMLInputElement | null)?.value ?? 0);
+  const defaultAmount = buyAmt > 0 ? buyAmt : sellAmt > 0 ? sellAmt : 0;
+  showQuickOrderPopup(clientX, clientY, price, {
+    baseSymbol: pair.base,
+    quoteSymbol: pair.quote,
+    defaultAmount,
+    onSidePreview: (side) => {
+      if (overlays.orderPreview) setChartPreviewPrice(price, side);
+    },
+    onPlace: (side, p, amt) => {
+      if (overlays.orderPreview) setChartPreviewPrice(p, side);
+      quickPlaceFromChart(side, "limit", p, pairId, amt);
+      if (!overlays.orderPreview) setChartPreviewPrice(null);
+    },
+    onClose: () => {
+      if (!overlays.orderPreview) setChartPreviewPrice(null);
+    },
+  });
+}
+
+function amendOpenOrder(id: string, field: "price" | "amount", raw: string): void {
+  const o = state.orders.find((x) => x.id === id);
+  if (!o || (o.status !== "open" && o.status !== "triggered")) {
+    toast("Order not open", "warn");
+    return;
+  }
+  if (o.kind !== "limit" && field === "price") {
+    toast("Only limit price can be edited inline", "warn");
+    return;
+  }
+  const n = Number(raw.replace(/,/g, ""));
+  if (!Number.isFinite(n) || n <= 0) {
+    toast("Invalid value", "warn");
+    return;
+  }
+  if (field === "price") {
+    if (market && (o.kind === "limit" || o.kind === "stop_limit")) {
+      const mid = midForPair(market, o.pairId);
+      const check = validateLimitOrder(o.side, n, mid, o.timeInForce ?? uiTif, o.postOnly ?? uiPostOnly);
+      if (!check.ok) {
+        toast(check.reason, "warn");
+        return;
+      }
+      if (o.source !== "lab") {
+        const funds = assertOrderFunds(state, market, o.pairId, o.side, o.amountBase, n, o.kind, check.immediate);
+        if (!funds.ok) {
+          toast(funds.reason, "warn");
+          return;
+        }
+      }
+    }
+    if (!updateOrderPrice(state, id, n)) {
+      toast("Could not update price", "warn");
+      return;
+    }
+    toast(`Order price → ${formatPrice(n)}`, "ok");
+  } else {
+    if (market && o.source !== "lab") {
+      const funds = assertOrderFunds(state, market, o.pairId, o.side, n, o.price, o.kind, false);
+      if (!funds.ok) {
+        toast(funds.reason, "warn");
+        return;
+      }
+    }
+    if (!updateOrderAmount(state, id, n)) {
+      toast("Could not update amount", "warn");
+      return;
+    }
+    toast(`Order amount → ${formatNum(n, 2)}`, "ok");
+  }
+  refreshOpenOrderChartLines();
+  refreshActivityPanel();
 }
 
 function handleChartContextAction(
@@ -3098,6 +3199,8 @@ function mountChartPanel(): void {
       toast(`Order price → ${formatPrice(price)}`, "info");
     },
     onContextMenu: (price, x, y) => openPaneContextMenu(state.activePair, "chart-host", price, x, y),
+    onChartPricePick: (price, x, y, dragging) =>
+      handleChartPricePick(price, x, y, state.activePair, dragging),
     onUpdateDrawing: (d) => {
       const i = state.drawings.findIndex((x) => x.id === d.id);
       if (i >= 0) state.drawings[i] = d;
@@ -3344,7 +3447,9 @@ function patchLive(): void {
 const throttledBookTapePatch = throttle(() => {
   const book = document.getElementById("book");
   if (book) {
+    const prevSnap = snapshotBookLevels(book);
     book.innerHTML = renderBook();
+    bookFlashSnap = applyBookFlashes(prevSnap.size ? prevSnap : bookFlashSnap, book);
     // Preserve delegation flag after innerHTML wipe
     book.dataset.bookTabsWired = "1";
     wireBookTabs();
@@ -3769,6 +3874,47 @@ function wireFundsFunding(): void {
   });
 }
 
+function wireOrderAmendButtons(): void {
+  document.querySelectorAll(".act-edit").forEach((btn) => {
+    const el = btn as HTMLElement;
+    const next = el.cloneNode(true) as HTMLElement;
+    el.replaceWith(next);
+    next.addEventListener("click", () => {
+      const id = next.dataset.amendId;
+      const field = next.dataset.amendField as "price" | "amount" | undefined;
+      if (!id || !field) return;
+      const o = state.orders.find((x) => x.id === id);
+      if (!o) return;
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "inp mono act-edit-inp";
+      inp.step = "any";
+      inp.value = field === "price" ? String(o.price) : String(o.amountBase);
+      const commit = () => {
+        amendOpenOrder(id, field, inp.value);
+      };
+      let cancelled = false;
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelled = true;
+          refreshActivityPanel();
+        }
+      });
+      inp.addEventListener("blur", () => {
+        if (!cancelled) commit();
+      });
+      next.replaceWith(inp);
+      inp.focus();
+      inp.select();
+    });
+  });
+}
+
 function wireCancelButtons(): void {
   document.querySelectorAll("[data-cancel]").forEach((b) => {
     b.addEventListener("click", () => {
@@ -3818,9 +3964,15 @@ function submitMarketHotkey(side: "buy" | "sell"): void {
   toggleOrderFields();
 }
 
+function syncChartOverlayEffects(): void {
+  if (!state.chartOverlays.orderPreview) setChartPreviewPrice(null);
+  if (!state.chartOverlays.quickOrder) closeQuickOrderPopup();
+}
+
 function saveChartPatch(patch: Partial<typeof state>): void {
   Object.assign(state, patch);
   saveState(state);
+  if (patch.chartOverlays) syncChartOverlayEffects();
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
   const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
   if (!softRefreshChart(candles, opts)) mountChartPanel();
@@ -3887,44 +4039,62 @@ function resyncPctSizedAmounts(): void {
 }
 
 function showSettings(): void {
-  document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
-  const bd = document.createElement("div");
-  bd.className = "modal-backdrop";
-  const anchor = sanitizeOracleAnchor(state.oracleAnchor);
-  bd.innerHTML = renderOracleSettingsModal(anchor);
-  const modal = bd.querySelector(".modal") as HTMLElement;
-  const close = () => {
-    window.removeEventListener("keydown", onKey);
-    untrap?.();
-    bd.remove();
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    }
-  };
-  document.body.appendChild(bd);
-  window.addEventListener("keydown", onKey);
-  const untrap = modal ? trapModalFocus(modal) : undefined;
-  bd.querySelector("#modal-close")?.addEventListener("click", close);
-  bd.addEventListener("click", (e) => {
-    if (e.target === bd) close();
-  });
-  bd.querySelector("#modal-save")?.addEventListener("click", () => {
-    const v = sanitizeOracleAnchor(Number((bd.querySelector("#anchor-inp") as HTMLInputElement).value), 0);
-    if (v > 0) {
+  showUnifiedSettingsModal(state, layoutPrefs, theme, {
+    onSaveOracle: (v) => {
       state.oracleAnchor = v;
       saveState(state);
       toast(`Anchor → ${v} USDT/HMC`, "ok");
-      close();
       refresh();
-    } else {
-      toast("Anchor must be a positive number", "warn");
-    }
+    },
+    onTheme: (next) => {
+      theme = next;
+      saveTheme(theme);
+      toast(theme === "hub" ? "Theme → Hub" : "Theme → Wallet", "ok");
+      render();
+    },
+    onLayout: (patch) => {
+      layoutPrefs = { ...layoutPrefs, ...patch };
+      saveLayoutPrefs(layoutPrefs);
+      applyLayoutToDom();
+      syncLayoutChips();
+    },
+    onResetLayout: () => {
+      layoutPrefs = { ...LAYOUT_DEFAULTS };
+      saveLayoutPrefs(layoutPrefs);
+      state.chartFullscreen = false;
+      saveState(state);
+      applyLayoutToDom();
+      syncLayoutChips();
+      toast("Layout reset", "info");
+      render();
+    },
+    onExport: () => {
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadText(`hackme-exchange-demo-${stamp}.json`, exportDemoJson(state));
+      toast("State exported", "ok");
+    },
+    onImportClick: () => {
+      document.getElementById("import-demo-file")?.click();
+    },
+    onResetDemo: () => {
+      document.getElementById("btn-reset")?.click();
+    },
+    onOpenChartStyle: () => {
+      showChartStyleModal(state, (patch) => saveChartPatch(patch));
+    },
+    onOpenOverlays: (anchor) => {
+      showOverlayMenu(state, anchor, (patch) => {
+        saveChartPatch(patch);
+        applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
+      });
+    },
+    onToggleMultiLink: (linked) => {
+      state.multiChartLinked = linked;
+      saveState(state);
+      wireMultiChartSync();
+      toast(linked ? "Panes linked" : "Panes independent", "info");
+    },
   });
-  (bd.querySelector("#anchor-inp") as HTMLInputElement | null)?.focus();
 }
 
 function syncLayoutChips(): void {
@@ -4004,6 +4174,10 @@ function applyLayoutToDom(): void {
   }
   if (chartBody) {
     chartBody.classList.toggle("tools-collapsed", !isMobileLayout() && layoutPrefs.toolsCollapsed);
+  }
+  const activity = document.getElementById("activity-panel");
+  if (activity) {
+    activity.classList.toggle("hidden", !mobile && layoutPrefs.bottomCollapsed);
   }
   // Expand rails: desktop only — mobile uses topbar tools toggle.
   syncExpandRail("btn-expand-book", !fs && !isMobileLayout() && layoutPrefs.bookCollapsed);
@@ -4620,6 +4794,7 @@ function wireEvents(): void {
     showOverlayMenu(state, el, (patch) => {
       Object.assign(state, patch);
       saveState(state);
+      syncChartOverlayEffects();
       applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
     }, () => el.classList.remove("active"));
   });
@@ -4809,6 +4984,7 @@ function wireEvents(): void {
       });
       document.getElementById("activity-body")!.innerHTML = renderActivityBody();
       wireCancelButtons();
+      wireOrderAmendButtons();
       wireAlertButtons();
     });
   });
@@ -4820,6 +4996,7 @@ function wireEvents(): void {
   document.getElementById("btn-hotkeys")?.addEventListener("click", () => showHotkeysHelp());
 
   wireCancelButtons();
+  wireOrderAmendButtons();
   wireAlertButtons();
   wireFundsFunding();
   syncPctMarks("buy");
@@ -5058,6 +5235,7 @@ function onKeydown(e: KeyboardEvent): void {
     const n = cancelAllOpenOrders(state);
     document.getElementById("activity-body")!.innerHTML = renderActivityBody();
     wireCancelButtons();
+    wireOrderAmendButtons();
     refreshOrderLines(state.orders.filter((o) => o.pairId === state.activePair));
     toast(n ? `Cancelled ${n} order(s)` : "No open orders", "info");
     return;
