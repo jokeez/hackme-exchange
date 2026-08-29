@@ -114,6 +114,8 @@ export type ChartOverlaySettings = {
   showLastPrice: boolean;
   orderPreview: boolean;
   quickOrder: boolean;
+  /** When true, chart quick order places immediately (no confirm step). */
+  quickOrderSkipConfirm: boolean;
 };
 
 export const DEFAULT_CHART_OVERLAYS: ChartOverlaySettings = {
@@ -122,6 +124,7 @@ export const DEFAULT_CHART_OVERLAYS: ChartOverlaySettings = {
   showLastPrice: true,
   orderPreview: false,
   quickOrder: false,
+  quickOrderSkipConfirm: false,
 };
 
 /** Preview ghost line only applies when quick-order chart click is enabled. */

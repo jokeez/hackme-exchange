@@ -3261,6 +3261,18 @@ export function switchChartTimeframe(candles: Candle[], opts: ChartMountOpts): b
   return true;
 }
 
+/** Pair switch without destroy/remount — restores saved zoom per pair+tf. */
+export function switchChartPair(candles: Candle[], opts: ChartMountOpts): boolean {
+  if (!mounted || !chart) return false;
+  saveCurrentChartViewport();
+  setCandleData(candles, opts, { scrollToLive: false });
+  bindChartViewportPersistence(opts.pairId, opts.tf);
+  if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
+    anchorToLatestCandle();
+  }
+  return true;
+}
+
 export function destroyChart(): void {
   saveCurrentChartViewport();
   viewportPersistCleanup?.();

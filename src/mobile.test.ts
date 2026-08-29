@@ -331,9 +331,10 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain(".cqo-backdrop");
     expect(css).toContain(".cqo-confirm");
     expect(app).toContain("buildQuickOrderValidation");
-    expect(app).toContain("switchChartTimeframe");
-    expect(app).toContain("bootstrapMobileQuickOrder");
-    expect(chart).toContain("switchChartTimeframe");
+    expect(app).toContain("switchActivePair");
+    expect(app).toContain("switchChartPair");
+    expect(app).toContain("mobile-ohlc-bar");
+    expect(chart).toContain("switchChartPair");
     expect(chart).toContain("tryRestoreChartViewport");
     expect(readFileSync(resolve(process.cwd(), "src/haptic.ts"), "utf8")).toContain("navigator.vibrate");
     expect(readFileSync(resolve(process.cwd(), "src/chartViewport.ts"), "utf8")).toContain("sessionStorage");

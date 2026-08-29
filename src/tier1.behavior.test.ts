@@ -74,6 +74,20 @@ describe("chartQuickOrder", () => {
     closeQuickOrderPopup();
   });
 
+  it("skips confirm when skipConfirm is set", () => {
+    const onPlace = vi.fn();
+    showQuickOrderPopup(100, 100, 0.05, {
+      baseSymbol: "HMC",
+      quoteSymbol: "USDT",
+      defaultAmount: 50,
+      skipConfirm: true,
+      onPlace,
+    });
+    (document.querySelector(".cqo-buy") as HTMLButtonElement).click();
+    expect(onPlace).toHaveBeenCalledWith("buy", 0.05, 50);
+    closeQuickOrderPopup();
+  });
+
   it("renders mobile sheet mode", () => {
     showQuickOrderPopup(0, 0, 0.05, {
       baseSymbol: "HMC",

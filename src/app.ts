@@ -35,6 +35,7 @@ import {
   scrollToTimestamp,
   setActiveDrawTool,
   setChartCrosshairMode,
+  switchChartPair,
   switchChartTimeframe,
   setCandleData,
   setChartMode,
@@ -780,6 +781,10 @@ function activePairQuote(): PairQuote {
 function patchTickerBar(quote: PairQuote = activePairQuote()): void {
   const pair = pairById(state.activePair);
   const tone = quoteToneClass(quote.tone);
+  const icons = document.querySelector(".tb-pair-icons");
+  if (icons) icons.innerHTML = pairAssetIcons(pair.base, pair.quote);
+  const pairTitle = document.querySelector(".tb-pair h1");
+  if (pairTitle) pairTitle.textContent = pair.label;
   const priceEl = document.querySelector(".tb-price");
   const chgEl = document.querySelector(".tb-chg");
   const fiatEl = document.querySelector("[data-tb-usdt]") as HTMLElement | null;
@@ -802,6 +807,282 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
     if (spans[1]) spans[1].textContent = formatPrice(quote.low24h);
     if (spans[2]) spans[2].textContent = formatVolBase(quote.vol24h, pair.base);
   }
+}
+
+function updateOhlcDisplays(c: Candle | null): void {
+  const ha = state.chartMode === "heikin" ? "HA " : "";
+  const el = document.getElementById("ohlc-legend");
+  const mob = document.getElementById("mobile-ohlc-bar");
+  if (!c) {
+    refreshOhlcLegendIdle();
+    mob?.classList.remove("live");
+    return;
+  }
+  const text = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
+  if (el) el.textContent = text;
+  if (mob && isMobileLayout()) {
+    mob.textContent = text;
+    mob.classList.remove("hidden");
+    mob.classList.add("live");
+  }
+}
+
+function patchRecentPairsStrip(): void {
+  const ticker = document.querySelector(".ticker-bar.binance-ticker");
+  if (!ticker) return;
+  const recentPairs = loadRecentPairs().filter((p) => p !== state.activePair);
+  const existing = document.getElementById("recent-pairs");
+  if (!recentPairs.length) {
+    existing?.remove();
+    return;
+  }
+  const html = `<div class="recent-pairs" id="recent-pairs" aria-label="Recent markets">${recentPairs
+    .map((p) => {
+      const meta = pairById(p);
+      const mid = pairQuote(p).mid;
+      return `<button type="button" class="recent-pair" data-recent-pair="${p}"><span>${meta.label}</span>${
+        mid ? `<span class="mono muted">${formatPrice(mid)}</span>` : ""
+      }</button>`;
+    })
+    .join("")}</div>`;
+  if (existing) existing.outerHTML = html;
+  else ticker.insertAdjacentHTML("afterend", html);
+  document.querySelectorAll("[data-recent-pair]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchActivePair((btn as HTMLElement).dataset.recentPair as PairId);
+    });
+  });
+}
+
+function refreshOrderZone(): void {
+  const zone = document.getElementById("order-zone");
+  if (!zone || !market) return;
+  const pair = pairById(state.activePair);
+  const quote = activePairQuote();
+  const av = availBalance(pair);
+  const vip = activeVipTier(state, market);
+  const feeRole = previewFeeRole(uiType);
+  const feeBps = feeRole === "maker" ? vip.makerBps : vip.takerBps;
+  const showTif = uiType === "limit" || uiType === "stop_limit";
+  zone.innerHTML = renderDualOrderPanel({
+    pair,
+    pairId: state.activePair,
+    mid: quote.mid,
+    uiType,
+    uiTif,
+    uiPostOnly,
+    availQuote: av.quote,
+    availBase: av.base,
+    payFeesInHmc: state.feeConfig.payFeesInHmc,
+    hmcDiscountPct: state.feeConfig.hmcDiscountPct,
+    feeRole,
+    feeBps,
+    showTif,
+    labMmSeeded: tradingGuards.labMmSeeded,
+    labLive: useLabMatching(),
+  });
+  applyRestingLimitPrices(spotTradeMid(), state.activePair);
+  wireOrderPanelEvents();
+  toggleOrderFields();
+  syncPctMarks("buy");
+  syncPctMarks("sell");
+  updatePreview();
+}
+
+function wireOrderPanelEvents(): void {
+  document.querySelectorAll("#type-tabs .type").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const next = (btn as HTMLElement).dataset.type as OrderKind;
+      const prev = uiType;
+      uiType = next;
+      syncOrderTypeTabs(uiType);
+      toggleOrderFields();
+      if ((next === "limit" || next === "stop_limit") && prev !== next) {
+        applyRestingLimitPrices(spotTradeMid(), state.activePair);
+      }
+      updatePreview();
+    });
+  });
+  document.getElementById("order-type-adv")?.addEventListener("change", (e) => {
+    const v = (e.target as HTMLSelectElement).value as OrderKind;
+    if (!v) return;
+    const prev = uiType;
+    uiType = v;
+    syncOrderTypeTabs(uiType);
+    toggleOrderFields();
+    if ((v === "limit" || v === "stop_limit") && prev !== v) {
+      applyRestingLimitPrices(spotTradeMid(), state.activePair);
+    }
+    updatePreview();
+  });
+  (["buy", "sell"] as const).forEach((side) => {
+    document.getElementById(`btn-${side}`)?.addEventListener("click", () => submitOrder(side));
+    document.getElementById(`${side}-amt`)?.addEventListener("input", () => {
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      if (slider) {
+        slider.value = "0";
+        syncPctMarks(side);
+      }
+      updatePreviewForSide(side);
+    });
+    document.getElementById(`${side}-price`)?.addEventListener("input", () => {
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      const pct = Number(slider?.value ?? 0);
+      if (pct > 0) setAmountPct(side, pct / 100);
+      updatePreviewForSide(side);
+    });
+  });
+  document.querySelectorAll("[data-avail-side]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const side = (btn as HTMLElement).dataset.availSide as "buy" | "sell";
+      setAmountPct(side, 1);
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      if (slider) slider.value = "100";
+      syncPctMarks(side);
+      updatePreviewForSide(side);
+    });
+  });
+  document.querySelectorAll(".pct-slider").forEach((el) => {
+    el.addEventListener("input", () => {
+      const side = (el as HTMLElement).dataset.side as "buy" | "sell";
+      const pct = Number((el as HTMLInputElement).value) / 100;
+      setAmountPct(side, pct);
+      syncPctMarks(side);
+      updatePreviewForSide(side);
+    });
+  });
+  document.querySelectorAll(".pct-marks button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const side = (btn as HTMLElement).dataset.side as "buy" | "sell";
+      const pct = Number((btn as HTMLElement).dataset.pct);
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      if (slider) slider.value = String(pct);
+      setAmountPct(side, pct / 100);
+      syncPctMarks(side);
+      updatePreviewForSide(side);
+    });
+  });
+  document.querySelectorAll(".quick-size button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const side = (btn as HTMLElement).dataset.side as "buy" | "sell";
+      const qs = (btn as HTMLElement).dataset.qs!;
+      const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
+      if (!amtInp) return;
+      if (qs === "max") {
+        if (!confirm(`Set amount to MAX available ${side.toUpperCase()}? (Paper demo)`)) return;
+        setAmountPct(side, 1);
+        const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+        if (slider) slider.value = "100";
+        syncPctMarks(side);
+      } else {
+        const add = Number(qs);
+        const cur = Number(amtInp.value) || 0;
+        amtInp.value = String(cur + add);
+      }
+      updatePreviewForSide(side);
+    });
+  });
+  document.querySelectorAll("[data-tpsl-side]").forEach((el) => {
+    el.addEventListener("change", () => {
+      const side = (el as HTMLElement).dataset.tpslSide as "buy" | "sell";
+      const fields = document.getElementById(`${side}-tpsl-fields`);
+      fields?.classList.toggle("hidden", !(el as HTMLInputElement).checked);
+    });
+  });
+  document.querySelectorAll(".btn-bbo").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const side = (btn as HTMLElement).dataset.bbo as "buy" | "sell";
+      const t = activeTicker();
+      const labLive = useLabMatching();
+      const lab = labLive ? getLabBookCache(state.activePair) : null;
+      if (labLive && (!lab || (!lab.bids.length && !lab.asks.length))) {
+        toast("Lab book not ready", "warn");
+        return;
+      }
+      const ask = lab?.asks[0]?.price || t.ask;
+      const bid = lab?.bids[0]?.price || t.bid;
+      const inp = document.getElementById(`${side}-price`) as HTMLInputElement;
+      if (inp) inp.value = tickInputValue(side === "buy" ? bid : ask, state.activePair);
+      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+      const pct = Number(slider?.value ?? 0);
+      if (pct > 0) setAmountPct(side, pct / 100);
+      updatePreviewForSide(side);
+    });
+  });
+}
+
+function patchActivePairChrome(): void {
+  patchTickerBar();
+  patchRecentPairsStrip();
+  patchMarketRowsInPlace();
+  softPatchFeePayChrome();
+  const alertCount = state.priceAlerts.filter((a) => a.pairId === state.activePair && !a.fired).length;
+  const alertsBtn = document.getElementById("btn-open-alerts");
+  if (alertsBtn) alertsBtn.textContent = `Alerts${alertCount ? ` · ${alertCount}` : ""}`;
+  const book = document.getElementById("book");
+  if (book) {
+    book.innerHTML = renderBook();
+    wireBookTabs();
+  }
+  const tape = document.getElementById("mobile-trade-tape");
+  if (tape) tape.innerHTML = renderMobileTradeTape();
+  const strip = document.getElementById("mining-strip");
+  if (strip && poolLive) {
+    const pair = pairById(state.activePair);
+    strip.textContent = `${pair.label} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · reward/M ${formatRewardPerM(poolLive.rewardPerM)} · #${formatNum(poolLive.blockHeight, 0)}`;
+  }
+  refreshOrderZone();
+}
+
+function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): void {
+  if (pairId === state.activePair) return;
+  state.activePair = pairId;
+  pushRecentPair(pairId);
+  saveState(state);
+  syncRouteHash();
+  ensurePublicTape(true);
+  lastOhlc = null;
+  closeQuickOrderPopup();
+  setChartPreviewPrice(null);
+  refreshSecondaryChartOrderLines();
+
+  if (opts?.mobileTrade && isMobileLayout()) {
+    mobilePanel = "trade";
+    saveMobilePanel("trade");
+    document.getElementById("terminal")?.setAttribute("data-mobile-panel", "trade");
+    document.querySelectorAll(".mp-tab").forEach((tab) => {
+      const on = (tab as HTMLElement).id === "mp-tab-trade";
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+
+  patchActivePairChrome();
+
+  if (useLabMatching()) {
+    void refreshLabBook(pairId).then(() => {
+      const bookEl = document.getElementById("book");
+      if (bookEl) {
+        bookEl.innerHTML = renderBook();
+        wireBookTabs();
+      }
+      throttledBookTapePatch();
+    });
+  }
+
+  const candles = state.candles[pairId]?.[state.activeTf] ?? [];
+  const chartOpt = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
+  if (chartMounted && switchChartPair(candles, chartOpt)) {
+    refreshOhlcLegendIdle();
+    refreshDrawings(state.drawings.filter((d) => d.pairId === pairId));
+    setActiveDrawTool(state.activeDrawTool);
+  } else {
+    mountChartPanel();
+  }
+
+  bookFlashSnap = snapshotBookLevels(document.getElementById("book"));
+  refreshActivityPanel();
+  void refresh();
 }
 
 /** Spot header / order defaults: lab L2 mid when fixture matching is live. */
@@ -1713,14 +1994,23 @@ function wireConvertDesk(): void {
   document.getElementById("cv-open-spot")?.addEventListener("click", () => {
     const route = routeForAssets(convertFrom, convertTo);
     const pair = route ? convertRouteDef(route)?.pair : null;
-    if (pair) {
-      state.activePair = pair;
-      pushRecentPair(pair);
-    }
+    const viewWasSpot = state.mainView === "spot";
     state.mainView = "spot";
     saveState(state);
     syncRouteHash();
+    if (viewWasSpot && pair) {
+      switchActivePair(pair);
+      return;
+    }
+    if (pair) {
+      state.activePair = pair;
+      pushRecentPair(pair);
+      saveState(state);
+    }
+    ensurePublicTape(true);
+    chartMounted = false;
     render();
+    void refresh();
   });
 
   refreshConvertPreview();
@@ -1903,6 +2193,7 @@ function renderSpot(): string {
         </aside>
         <div class="chart-main">
           <div class="ohlc-legend mono" id="ohlc-legend">${ohlc}</div>
+          <div class="mobile-ohlc-bar mono" id="mobile-ohlc-bar" aria-live="polite">${ohlc}</div>
           <div class="chart-split ${layoutClass}">
             <div id="chart-host" class="chart-host"></div>
             ${state.multiChartLayout !== "1" ? `<div id="chart-host-2" class="chart-host chart-host-sub"></div>` : ""}
@@ -3107,6 +3398,7 @@ function handleChartPricePick(
     quoteSymbol: pair.quote,
     defaultAmount,
     mobileSheet: isMobileLayout(),
+    skipConfirm: state.chartOverlays.quickOrderSkipConfirm,
     validate: buildQuickOrderValidation(pairId, price),
     onSidePreview: (side) => {
       if (overlays.orderPreview) {
@@ -3323,16 +3615,22 @@ function openPaneContextMenu(pairId: PairId, paneHostId: string, price: number, 
 
 function refreshOhlcLegendIdle(): void {
   const el = document.getElementById("ohlc-legend");
-  if (!el) return;
+  const mob = document.getElementById("mobile-ohlc-bar");
   const ha = state.chartMode === "heikin" ? "HA " : "";
   const tip =
     state.chartMode === "heikin"
       ? getDisplayedLastCandle()
       : (state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null);
+  let text: string;
   if (tip) {
-    el.textContent = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
+    text = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
   } else {
-    el.textContent = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
+    text = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
+  }
+  if (el) el.textContent = text;
+  if (mob && isMobileLayout()) {
+    mob.textContent = text;
+    mob.classList.remove("hidden", "live");
   }
 }
 
@@ -3348,15 +3646,7 @@ function mountChartPanel(): void {
     drawingsLocked: state.drawingsLocked,
     onCrosshair: (c) => {
       lastOhlc = c;
-      const el = document.getElementById("ohlc-legend");
-      if (!el) return;
-      const ha = state.chartMode === "heikin" ? "HA " : "";
-      if (c) {
-        el.textContent = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
-        return;
-      }
-      // Idle: last bar OHLC — never fake C=ticker.mid with empty O/H/L.
-      refreshOhlcLegendIdle();
+      updateOhlcDisplays(c);
     },
     onOrderPriceDrag: (id, price) => {
       updateOrderPrice(state, id, price);
@@ -3436,12 +3726,7 @@ function panePair(pane: number): PairId {
 
 function setPanePair(pane: number, pairId: PairId): void {
   if (pane <= 1) {
-    if (pairId === state.activePair) return;
-    state.activePair = pairId;
-    saveState(state);
-    syncRouteHash();
-    render();
-    refresh();
+    switchActivePair(pairId);
     return;
   }
   const next = [...(state.multiPanePairs ?? DEFAULT_MULTI_PANE_PAIRS)] as MultiPanePairs;
@@ -4663,9 +4948,13 @@ function wireOracleRetry(): void {
 }
 
 function patchMarketRowsInPlace(): void {
-  document.querySelectorAll<HTMLElement>(".market-row[data-pair]").forEach((row) => {
-    const pid = row.dataset.pair as PairId | undefined;
-    if (!pid) return;
+  document.querySelectorAll<HTMLElement>(".market-row-wrap").forEach((wrap) => {
+    const row = wrap.querySelector(".market-row") as HTMLElement | null;
+    const pid = row?.dataset.pair as PairId | undefined;
+    if (!pid || !row) return;
+    const on = pid === state.activePair;
+    wrap.classList.toggle("active", on);
+    row.classList.toggle("active", on);
     const q = pairQuote(pid);
     const px = row.querySelector(".mr-px");
     const ch = row.querySelector(".mr-chg");
@@ -5042,133 +5331,7 @@ function wireEvents(): void {
 
   wireBookTabs();
 
-  document.querySelectorAll("#type-tabs .type").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const next = (btn as HTMLElement).dataset.type as OrderKind;
-      const prev = uiType;
-      uiType = next;
-      syncOrderTypeTabs(uiType);
-      toggleOrderFields();
-      if ((next === "limit" || next === "stop_limit") && prev !== next) {
-        applyRestingLimitPrices(spotTradeMid(), state.activePair);
-      }
-      updatePreview();
-    });
-  });
-  document.getElementById("order-type-adv")?.addEventListener("change", (e) => {
-    const v = (e.target as HTMLSelectElement).value as OrderKind;
-    if (!v) return;
-    const prev = uiType;
-    uiType = v;
-    syncOrderTypeTabs(uiType);
-    toggleOrderFields();
-    if ((v === "limit" || v === "stop_limit") && prev !== v) {
-      applyRestingLimitPrices(spotTradeMid(), state.activePair);
-    }
-    updatePreview();
-  });
-
-  (["buy", "sell"] as const).forEach((side) => {
-    document.getElementById(`btn-${side}`)?.addEventListener("click", () => submitOrder(side));
-    document.getElementById(`${side}-amt`)?.addEventListener("input", () => {
-      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-      if (slider) {
-        slider.value = "0";
-        syncPctMarks(side);
-      }
-      updatePreviewForSide(side);
-    });
-    document.getElementById(`${side}-price`)?.addEventListener("input", () => {
-      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-      const pct = Number(slider?.value ?? 0);
-      if (pct > 0) setAmountPct(side, pct / 100);
-      updatePreviewForSide(side);
-    });
-  });
-
-  document.querySelectorAll("[data-avail-side]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const side = (btn as HTMLElement).dataset.availSide as "buy" | "sell";
-      setAmountPct(side, 1);
-      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-      if (slider) slider.value = "100";
-      syncPctMarks(side);
-      updatePreviewForSide(side);
-    });
-  });
-
-  document.querySelectorAll(".pct-slider").forEach((el) => {
-    el.addEventListener("input", () => {
-      const side = (el as HTMLElement).dataset.side as "buy" | "sell";
-      const pct = Number((el as HTMLInputElement).value) / 100;
-      setAmountPct(side, pct);
-      syncPctMarks(side);
-      updatePreviewForSide(side);
-    });
-  });
-
-  document.querySelectorAll(".pct-marks button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const side = (btn as HTMLElement).dataset.side as "buy" | "sell";
-      const pct = Number((btn as HTMLElement).dataset.pct);
-      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-      if (slider) slider.value = String(pct);
-      setAmountPct(side, pct / 100);
-      syncPctMarks(side);
-      updatePreviewForSide(side);
-    });
-  });
-
-  document.querySelectorAll(".quick-size button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const side = (btn as HTMLElement).dataset.side as "buy" | "sell";
-      const qs = (btn as HTMLElement).dataset.qs!;
-      const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
-      if (!amtInp) return;
-      if (qs === "max") {
-        if (!confirm(`Set amount to MAX available ${side.toUpperCase()}? (Paper demo)`)) return;
-        setAmountPct(side, 1);
-        const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-        if (slider) slider.value = "100";
-        syncPctMarks(side);
-      } else {
-        const add = Number(qs);
-        const cur = Number(amtInp.value) || 0;
-        amtInp.value = String(cur + add);
-      }
-      updatePreviewForSide(side);
-    });
-  });
-
-  document.querySelectorAll("[data-tpsl-side]").forEach((el) => {
-    el.addEventListener("change", () => {
-      const side = (el as HTMLElement).dataset.tpslSide as "buy" | "sell";
-      const fields = document.getElementById(`${side}-tpsl-fields`);
-      fields?.classList.toggle("hidden", !(el as HTMLInputElement).checked);
-    });
-  });
-
-  document.querySelectorAll(".btn-bbo").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const side = (btn as HTMLElement).dataset.bbo as "buy" | "sell";
-      const t = activeTicker();
-      const labLive = useLabMatching();
-      const lab = labLive ? getLabBookCache(state.activePair) : null;
-      if (labLive && (!lab || (!lab.bids.length && !lab.asks.length))) {
-        toast("Lab book not ready", "warn");
-        return;
-      }
-      const ask = lab?.asks[0]?.price || t.ask;
-      const bid = lab?.bids[0]?.price || t.bid;
-      // Resting BBO: buy→bid, sell→ask (does not instantly cross).
-      const inp = document.getElementById(`${side}-price`) as HTMLInputElement;
-      if (inp) inp.value = tickInputValue(side === "buy" ? bid : ask, state.activePair);
-      const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
-      const pct = Number(slider?.value ?? 0);
-      if (pct > 0) setAmountPct(side, pct / 100);
-      updatePreviewForSide(side);
-    });
-  });
+  wireOrderPanelEvents();
 
   document.getElementById("pay-fees-hmc")?.addEventListener("change", (e) => {
     state.feeConfig.payFeesInHmc = (e.target as HTMLInputElement).checked;
@@ -5285,17 +5448,7 @@ function wireMarketRows(): void {
     btn.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).classList.contains("star")) return;
       const pair = (btn as HTMLElement).dataset.pair as PairId;
-      if (isMobileLayout()) {
-        mobilePanel = "trade";
-        saveMobilePanel("trade");
-      }
-      state.activePair = pair;
-      pushRecentPair(pair);
-      saveState(state);
-      ensurePublicTape(true);
-      chartMounted = false;
-      syncRouteHash();
-      render();
+      switchActivePair(pair, { mobileTrade: isMobileLayout() });
     });
   });
   document.querySelectorAll(".star").forEach((btn) => {
@@ -5314,13 +5467,7 @@ function wireMarketRows(): void {
   document.querySelectorAll("[data-recent-pair]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const pair = (btn as HTMLElement).dataset.recentPair as PairId;
-      state.activePair = pair;
-      pushRecentPair(pair);
-      saveState(state);
-      ensurePublicTape(true);
-      chartMounted = false;
-      syncRouteHash();
-      render();
+      switchActivePair(pair);
     });
   });
 }
@@ -5836,11 +5983,19 @@ export async function boot(): Promise<void> {
     /* ignore */
   }
   window.addEventListener("hashchange", () => {
+    const prevPair = state.activePair;
+    const prevTf = state.activeTf;
+    const prevView = state.mainView;
     applyHashToState();
     saveState(state);
-    chartMounted = false;
     ensurePublicTape(true);
-    render();
+    if (state.mainView === "spot" && prevView === "spot") {
+      if (state.activePair !== prevPair) switchActivePair(state.activePair);
+      else if (state.activeTf !== prevTf) setPaneTf(1, state.activeTf);
+    } else {
+      chartMounted = false;
+      render();
+    }
   });
   if (typeof window !== "undefined") {
     const w = window as Window & { __hackmeExchangeDebug?: Record<string, unknown> };

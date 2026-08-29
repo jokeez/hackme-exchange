@@ -231,7 +231,8 @@ export function showOverlayMenu(
     <label><input type="checkbox" id="ov-orders" ${o.showOrderLines ? "checked" : ""} /> Order lines</label>
     <label><input type="checkbox" id="ov-last" ${o.showLastPrice ? "checked" : ""} /> Last price line</label>
     <label><input type="checkbox" id="ov-preview" ${o.orderPreview && o.quickOrder ? "checked" : ""} ${o.quickOrder ? "" : "disabled"} /> Order preview</label>
-    <label><input type="checkbox" id="ov-quick" ${o.quickOrder ? "checked" : ""} /> Quick order</label>`;
+    <label><input type="checkbox" id="ov-quick" ${o.quickOrder ? "checked" : ""} /> Quick order</label>
+    <label><input type="checkbox" id="ov-skip-confirm" ${o.quickOrderSkipConfirm ? "checked" : ""} ${o.quickOrder ? "" : "disabled"} /> Skip confirm</label>`;
   const prevTitle = anchor.getAttribute("title");
   if (prevTitle) anchor.removeAttribute("title");
   positionPopMenu(anchor, menu, 188);
@@ -239,11 +240,17 @@ export function showOverlayMenu(
 
   const quickInp = menu.querySelector("#ov-quick") as HTMLInputElement;
   const previewInp = menu.querySelector("#ov-preview") as HTMLInputElement;
+  const skipInp = menu.querySelector("#ov-skip-confirm") as HTMLInputElement;
   const syncPreviewGate = () => {
     const on = quickInp.checked;
     previewInp.disabled = !on;
+    skipInp.disabled = !on;
     previewInp.closest("label")?.classList.toggle("ov-disabled", !on);
-    if (!on) previewInp.checked = false;
+    skipInp.closest("label")?.classList.toggle("ov-disabled", !on);
+    if (!on) {
+      previewInp.checked = false;
+      skipInp.checked = false;
+    }
   };
   syncPreviewGate();
 
@@ -260,6 +267,7 @@ export function showOverlayMenu(
       showLastPrice: (menu.querySelector("#ov-last") as HTMLInputElement).checked,
       orderPreview: previewInp.checked,
       quickOrder: quickInp.checked,
+      quickOrderSkipConfirm: skipInp.checked,
     });
     previewInp.checked = patch.orderPreview;
     // Keep menu open so multiple overlays can be toggled in one pass.

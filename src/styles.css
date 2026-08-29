@@ -4086,6 +4086,32 @@ html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
   border-radius: 999px; background: rgba(255,255,255,.22);
 }
 .chart-quick-order .hidden { display: none !important; }
+
+.mobile-ohlc-bar {
+  display: none;
+  position: absolute;
+  left: 0.35rem;
+  right: 0.35rem;
+  top: 0.12rem;
+  z-index: 4;
+  padding: 0.22rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(8, 12, 22, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.62rem;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.mobile-layout .mobile-ohlc-bar {
+  display: block;
+}
+html.mobile-layout .mobile-ohlc-bar.live {
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.28);
+  color: var(--text);
+}
 body.cqo-sheet-open { overflow: hidden; }
 html.mobile-layout .chart-quick-order.sheet .cqo-actions button {
   min-height: 2.75rem;

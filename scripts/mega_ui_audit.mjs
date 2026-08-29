@@ -360,6 +360,37 @@ async function testChartQuickOrderNoPanPopup(page) {
   else ok("quick order Esc closes popup");
 }
 
+async function testPairSwitchLight(page) {
+  await dismissOverlays(page);
+  await waitChart(page);
+  const rows = page.locator(".market-row");
+  const n = await rows.count();
+  if (n < 2) {
+    note("P2", "pair-switch-rows", "need 2+ market rows");
+    return;
+  }
+  let otherIdx = -1;
+  for (let i = 0; i < n; i++) {
+    const pid = await rows.nth(i).getAttribute("data-pair");
+    if (pid && pid !== "HMC_USDT") {
+      otherIdx = i;
+      break;
+    }
+  }
+  if (otherIdx < 0) otherIdx = 1;
+  const mountedBefore = await page.evaluate(() => !!document.querySelector("#chart-host .chart-inner canvas"));
+  await rows.nth(otherIdx).click();
+  await sleep(500);
+  const mountedAfter = await page.evaluate(() => !!document.querySelector("#chart-host .chart-inner canvas"));
+  const title = await page.locator(".tb-pair h1").textContent();
+  if (!mountedAfter) note("P1", "pair-switch-chart", "chart missing after pair switch");
+  else if (mountedBefore && mountedAfter) ok("pair switch keeps chart mounted (no full remount flash)");
+  if (!title || title.includes("HMC")) note("P2", "pair-switch-title", `title still ${title}`);
+  else ok(`pair switch updates ticker (${title?.trim()})`);
+  await page.locator('.market-row[data-pair="HMC_USDT"]').click();
+  await sleep(400);
+}
+
 async function testTfViewportPersistence(page) {
   await dismissOverlays(page);
   await waitChart(page);
@@ -1243,6 +1274,7 @@ async function testDesktopDeep(browser) {
     await testDesktopOverlayMenu(page);
     await testChartToolbarButtons(page);
     await testChartQuickOrderNoPanPopup(page);
+    await testPairSwitchLight(page);
     await testTfViewportPersistence(page);
     await testInlineOrderAmend(page);
     await testAdvancedOrderTypes(page);

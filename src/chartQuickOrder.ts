@@ -12,6 +12,7 @@ export type QuickOrderHandlers = {
   quoteSymbol: string;
   defaultAmount: number;
   mobileSheet?: boolean;
+  skipConfirm?: boolean;
   validate?: QuickOrderValidation;
   onPlace: (side: "buy" | "sell", price: number, amount: number) => void;
   onSidePreview?: (side: "buy" | "sell" | null) => void;
@@ -212,6 +213,12 @@ export function showQuickOrderPopup(
         showErr(check.reason);
         return;
       }
+    }
+    if (handlers.skipConfirm) {
+      handlers.onPlace(side, price, amt);
+      hapticSuccess();
+      finish();
+      return;
     }
     showConfirm(side, amt);
   };
