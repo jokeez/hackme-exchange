@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export EX_UI_BASE="${EX_UI_BASE:-http://127.0.0.1:5199/}"
 
+echo "[e2e] paper build (preview serves dist/)"
+VITE_INTEGRATION_MODE=paper VITE_LAB_API=0 VITE_EXCHANGE_API_ORIGIN= npm run build
+
 echo "[e2e] vitest"
 npm test
 
