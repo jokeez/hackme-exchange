@@ -59,11 +59,18 @@ describe("price scale wheel helpers", () => {
     expect(b).toBeGreaterThan(a);
   });
 
-  it("plotWheelAnchorShift matches LWC cursor-anchored zoom math", () => {
-    expect(plotWheelAnchorShift(400, 8, 16)).toBeCloseTo(25, 5);
-    expect(plotWheelAnchorShift(400, 16, 8)).toBeCloseTo(-25, 5);
-    expect(plotWheelAnchorShift(0, 8, 16)).toBe(0);
-    expect(plotWheelAnchorShift(320, 10, 12)).toBeCloseTo(320 * (0.1 - 1 / 12), 5);
+  it("plotWheelAnchorShift matches LWC TimeScale._internal_zoom offset math", () => {
+    const w = 800;
+    expect(plotWheelAnchorShift(400, 8, 16, w)).toBeCloseTo(399 * (1 / 16 - 1 / 8), 5);
+    expect(plotWheelAnchorShift(400, 16, 8, w)).toBeCloseTo(399 * (1 / 8 - 1 / 16), 5);
+    expect(plotWheelAnchorShift(320, 10, 12, w)).toBeCloseTo(479 * (1 / 12 - 1 / 10), 5);
+    expect(plotWheelAnchorShift(0, 8, 16, w)).toBeCloseTo(799 * (1 / 16 - 1 / 8), 5);
+  });
+
+  it("smoothPlotBarSpacing changes ~5% per mouse notch", () => {
+    expect(smoothPlotBarSpacing(10, 120)).toBeCloseTo(10.5, 1);
+    expect(smoothPlotBarSpacing(10, -120)).toBeCloseTo(9.5, 1);
+    expect(smoothPlotBarSpacing(10, 40)).toBeCloseTo(10.17, 1);
   });
 
   it("heals a near-zero corrupted price window back to the instrument", () => {

@@ -38,7 +38,7 @@ import {
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { chartInteractionOptions, isMobileLayout } from "./mobile";
+import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
 
 const SCHEMES = {
   classic: { up: "#00e676", down: "#ff5252" },
@@ -126,7 +126,10 @@ const PRICE_WHEEL_UNIT = 140;
 /** Plot zoom: min/max bar spacing (px) — 3px floor keeps candles crisp on small TFs. */
 export const MIN_PLOT_BAR_SPACING = 3;
 export const MAX_PLOT_BAR_SPACING = 56;
-/** Binance-like: wheel away (deltaY > 0) zooms in; smooth exponential per frame. */
+/** Plot wheel: pixels for one full ±5% bar-spacing step (one mouse notch ≈ 120px). */
+export const PLOT_WHEEL_UNIT = 120;
+const PLOT_WHEEL_STEP_RATIO = 0.05;
+/** @deprecated plot zoom uses PLOT_WHEEL_UNIT linear steps; kept for price-span helper */
 export const PLOT_WHEEL_ZOOM_SENSITIVITY = 0.0022;
 
 export type PaneDrawHost = {
@@ -462,7 +465,9 @@ function applyIndicators(candles: Candle[], settings: ChartSettings, maConfig?: 
     });
     s.setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
     if (scaleId && scaleId !== "right") {
-      chart!.priceScale(scaleId).applyOptions({ scaleMargins: { top: 0.78, bottom: 0.02 }, visible: false });
+      const hostH = hostEl?.clientHeight ?? 0;
+      const oscTop = isMobileLayout() && hostH > 0 && hostH < 460 ? 0.62 : 0.78;
+      chart!.priceScale(scaleId).applyOptions({ scaleMargins: { top: oscTop, bottom: 0.04 }, visible: false });
     }
     return s;
   };
@@ -1189,11 +1194,11 @@ export function normalizeWheelDeltaY(e: Pick<WheelEvent, "deltaY" | "deltaMode">
  * Map raw wheel pixels to a discrete zoom step in [-1, 1].
  * Mouse notches (~100–140px) → ±1; trackpad noise is accumulated by the caller.
  */
-export function wheelZoomStep(deltaY: number, accumulated = 0): { step: number; residual: number } {
+export function wheelZoomStep(deltaY: number, accumulated = 0, unit = PRICE_WHEEL_UNIT): { step: number; residual: number } {
   const total = accumulated + deltaY;
-  const notches = Math.trunc(total / PRICE_WHEEL_UNIT);
+  const notches = Math.trunc(total / unit);
   // Drop unused notches from residual so a mega-delta cannot queue fly-aways.
-  const residual = total - notches * PRICE_WHEEL_UNIT;
+  const residual = total - notches * unit;
   if (notches === 0) return { step: 0, residual };
   const step = Math.max(-1, Math.min(1, notches));
   return { step, residual };
@@ -1460,10 +1465,10 @@ export function zoomBarSpacing(current: number, step: number): number {
 /** Smooth CEX plot zoom — positive deltaY (wheel away) increases bar spacing (zoom in). */
 export function smoothPlotBarSpacing(current: number, deltaY: number): number {
   if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.25) return current;
-  const expArg = Math.max(-0.16, Math.min(0.16, deltaY * PLOT_WHEEL_ZOOM_SENSITIVITY));
-  const factor = Math.exp(expArg);
-  const next = current * factor;
-  const quantized = Math.round(next * 80) / 80;
+  const scale = Math.sign(deltaY) * Math.min(1, Math.abs(deltaY) / PLOT_WHEEL_UNIT);
+  if (Math.abs(scale) < 0.01) return current;
+  const next = current * (1 + scale * PLOT_WHEEL_STEP_RATIO);
+  const quantized = Math.round(next * 100) / 100;
   return Math.max(MIN_PLOT_BAR_SPACING, Math.min(MAX_PLOT_BAR_SPACING, quantized));
 }
 
@@ -1473,81 +1478,108 @@ type PlotWheelTimeScale = {
   getVisibleLogicalRange: () => { from: number; to: number } | null;
   setVisibleLogicalRange: (r: { from: number; to: number }) => void;
   coordinateToTime: (x: number) => unknown;
+  coordinateToLogical: (x: number) => number | null;
   timeToCoordinate: (time: UTCTimestamp) => number | null;
+  scrollPosition: () => number;
+  scrollToPosition: (position: number, animated: boolean) => void;
 };
 
-/** Plot X in px from viewport clientX (plot canvas origin). */
-export function plotCoordFromClient(clientX: number, shell: HTMLElement): number {
+/** Plot cell in the LWC table (middle column; col 0 is gutter, col 2 is price scale). */
+function plotCellFromShell(el: HTMLElement): HTMLElement | null {
+  const row = el.querySelector(".tv-lightweight-charts table tr");
+  if (!row) return null;
+  const cells = [...row.querySelectorAll("td")];
+  const plot =
+    cells.find((c) => c.clientWidth > 48 && c !== cells[cells.length - 1]) ??
+    cells.find((c) => c.clientWidth > 48) ??
+    null;
+  return plot;
+}
+
+export type PlotMetrics = { x: number; width: number };
+
+/** Plot-area X + width from the LWC plot cell (excludes the price-scale column). */
+export function plotMetricsFromClient(clientX: number, shell: HTMLElement): PlotMetrics {
   const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
   const el = inner ?? shell;
-  const rect = el.getBoundingClientRect();
-  // LWC table cells often report clientWidth=0 — use the plot canvas bounds.
-  const plotCanvas = el.querySelector<HTMLCanvasElement>(
-    ".tv-lightweight-charts table tr:first-child td:first-child canvas",
-  );
-  let plotLeft = rect.left;
-  let plotW = Math.max(40, el.clientWidth - 72);
-  if (plotCanvas) {
-    const cr = plotCanvas.getBoundingClientRect();
-    if (cr.width >= 8) {
-      plotLeft = cr.left;
-      plotW = cr.width;
-    }
-  } else {
-    const scaleCell = el.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child");
-    const scaleW = scaleCell?.getBoundingClientRect().width ?? 72;
-    plotW = Math.max(40, rect.width - scaleW);
+  const plotCell = plotCellFromShell(el);
+  if (plotCell) {
+    const plotRect = plotCell.getBoundingClientRect();
+    const width = Math.max(40, plotRect.width);
+    const x = Math.max(0, Math.min(width - 1, clientX - plotRect.left));
+    return { x, width };
   }
-  const x = clientX - plotLeft;
-  return Math.max(0, Math.min(plotW - 1, x));
+  const rect = el.getBoundingClientRect();
+  const scaleCell = el.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child");
+  const scaleW = scaleCell?.getBoundingClientRect().width ?? 72;
+  const width = Math.max(40, rect.width - scaleW);
+  const x = Math.max(0, Math.min(width - 1, clientX - rect.left));
+  return { x, width };
+}
+
+/** Plot width in px (LWC time-scale width = plot cell width, not price-scale column). */
+export function plotWidthFromShell(shell: HTMLElement): number {
+  const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
+  const el = inner ?? shell;
+  const plotCell = plotCellFromShell(el);
+  if (plotCell) return Math.max(40, plotCell.getBoundingClientRect().width);
+  const scaleCell = el.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child");
+  const scaleW = scaleCell?.getBoundingClientRect().width ?? 72;
+  return Math.max(40, (el.clientWidth || el.getBoundingClientRect().width) - scaleW);
+}
+
+/** Plot X in px from viewport clientX (plot-canvas origin — matches LWC coordinateToTime). */
+export function plotCoordFromClient(clientX: number, shell: HTMLElement): number {
+  return plotMetricsFromClient(clientX, shell).x;
 }
 
 /**
  * LWC-matching logical shift: keep the bar under `coordPx` fixed when bar spacing changes.
- * See lightweight-charts TimeScale.zoom() — adjust offset by bars-from-left * (1 - prev/next).
+ * Uses (width - 1 - coord) from TimeScale._rightOffsetForCoordinate — not raw coord.
  */
-export function plotWheelAnchorShift(coordPx: number, prevSpacing: number, nextSpacing: number): number {
-  if (!(coordPx > 0) || !(prevSpacing > 0) || !(nextSpacing > 0)) return 0;
+export function plotWheelAnchorShift(
+  coordPx: number,
+  prevSpacing: number,
+  nextSpacing: number,
+  plotWidth: number,
+): number {
+  if (!(plotWidth > 1) || !(prevSpacing > 0) || !(nextSpacing > 0)) return 0;
   if (Math.abs(nextSpacing - prevSpacing) < 1e-6) return 0;
-  return coordPx * (1 / prevSpacing - 1 / nextSpacing);
+  const fromRight = Math.max(0, plotWidth - 1 - coordPx);
+  return fromRight * (1 / nextSpacing - 1 / prevSpacing);
 }
+
+type PlotWheelChart = {
+  timeScale: () => PlotWheelTimeScale;
+  applyOptions: (o: { timeScale?: { barSpacing?: number; minBarSpacing?: number; rightBarStaysOnScroll?: boolean } }) => void;
+};
 
 /** Zoom time scale under cursor — keeps anchor bar under the mouse (Binance/TV feel). */
 export function applyPlotWheelZoom(
-  ts: PlotWheelTimeScale,
+  chartApi: PlotWheelChart,
   shell: HTMLElement,
   clientX: number,
   deltaY: number,
 ): number {
+  const ts = chartApi.timeScale();
   const prev = ts.options().barSpacing ?? 8;
   const next = smoothPlotBarSpacing(prev, deltaY);
   if (Math.abs(next - prev) < 1e-4) return prev;
 
-  const lr = ts.getVisibleLogicalRange();
-  const plotX = plotCoordFromClient(clientX, shell);
-  const anchorTime = ts.coordinateToTime(plotX);
+  const { x: plotX, width: plotW } = plotMetricsFromClient(clientX, shell);
+  const deltaLogical = plotWheelAnchorShift(plotX, prev, next, plotW);
 
-  if (!lr || anchorTime == null) {
-    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
-    return next;
-  }
+  chartApi.applyOptions({
+    timeScale: { barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false },
+  });
 
-  const coordBefore = ts.timeToCoordinate(anchorTime as UTCTimestamp);
-  if (coordBefore == null || !Number.isFinite(coordBefore)) {
-    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
-    return next;
-  }
+  if (Math.abs(deltaLogical) < 1e-6) return next;
 
-  const deltaLogical = plotWheelAnchorShift(coordBefore, prev, next);
   try {
-    ts.setVisibleLogicalRange({
-      from: (lr.from as number) + deltaLogical,
-      to: (lr.to as number) + deltaLogical,
-    });
+    ts.scrollToPosition(ts.scrollPosition() + deltaLogical, false);
   } catch {
     /* ignore */
   }
-  ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
   return next;
 }
 
@@ -2547,10 +2579,11 @@ function bindChartDebugProbe(): void {
     priceAnchorFromPointer,
     applyMainPlotWheel(dy: number, clientX: number) {
       if (!chart || !hostEl) return null;
-      applyPlotWheelZoom(chart.timeScale(), hostEl, clientX, dy);
+      applyPlotWheelZoom(chart, hostEl, clientX, dy);
       bumpTimeSyncPane("chart-host");
       return getMainViewportDebug();
     },
+    getMainViewport: getMainViewportDebug,
     plotCoordFromClient(clientX: number) {
       if (!hostEl) return 0;
       return plotCoordFromClient(clientX, hostEl);
@@ -2817,9 +2850,10 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   const onWheel = (e: WheelEvent) => {
     if (isMobileLayout()) return;
     if (!chart || !candleSeries) return;
-    const target = e.target as Node | null;
+    const target = e.target;
     const inHost =
-      (target != null && host.contains(target)) || e.composedPath().some((n) => n === host);
+      (target instanceof Node && host.contains(target)) ||
+      e.composedPath().some((n) => n === host);
     if (!inHost) return;
 
     if (isOverPriceScaleEl(e.clientX, e.clientY, host)) {
@@ -2886,7 +2920,10 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
 
     const dy = normalizeWheelDeltaY(e, host.clientHeight || 400);
-    applyPlotWheelZoom(chart.timeScale(), host, e.clientX, dy);
+    const { step, residual } = wheelZoomStep(dy, plotWheelResidual, PLOT_WHEEL_UNIT);
+    plotWheelResidual = residual;
+    if (!step) return;
+    applyPlotWheelZoom(chart, host, e.clientX, step * PLOT_WHEEL_UNIT);
     bumpTimeSyncPane("chart-host");
   };
   const onDblClick = (e: MouseEvent) => {
@@ -3054,7 +3091,9 @@ export function resizeChart(): void {
   if (!chart || !hostEl) return;
   const inner = hostEl.querySelector(".chart-inner") as HTMLElement | null;
   const w = Math.floor(inner?.clientWidth ?? hostEl.clientWidth);
-  const h = Math.floor(inner?.clientHeight ?? hostEl.clientHeight);
+  const footerOverlap = mobileChartFooterOverlapPx(hostEl);
+  const rawH = inner?.clientHeight ?? hostEl.clientHeight;
+  const h = Math.floor(rawH - footerOverlap);
   if (w > 2 && h > 2) chart.resize(w, h);
   if (lastOpts && w > 2) {
     const spacing = barSpacingForWidth(w, lastOpts.tf);

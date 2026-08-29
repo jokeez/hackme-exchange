@@ -1161,14 +1161,15 @@ a:hover { text-decoration: underline; }
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    max-height: 2.15rem;
-    padding: 0.1rem 0.4rem;
+    min-height: 2.75rem;
+    padding: 0.12rem 0.4rem;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
     border-bottom: none;
     box-sizing: border-box;
+    align-items: center;
   }
   .chart-topbar {
     flex-wrap: nowrap;
@@ -1792,6 +1793,9 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   margin: 0.45rem 0.5rem 0.35rem; padding: 0.48rem 0.65rem; width: calc(100% - 1rem);
   background: rgba(0,0,0,.28); border: 1px solid var(--line); border-radius: 8px;
   color: var(--text); font-size: 0.8rem;
+}
+html.mobile-layout .market-search {
+  font-size: 16px;
 }
 .lane-tabs {
   display: flex; gap: 0.3rem; padding: 0 0.5rem 0.45rem; flex-wrap: wrap;

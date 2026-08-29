@@ -103,6 +103,20 @@ export function mobilePanelResizeEnabled(): boolean {
   return !isMobileLayout();
 }
 
+/** Pixels of chart-host covered by the fixed mobile footer on the chart tab. */
+export function mobileChartFooterOverlapPx(host?: HTMLElement | null): number {
+  if (!isMobileLayout()) return 0;
+  if (document.documentElement.getAttribute("data-mobile-panel") !== "chart") return 0;
+  const footer = document.getElementById("mobile-footer-stack");
+  if (!footer) return 0;
+  const style = getComputedStyle(footer);
+  if (style.display === "none" || style.visibility === "hidden") return 0;
+  const chartHost = host ?? document.getElementById("chart-host");
+  if (!chartHost) return 0;
+  const overlap = chartHost.getBoundingClientRect().bottom - footer.getBoundingClientRect().top;
+  return overlap > 2 ? Math.ceil(overlap) : 0;
+}
+
 /** Keep CSS + JS on the same breakpoint (not only @media). */
 export function syncMobileLayoutClass(): void {
   if (typeof document === "undefined") return;

@@ -12,7 +12,7 @@ import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget } from "./chart";
+import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
@@ -56,6 +56,7 @@ type Slot = {
 };
 
 const slots = new Map<string, Slot>();
+const secPlotWheelResidual = new Map<string, number>();
 const CHART_BG = "#05070d";
 
 export type SecondaryPaneOverlayOpts = {
@@ -617,7 +618,11 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       }
       return;
     }
-    applyPlotWheelZoom(slot.chart.timeScale(), el, e.clientX, dy);
+    const acc = secPlotWheelResidual.get(key) ?? 0;
+    const { step, residual } = wheelZoomStep(dy, acc, PLOT_WHEEL_UNIT);
+    secPlotWheelResidual.set(key, residual);
+    if (!step) return;
+    applyPlotWheelZoom(slot.chart, el, e.clientX, step * PLOT_WHEEL_UNIT);
     bumpTimeSyncPane(key);
   };
   window.addEventListener("wheel", onWheel, { passive: false, capture: true });

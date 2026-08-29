@@ -488,7 +488,7 @@ async function testHotkeysOverlay(page) {
 async function testPlotWheelCursorAnchor(page) {
   await dismissOverlays(page);
   await waitChart(page);
-  const plotCanvas = page.locator("#chart-host .chart-inner canvas").first();
+  const plotCanvas = page.locator("#chart-host .tv-lightweight-charts table tr td:nth-child(2) canvas").first();
   const box = await plotCanvas.boundingBox({ timeout: 15000 });
   if (!box) {
     note("P1", "plot-anchor-box", "plot canvas box null");
@@ -498,41 +498,39 @@ async function testPlotWheelCursorAnchor(page) {
   const cy = box.y + box.height * 0.52;
   await page.mouse.move(cx, cy, { steps: 6 });
   const result = await page.evaluate(
-    ({ clientX, clientY }) => {
+    async ({ clientX }) => {
       const probe = window.__hackmeChart;
+      const before = probe?.getMainViewport?.() ?? null;
       const time0 = probe?.timeAtPlotClientX?.(clientX) ?? null;
-      const host = document.getElementById("chart-host");
-      for (let i = 0; i < 8; i++) {
-        host?.dispatchEvent(
-          new WheelEvent("wheel", {
-            deltaY: 120,
-            clientX,
-            clientY,
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+      for (let i = 0; i < 4; i++) {
+        probe?.applyMainPlotWheel?.(120, clientX);
       }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const after = probe?.getMainViewport?.() ?? null;
       const time1 = probe?.timeAtPlotClientX?.(clientX) ?? null;
       const driftPx =
         time0 != null && probe?.anchorDriftPx ? probe.anchorDriftPx(clientX, time0) : 999;
-      return { time0, time1, driftPx };
+      return { time0, time1, driftPx, spacing0: before?.barSpacing, spacing1: after?.barSpacing };
     },
-    { clientX: cx, clientY: cy },
+    { clientX: cx },
   );
   if (result.time0 == null) {
     note("P1", "plot-anchor-time", "could not read anchor time under cursor");
+    return;
+  }
+  if (result.spacing0 && result.spacing1 && !(result.spacing1 > result.spacing0 * 1.02)) {
+    note("P0", "plot-wheel-zoom-in", `barSpacing ${result.spacing0} → ${result.spacing1}`);
     return;
   }
   if (result.time1 !== result.time0) {
     note("P0", "plot-wheel-anchor-time", `anchor time ${result.time0} → ${result.time1}`);
     return;
   }
-  if (result.driftPx > 6) {
+  if (result.driftPx > 4) {
     note("P0", "plot-wheel-anchor-drift", `anchor px drift ${result.driftPx.toFixed(1)}`);
     return;
   }
-  ok(`plot wheel keeps cursor anchor (drift ${result.driftPx.toFixed(1)}px)`);
+  ok(`plot wheel zoom-in + anchor (drift ${result.driftPx.toFixed(1)}px)`);
 }
 
 async function testPriceScaleWheel(page) {
@@ -1000,6 +998,52 @@ async function testMobileDeep(browser) {
 
     await page.locator("#mp-tab-chart").click();
     await waitChart(page);
+
+    await page.locator("#btn-mobile-pair").click();
+    await sleep(450);
+    const pairTap = await page.evaluate(() => ({
+      panel: document.documentElement.getAttribute("data-mobile-panel"),
+      searchFocused: document.activeElement?.id === "market-search",
+    }));
+    if (pairTap.panel !== "markets") note("P1", "mobile-pair-panel", "pair tap did not open markets");
+    else ok("mobile pair tap → markets");
+    if (pairTap.searchFocused) note("P0", "mobile-pair-focus", "market-search focused on pair tap");
+    else ok("mobile pair tap no search focus");
+
+    await page.locator("#mp-tab-chart").click();
+    await waitChart(page);
+
+    const timeAxis = await page.evaluate(() => {
+      const footer = document.getElementById("mobile-footer-stack");
+      const canvas = document.querySelector(
+        "#chart-host .tv-lightweight-charts table tr:nth-child(2) td:nth-child(2) canvas",
+      );
+      if (!canvas || !footer) return { ok: false, reason: "missing" };
+      const cb = canvas.getBoundingClientRect();
+      const fb = footer.getBoundingClientRect();
+      return {
+        ok: cb.height >= 18 && cb.bottom <= fb.top + 3,
+        h: Math.round(cb.height),
+        gap: Math.round(fb.top - cb.bottom),
+      };
+    });
+    if (!timeAxis.ok) note("P0", "mobile-time-axis", `h=${timeAxis.h} gap=${timeAxis.gap}`);
+    else ok(`mobile time axis visible (gap ${timeAxis.gap}px)`);
+
+    const indTabs = await page.evaluate(() => {
+      const tabs = document.getElementById("ind-tabs");
+      if (!tabs) return { ok: false };
+      const first = tabs.querySelector(".ind");
+      const tabRect = first?.getBoundingClientRect();
+      const rowRect = tabs.getBoundingClientRect();
+      const clipped =
+        !!tabRect &&
+        (tabRect.height < 20 || tabRect.bottom > rowRect.bottom + 1 || tabRect.top < rowRect.top - 1);
+      return { ok: !clipped && tabs.scrollHeight <= tabs.clientHeight + 2, clipped };
+    });
+    if (!indTabs.ok) note("P1", "mobile-ind-tabs", "indicator tabs clipped");
+    else ok("mobile indicator tabs not clipped");
+
     const scaleBox = await page.locator("#chart-host .tv-lightweight-charts table tr td:last-child").first().boundingBox();
     if (!scaleBox) {
       note("P1", "mobile-price-axis-box", "price scale column missing");
