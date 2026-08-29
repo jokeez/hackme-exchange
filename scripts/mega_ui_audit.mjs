@@ -6,12 +6,14 @@
  *   node scripts/mega_ui_audit.mjs
  */
 import { chromium } from "playwright";
+import { execSync } from "child_process";
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const BASE = process.env.EX_UI_BASE || "http://127.0.0.1:5199/";
 const __dir = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dir, "..");
 const OUT = join(__dir, "..", ".cache", "mega-ui-audit");
 const findings = [];
 const log = [];
@@ -27,6 +29,21 @@ function ignorableConsole(text) {
   return /CORS|Cross-Origin|405|Failed to load resource|net::ERR|favicon|frame-ancestors|reportAllChanges|cloudflare|beacon|Incorrect locale/i.test(
     text,
   );
+}
+
+function ensureAuditBuild() {
+  if (process.env.EX_AUDIT_SKIP_BUILD === "1") return;
+  console.log("[mega-audit] npm run build (set EX_AUDIT_SKIP_BUILD=1 to skip)");
+  execSync("npm run build", {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      VITE_INTEGRATION_MODE: process.env.VITE_INTEGRATION_MODE || "paper",
+      VITE_LAB_API: process.env.VITE_LAB_API || "0",
+      VITE_EXCHANGE_API_ORIGIN: process.env.VITE_EXCHANGE_API_ORIGIN || "",
+    },
+  });
 }
 
 async function bootPage(browser, vp) {
@@ -637,6 +654,70 @@ async function testDrawToolsA11y(page) {
   else ok("draw tools aria-label + pressed");
 }
 
+async function testMobileChartMore(page) {
+  await dismissOverlays(page);
+  await page.locator("#mp-tab-chart").click();
+  await sleep(400);
+  const more = page.locator("#btn-mobile-chart-more");
+  if (!(await more.isVisible().catch(() => false))) {
+    note("P2", "mobile-chart-more-btn", "hidden on chart tab");
+    return;
+  }
+  await more.click({ force: true });
+  await sleep(250);
+  const drop = page.locator("#chart-more-drop");
+  if (!(await drop.isVisible().catch(() => false))) {
+    note("P1", "mobile-chart-more-drop", "sheet menu missing");
+    return;
+  }
+  ok("mobile chart-more menu opens");
+
+  await page.locator('#chart-more-drop [data-chart-more="overlays"]').click();
+  await sleep(300);
+  const ov = page.locator(".pop-menu.overlay-menu");
+  if (!(await ov.isVisible().catch(() => false))) {
+    note("P1", "mobile-overlays-menu", "overlay pop menu missing");
+  } else {
+    ok("mobile chart-more → overlays");
+    const preview = ov.locator("#ov-preview");
+    const quick = ov.locator("#ov-quick");
+    if (await quick.isChecked()) {
+      if (await preview.isChecked()) note("P1", "mobile-ov-preview", "preview on without gate check");
+      else ok("mobile overlay preview gated");
+    } else {
+      const disabled = await preview.isDisabled();
+      if (!disabled) note("P1", "mobile-ov-preview-disabled", "preview not disabled when quick off");
+      else ok("mobile overlay preview disabled without quick order");
+    }
+  }
+  await dismissOverlays(page);
+
+  await more.click({ force: true });
+  await sleep(200);
+  await page.locator('#chart-more-drop [data-chart-more="goto"]').click();
+  await sleep(250);
+  if (!(await page.locator("#goto-title").isVisible().catch(() => false))) {
+    note("P1", "mobile-goto-modal", "go to date via chart-more missing");
+  } else {
+    ok("mobile chart-more → go to date");
+    await page.locator("#modal-close").click();
+    await sleep(150);
+  }
+  await dismissOverlays(page);
+
+  await more.click({ force: true });
+  await sleep(200);
+  await page.locator('#chart-more-drop [data-chart-more="hotkeys"]').click();
+  await sleep(300);
+  if (!(await page.locator("#hotkeys-overlay").isVisible().catch(() => false))) {
+    note("P1", "mobile-hotkeys", "hotkeys via chart-more missing");
+  } else {
+    ok("mobile chart-more → hotkeys");
+    await page.locator("#hotkeys-close").click();
+  }
+  await dismissOverlays(page);
+}
+
 async function testMobileDeep(browser) {
   const vp = { width: 390, height: 844 };
   const { ctx, page, errors } = await bootPage(browser, vp);
@@ -680,6 +761,8 @@ async function testMobileDeep(browser) {
       if (onTrade !== "true") note("P1", "mctb-goto", "did not switch to trade panel");
       else ok("mobile chart bar → trade panel");
     }
+
+    await testMobileChartMore(page);
 
     await page.locator("#mp-tab-orders").click();
     await sleep(300);
@@ -750,6 +833,7 @@ async function testDesktopDeep(browser) {
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
+  ensureAuditBuild();
   const browser = await chromium.launch({ headless: true });
   try {
     console.log("\n=== Mega UI audit: desktop deep ===");
