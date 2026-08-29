@@ -120,7 +120,7 @@ export const DEFAULT_CHART_OVERLAYS: ChartOverlaySettings = {
   showVolume: true,
   showOrderLines: true,
   showLastPrice: true,
-  orderPreview: true,
+  orderPreview: false,
   quickOrder: false,
 };
 

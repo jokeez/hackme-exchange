@@ -76,4 +76,23 @@ describe("chartSecondary multi-slot", () => {
     a.remove();
     b.remove();
   });
+
+  it("can toggle crosshair magnet via setSecondaryCrosshairMode", async () => {
+    const { mountSecondaryChart, destroySecondaryChart, setSecondaryCrosshairMode } = await import("./chartSecondary");
+    const host = document.createElement("div");
+    host.id = "chart-host-2";
+    document.body.append(host);
+    const candles = [
+      { time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+      { time: 2, open: 1.5, high: 2.2, low: 1.2, close: 2, volume: 12 },
+    ];
+    mountSecondaryChart(host, candles, { pairId: "HMC_USDT", pairLabel: "HMC/USDT", tf: "15m" });
+    applyOptions.mockClear();
+    setSecondaryCrosshairMode(1);
+    expect(applyOptions).toHaveBeenCalledWith(expect.objectContaining({ crosshair: { mode: 1 } }));
+    setSecondaryCrosshairMode(0);
+    expect(applyOptions).toHaveBeenCalledWith(expect.objectContaining({ crosshair: { mode: 0 } }));
+    destroySecondaryChart();
+    host.remove();
+  });
 });
