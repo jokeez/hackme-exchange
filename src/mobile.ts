@@ -66,7 +66,7 @@ export function setMobileTradeSide(side: MobileTradeSide): void {
   });
 }
 
-/** LWC interaction profile — phones lock the price axis, desktop keeps full desk. */
+/** LWC interaction profile — mobile keeps price-axis drag + vertical chart pan. */
 export function chartInteractionOptions(): {
   handleScale: {
     axisPressedMouseMove: { time: boolean; price: boolean };
@@ -81,21 +81,20 @@ export function chartInteractionOptions(): {
     vertTouchDrag: boolean;
   };
 } {
-  const mobile = isMobileLayout();
   return {
     handleScale: {
-      axisPressedMouseMove: { time: true, price: !mobile },
+      axisPressedMouseMove: { time: true, price: true },
       // Price-axis wheel is handled in chart.ts — LWC native wheel fights our clamped zoom.
       mouseWheel: false,
       pinch: true,
-      axisDoubleClickReset: { time: true, price: !mobile },
+      axisDoubleClickReset: { time: true, price: true },
     },
     handleScroll: {
       // Plot wheel zoom/pan is custom in chart.ts (Binance-like).
       mouseWheel: false,
       pressedMouseMove: true,
       horzTouchDrag: true,
-      vertTouchDrag: false,
+      vertTouchDrag: true,
     },
   };
 }

@@ -12,7 +12,7 @@ import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
-import { applyPlotWheelZoom, barSpacingForWidth, clampVisiblePriceRange, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomPriceRange } from "./chart";
+import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget } from "./chart";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
@@ -544,6 +544,10 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     const panCleanup = setupPortableChartPan(shell, chart, {
       getActiveTool: () => getActiveDrawTool(),
       healPriceScale: healAxis,
+      refPrice: () => {
+        const last = slot.candles[slot.candles.length - 1]?.close;
+        return last && Number.isFinite(last) && last > 0 ? last : 0;
+      },
     });
     const prevCleanup = slot.cleanup;
     slot.cleanup = () => {
@@ -552,26 +556,11 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     };
   }
 
-  // Soft price-axis wheel — notch-capped + ref-clamped so trackpads can't fling the scale.
-  // Also heal after native LWC axis drag (same collapse path as the main chart).
-  let residual = 0;
-  let lastApply = 0;
+  // Price-axis wheel — smooth exponential zoom + ref-clamped; heal after native axis drag.
   let axisPointerDown = false;
   let axisHealRaf = 0;
-  const overPriceScale = (clientX: number, clientY: number): boolean => {
-    const cell =
-      shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr td:last-child") ??
-      shell.querySelector<HTMLElement>("table tr td:last-child");
-    if (cell) {
-      const r = cell.getBoundingClientRect();
-      if (r.width >= 8) {
-        return clientX >= r.left - 1 && clientX <= r.right + 1 && clientY >= r.top && clientY <= r.bottom;
-      }
-    }
-    const rect = shell.getBoundingClientRect();
-    const scaleW = Math.max(48, slot.chart.priceScale("right").width() || 56);
-    return clientX >= rect.right - scaleW - 4;
-  };
+  const overPriceScale = (clientX: number, clientY: number): boolean =>
+    isOverPriceScaleEl(clientX, clientY, shell);
   const scheduleHeal = () => {
     if (axisHealRaf) return;
     axisHealRaf = requestAnimationFrame(() => {
@@ -590,21 +579,20 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       const dy = normalizeWheelDeltaY(e, shell.clientHeight || 200);
 
       if (overScale) {
-        const z = wheelZoomStep(dy, residual);
-        residual = z.residual;
-        if (z.step === 0) return;
-        const now = performance.now();
-        if (now - lastApply < 50) return;
-        lastApply = now;
+        if (Math.abs(dy) < 0.25) return;
         const ps = slot.chart.priceScale("right");
         let range = ps.getVisibleRange();
         if (!range || !(range.to > range.from)) return;
         const last = slot.candles[slot.candles.length - 1]?.close;
         const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
         if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
-          range = clampVisiblePriceRange(range, refPrice);
+          const chartH = Math.floor(shell.clientHeight || 0);
+          range = clampVisiblePriceRange(range, refPrice, chartH);
         }
-        const next = zoomPriceRange(range, z.step, { step: z.step, refPrice });
+        const anchor =
+          priceAnchorFromPointer(e.clientY, shell, slot.series) ?? (range.from + range.to) / 2;
+        const chartH = Math.floor(shell.clientHeight || 0);
+        const next = applyPriceWheelZoom(range, dy, anchor, refPrice, chartH);
         try {
           ps.setAutoScale(false);
           ps.setVisibleRange(next);

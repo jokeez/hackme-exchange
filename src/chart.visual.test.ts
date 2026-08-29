@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, smoothPlotBarSpacing, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -86,6 +86,25 @@ describe("price scale wheel helpers", () => {
     // Legitimate user zoom-out must not trigger heal spam.
     const wide = { from: ref * 0.96, to: ref * 1.04 };
     expect(priceRangeNeedsHeal(wide, ref)).toBe(false);
+  });
+
+  it("smooth price wheel zooms in on positive deltaY (Binance-like)", () => {
+    const base = { from: 1, to: 3 };
+    const span0 = base.to - base.from;
+    const tight = applyPriceWheelZoom(base, 120, 2, 2, 400);
+    expect(tight.to - tight.from).toBeLessThan(span0);
+    const wide = applyPriceWheelZoom(base, -120, 2, 2, 400);
+    expect(wide.to - wide.from).toBeGreaterThan(span0);
+    expect(smoothPriceSpan(span0, 80)).toBeLessThan(span0);
+  });
+
+  it("manual clamp allows deeper zoom than auto clamp", () => {
+    const ref = 0.05;
+    const tight = { from: ref * 0.999, to: ref * 1.001 };
+    const auto = clampVisiblePriceRange(tight, ref, 400);
+    const manual = clampVisiblePriceRange(tight, ref, 400, { manual: true });
+    expect(manual.to - manual.from).toBeLessThanOrEqual(tight.to - tight.from + 1e-12);
+    expect(auto.to - auto.from).toBeGreaterThan(tight.to - tight.from);
   });
 
   it("uses wider bar spacing on phone-width panes", () => {

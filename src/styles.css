@@ -1058,6 +1058,7 @@ a:hover { text-decoration: underline; }
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+    touch-action: pan-x;
   }
   html.mobile-layout .terminal.mobile-stack.mobile-tools-open[data-mobile-panel="chart"] .chart-body::before {
     content: "";
