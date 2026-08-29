@@ -35,6 +35,7 @@ import {
   scrollToTimestamp,
   setActiveDrawTool,
   setChartCrosshairMode,
+  switchChartTimeframe,
   setCandleData,
   setChartMode,
   setChartPreviewPrice,
@@ -49,7 +50,8 @@ import { MAX_DRAWINGS } from "./chartDraw";
 import { candleCountdown, fireBrowserAlert, yesterdayClose } from "./chartHud";
 import { isHubEmbed, postHubGotoTab } from "./embed";
 import { closeChartContextMenu, showChartContextMenu, showObjectTreeModal } from "./chartContextMenu";
-import { closeQuickOrderPopup, showQuickOrderPopup } from "./chartQuickOrder";
+import { closeQuickOrderPopup, showQuickOrderPopup, type QuickOrderValidation } from "./chartQuickOrder";
+import { hapticError, hapticLight, hapticSuccess } from "./haptic";
 import { applyBookFlashes, snapshotBookLevels, type BookLevelSnap } from "./bookFlash";
 import {
   loadLayoutPrefs,
@@ -297,6 +299,7 @@ function applyHubEmbedLayoutPrefs(): void {
 /** Phone: session-only tools sheet — never fold desktop draw-tools prefs. */
 function applyMobileLayoutPrefs(): void {
   syncMobileLayoutClass();
+  bootstrapMobileQuickOrder();
   if (isHubEmbed()) return;
   if (isMobileLayout()) {
     mobileToolsOpen = false;
@@ -305,6 +308,23 @@ function applyMobileLayoutPrefs(): void {
   }
   mobileToolsOpen = false;
   document.getElementById("terminal")?.classList.remove("mobile-tools-open");
+}
+
+const MOBILE_QO_BOOT_KEY = "hackme-ex-mobile-qo-boot-v1";
+
+/** One-time: enable chart quick-order on phones (users can still disable in settings). */
+function bootstrapMobileQuickOrder(): void {
+  if (!isMobileLayout()) return;
+  try {
+    if (localStorage.getItem(MOBILE_QO_BOOT_KEY)) return;
+    localStorage.setItem(MOBILE_QO_BOOT_KEY, "1");
+    if (!state.chartOverlays.quickOrder) {
+      state.chartOverlays = normalizeChartOverlays({ ...state.chartOverlays, quickOrder: true });
+      saveState(state);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function onMobileLayoutChange(): void {
@@ -572,6 +592,7 @@ function paperGuardsOrWarn(
   if (!check.ok) {
     setOrderMsg(side, check.reason, "err");
     toast(check.reason, "warn");
+    hapticError();
     return false;
   }
   return true;
@@ -2115,6 +2136,7 @@ function wireBookClicks(): void {
     const price = Number(row.dataset.bookPrice);
     const side = row.dataset.bookSide === "ask" ? "buy" : "sell";
     if (!Number.isFinite(price) || price <= 0) return;
+    hapticLight();
     fillOrderPanelAtPrice(side, uiType === "stop_limit" ? "stop_limit" : "limit", price);
     toast(`${side === "buy" ? "Buy" : "Sell"} price ← ${formatPrice(price)}`, "info");
   };
@@ -2987,6 +3009,7 @@ function quickPlaceFromChart(
   }
   saveState(state);
   toast(`${kind === "limit" ? "Limit" : "Stop"} ${side} @ ${formatPrice(price)}`, "ok");
+  hapticSuccess();
   refreshOrderLines(state.orders.filter((o) => o.pairId === state.activePair));
   activityTab = "orders";
   document.querySelectorAll("#activity-tabs button").forEach((b) => {
@@ -3014,6 +3037,41 @@ function toastChartScreenshot(): void {
     return;
   }
   toast(shot.panes > 1 ? `Screenshot saved (${shot.panes} panes)` : "Screenshot saved", "ok");
+}
+
+function quickOrderMid(pairId: PairId): number {
+  return (
+    (useLabMatching() ? labBookMid(pairId) : 0) ||
+    (market ? midForPair(market, pairId) : activeTicker().mid)
+  );
+}
+
+function buildQuickOrderValidation(pairId: PairId, price: number): QuickOrderValidation {
+  const pair = pairById(pairId);
+  return {
+    validate: (side, amount) => {
+      if (!market) return { ok: false, reason: "Market not ready — wait for sync" };
+      const mid = quickOrderMid(pairId);
+      const guard = validatePaperTradingGuards({
+        side,
+        kind: "limit",
+        amountBase: amount,
+        price,
+        mid,
+        quoteSymbol: pair.quote,
+        guards: tradingGuards,
+      });
+      if (!guard.ok) return guard;
+      return assertOrderFunds(state, market, pairId, side, amount, price, "limit");
+    },
+    hintForSide: (side) => {
+      if (!market) return "";
+      const mid = quickOrderMid(pairId);
+      const max = maxOrderBaseAmount(state, market, pairId, side, price, "limit", 1, mid);
+      if (!(max > 0)) return `No free ${side === "buy" ? pair.quote : pair.base}`;
+      return `Max ~${formatNum(max, 4)} ${pair.base}`;
+    },
+  };
 }
 
 function handleChartPricePick(
@@ -3048,6 +3106,8 @@ function handleChartPricePick(
     baseSymbol: pair.base,
     quoteSymbol: pair.quote,
     defaultAmount,
+    mobileSheet: isMobileLayout(),
+    validate: buildQuickOrderValidation(pairId, price),
     onSidePreview: (side) => {
       if (overlays.orderPreview) {
         setChartPreviewPrice(price, side, paneHostId);
@@ -3394,13 +3454,17 @@ function setPanePair(pane: number, pairId: PairId): void {
 
 function setPaneTf(pane: number, tf: Timeframe): void {
   if (pane <= 1) {
+    if (tf === state.activeTf) return;
     state.activeTf = tf;
     saveState(state);
     syncRouteHash();
-    mountChartPanel();
     document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
     const more = document.getElementById("tf-more") as HTMLSelectElement | null;
     if (more) more.value = tf;
+    const candles = state.candles[state.activePair]?.[tf] ?? [];
+    const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
+    if (!switchChartTimeframe(candles, opts)) mountChartPanel();
+    else refreshOhlcLegendIdle();
     return;
   }
   const next = [...(state.multiPaneTfs ?? ["15m", "1H", "1D"])] as MultiPaneTfs;
@@ -4773,13 +4837,17 @@ function wireEvents(): void {
   if (state.mainView !== "spot") return;
 
   const setTf = (tf: Timeframe) => {
+    if (tf === state.activeTf) return;
     state.activeTf = tf;
     saveState(state);
     syncRouteHash();
-    mountChartPanel();
     document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
     const more = document.getElementById("tf-more") as HTMLSelectElement | null;
     if (more) more.value = tf;
+    const candles = state.candles[state.activePair]?.[tf] ?? [];
+    const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
+    if (!switchChartTimeframe(candles, opts)) mountChartPanel();
+    else refreshOhlcLegendIdle();
   };
 
   document.querySelectorAll(".tfq").forEach((btn) => {

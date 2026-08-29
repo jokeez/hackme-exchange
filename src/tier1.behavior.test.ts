@@ -39,7 +39,7 @@ describe("chartQuickOrder", () => {
     expect(document.querySelector(".chart-quick-order")).toBeFalsy();
   });
 
-  it("places order on buy click", () => {
+  it("places order on buy after confirm", () => {
     const onPlace = vi.fn();
     showQuickOrderPopup(100, 100, 0.05, {
       baseSymbol: "HMC",
@@ -50,7 +50,40 @@ describe("chartQuickOrder", () => {
     const inp = document.querySelector(".cqo-amt") as HTMLInputElement;
     inp.value = "50";
     (document.querySelector(".cqo-buy") as HTMLButtonElement).click();
+    (document.querySelector(".cqo-confirm-btn") as HTMLButtonElement).click();
     expect(onPlace).toHaveBeenCalledWith("buy", 0.05, 50);
+    closeQuickOrderPopup();
+  });
+
+  it("shows inline error when validation fails", () => {
+    showQuickOrderPopup(100, 100, 0.05, {
+      baseSymbol: "HMC",
+      quoteSymbol: "USDT",
+      defaultAmount: 0,
+      onPlace: () => {},
+      validate: {
+        validate: () => ({ ok: false, reason: "Min notional 1 USDT" }),
+      },
+    });
+    const inp = document.querySelector(".cqo-amt") as HTMLInputElement;
+    inp.value = "1";
+    (document.querySelector(".cqo-buy") as HTMLButtonElement).click();
+    const err = document.querySelector(".cqo-err") as HTMLElement;
+    expect(err.hidden).toBe(false);
+    expect(err.textContent).toContain("Min notional");
+    closeQuickOrderPopup();
+  });
+
+  it("renders mobile sheet mode", () => {
+    showQuickOrderPopup(0, 0, 0.05, {
+      baseSymbol: "HMC",
+      quoteSymbol: "USDT",
+      defaultAmount: 10,
+      mobileSheet: true,
+      onPlace: () => {},
+    });
+    expect(document.querySelector(".cqo-backdrop")).toBeTruthy();
+    expect(document.querySelector(".chart-quick-order.sheet")).toBeTruthy();
     closeQuickOrderPopup();
   });
 });
