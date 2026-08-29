@@ -195,6 +195,56 @@ async function testChartOverlayDefaults(page) {
   } else ok("no chart click popup with default overlays");
 }
 
+async function testDesktopOverlayMenu(page) {
+  await dismissOverlays(page);
+  const btn = page.locator("#btn-overlays");
+  if (!(await btn.isVisible().catch(() => false))) {
+    note("P2", "desktop-overlay-btn", "overlays button hidden");
+    return;
+  }
+  await btn.click({ force: true });
+  await sleep(250);
+  const menu = page.locator(".pop-menu.overlay-menu");
+  if (!(await menu.isVisible().catch(() => false))) {
+    note("P1", "desktop-overlay-open", "overlay menu did not open");
+    return;
+  }
+  ok("desktop overlay menu opens");
+
+  const title = await menu.locator(".pop-menu-title").textContent();
+  if (title?.trim() !== "Overlays") note("P1", "desktop-overlay-title", `title=${title}`);
+  else ok("desktop overlay menu title");
+
+  const quick = menu.locator("#ov-quick");
+  const preview = menu.locator("#ov-preview");
+  if (await quick.isChecked()) {
+    await quick.uncheck();
+    await sleep(200);
+  }
+  if (!(await preview.isDisabled())) note("P1", "desktop-ov-preview-gate", "preview enabled while quick off");
+  else ok("desktop overlay preview disabled without quick");
+
+  await quick.check();
+  await sleep(250);
+  if (await preview.isDisabled()) note("P1", "desktop-ov-preview-enable", "preview still disabled after quick on");
+  else ok("desktop overlay preview enabled with quick order");
+
+  await quick.uncheck();
+  await sleep(200);
+  if (!(await preview.isDisabled())) note("P1", "desktop-ov-preview-off", "preview not disabled after quick off");
+  else ok("desktop overlay preview re-disabled");
+
+  await dismissOverlays(page);
+}
+
+async function openMultiChartPicker(page) {
+  const btn = page.locator("#btn-multi");
+  if (!(await btn.isVisible().catch(() => false))) return null;
+  await btn.click({ force: true });
+  await sleep(200);
+  return btn;
+}
+
 async function testChartToolbarButtons(page) {
   await dismissOverlays(page);
   await page.locator("#btn-goto-date").click({ force: true });
@@ -437,10 +487,8 @@ async function testHotkeysOverlay(page) {
 
 async function testMultiChartIndependent(page) {
   await dismissOverlays(page);
-  const btn = page.locator("#btn-multi");
-  if (!(await btn.isVisible().catch(() => false))) return;
-  await btn.click({ force: true });
-  await sleep(200);
+  const btn = await openMultiChartPicker(page);
+  if (!btn) return;
   const linkRow = page.locator("#mc-link-panes");
   if (await linkRow.isVisible().catch(() => false)) ok("multi-chart link toggle visible");
   else note("P2", "multi-link-toggle", "link panes checkbox missing");
@@ -635,6 +683,103 @@ async function testMultiChartIndependent(page) {
   await sleep(500);
 }
 
+async function testMultiChartLinked(page) {
+  await dismissOverlays(page);
+  const btn = await openMultiChartPicker(page);
+  if (!btn) return;
+
+  const linkInp = page.locator("#mc-link-panes");
+  if (!(await linkInp.isVisible().catch(() => false))) {
+    note("P2", "linked-toggle", "link panes checkbox missing");
+    return;
+  }
+  if (!(await linkInp.isChecked())) await linkInp.check();
+  await sleep(200);
+
+  const hint = await page.locator(".pop-menu.multi-picker .pop-menu-hint").textContent();
+  if (!hint || !/Linked/i.test(hint)) note("P1", "linked-hint", `hint=${hint?.slice(0, 48) ?? ""}`);
+  else ok("linked panes hint shown");
+
+  await page.locator('.pop-menu.multi-picker [data-l="2v"]').click({ timeout: 3000 });
+  await sleep(1000);
+  await waitChart(page);
+
+  const split = page.locator(".chart-split.layout-2v");
+  if (!(await split.isVisible().catch(() => false))) {
+    note("P0", "linked-2v", "2v layout missing");
+    return;
+  }
+  ok("linked 2v layout");
+
+  const linked = await page.evaluate(() => window.__hackmeExchangeDebug?.multiChartLinked === true);
+  if (!linked) note("P0", "linked-flag", "multiChartLinked not true");
+  else ok("multiChartLinked active");
+
+  const syncOn = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    const cross = ex?.getCrosshairSyncDebug?.();
+    const time = ex?.getTimeSyncDebug?.();
+    return cross?.enabled === true && time?.enabled === true && (cross?.paneCount ?? 0) >= 2;
+  });
+  if (!syncOn) note("P0", "linked-sync-on", "crosshair/time sync not enabled");
+  else ok("linked sync engines on");
+
+  const before = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    return { main: ex?.getMainViewport?.(), pane2: ex?.getPaneViewport?.("chart-host-2") };
+  });
+  if (!before.main || !before.pane2) {
+    note("P1", "linked-viewport", "could not read viewports");
+    return;
+  }
+
+  const canvas = page.locator("#chart-host .chart-inner canvas").first();
+  const box = await canvas.boundingBox();
+  if (!box) {
+    note("P1", "linked-canvas", "main canvas box null");
+    return;
+  }
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 6 });
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, -120);
+    await sleep(80);
+  }
+  await sleep(500);
+
+  const after = await page.evaluate(() => {
+    const ex = window.__hackmeExchangeDebug;
+    return {
+      main: ex?.getMainViewport?.(),
+      pane2: ex?.getPaneViewport?.("chart-host-2"),
+      time: ex?.getTimeSyncDebug?.(),
+    };
+  });
+  const mainZoomed = after.main && before.main && Math.abs(after.main.barSpacing - before.main.barSpacing) > 0.01;
+  const pane2Followed =
+    after.pane2 && after.main && Math.abs(after.pane2.barSpacing - after.main.barSpacing) < 0.15;
+  if (!mainZoomed) note("P1", "linked-main-zoom", "main barSpacing unchanged");
+  else ok(`linked main zoomed spacing ${after.main?.barSpacing?.toFixed(1)}`);
+  if (!pane2Followed) {
+    note("P0", "linked-pane2-sync", `pane2=${after.pane2?.barSpacing} main=${after.main?.barSpacing}`);
+  } else ok("pane 2 barSpacing synced with main (linked)");
+
+  await page.mouse.move(box.x + box.width * 0.42, box.y + box.height * 0.5, { steps: 4 });
+  await sleep(400);
+  const cross = await page.evaluate(() => window.__hackmeExchangeDebug?.getCrosshairSyncDebug?.());
+  if (!(cross?.lastSyncedTime != null && cross.lastSyncedTime > 0)) {
+    note("P2", "linked-crosshair", "crosshair sync time not set after hover");
+  } else ok("linked crosshair sync active");
+
+  await btn.click().catch(() => {});
+  await sleep(200);
+  if (await linkInp.isVisible().catch(() => false) && (await linkInp.isChecked())) {
+    await linkInp.uncheck();
+    await sleep(150);
+  }
+  await page.locator('.pop-menu.multi-picker [data-l="1"]').click({ timeout: 3000 }).catch(() => {});
+  await sleep(500);
+}
+
 async function testDrawToolsA11y(page) {
   const tools = page.locator("#draw-tools .dt");
   const n = await tools.count();
@@ -790,6 +935,7 @@ async function testDesktopDeep(browser) {
     await testBookObAmt(page);
     await testBookClickToPrice(page);
     await testChartOverlayDefaults(page);
+    await testDesktopOverlayMenu(page);
     await testChartToolbarButtons(page);
     await testChartQuickOrderNoPanPopup(page);
     await testInlineOrderAmend(page);
@@ -798,6 +944,7 @@ async function testDesktopDeep(browser) {
     await testDrawToolsA11y(page);
     await testHotkeysOverlay(page);
     await testMultiChartIndependent(page);
+    await testMultiChartLinked(page);
     await testLayoutPresets(page);
 
     const bbo = page.locator('.btn-bbo[data-bbo="buy"]');
