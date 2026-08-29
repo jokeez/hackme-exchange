@@ -372,6 +372,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       secondsVisible: resolved.tf === "30s" || resolved.tf === "1m" || resolved.tf === "3m" || resolved.tf === "5m",
       rightOffset: 4,
       barSpacing: spacing,
+      rightBarStaysOnScroll: false,
     },
     handleScale: {
       mouseWheel: false,
@@ -568,59 +569,58 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       healAxis();
     });
   };
-  el.addEventListener(
-    "wheel",
-    (e: WheelEvent) => {
-      const target = e.target as Node | null;
-      if (!target || !el.contains(target)) return;
-      const overScale = overPriceScale(e.clientX, e.clientY);
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const dy = normalizeWheelDeltaY(e, shell.clientHeight || 200);
+  const onWheel = (e: WheelEvent) => {
+    const target = e.target as Node | null;
+    const inHost =
+      (target != null && el.contains(target)) || e.composedPath().some((n) => n === el);
+    if (!inHost) return;
+    const overScale = overPriceScale(e.clientX, e.clientY);
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const dy = normalizeWheelDeltaY(e, shell.clientHeight || 200);
 
-      if (overScale) {
-        if (Math.abs(dy) < 0.25) return;
-        const ps = slot.chart.priceScale("right");
-        let range = ps.getVisibleRange();
-        if (!range || !(range.to > range.from)) return;
-        const last = slot.candles[slot.candles.length - 1]?.close;
-        const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
-        if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
-          const chartH = Math.floor(shell.clientHeight || 0);
-          range = clampVisiblePriceRange(range, refPrice, chartH);
-        }
-        const anchor =
-          priceAnchorFromPointer(e.clientY, shell, slot.series) ?? (range.from + range.to) / 2;
+    if (overScale) {
+      if (Math.abs(dy) < 0.25) return;
+      const ps = slot.chart.priceScale("right");
+      let range = ps.getVisibleRange();
+      if (!range || !(range.to > range.from)) return;
+      const last = slot.candles[slot.candles.length - 1]?.close;
+      const refPrice = last && Number.isFinite(last) && last > 0 ? last : 0;
+      if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
         const chartH = Math.floor(shell.clientHeight || 0);
-        const next = applyPriceWheelZoom(range, dy, anchor, refPrice, chartH);
-        try {
-          ps.setAutoScale(false);
-          ps.setVisibleRange(next);
-        } catch {
-          /* ignore */
-        }
-        return;
+        range = clampVisiblePriceRange(range, refPrice, chartH);
       }
+      const anchor =
+        priceAnchorFromPointer(e.clientY, shell, slot.series) ?? (range.from + range.to) / 2;
+      const chartH = Math.floor(shell.clientHeight || 0);
+      const next = applyPriceWheelZoom(range, dy, anchor, refPrice, chartH);
+      try {
+        ps.setAutoScale(false);
+        ps.setVisibleRange(next);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
-      const ts = slot.chart.timeScale();
-      const spacing = ts.options().barSpacing ?? 8;
-      const lr = ts.getVisibleLogicalRange();
-      if (!lr) return;
-      if (e.shiftKey) {
-        const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-        try {
-          ts.setVisibleLogicalRange(panLogicalRangeByWheel(lr, deltaPx, spacing));
-          bumpTimeSyncPane(key);
-        } catch {
-          /* ignore */
-        }
-        return;
+    const ts = slot.chart.timeScale();
+    const spacing = ts.options().barSpacing ?? 8;
+    const lr = ts.getVisibleLogicalRange();
+    if (!lr) return;
+    if (e.shiftKey) {
+      const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      try {
+        ts.setVisibleLogicalRange(panLogicalRangeByWheel(lr, deltaPx, spacing));
+        bumpTimeSyncPane(key);
+      } catch {
+        /* ignore */
       }
-      applyPlotWheelZoom(slot.chart.timeScale(), el.getBoundingClientRect(), e.clientX, dy);
-      bumpTimeSyncPane(key);
-    },
-    { passive: false, capture: true },
-  );
+      return;
+    }
+    applyPlotWheelZoom(slot.chart.timeScale(), el, e.clientX, dy);
+    bumpTimeSyncPane(key);
+  };
+  window.addEventListener("wheel", onWheel, { passive: false, capture: true });
   shell.addEventListener(
     "pointerdown",
     (e: PointerEvent) => {
@@ -646,13 +646,16 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   window.addEventListener("pointermove", onPtrMove, { capture: true });
   window.addEventListener("pointerup", onPtrUp, { capture: true });
   window.addEventListener("pointercancel", onPtrUp, { capture: true });
+  const prevCleanup = slot.cleanup;
   slot.cleanup = () => {
+    window.removeEventListener("wheel", onWheel, true);
     window.removeEventListener("pointermove", onPtrMove, true);
     window.removeEventListener("pointerup", onPtrUp, true);
     window.removeEventListener("pointercancel", onPtrUp, true);
     if (axisHealRaf) cancelAnimationFrame(axisHealRaf);
     axisHealRaf = 0;
     axisPointerDown = false;
+    prevCleanup?.();
     slot.cleanup = null;
   };
 }

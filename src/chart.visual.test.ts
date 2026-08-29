@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, plotWheelAnchorShift, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -57,6 +57,13 @@ describe("price scale wheel helpers", () => {
     const a = smoothPlotBarSpacing(10, 40);
     const b = smoothPlotBarSpacing(a, 40);
     expect(b).toBeGreaterThan(a);
+  });
+
+  it("plotWheelAnchorShift matches LWC cursor-anchored zoom math", () => {
+    expect(plotWheelAnchorShift(400, 8, 16)).toBeCloseTo(25, 5);
+    expect(plotWheelAnchorShift(400, 16, 8)).toBeCloseTo(-25, 5);
+    expect(plotWheelAnchorShift(0, 8, 16)).toBe(0);
+    expect(plotWheelAnchorShift(320, 10, 12)).toBeCloseTo(320 * (0.1 - 1 / 12), 5);
   });
 
   it("heals a near-zero corrupted price window back to the instrument", () => {
