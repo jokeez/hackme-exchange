@@ -51,14 +51,32 @@ export function maxJumpFracForTf(tf: Timeframe | string): number {
  * Max |close−open|/open inside one bar.
  * Stops multi-tick walks (esp. 1D) from painting −30% bodies that squash the pane.
  */
+/** Visible wick cap per TF — small TFs need slightly tighter wicks, not barcode spikes. */
+export function maxWickFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.0055;
+    case "1m":
+      return 0.0065;
+    case "3m":
+      return 0.008;
+    case "5m":
+      return 0.009;
+    case "15m":
+      return 0.01;
+    default:
+      return MAX_WICK_FRAC;
+  }
+}
+
 export function maxBodyFracForTf(tf: Timeframe | string): number {
   switch (tf) {
     case "30s":
-      return 0.012;
+      return 0.016;
     case "1m":
-      return 0.015;
-    case "3m":
       return 0.02;
+    case "3m":
+      return 0.024;
     case "5m":
       return 0.025;
     case "15m":
@@ -111,12 +129,12 @@ export function isPriceDiscontinuity(
  * Keep OHLC coherent with open: close/high/low cannot run away and squash the chart.
  * Used after each tip update and during sanitize.
  */
-export function constrainBarToOpen(c: Candle, maxBody = 0.05): Candle {
-  if (!finitePos(c.open)) return clipBarWicks(c);
+export function constrainBarToOpen(c: Candle, maxBody = 0.05, maxWick = MAX_WICK_FRAC): Candle {
+  if (!finitePos(c.open)) return clipBarWicks(c, maxWick);
   const open = c.open;
   const close = clampTickMid(finitePos(c.close) ? c.close : open, open, maxBody);
   // Wick pad tracks body cap but stays tighter than the body itself (no barcode tape).
-  const wickPad = Math.min(maxBody * 0.55, MAX_WICK_FRAC * 1.25);
+  const wickPad = Math.min(maxBody * 0.65, maxWick * 1.35);
   const hiCap = open * (1 + wickPad);
   const loCap = open * Math.max(1e-6, 1 - wickPad);
   let high = Math.max(open, close, finitePos(c.high) ? c.high : close);
@@ -125,7 +143,7 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05): Candle {
   low = Math.max(low, loCap);
   high = Math.max(high, open, close);
   low = Math.min(low, open, close);
-  return clipBarWicks({ ...c, open, high, low, close });
+  return clipBarWicks({ ...c, open, high, low, close }, maxWick);
 }
 
 /** Clip one bar's high/low to a sane wick around the body. */
@@ -154,15 +172,16 @@ export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
 export function sanitizeCandleExtremes(
   candles: Candle[],
   maxBodyJump = 0.08,
-  opts?: { clipJumps?: boolean },
+  opts?: { clipJumps?: boolean; maxWick?: number },
 ): Candle[] {
   const clipJumps = opts?.clipJumps !== false;
+  const maxWick = opts?.maxWick ?? MAX_WICK_FRAC;
   if (!candles.length) return candles;
-  if (candles.length === 1) return [constrainBarToOpen(clipBarWicks(candles[0]!), maxBodyJump)];
+  if (candles.length === 1) return [constrainBarToOpen(clipBarWicks(candles[0]!, maxWick), maxBodyJump, maxWick)];
 
   const closes = candles.map((c) => c.close).filter(finitePos).sort((a, b) => a - b);
   const med = median(closes) || candles[candles.length - 1]!.close;
-  if (!finitePos(med)) return candles.map((c) => constrainBarToOpen(clipBarWicks(c), maxBodyJump));
+  if (!finitePos(med)) return candles.map((c) => constrainBarToOpen(clipBarWicks(c, maxWick), maxBodyJump, maxWick));
   const absLo = med * (1 - MAX_SERIES_DEV_FRAC);
   const absHi = med * (1 + MAX_SERIES_DEV_FRAC);
 
@@ -182,7 +201,7 @@ export function sanitizeCandleExtremes(
     if (clipJumps && finitePos(prevClose) && isPriceDiscontinuity(c.open, prevClose, maxBodyJump)) {
       c.open = prevClose;
     }
-    c = constrainBarToOpen(c, maxBodyJump);
+    c = constrainBarToOpen(c, maxBodyJump, maxWick);
     if (clipJumps) {
       c.high = Math.min(c.high, absHi * 1.02);
       c.low = Math.max(c.low, absLo * 0.98);
