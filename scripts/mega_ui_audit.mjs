@@ -225,7 +225,11 @@ async function testMultiChartSync(page) {
     return;
   }
   await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45, { steps: 12 });
-  await sleep(600);
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.wheel(0, i % 2 === 0 ? -100 : 80);
+    await sleep(100);
+  }
+  await sleep(500);
   const canvas2 = page.locator("#chart-host-2 .chart-inner canvas").first();
   const box2 = await canvas2.boundingBox().catch(() => null);
   if (box2) {
@@ -247,15 +251,27 @@ async function testMultiChartSync(page) {
   await page.mouse.wheel(-120, 0);
   await sleep(500);
   const tdbg = await page.evaluate(() => window.__hackmeExchangeDebug?.getTimeSyncDebug?.());
-  if (!tdbg?.lastSyncedRange) {
+  if (!tdbg?.lastSync?.span) {
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.5, { steps: 6 });
     await page.mouse.up();
     await sleep(500);
   }
   const tdbg2 = await page.evaluate(() => window.__hackmeExchangeDebug?.getTimeSyncDebug?.());
-  if (!tdbg2?.lastSyncedRange) note("P2", "time-sync", "no time range propagated after pan (headless)");
-  else ok("time range sync after pan");
+  if (!tdbg2?.lastSync?.span) note("P2", "time-sync", "no logical sync after wheel (headless)");
+  else ok(`time sync span=${Math.round(tdbg2.lastSync.span)} spacing=${tdbg2.lastSync.barSpacing}`);
+
+  for (const id of ["chart-host", "chart-host-2", "chart-host-3", "chart-host-4"]) {
+    const okRange = await page.evaluate((hostId) => {
+      const host = document.getElementById(hostId);
+      const canvas = host?.querySelector("canvas");
+      if (!canvas) return false;
+      const box = canvas.getBoundingClientRect();
+      return box.width > 40 && box.height > 30;
+    }, id);
+    if (!okRange) note("P0", `${id}-wheel-health`, "canvas collapsed after multi wheel zoom");
+    else ok(`${id} healthy after wheel stress`);
+  }
 
   await btn.click().catch(() => {});
   await sleep(200);
