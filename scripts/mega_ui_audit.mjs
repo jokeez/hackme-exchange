@@ -44,7 +44,12 @@ async function bootPage(browser, vp) {
     try {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
       sessionStorage.setItem("hackme-ex-mobile-panel-v1", "chart");
+      localStorage.removeItem("hackme-exchange-demo-v5-layout-v3");
       localStorage.removeItem("hackme-ex-layout-v3");
+      if (!sessionStorage.getItem("e2e-demo-reset")) {
+        localStorage.removeItem("hackme-exchange-demo-v5");
+        sessionStorage.setItem("e2e-demo-reset", "1");
+      }
     } catch {
       /* ignore */
     }
@@ -187,34 +192,31 @@ async function testChartQuickOrderNoPanPopup(page) {
 
 async function testInlineOrderAmend(page) {
   await dismissOverlays(page);
-  await page.locator('.type[data-type="limit"]').click().catch(() => {});
-  await sleep(150);
-  const priceInp = page.locator("#buy-price");
-  const amtInp = page.locator("#buy-amt");
-  if (!(await priceInp.isVisible().catch(() => false))) {
-    note("P2", "amend-skip", "buy form not visible");
+  const midText = await page.locator(".ob-mid-price").first().textContent().catch(() => "0.05");
+  const midN = Number(String(midText).replace(/[^\d.]/g, "")) || 0.05;
+  const px = (midN * 0.55).toFixed(6);
+
+  const seeded = await page.evaluate(async (price) => {
+    const w = window;
+    const dbg = w.__hackmeExchangeDebug;
+    if (dbg && typeof dbg.seedOpenOrderForE2E === "function") {
+      dbg.seedOpenOrderForE2E(Number(price), 120);
+      return true;
+    }
+    return false;
+  }, px);
+
+  if (!seeded) {
+    note("P2", "amend-seed", "seedOpenOrderForE2E debug helper missing");
     return;
   }
-  const mid = await priceInp.inputValue().catch(() => "0.05");
-  const px = Number(mid) > 0 ? (Number(mid) * 0.75).toFixed(6) : "0.035";
-  await priceInp.fill(px);
-  await amtInp.fill("250");
-  await page.locator("#post-only").check().catch(() => {});
-  const placed = await page
-    .locator("#btn-buy")
-    .click({ timeout: 8000 })
-    .then(() => true)
-    .catch(() => false);
-  if (!placed) {
-    note("P2", "amend-place", "could not place limit for amend test");
-    return;
-  }
-  await sleep(600);
-  await page.locator('#activity-tabs button[data-tab="orders"]').click();
-  await sleep(300);
+
+  await sleep(400);
+  await page.locator("#activity-panel").scrollIntoViewIfNeeded().catch(() => {});
+
   const edit = page.locator('.act-edit[data-amend-field="price"]').first();
   if (!(await edit.isVisible().catch(() => false))) {
-    note("P2", "amend-btn", "no inline price edit after limit order");
+    note("P2", "amend-btn", "no inline price edit after seeded open order");
     return;
   }
   await edit.click();
@@ -227,6 +229,33 @@ async function testInlineOrderAmend(page) {
   const rowText = await page.locator(".act-row").first().textContent().catch(() => "");
   if (!rowText?.includes(nextPx.slice(0, 4))) note("P1", "amend-price", `row=${rowText?.slice(0, 60)}`);
   else ok("inline amend updates order price");
+}
+
+async function testLayoutPresets(page) {
+  if (!(await openSystemMenu(page))) return;
+  await page.locator("#btn-settings").click();
+  await sleep(250);
+  await page.locator('.settings-nav [data-tab="layout"]').click();
+  await sleep(150);
+  if (!(await page.locator("#set-preset-chart").isVisible().catch(() => false))) {
+    note("P1", "layout-presets", "chart focus preset missing");
+    return;
+  }
+  ok("layout presets visible");
+  await page.locator("#set-preset-chart").click();
+  await sleep(400);
+  const bookHidden = await page.evaluate(() => {
+    const term = document.getElementById("terminal");
+    return term?.classList.contains("book-collapsed") ?? false;
+  });
+  if (!bookHidden) note("P1", "layout-preset-chart", "book not collapsed after chart focus");
+  else ok("chart focus preset collapses book");
+  // Restore standard layout so later tests keep markets/activity visible.
+  if (!(await openSystemMenu(page))) return;
+  await page.locator("#btn-settings").click();
+  await sleep(200);
+  await page.locator("#set-preset-standard").click();
+  await sleep(400);
 }
 
 async function testBookClickToPrice(page) {
@@ -498,6 +527,7 @@ async function testDesktopDeep(browser) {
     await testDrawToolsA11y(page);
     await testHotkeysOverlay(page);
     await testMultiChartIndependent(page);
+    await testLayoutPresets(page);
 
     const bbo = page.locator('.btn-bbo[data-bbo="buy"]');
     if (await bbo.isVisible().catch(() => false)) {

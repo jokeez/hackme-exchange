@@ -3,6 +3,7 @@
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  applyLayoutPreset,
   LAYOUT_DEFAULTS,
   LAYOUT_MAX_W,
   LAYOUT_MIN_W,
@@ -85,5 +86,13 @@ describe("layoutPrefs", () => {
     const opened = setPanelWidth(collapsed, "book", 200);
     expect(opened.bookCollapsed).toBe(false);
     expect(opened.bookWidth).toBe(200);
+  });
+
+  it("applyLayoutPreset returns sanitized preset", () => {
+    const chart = applyLayoutPreset("chart");
+    expect(chart.bookCollapsed).toBe(true);
+    expect(chart.rightCollapsed).toBe(true);
+    const scalper = applyLayoutPreset("scalper");
+    expect(scalper.bookWidth).toBeGreaterThan(LAYOUT_DEFAULTS.bookWidth);
   });
 });

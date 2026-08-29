@@ -58,6 +58,8 @@ async function bootPage(browser, vp) {
     try {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
       sessionStorage.setItem("hackme-ex-mobile-panel-v1", "chart");
+      localStorage.removeItem("hackme-exchange-demo-v5");
+      localStorage.removeItem("hackme-exchange-demo-v5-layout-v3");
       localStorage.removeItem("hackme-ex-layout-v3");
     } catch {
       /* ignore */
