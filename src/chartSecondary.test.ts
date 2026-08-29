@@ -58,6 +58,7 @@ describe("chartSecondary multi-slot", () => {
     expect(setData).toHaveBeenCalledTimes(2);
     expect(a.querySelector(".sub-tf-select")).toBeTruthy();
     expect(a.querySelector(".sub-pair-select")).toBeTruthy();
+    expect(a.querySelector(".sub-reset-view")).toBeTruthy();
     expect((a.querySelector(".sub-pair-select") as HTMLSelectElement).value).toBe("HMC_USDT");
 
     setData.mockClear();

@@ -2129,6 +2129,7 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   outline-offset: -1px;
   box-shadow: inset 0 0 0 1px rgba(77, 228, 255, 0.12);
 }
+.multi-chart-grid .chart-host.chart-pane-focused,
 .multi-chart-sync .chart-host.chart-pane-focused {
   outline: 1px solid rgba(77, 228, 255, 0.55);
 }
@@ -2184,6 +2185,22 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
 }
 .sub-tf-select {
   flex-shrink: 0;
+}
+.sub-reset-view {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0.12rem 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--primary);
+  opacity: 0.85;
+}
+.sub-reset-view:hover { opacity: 1; }
+.pop-menu-hint {
+  margin: -0.15rem 0 0.45rem;
+  padding: 0 0.1rem;
+  line-height: 1.35;
+  font-size: 0.72rem;
 }
 .sub-pair-select:focus-visible,
 .sub-tf-select:focus-visible {

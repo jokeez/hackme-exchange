@@ -8,7 +8,6 @@ import {
 } from "lightweight-charts";
 import type { Candle, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
-import { bumpTimeSyncPane } from "./chartTimeSync";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 import { barSpacingForWidth, clampVisiblePriceRange, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange } from "./chart";
@@ -127,7 +126,8 @@ function paintChrome(host: HTMLElement, opts: SecondaryMountOpts): void {
     : `<option value="${escapeHtml(opts.pairId)}" selected>${escapeHtml(opts.pairLabel)}</option>`;
   chrome.innerHTML = `
     <select class="sub-pair-select mono" aria-label="Pane symbol">${pairOpts}</select>
-    <select class="sub-tf-select mono" aria-label="Pane timeframe"></select>`;
+    <select class="sub-tf-select mono" aria-label="Pane timeframe"></select>
+    <button type="button" class="sub-reset-view btn-ico-sm" title="Reset pane view" aria-label="Reset pane view">↺</button>`;
   const pairSel = chrome.querySelector(".sub-pair-select") as HTMLSelectElement;
   pairSel.addEventListener("change", () => {
     const next = pairSel.value as PairId;
@@ -138,6 +138,11 @@ function paintChrome(host: HTMLElement, opts: SecondaryMountOpts): void {
   sel.addEventListener("change", () => {
     const next = sel.value as Timeframe;
     if (next && next !== opts.tf) opts.onTfChange?.(next);
+  });
+  chrome.querySelector(".sub-reset-view")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const id = host.id || slotKey(host);
+    resetSecondaryPaneView(id);
   });
 }
 
@@ -443,7 +448,6 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
         const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         try {
           ts.setVisibleLogicalRange(panLogicalRangeByWheel(lr, deltaPx, spacing));
-          bumpTimeSyncPane(key);
         } catch {
           /* ignore */
         }
@@ -457,7 +461,6 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       plotLastApply = now;
       try {
         ts.applyOptions({ barSpacing: zoomBarSpacing(spacing, z.step), minBarSpacing: 2 });
-        bumpTimeSyncPane(key);
       } catch {
         /* ignore */
       }
@@ -669,5 +672,18 @@ export function resetSecondaryPaneView(hostId: string): void {
     slot.savedRange = null;
   } catch {
     /* ignore */
+  }
+}
+
+export function getSecondaryViewportDebug(hostId: string): { barSpacing: number; from: number; to: number } | null {
+  const slot = slots.get(hostId);
+  if (!slot) return null;
+  try {
+    const ts = slot.chart.timeScale();
+    const lr = ts.getVisibleLogicalRange();
+    if (!lr) return null;
+    return { barSpacing: ts.options().barSpacing ?? 8, from: lr.from as number, to: lr.to as number };
+  } catch {
+    return null;
   }
 }
