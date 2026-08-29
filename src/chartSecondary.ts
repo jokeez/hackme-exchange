@@ -845,11 +845,27 @@ export function resetSecondaryPaneView(hostId: string): void {
     if (n < 2) return;
     const w = slot.shell.clientWidth || 320;
     const spacing = barSpacingForWidth(w, slot.tf);
+    slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: 2 });
     const budget = visibleBarBudget(w, spacing);
     const to = n - 1 + 2;
     const from = to - budget;
     slot.chart.timeScale().setVisibleLogicalRange({ from, to });
     slot.savedRange = null;
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Jump secondary pane to a UTC timestamp window (±1h), same as main chart go-to-date. */
+export function scrollSecondaryToTimestamp(hostId: string, ts: number): void {
+  const slot = slots.get(hostId);
+  if (!slot || !Number.isFinite(ts)) return;
+  try {
+    slot.chart.timeScale().scrollToPosition(-20, false);
+    slot.chart.timeScale().setVisibleRange({
+      from: (ts - 3600) as UTCTimestamp,
+      to: (ts + 3600) as UTCTimestamp,
+    });
   } catch {
     /* ignore */
   }

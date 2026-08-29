@@ -65,7 +65,7 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes, refreshSecondaryPaneOrderLines, setSecondaryCrosshairMode } from "./chartSecondary";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, scrollSecondaryToTimestamp, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes, refreshSecondaryPaneOrderLines, setSecondaryCrosshairMode } from "./chartSecondary";
 import { detectMultiChartLayout, listChartPaneHosts } from "./chartScreenshot";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
@@ -2995,6 +2995,18 @@ function quickPlaceFromChart(
   document.getElementById("activity-body")!.innerHTML = renderActivityBody();
 }
 
+function scrollFocusedChartToTimestamp(ts: number): void {
+  const paneId = getFocusedChartPaneId();
+  if (paneId === "chart-host") scrollToTimestamp(ts);
+  else scrollSecondaryToTimestamp(paneId, ts);
+}
+
+function resetFocusedChartView(): void {
+  const paneId = getFocusedChartPaneId();
+  if (paneId === "chart-host") resetChartView();
+  else resetSecondaryPaneView(paneId);
+}
+
 function toastChartScreenshot(): void {
   const shot = chartScreenshot();
   if (!shot.ok) {
@@ -4841,7 +4853,7 @@ function wireEvents(): void {
       } else if (action === "style") showChartStyleModal(state, (patch) => saveChartPatch(patch));
       else if (action === "goto") {
         showGoToDateModal((ts) => {
-          scrollToTimestamp(ts);
+          scrollFocusedChartToTimestamp(ts);
           toast("Jumped to date", "info");
         });
       } else if (action === "screenshot") {
@@ -4857,7 +4869,10 @@ function wireEvents(): void {
   });
 
   document.getElementById("btn-goto-date")?.addEventListener("click", () => {
-    showGoToDateModal((ts) => { scrollToTimestamp(ts); toast("Jumped to date", "info"); });
+    showGoToDateModal((ts) => {
+      scrollFocusedChartToTimestamp(ts);
+      toast("Jumped to date", "info");
+    });
   });
 
   document.querySelectorAll("#ind-tabs .ind").forEach((btn) => {
@@ -5333,6 +5348,14 @@ function onKeydown(e: KeyboardEvent): void {
   }
 
   if (state.mainView !== "spot") return;
+
+  if ((e.key === "r" || e.key === "R") && e.altKey) {
+    e.preventDefault();
+    resetFocusedChartView();
+    toast("Chart view reset", "info");
+    return;
+  }
+
   if (isTypingTarget(e.target)) return;
 
   if ((e.key === "Delete" || e.key === "Backspace") && getSelectedDrawingId()) {
@@ -5421,13 +5444,6 @@ function onKeydown(e: KeyboardEvent): void {
     saveState(state);
     setChartMode("area");
     document.querySelectorAll("#chart-mode-tabs .cm").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.mode === "area"));
-  }
-  if (e.key === "r" || e.key === "R") {
-    if (e.altKey) {
-      e.preventDefault();
-      resetChartView();
-      toast("Chart view reset", "info");
-    }
   }
 }
 
@@ -5778,6 +5794,7 @@ export async function boot(): Promise<void> {
           hosts: listChartPaneHosts(split).map((h) => h.id),
         };
       },
+      getFocusedPaneId: () => getFocusedChartPaneId(),
       seedOpenOrderForE2E(price: number, amountBase = 120) {
         const o = {
           id: `e2e-${uid()}`,

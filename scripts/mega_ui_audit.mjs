@@ -74,7 +74,15 @@ async function openSystemMenu(page) {
 
 async function dismissOverlays(page) {
   await page.evaluate(() => {
-    document.querySelectorAll(".modal-backdrop, #hotkeys-overlay, .pop-menu").forEach((el) => el.remove());
+    document.querySelectorAll(".modal-backdrop, #hotkeys-overlay, .pop-menu, .chart-ctx-menu").forEach((el) => el.remove());
+    for (const id of ["chart-type-drop", "chart-more-drop", "chart-type-backdrop", "chart-more-backdrop"]) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.add("hidden");
+        el.setAttribute("aria-hidden", "true");
+      }
+    }
+    document.body.classList.remove("chart-type-open", "chart-more-open");
   });
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(150);
@@ -168,6 +176,59 @@ async function testChartOverlayDefaults(page) {
   if (await page.locator(".chart-quick-order").count()) {
     note("P0", "chart-click-default", "quick order opened while overlays off");
   } else ok("no chart click popup with default overlays");
+}
+
+async function testChartToolbarButtons(page) {
+  await dismissOverlays(page);
+  await page.locator("#btn-goto-date").click({ force: true });
+  await sleep(250);
+  if (!(await page.locator("#goto-title").isVisible().catch(() => false))) {
+    note("P1", "goto-modal", "go to date modal missing");
+  } else {
+    ok("goto date modal opens");
+    await page.locator("#modal-close").click();
+    await sleep(150);
+  }
+
+  await page.locator("#btn-indicators").click({ force: true });
+  await sleep(250);
+  if (!(await page.locator(".modal-backdrop [role='dialog']").isVisible().catch(() => false))) {
+    note("P1", "ind-modal", "indicator modal missing");
+  } else {
+    ok("indicators modal opens");
+    await page.keyboard.press("Escape");
+    await sleep(150);
+  }
+
+  const term = page.locator("#terminal");
+  const fsBefore = await term.evaluate((el) => el.classList.contains("chart-fullscreen"));
+  await page.locator("#btn-fullscreen").click({ force: true });
+  await sleep(400);
+  const fsAfter = await term.evaluate((el) => el.classList.contains("chart-fullscreen"));
+  if (fsAfter === fsBefore) note("P1", "fullscreen-toggle", "fullscreen class unchanged");
+  else ok("fullscreen toggles");
+  if (fsAfter) {
+    await page.locator("#btn-fullscreen").click({ force: true });
+    await sleep(300);
+  }
+
+  await page.locator("#btn-chart-type").click({ force: true });
+  await sleep(200);
+  const typeDrop = page.locator("#chart-type-drop");
+  if (!(await typeDrop.isVisible().catch(() => false))) {
+    note("P1", "chart-type-drop", "chart type menu missing");
+  } else {
+    ok("chart type menu opens");
+    await page.locator("#btn-chart-type").click({ force: true });
+    await sleep(150);
+  }
+
+  const stillFs = await term.evaluate((el) => el.classList.contains("chart-fullscreen"));
+  if (stillFs) {
+    await page.keyboard.press("f");
+    await sleep(400);
+  }
+  await dismissOverlays(page);
 }
 
 async function testChartQuickOrderNoPanPopup(page) {
@@ -490,6 +551,46 @@ async function testMultiChartIndependent(page) {
     }
   }
 
+  await page.locator("#chart-host-2").click({ force: true });
+  await sleep(250);
+  const pane2ZoomCanvas = page.locator("#chart-host-2 .sub-inner canvas").first();
+  const pane2ZoomBox = await pane2ZoomCanvas.boundingBox();
+  if (pane2ZoomBox) {
+    const baseline = await page.evaluate(() => window.__hackmeExchangeDebug?.getPaneViewport?.("chart-host-2"));
+    await pane2ZoomCanvas.hover({ force: true });
+    await page.mouse.move(pane2ZoomBox.x + pane2ZoomBox.width * 0.5, pane2ZoomBox.y + pane2ZoomBox.height * 0.5);
+    for (let i = 0; i < 8; i++) {
+      await page.mouse.wheel(0, -140);
+      await sleep(80);
+    }
+    await sleep(400);
+    const zoomed = await page.evaluate(() => window.__hackmeExchangeDebug?.getPaneViewport?.("chart-host-2"));
+    const focused = await page.evaluate(() => window.__hackmeExchangeDebug?.getFocusedPaneId?.());
+    if (focused !== "chart-host-2") note("P2", "pane2-focus", `focused=${focused ?? "?"}`);
+    const span = (v) => (v ? Math.abs(v.to - v.from) : 0);
+    const zoomedIn =
+      baseline &&
+      zoomed &&
+      (Math.abs(zoomed.barSpacing - baseline.barSpacing) > 0.02 || Math.abs(span(zoomed) - span(baseline)) > 2);
+    if (!zoomedIn) {
+      note("P2", "pane2-zoom", "wheel did not zoom pane 2 before Alt+R");
+    } else {
+      await page.evaluate(() => document.body.focus());
+      await page.keyboard.press("Alt+KeyR");
+      await sleep(450);
+      const reset = await page.evaluate(() => window.__hackmeExchangeDebug?.getPaneViewport?.("chart-host-2"));
+      const changed =
+        zoomed &&
+        reset &&
+        (Math.abs(span(zoomed) - span(reset)) > 2 || Math.abs(zoomed.barSpacing - reset.barSpacing) > 0.02);
+      if (changed) {
+        ok("Alt+R resets focused secondary pane");
+      } else if (zoomed && reset) {
+        note("P2", "pane2-alt-r", "Alt+R may not have changed pane 2 zoom");
+      }
+    }
+  }
+
   const shotProbe = await page.evaluate(() => {
     const split = document.querySelector(".chart-split");
     const hosts = split ? [...split.querySelectorAll(".chart-host")].map((h) => h.id) : [];
@@ -606,6 +707,7 @@ async function testDesktopDeep(browser) {
     await testBookObAmt(page);
     await testBookClickToPrice(page);
     await testChartOverlayDefaults(page);
+    await testChartToolbarButtons(page);
     await testChartQuickOrderNoPanPopup(page);
     await testInlineOrderAmend(page);
     await testAdvancedOrderTypes(page);
