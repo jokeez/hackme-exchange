@@ -270,14 +270,28 @@ export function showMultiChartPicker(state: DemoState, anchor: HTMLElement, onSa
     { id: "2h", label: "2 horizontal", icon: "▤" },
     { id: "4", label: "2×2 grid", icon: "⊞" },
   ];
+  const hint = state.multiChartLinked
+    ? "Linked panes — zoom &amp; crosshair sync across charts."
+    : "Independent panes — zoom &amp; scroll each chart separately.";
   const menu = document.createElement("div");
   menu.className = "pop-menu glass multi-picker";
   menu.innerHTML = `<p class="pop-menu-title">Multi Chart</p>
-    <p class="pop-menu-hint muted small">Independent panes — zoom &amp; scroll each chart separately.</p>${layouts
+    <label class="mc-link-row"><input type="checkbox" id="mc-link-panes" ${state.multiChartLinked ? "checked" : ""} /> Link panes (zoom + crosshair)</label>
+    <p class="pop-menu-hint muted small">${hint}</p>${layouts
     .map((l) => `<button type="button" class="mc-opt ${state.multiChartLayout === l.id ? "active" : ""}" data-l="${l.id}"><span>${l.icon}</span>${l.label}</button>`)
     .join("")}`;
-  positionPopMenu(anchor, menu, 176);
+  positionPopMenu(anchor, menu, 220);
   document.body.appendChild(menu);
+  const linkInp = menu.querySelector("#mc-link-panes") as HTMLInputElement | null;
+  linkInp?.addEventListener("change", () => {
+    onSave({ multiChartLinked: linkInp.checked });
+    const hintEl = menu.querySelector(".pop-menu-hint");
+    if (hintEl) {
+      hintEl.textContent = linkInp.checked
+        ? "Linked panes — zoom & crosshair sync across charts."
+        : "Independent panes — zoom & scroll each chart separately.";
+    }
+  });
   menu.querySelectorAll(".mc-opt").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = (btn as HTMLElement).dataset.l as MultiChartLayout;

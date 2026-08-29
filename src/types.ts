@@ -297,7 +297,7 @@ export const DEFAULT_FEE_CONFIG: FeeConfig = {
   hmcDiscountPct: 25,
 };
 
-export const STATE_VERSION = 19;
+export const STATE_VERSION = 20;
 
 export type DemoState = {
   wallet: Wallet;
@@ -329,6 +329,8 @@ export type DemoState = {
   chartFullscreen: boolean;
   multiChart: boolean;
   multiChartLayout: MultiChartLayout;
+  /** When true, multi-chart panes share zoom/crosshair (optional). Default independent. */
+  multiChartLinked: boolean;
   chartOverlays: ChartOverlaySettings;
   indicatorConfig: IndicatorConfig;
   drawingsLocked: boolean;

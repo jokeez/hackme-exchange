@@ -125,6 +125,7 @@ const DEFAULT: DemoState = {
   chartFullscreen: false,
   multiChart: false,
   multiChartLayout: "1",
+  multiChartLinked: false,
   chartOverlays: structuredClone(DEFAULT_CHART_OVERLAYS),
   indicatorConfig: structuredClone(DEFAULT_INDICATOR_CONFIG),
   drawingsLocked: false,
@@ -247,6 +248,7 @@ export function loadState(): DemoState {
       multiChartLayout: sanitizeMultiChartLayout(
         parsed.multiChartLayout ?? (parsed.multiChart ? "2v" : "1"),
       ),
+      multiChartLinked: !!parsed.multiChartLinked,
       drawingsLocked: parsed.drawingsLocked ?? false,
       oracleAnchor: migrateOracleAnchor(parsed.oracleAnchor, DEFAULT.oracleAnchor),
       mainView: sanitizeMainView(parsed.mainView),

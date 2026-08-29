@@ -9,6 +9,7 @@ import {
 import type { Candle, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
+import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 import { barSpacingForWidth, clampVisiblePriceRange, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange } from "./chart";
 import type { Drawing } from "./types";
@@ -448,6 +449,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
         const deltaPx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         try {
           ts.setVisibleLogicalRange(panLogicalRangeByWheel(lr, deltaPx, spacing));
+          bumpTimeSyncPane(key);
         } catch {
           /* ignore */
         }
@@ -461,6 +463,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       plotLastApply = now;
       try {
         ts.applyOptions({ barSpacing: zoomBarSpacing(spacing, z.step), minBarSpacing: 2 });
+        bumpTimeSyncPane(key);
       } catch {
         /* ignore */
       }

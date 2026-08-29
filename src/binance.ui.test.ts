@@ -49,7 +49,17 @@ describe("binance-inspired UI contracts", () => {
     expect(panel).toContain('aria-label="Product mode"');
     expect(panel).toContain('aria-label="Order type"');
     expect(panel).toContain("fee-meta");
-    // HMC fees live in meta — not jammed under Spot as a separate jammed fee-row block
     expect(panel).toMatch(/order-head-meta[\s\S]*pay-fees-hmc/);
+  });
+
+  it("convert desk and multi-chart picker expose hotkey + link controls", () => {
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    const modals = readFileSync(resolve(process.cwd(), "src/chartModals.ts"), "utf8");
+    expect(app).toContain('id="cv-flip"');
+    expect(app).toContain('id="cv-max"');
+    expect(app).toContain('state.mainView === "convert"');
+    expect(app).toContain('document.getElementById("cv-flip")?.click()');
+    expect(modals).toContain("mc-link-panes");
+    expect(modals).toContain("multiChartLinked");
   });
 });
