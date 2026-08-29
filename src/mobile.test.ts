@@ -9,6 +9,7 @@ import {
   loadMobilePanel,
   loadMobileTradeSide,
   mobilePanelResizeEnabled,
+  mobileChartFooterOverlapPx,
   saveMobilePanel,
   saveMobileTradeSide,
   setMobileTradeSide,
@@ -93,6 +94,49 @@ describe("mobile layout helpers", () => {
     expect(document.documentElement.classList.contains("mobile-layout")).toBe(false);
     window.matchMedia = orig;
     syncMobileLayoutClass();
+  });
+
+  it("mobileChartFooterOverlapPx measures chart/footer overlap on chart tab", () => {
+    const orig = window.matchMedia;
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: q.includes(String(MOBILE_LAYOUT_MAX_PX)),
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
+    document.documentElement.classList.add("mobile-layout");
+    document.documentElement.setAttribute("data-mobile-panel", "chart");
+    document.body.innerHTML = `
+      <div id="chart-host" style="position:fixed;left:0;right:0;top:0;height:400px"></div>
+      <div id="mobile-footer-stack" style="position:fixed;left:0;right:0;bottom:0;height:120px"></div>
+    `;
+    const host = document.getElementById("chart-host")!;
+    Object.defineProperty(host, "getBoundingClientRect", {
+      value: () => ({ top: 0, bottom: 400, left: 0, right: 320, width: 320, height: 400, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    const footer = document.getElementById("mobile-footer-stack")!;
+    Object.defineProperty(footer, "getBoundingClientRect", {
+      value: () => ({ top: 300, bottom: 420, left: 0, right: 320, width: 320, height: 120, x: 0, y: 300, toJSON: () => ({}) }),
+    });
+    expect(mobileChartFooterOverlapPx(host)).toBe(100);
+    document.documentElement.removeAttribute("data-mobile-panel");
+    document.documentElement.classList.remove("mobile-layout");
+    document.body.innerHTML = "";
+    window.matchMedia = orig;
+  });
+
+  it("ships mobile pair tap without search autofocus and readable market search", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(app).not.toContain('getElementById("market-search")?.focus()');
+    expect(css).toContain("html.mobile-layout .market-search");
+    expect(css).toContain("font-size: 16px");
+    expect(css).toMatch(/ind-tabs\.compact[\s\S]*?min-height:\s*2\.75rem/);
   });
 
   it("persists mobile trade side in sessionStorage", () => {

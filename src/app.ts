@@ -4642,8 +4642,8 @@ function wireEvents(): void {
 
   document.getElementById("btn-mobile-pair")?.addEventListener("click", () => {
     if (!isMobileLayout()) return;
+    (document.activeElement as HTMLElement | null)?.blur?.();
     switchMobilePanel("markets");
-    document.getElementById("market-search")?.focus();
   });
 
   wireLayoutPanels();
