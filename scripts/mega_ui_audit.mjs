@@ -485,6 +485,56 @@ async function testHotkeysOverlay(page) {
   await dismissOverlays(page);
 }
 
+async function testPlotWheelCursorAnchor(page) {
+  await dismissOverlays(page);
+  await waitChart(page);
+  const plotCanvas = page.locator("#chart-host .chart-inner canvas").first();
+  const box = await plotCanvas.boundingBox({ timeout: 15000 });
+  if (!box) {
+    note("P1", "plot-anchor-box", "plot canvas box null");
+    return;
+  }
+  const cx = box.x + box.width * 0.38;
+  const cy = box.y + box.height * 0.52;
+  await page.mouse.move(cx, cy, { steps: 6 });
+  const result = await page.evaluate(
+    ({ clientX, clientY }) => {
+      const probe = window.__hackmeChart;
+      const time0 = probe?.timeAtPlotClientX?.(clientX) ?? null;
+      const host = document.getElementById("chart-host");
+      for (let i = 0; i < 8; i++) {
+        host?.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: 120,
+            clientX,
+            clientY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+      const time1 = probe?.timeAtPlotClientX?.(clientX) ?? null;
+      const driftPx =
+        time0 != null && probe?.anchorDriftPx ? probe.anchorDriftPx(clientX, time0) : 999;
+      return { time0, time1, driftPx };
+    },
+    { clientX: cx, clientY: cy },
+  );
+  if (result.time0 == null) {
+    note("P1", "plot-anchor-time", "could not read anchor time under cursor");
+    return;
+  }
+  if (result.time1 !== result.time0) {
+    note("P0", "plot-wheel-anchor-time", `anchor time ${result.time0} → ${result.time1}`);
+    return;
+  }
+  if (result.driftPx > 6) {
+    note("P0", "plot-wheel-anchor-drift", `anchor px drift ${result.driftPx.toFixed(1)}`);
+    return;
+  }
+  ok(`plot wheel keeps cursor anchor (drift ${result.driftPx.toFixed(1)}px)`);
+}
+
 async function testPriceScaleWheel(page) {
   await dismissOverlays(page);
   const before = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
@@ -1021,6 +1071,7 @@ async function testDesktopDeep(browser) {
     await testActivityTabs(page);
     await testDrawToolsA11y(page);
     await testHotkeysOverlay(page);
+    await testPlotWheelCursorAnchor(page);
     await testPriceScaleWheel(page);
     await testMultiChartIndependent(page);
     await testMultiChartLinked(page);

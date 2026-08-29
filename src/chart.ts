@@ -1469,17 +1469,53 @@ export function smoothPlotBarSpacing(current: number, deltaY: number): number {
 
 type PlotWheelTimeScale = {
   options: () => { barSpacing?: number };
-  applyOptions: (o: { barSpacing?: number; minBarSpacing?: number }) => void;
+  applyOptions: (o: { barSpacing?: number; minBarSpacing?: number; rightBarStaysOnScroll?: boolean }) => void;
   getVisibleLogicalRange: () => { from: number; to: number } | null;
   setVisibleLogicalRange: (r: { from: number; to: number }) => void;
   coordinateToTime: (x: number) => unknown;
   timeToCoordinate: (time: UTCTimestamp) => number | null;
 };
 
+/** Plot X in px from viewport clientX (plot canvas origin). */
+export function plotCoordFromClient(clientX: number, shell: HTMLElement): number {
+  const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
+  const el = inner ?? shell;
+  const rect = el.getBoundingClientRect();
+  // LWC table cells often report clientWidth=0 — use the plot canvas bounds.
+  const plotCanvas = el.querySelector<HTMLCanvasElement>(
+    ".tv-lightweight-charts table tr:first-child td:first-child canvas",
+  );
+  let plotLeft = rect.left;
+  let plotW = Math.max(40, el.clientWidth - 72);
+  if (plotCanvas) {
+    const cr = plotCanvas.getBoundingClientRect();
+    if (cr.width >= 8) {
+      plotLeft = cr.left;
+      plotW = cr.width;
+    }
+  } else {
+    const scaleCell = el.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child");
+    const scaleW = scaleCell?.getBoundingClientRect().width ?? 72;
+    plotW = Math.max(40, rect.width - scaleW);
+  }
+  const x = clientX - plotLeft;
+  return Math.max(0, Math.min(plotW - 1, x));
+}
+
+/**
+ * LWC-matching logical shift: keep the bar under `coordPx` fixed when bar spacing changes.
+ * See lightweight-charts TimeScale.zoom() — adjust offset by bars-from-left * (1 - prev/next).
+ */
+export function plotWheelAnchorShift(coordPx: number, prevSpacing: number, nextSpacing: number): number {
+  if (!(coordPx > 0) || !(prevSpacing > 0) || !(nextSpacing > 0)) return 0;
+  if (Math.abs(nextSpacing - prevSpacing) < 1e-6) return 0;
+  return coordPx * (1 / prevSpacing - 1 / nextSpacing);
+}
+
 /** Zoom time scale under cursor — keeps anchor bar under the mouse (Binance/TV feel). */
 export function applyPlotWheelZoom(
   ts: PlotWheelTimeScale,
-  shellRect: DOMRect,
+  shell: HTMLElement,
   clientX: number,
   deltaY: number,
 ): number {
@@ -1488,30 +1524,30 @@ export function applyPlotWheelZoom(
   if (Math.abs(next - prev) < 1e-4) return prev;
 
   const lr = ts.getVisibleLogicalRange();
-  const x = clientX - shellRect.left;
-  const anchorTime = ts.coordinateToTime(x);
+  const plotX = plotCoordFromClient(clientX, shell);
+  const anchorTime = ts.coordinateToTime(plotX);
 
   if (!lr || anchorTime == null) {
-    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
     return next;
   }
 
   const coordBefore = ts.timeToCoordinate(anchorTime as UTCTimestamp);
-  if (coordBefore == null) {
-    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+  if (coordBefore == null || !Number.isFinite(coordBefore)) {
+    ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
     return next;
   }
 
-  const deltaLogical = ((coordBefore * (prev / next - 1)) / Math.max(MIN_PLOT_BAR_SPACING, next));
+  const deltaLogical = plotWheelAnchorShift(coordBefore, prev, next);
   try {
     ts.setVisibleLogicalRange({
-      from: (lr.from as number) - deltaLogical,
-      to: (lr.to as number) - deltaLogical,
+      from: (lr.from as number) + deltaLogical,
+      to: (lr.to as number) + deltaLogical,
     });
   } catch {
     /* ignore */
   }
-  ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING });
+  ts.applyOptions({ barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false });
   return next;
 }
 
@@ -1884,6 +1920,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       secondsVisible: secondsVisibleForTf(opts.tf),
       rightOffset: chartRightOffset(hostW, opts.tf),
       barSpacing: spacing,
+      rightBarStaysOnScroll: false,
     },
     crosshair: { mode: 0 },
     localization: chartLocalization(),
@@ -2510,11 +2547,33 @@ function bindChartDebugProbe(): void {
     priceAnchorFromPointer,
     applyMainPlotWheel(dy: number, clientX: number) {
       if (!chart || !hostEl) return null;
-      const inner = hostEl.querySelector(".chart-inner") as HTMLElement | null;
-      const rect = (inner ?? hostEl).getBoundingClientRect();
-      applyPlotWheelZoom(chart.timeScale(), rect, clientX, dy);
+      applyPlotWheelZoom(chart.timeScale(), hostEl, clientX, dy);
       bumpTimeSyncPane("chart-host");
       return getMainViewportDebug();
+    },
+    plotCoordFromClient(clientX: number) {
+      if (!hostEl) return 0;
+      return plotCoordFromClient(clientX, hostEl);
+    },
+    timeAtPlotClientX(clientX: number) {
+      if (!chart || !hostEl) return null;
+      const x = plotCoordFromClient(clientX, hostEl);
+      try {
+        return chart.timeScale().coordinateToTime(x) as number | null;
+      } catch {
+        return null;
+      }
+    },
+    anchorDriftPx(clientX: number, anchorTime: number) {
+      if (!chart || !hostEl) return 999;
+      const plotX = plotCoordFromClient(clientX, hostEl);
+      try {
+        const coord = chart.timeScale().timeToCoordinate(anchorTime as UTCTimestamp);
+        if (coord == null || !Number.isFinite(coord)) return 999;
+        return Math.abs(coord - plotX);
+      } catch {
+        return 999;
+      }
     },
   };
 }
@@ -2759,7 +2818,9 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     if (isMobileLayout()) return;
     if (!chart || !candleSeries) return;
     const target = e.target as Node | null;
-    if (!target || !host.contains(target)) return;
+    const inHost =
+      (target != null && host.contains(target)) || e.composedPath().some((n) => n === host);
+    if (!inHost) return;
 
     if (isOverPriceScaleEl(e.clientX, e.clientY, host)) {
       e.preventDefault();
@@ -2825,8 +2886,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     }
 
     const dy = normalizeWheelDeltaY(e, host.clientHeight || 400);
-    const rect = host.getBoundingClientRect();
-    applyPlotWheelZoom(chart.timeScale(), rect, e.clientX, dy);
+    applyPlotWheelZoom(chart.timeScale(), host, e.clientX, dy);
     bumpTimeSyncPane("chart-host");
   };
   const onDblClick = (e: MouseEvent) => {
@@ -2860,14 +2920,14 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     axisPointerDown = false;
     healVisiblePriceScale();
   };
-  host.addEventListener("wheel", onWheel, { passive: false, capture: true });
+  window.addEventListener("wheel", onWheel, { passive: false, capture: true });
   shell.addEventListener("dblclick", onDblClick, { capture: true });
   shell.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
   window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
   window.addEventListener("pointerup", onPointerUp, { capture: true });
   window.addEventListener("pointercancel", onPointerUp, { capture: true });
   priceWheelCleanup = () => {
-    host?.removeEventListener("wheel", onWheel, true);
+    window.removeEventListener("wheel", onWheel, true);
     shell.removeEventListener("dblclick", onDblClick, true);
     shell.removeEventListener("pointerdown", onPointerDown, true);
     window.removeEventListener("pointermove", onPointerMove, true);
