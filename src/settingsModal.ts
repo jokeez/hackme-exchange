@@ -1,11 +1,12 @@
 import type { ChartOverlaySettings, DemoState, ThemeId } from "./types";
-import { type LayoutPrefs } from "./layoutPrefs";
+import { type LayoutPrefs, type LayoutPresetId } from "./layoutPrefs";
 import { trapModalFocus } from "./oracleSettings";
 
 export type SettingsModalActions = {
   onSaveOracle: (anchor: number) => void;
   onTheme: (theme: ThemeId) => void;
   onLayout: (patch: Partial<LayoutPrefs>) => void;
+  onApplyLayoutPreset: (id: LayoutPresetId) => void;
   onResetLayout: () => void;
   onExport: () => void;
   onImportClick: () => void;
@@ -33,7 +34,13 @@ export function renderUnifiedSettingsModal(
     </nav>
 
     <div class="modal-pane active" id="pane-layout" role="tabpanel">
-      <p class="muted small">Panel visibility and multi-chart sync — like Binance Pro layout toggles.</p>
+      <p class="muted small">Named presets — like Binance Pro layout modes.</p>
+      <div class="settings-preset-row">
+        <button type="button" class="btn-sm" id="set-preset-standard">Standard</button>
+        <button type="button" class="btn-sm" id="set-preset-chart">Chart focus</button>
+        <button type="button" class="btn-sm" id="set-preset-scalper">Scalper</button>
+      </div>
+      <p class="muted small">Or toggle panels individually:</p>
       <div class="settings-grid">
         <label><input type="checkbox" id="set-book" ${!layout.bookCollapsed ? "checked" : ""} /> Order book</label>
         <label><input type="checkbox" id="set-right" ${!layout.rightCollapsed ? "checked" : ""} /> Markets</label>
@@ -165,6 +172,18 @@ export function showUnifiedSettingsModal(
   });
   bd.querySelector("#set-layout-reset")?.addEventListener("click", () => {
     actions.onResetLayout();
+    close();
+  });
+  bd.querySelector("#set-preset-standard")?.addEventListener("click", () => {
+    actions.onApplyLayoutPreset("standard");
+    close();
+  });
+  bd.querySelector("#set-preset-chart")?.addEventListener("click", () => {
+    actions.onApplyLayoutPreset("chart");
+    close();
+  });
+  bd.querySelector("#set-preset-scalper")?.addEventListener("click", () => {
+    actions.onApplyLayoutPreset("scalper");
     close();
   });
 

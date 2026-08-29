@@ -22,6 +22,35 @@ export const LAYOUT_DEFAULTS: LayoutPrefs = {
   bottomCollapsed: false,
 };
 
+export type LayoutPresetId = "standard" | "chart" | "scalper";
+
+/** Binance-style one-click desk layouts. */
+export const LAYOUT_PRESETS: Record<LayoutPresetId, LayoutPrefs> = {
+  standard: { ...LAYOUT_DEFAULTS },
+  chart: {
+    ...LAYOUT_DEFAULTS,
+    bookCollapsed: true,
+    rightCollapsed: true,
+    toolsCollapsed: false,
+    bottomCollapsed: true,
+  },
+  scalper: {
+    ...LAYOUT_DEFAULTS,
+    bookWidth: 280,
+    rightWidth: 320,
+    bookCollapsed: false,
+    rightCollapsed: false,
+    toolsCollapsed: false,
+    bottomHeight: 220,
+    bottomCollapsed: false,
+  },
+};
+
+export function applyLayoutPreset(id: LayoutPresetId): LayoutPrefs {
+  const base = LAYOUT_PRESETS[id] ?? LAYOUT_PRESETS.standard;
+  return sanitizeLayoutPrefs({ ...base });
+}
+
 const MIN_W = 200;
 const MAX_W = 380;
 const BOTTOM_MIN_H = 136;

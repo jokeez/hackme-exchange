@@ -56,8 +56,10 @@ import {
   setPanelWidth,
   terminalGridColumnsForView,
   togglePanelCollapsed,
+  applyLayoutPreset,
   LAYOUT_DEFAULTS,
   type LayoutPrefs,
+  type LayoutPresetId,
 } from "./layoutPrefs";
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
@@ -1931,6 +1933,7 @@ function renderSpot(): string {
     <button type="button" class="cm" data-chart-more="style" role="menuitem">Chart style</button>
     <button type="button" class="cm" data-chart-more="goto" role="menuitem">Go to date</button>
     <button type="button" class="cm" data-chart-more="screenshot" role="menuitem">Screenshot</button>
+    <button type="button" class="cm" data-chart-more="hotkeys" role="menuitem">Shortcuts</button>
   </div>
   </div>
   <div class="kbd-hint">? help · Shift+B/S market · Esc cancel all · 1-0 TF · Alt+R reset · charts by TradingView</div>`;
@@ -3935,22 +3938,30 @@ function wireOrderAmendButtons(): void {
       inp.value =
         field === "price" ? String(o.price) : field === "stop" ? String(o.stopPrice ?? "") : String(o.amountBase);
       const commit = () => {
+        if (cancelled) return;
         amendOpenOrder(id, field, inp.value);
       };
       let cancelled = false;
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        commit();
+      };
       inp.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          commit();
+          finish();
         }
         if (e.key === "Escape") {
           e.preventDefault();
           cancelled = true;
+          done = true;
           refreshActivityPanel();
         }
       });
       inp.addEventListener("blur", () => {
-        if (!cancelled) commit();
+        if (!done) finish();
       });
       next.replaceWith(inp);
       inp.focus();
@@ -4110,6 +4121,16 @@ function showSettings(): void {
       syncLayoutChips();
       toast("Layout reset", "info");
       render();
+    },
+    onApplyLayoutPreset: (id: LayoutPresetId) => {
+      layoutPrefs = applyLayoutPreset(id);
+      saveLayoutPrefs(layoutPrefs);
+      state.chartFullscreen = false;
+      saveState(state);
+      applyLayoutToDom();
+      syncLayoutChips();
+      toast(`Layout → ${id}`, "info");
+      scheduleChartResize();
     },
     onExport: () => {
       const stamp = new Date().toISOString().slice(0, 10);
@@ -4746,6 +4767,7 @@ function wireEvents(): void {
             (patch) => {
               Object.assign(state, patch);
               saveState(state);
+              syncChartOverlayEffects();
               applyOverlays(
                 state.chartOverlays,
                 state.orders.filter((o) => o.pairId === state.activePair),
@@ -4764,6 +4786,8 @@ function wireEvents(): void {
       } else if (action === "screenshot") {
         chartScreenshot();
         toast("Screenshot saved", "ok");
+      } else if (action === "hotkeys") {
+        showHotkeysHelp();
       }
     });
   });
@@ -5179,9 +5203,11 @@ function showHotkeysHelp(): void {
         <li><kbd>Alt</kbd>+<kbd>R</kbd> Reset chart view</li>
         <li><kbd>Del</kbd> Remove selected drawing</li>
         <li><kbd>?</kbd> This help</li>
+        <li>Chart click → quick limit (enable in Settings → Chart)</li>
+        <li>Orders tab → click price/amount to amend inline</li>
         <li>Click book row → fill Limit price</li>
         <li>BBO → best bid/offer into price</li>
-        <li>Convert → flip · Max · % · live fee</li>
+        <li>Convert → <kbd>F</kbd> flip · <kbd>M</kbd> max · <kbd>1</kbd>–<kbd>4</kbd> %</li>
       </ul>
       <p class="muted small">Tip: collapse Book / Markets rails to widen the chart when you need focus.</p>
     </div>`;
@@ -5684,6 +5710,26 @@ export async function boot(): Promise<void> {
       },
       get multiChartIndependent() {
         return !state.multiChartLinked;
+      },
+      seedOpenOrderForE2E(price: number, amountBase = 120) {
+        const o = {
+          id: `e2e-${uid()}`,
+          pairId: state.activePair,
+          side: "buy" as const,
+          kind: "limit" as const,
+          price,
+          amountBase,
+          filledBase: 0,
+          status: "open" as const,
+          source: "paper" as const,
+          createdAt: Date.now(),
+          timeInForce: "GTC" as const,
+        };
+        state.orders.unshift(o);
+        saveState(state);
+        activityTab = "orders";
+        refreshActivityPanel();
+        return o.id;
       },
     };
   }

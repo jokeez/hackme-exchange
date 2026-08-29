@@ -4057,6 +4057,7 @@ html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
 .act-edit { padding: 0; border: none; background: transparent; cursor: pointer; }
 .act-edit:hover { text-decoration: underline; }
 
+.settings-modal .settings-preset-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0.5rem; }
 .settings-modal .settings-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 0.75rem; margin: 0.5rem 0;
 }
