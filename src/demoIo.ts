@@ -206,6 +206,7 @@ export function parseDemoImport(raw: string): DemoState {
     incoming.multiChartLayout ?? (incoming.multiChart ? "2v" : "1"),
   );
   state.multiChart = state.multiChartLayout !== "1";
+  state.multiChartLinked = !!incoming.multiChartLinked;
   if (Array.isArray(incoming.favoritePairs)) {
     state.favoritePairs = incoming.favoritePairs
       .filter((p): p is PairId => typeof p === "string" && PAIR_IDS.has(p as PairId))

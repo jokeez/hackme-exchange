@@ -78,6 +78,7 @@ export function baseState(over: Partial<DemoState> = {}): DemoState {
     chartFullscreen: false,
     multiChart: false,
     multiChartLayout: "1",
+    multiChartLinked: false,
     chartOverlays: structuredClone(DEFAULT_CHART_OVERLAYS),
     indicatorConfig: structuredClone(DEFAULT_INDICATOR_CONFIG),
     drawingsLocked: false,

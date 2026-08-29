@@ -207,6 +207,9 @@ async function testMultiChartIndependent(page) {
   if (!(await btn.isVisible().catch(() => false))) return;
   await btn.click({ force: true });
   await sleep(200);
+  const linkRow = page.locator("#mc-link-panes");
+  if (await linkRow.isVisible().catch(() => false)) ok("multi-chart link toggle visible");
+  else note("P2", "multi-link-toggle", "link panes checkbox missing");
   const hint = page.locator(".pop-menu.multi-picker .pop-menu-hint");
   if (!(await hint.isVisible().catch(() => false))) note("P2", "multi-hint", "independent panes hint missing");
   else ok("multi-chart independent hint");
@@ -222,8 +225,8 @@ async function testMultiChartIndependent(page) {
   ok("multi 4-grid independent layout");
 
   const indep = await page.evaluate(() => window.__hackmeExchangeDebug?.multiChartIndependent === true);
-  if (!indep) note("P0", "multi-indep-flag", "multiChartIndependent not set");
-  else ok("multiChartIndependent flag");
+  if (!indep) note("P0", "multi-indep-flag", "multiChartIndependent not true by default");
+  else ok("multiChartIndependent default");
 
   const syncOff = await page.evaluate(() => {
     const ex = window.__hackmeExchangeDebug;

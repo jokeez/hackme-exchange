@@ -23,6 +23,7 @@ import {
   getDisplayedLastCandle,
   getChartMountOpts,
   getFocusedChartPaneId,
+  getMainCrosshairPane,
   getSelectedDrawingId,
   mountChart,
   refreshDrawings,
@@ -57,9 +58,9 @@ import {
 import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
-import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug } from "./chartSecondary";
-import { setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
-import { clearTimeSyncRegistry, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
+import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes } from "./chartSecondary";
+import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
+import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
 import { renderOracleSettingsModal, trapModalFocus } from "./oracleSettings";
 import {
   authLogout,
@@ -323,7 +324,13 @@ let labFeeWallet: string | null = null;
 let convertFrom: keyof Wallet = "hmc";
 let convertTo: keyof Wallet = "usdt";
 let convertAmtStr = "100";
-let convertConfirmLarge = true;
+let convertConfirmLarge = (() => {
+  try {
+    return sessionStorage.getItem("hackme-ex-cv-confirm-large") !== "0";
+  } catch {
+    return true;
+  }
+})();
 /** Ignore stale lab convert quotes when flip/amount races ahead of await. */
 let convertPreviewSeq = 0;
 /** Ignore stale custody fee quotes when asset/amount change mid-flight. */
@@ -1626,6 +1633,11 @@ function wireConvertDesk(): void {
 
   document.getElementById("cv-confirm-large")?.addEventListener("change", (e) => {
     convertConfirmLarge = (e.target as HTMLInputElement).checked;
+    try {
+      sessionStorage.setItem("hackme-ex-cv-confirm-large", convertConfirmLarge ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
   });
 
   document.getElementById("cv-go")?.addEventListener("click", () => {
@@ -3191,17 +3203,40 @@ function setPaneTf(pane: number, tf: Timeframe): void {
   syncMultiCharts();
 }
 
-/** Multi-chart panes are fully independent — no linked zoom or crosshair. */
-function wireMultiChartIndependence(): void {
-  setCrosshairSyncEnabled(false);
-  setTimeSyncEnabled(false);
-  setChartCrosshairMode(0);
+/** Multi-chart: independent by default; optional linked zoom/crosshair. */
+let crosshairPaneCleanups: Array<() => void> = [];
+let timeSyncPaneCleanups: Array<() => void> = [];
+
+function wireMultiChartSync(): void {
+  crosshairPaneCleanups.forEach((fn) => fn());
+  crosshairPaneCleanups = [];
+  timeSyncPaneCleanups.forEach((fn) => fn());
+  timeSyncPaneCleanups = [];
+  const multi = state.multiChartLayout !== "1";
+  const linked = multi && state.multiChartLinked;
+  setCrosshairSyncEnabled(linked);
+  setTimeSyncEnabled(linked);
+  setChartCrosshairMode(linked ? 1 : 0);
+  if (!linked) return;
+  const main = getMainCrosshairPane();
+  if (main) {
+    crosshairPaneCleanups.push(registerCrosshairPane(main));
+    timeSyncPaneCleanups.push(
+      registerTimeSyncPane({ id: main.id, chart: main.chart, barCount: () => main.candles().length }),
+    );
+  }
+  for (const pane of listSecondaryCrosshairPanes()) {
+    crosshairPaneCleanups.push(registerCrosshairPane(pane));
+    timeSyncPaneCleanups.push(
+      registerTimeSyncPane({ id: pane.id, chart: pane.chart, barCount: () => pane.candles().length }),
+    );
+  }
 }
 
 function syncMultiCharts(): void {
   if (state.multiChartLayout === "1") {
     destroySecondaryChart();
-    wireMultiChartIndependence();
+    wireMultiChartSync();
     return;
   }
   if (market) ensureCandles(state, market);
@@ -3256,7 +3291,7 @@ function syncMultiCharts(): void {
       resizeAll();
       requestAnimationFrame(() => {
         resizeAll();
-        wireMultiChartIndependence();
+        wireMultiChartSync();
       });
     });
   });
@@ -4273,6 +4308,7 @@ function patchOracleStatus(): void {
 }
 
 function tickOracleAge(): void {
+  if (state.mainView !== "spot") return;
   patchOracleStatus();
 }
 
@@ -4600,6 +4636,10 @@ function wireEvents(): void {
       }
       Object.assign(state, patch);
       saveState(state);
+      if (patch.multiChartLinked != null && patch.multiChartLayout == null) {
+        wireMultiChartSync();
+        return;
+      }
       render();
     });
   });
@@ -4951,6 +4991,35 @@ function onKeydown(e: KeyboardEvent): void {
     e.preventDefault();
     document.getElementById("hotkeys-overlay")?.remove();
     return;
+  }
+
+  if (state.mainView === "convert" && !isTypingTarget(e.target)) {
+    if (e.key === "f" || e.key === "F") {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      document.getElementById("cv-flip")?.click();
+      return;
+    }
+    if (e.key === "m" || e.key === "M") {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      document.getElementById("cv-max")?.click();
+      return;
+    }
+    if (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4") {
+      const pct = [25, 50, 75, 100][Number(e.key) - 1];
+      const chip = document.querySelector(`[data-cv-pct="${pct}"]`) as HTMLElement | null;
+      if (chip) {
+        e.preventDefault();
+        chip.click();
+      }
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("cv-go")?.click();
+      return;
+    }
   }
 
   if (state.mainView !== "spot") return;
@@ -5385,7 +5454,12 @@ export async function boot(): Promise<void> {
       getTimeSyncDebug,
       getMainViewport: getMainViewportDebug,
       getPaneViewport: getSecondaryViewportDebug,
-      multiChartIndependent: true,
+      get multiChartLinked() {
+        return state.multiChartLinked;
+      },
+      get multiChartIndependent() {
+        return !state.multiChartLinked;
+      },
     };
   }
 }

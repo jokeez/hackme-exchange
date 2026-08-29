@@ -2202,6 +2202,16 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   line-height: 1.35;
   font-size: 0.72rem;
 }
+.mc-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+  user-select: none;
+}
+.mc-link-row input { accent-color: var(--primary); }
 .sub-pair-select:focus-visible,
 .sub-tf-select:focus-visible {
   outline: 2px solid var(--primary);

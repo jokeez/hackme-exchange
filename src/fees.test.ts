@@ -46,6 +46,7 @@ function baseState(): DemoState {
     chartFullscreen: false,
     multiChart: false,
     multiChartLayout: "1" as const,
+    multiChartLinked: false,
     chartOverlays: structuredClone(DEFAULT_CHART_OVERLAYS),
     indicatorConfig: structuredClone(DEFAULT_INDICATOR_CONFIG),
     drawingsLocked: false,
