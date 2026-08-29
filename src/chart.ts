@@ -417,7 +417,7 @@ export function getDisplayedLastCandle(): Candle | null {
 /** LWC autoscale override — ignore extreme wicks (TV-style scale to body). */
 function makeRobustAutoscaleProvider() {
   return (original: () => { priceRange: { minValue: number; maxValue: number } | null; margins?: { above: number; below: number } } | null) => {
-    if (priceScaleManual) return original();
+    if (priceScaleManual) return null;
     if (!chart || currentCandles.length < 2) return original();
     try {
       const lr = chart.timeScale().getVisibleLogicalRange();
@@ -1208,7 +1208,9 @@ export function clampVisiblePriceRange(
   range: { from: number; to: number },
   refPrice: number,
   chartHeightPx = 0,
+  clampOpts?: { manual?: boolean },
 ): { from: number; to: number } {
+  const manual = clampOpts?.manual === true;
   const ref = Number.isFinite(refPrice) && refPrice > 0 ? refPrice : 0;
   let from = range.from;
   let to = range.to;
@@ -1233,7 +1235,9 @@ export function clampVisiblePriceRange(
   const labelPx = 26;
   const maxLabels = chartHeightPx > 80 ? Math.max(5, Math.floor(chartHeightPx / labelPx)) : 10;
   const spanFromHeight = chartHeightPx > 0 ? (ref * 0.14) / Math.sqrt(maxLabels) : 0;
-  const minSpan = Math.max(ref * 0.008, spanFromHeight, ref * 1e-5, 1e-12);
+  const autoMinSpan = Math.max(ref * 0.008, spanFromHeight, ref * 1e-5, 1e-12);
+  const manualMinSpan = Math.max(ref * 0.00006, ref * 1e-6, 1e-12);
+  const minSpan = manual ? manualMinSpan : autoMinSpan;
   const maxSpan = ref * 3; // ~±150% around mid at worst
   span = Math.min(Math.max(span, minSpan), maxSpan);
 
@@ -1261,13 +1265,16 @@ export function clampVisiblePriceRange(
     from = Math.max(floor, to - span);
   }
 
-  // Keep the reference price on-screen.
+  // Keep the reference price on-screen (soft when user manually zoomed/panned).
   if (ref < from || ref > to) {
-    from = ref - span / 2;
-    to = ref + span / 2;
-    if (from < floor) {
-      from = floor;
-      to = from + span;
+    const offScreen = manual ? ref < from - span || ref > to + span : true;
+    if (offScreen) {
+      from = ref - span / 2;
+      to = ref + span / 2;
+      if (from < floor) {
+        from = floor;
+        to = from + span;
+      }
     }
   }
 
@@ -1302,7 +1309,7 @@ export function zoomPriceRange(
   deltaY: number,
   factorOrOpts:
     | number
-    | { sensitivity?: number; maxStep?: number; anchor?: number; step?: number; refPrice?: number } = {},
+    | { sensitivity?: number; maxStep?: number; anchor?: number; step?: number; refPrice?: number; manual?: boolean } = {},
 ): { from: number; to: number } {
   const opts =
     typeof factorOrOpts === "number"
@@ -1335,7 +1342,9 @@ export function zoomPriceRange(
   const factor = Math.exp(step);
   let nextSpan = span * factor;
   const absMid = refHint || Math.abs(mid) || 1e-8;
-  nextSpan = Math.min(Math.max(nextSpan, absMid * 0.002), absMid * 3);
+  const manual = opts.manual === true;
+  const minSpanFactor = manual ? 0.00012 : 0.002;
+  nextSpan = Math.min(Math.max(nextSpan, absMid * minSpanFactor), absMid * 3);
 
   let anchor =
     opts.anchor != null && Number.isFinite(opts.anchor) ? opts.anchor : mid;
@@ -1346,19 +1355,75 @@ export function zoomPriceRange(
   anchor = Math.min(range.to, Math.max(range.from, anchor));
   const ratio = Math.min(1, Math.max(0, (anchor - range.from) / span));
   const next = { from: anchor - nextSpan * ratio, to: anchor + nextSpan * (1 - ratio) };
-  return clampVisiblePriceRange(next, refHint || mid);
+  return clampVisiblePriceRange(next, refHint || mid, 0, { manual });
+}
+
+/** Smooth CEX price zoom — positive deltaY (wheel away) tightens the visible span. */
+export function smoothPriceSpan(span: number, deltaY: number): number {
+  if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.25 || !(span > 0)) return span;
+  const expArg = Math.max(-0.16, Math.min(0.16, deltaY * PLOT_WHEEL_ZOOM_SENSITIVITY));
+  const factor = Math.exp(expArg);
+  return span / factor;
+}
+
+/** Wheel zoom on the price scale with Y-anchor under the cursor. */
+export function applyPriceWheelZoom(
+  range: { from: number; to: number },
+  deltaY: number,
+  anchor: number,
+  refPrice: number,
+  chartHeightPx = 0,
+): { from: number; to: number } {
+  const span0 = range.to - range.from;
+  if (!(span0 > 0)) return range;
+  const nextSpan = smoothPriceSpan(span0, deltaY);
+  let a = Number.isFinite(anchor) ? anchor : (range.from + range.to) / 2;
+  a = Math.min(range.to, Math.max(range.from, a));
+  const ratio = Math.min(1, Math.max(0, (a - range.from) / span0));
+  const next = { from: a - nextSpan * ratio, to: a + nextSpan * (1 - ratio) };
+  return clampVisiblePriceRange(next, refPrice, chartHeightPx, { manual: true });
+}
+
+/** Map vertical px drag to a price-range shift (mobile / axis pan). */
+export function shiftPriceRangeByPx(
+  range: { from: number; to: number },
+  dyPx: number,
+  chartHeightPx: number,
+): { from: number; to: number } {
+  const span = range.to - range.from;
+  const h = Math.max(40, chartHeightPx);
+  const shift = -(dyPx / h) * span;
+  return { from: range.from + shift, to: range.to + shift };
+}
+
+/** Price under the pointer for wheel / axis anchoring. */
+export function priceAnchorFromPointer(
+  clientY: number,
+  shell: HTMLElement,
+  series: ISeriesApi<"Candlestick">,
+): number | undefined {
+  const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
+  const rect = (inner ?? shell).getBoundingClientRect();
+  const y = clientY - rect.top;
+  try {
+    const p = series.coordinateToPrice(y);
+    if (p != null && Number.isFinite(p as number)) return p as number;
+  } catch {
+    /* ignore */
+  }
+  return undefined;
 }
 
 /** Hit-test the LWC right price-scale column (stable across layouts / DPR). */
 export function isOverPriceScaleEl(clientX: number, clientY: number, shell: HTMLElement | null): boolean {
   if (!shell) return false;
-  const cell =
-    shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr td:last-child") ??
-    shell.querySelector<HTMLElement>("table tr td:last-child");
-  if (cell) {
+  const cells = shell.querySelectorAll<HTMLElement>(".tv-lightweight-charts table tr td:last-child");
+  for (const cell of cells) {
     const r = cell.getBoundingClientRect();
     if (r.width >= 8 && r.height >= 8) {
-      return clientX >= r.left - 1 && clientX <= r.right + 1 && clientY >= r.top && clientY <= r.bottom;
+      if (clientX >= r.left - 1 && clientX <= r.right + 1 && clientY >= r.top && clientY <= r.bottom) {
+        return true;
+      }
     }
   }
   const rect = shell.getBoundingClientRect();
@@ -2390,7 +2455,7 @@ export function healVisiblePriceScale(): boolean {
     range = { from: robust.minValue, to: robust.maxValue };
   }
   if (!priceRangeNeedsHeal(range, refPrice)) return false;
-  const next = clampVisiblePriceRange(range, refPrice, chartH);
+  const next = clampVisiblePriceRange(range, refPrice, chartH, { manual: priceScaleManual });
   if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return false;
   priceScaleManual = true;
   try {
@@ -2439,6 +2504,10 @@ function bindChartDebugProbe(): void {
     wheelZoomStep,
     smoothPlotBarSpacing,
     applyPlotWheelZoom,
+    applyPriceWheelZoom,
+    smoothPriceSpan,
+    shiftPriceRangeByPx,
+    priceAnchorFromPointer,
     applyMainPlotWheel(dy: number, clientX: number) {
       if (!chart || !hostEl) return null;
       const inner = hostEl.querySelector(".chart-inner") as HTMLElement | null;
@@ -2456,6 +2525,10 @@ function setupMobileChartPan(shell: HTMLElement): void {
   mobilePanCleanup = setupPortableChartPan(shell, chart, {
     getActiveTool: () => activeTool,
     healPriceScale: healVisiblePriceScale,
+    onPriceManual: () => {
+      priceScaleManual = true;
+    },
+    refPrice: refClosePrice,
   });
 }
 
@@ -2465,10 +2538,15 @@ export function setupPortableChartPan(
   opts?: {
     getActiveTool?: () => Drawing["tool"];
     healPriceScale?: () => void;
+    candleSeries?: ISeriesApi<"Candlestick">;
+    onPriceManual?: () => void;
+    refPrice?: () => number;
   },
 ): () => void {
   const getTool = opts?.getActiveTool ?? (() => activeTool);
   const heal = opts?.healPriceScale ?? (() => {});
+  const markManual = opts?.onPriceManual ?? (() => {});
+  const refPrice = opts?.refPrice ?? (() => 0);
   const cleanups: Array<() => void> = [];
   let healTimer = 0;
   let activeTouches = 0;
@@ -2577,6 +2655,91 @@ export function setupPortableChartPan(
     });
   }
 
+  if (isMobileLayout()) {
+    let axisPan = false;
+    let axisStartY = 0;
+    let axisStartRange: { from: number; to: number } | null = null;
+    let axisPointerId = -1;
+    const chartH = () => {
+      const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
+      return Math.floor(inner?.clientHeight ?? shell.clientHeight);
+    };
+
+    const cancelAxisPan = () => {
+      axisPan = false;
+      axisStartRange = null;
+      axisPointerId = -1;
+    };
+
+    const axisCell =
+      shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child") ??
+      shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr td:last-child") ??
+      shell;
+
+    const onAxisDown = (e: PointerEvent) => {
+      if (getTool() !== "cursor") return;
+      if (!isOverPriceScaleEl(e.clientX, e.clientY, hostEl)) return;
+      const ps = chartApi.priceScale("right");
+      let range = ps.getVisibleRange();
+      if (!range || !(range.to > range.from)) return;
+      axisPan = true;
+      axisStartY = e.clientY;
+      axisStartRange = { from: range.from, to: range.to };
+      axisPointerId = e.pointerId;
+      markManual();
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onAxisMove = (e: PointerEvent) => {
+      if (!axisPan || !axisStartRange || e.pointerId !== axisPointerId) return;
+      const dy = e.clientY - axisStartY;
+      if (Math.abs(dy) < 4) return;
+      const h = chartH();
+      const shifted = shiftPriceRangeByPx(axisStartRange, dy, h);
+      const ref = refPrice();
+      const next = ref > 0 ? clampVisiblePriceRange(shifted, ref, h, { manual: true }) : shifted;
+      if (!(next.to > next.from)) return;
+      try {
+        chartApi.priceScale("right").setAutoScale(false);
+        chartApi.priceScale("right").setVisibleRange(next);
+      } catch {
+        /* ignore */
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onAxisUp = (e: PointerEvent) => {
+      if (e.pointerId !== axisPointerId) return;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      const wasPan = axisPan;
+      cancelAxisPan();
+      if (wasPan) scheduleHeal();
+    };
+
+    axisCell.addEventListener("pointerdown", onAxisDown, { passive: false, capture: true });
+    axisCell.addEventListener("pointermove", onAxisMove, { passive: false, capture: true });
+    axisCell.addEventListener("pointerup", onAxisUp, { capture: true });
+    axisCell.addEventListener("pointercancel", onAxisUp, { capture: true });
+    cleanups.push(() => {
+      axisCell.removeEventListener("pointerdown", onAxisDown, true);
+      axisCell.removeEventListener("pointermove", onAxisMove, true);
+      axisCell.removeEventListener("pointerup", onAxisUp, true);
+      axisCell.removeEventListener("pointercancel", onAxisUp, true);
+      cancelAxisPan();
+    });
+  }
+
   return () => {
     if (healTimer) window.clearTimeout(healTimer);
     cleanups.forEach((fn) => fn());
@@ -2598,22 +2761,16 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
     const target = e.target as Node | null;
     if (!target || !host.contains(target)) return;
 
-    if (isOverPriceScaleEl(e.clientX, e.clientY, shell)) {
+    if (isOverPriceScaleEl(e.clientX, e.clientY, host)) {
       e.preventDefault();
       e.stopImmediatePropagation();
 
       const dy = normalizeWheelDeltaY(e, host.clientHeight || 400);
-      const { step, residual } = wheelZoomStep(dy, priceWheelResidual);
-      priceWheelResidual = residual;
-      if (step === 0) return;
-
-      const now = performance.now();
-      if (now - priceWheelLastApplyMs < PRICE_WHEEL_MIN_INTERVAL_MS) {
-        return;
-      }
-      priceWheelLastApplyMs = now;
+      if (Math.abs(dy) < 0.25) return;
 
       const refPrice = refClosePrice();
+      const inner = host.querySelector(".chart-inner") as HTMLElement | null;
+      const chartH = Math.floor(inner?.clientHeight ?? host.clientHeight ?? 0);
 
       const ps = chart.priceScale("right");
       let range = ps.getVisibleRange();
@@ -2629,28 +2786,15 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
         range = { from: robust.minValue, to: robust.maxValue };
       }
       if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
-        const inner = host.querySelector(".chart-inner") as HTMLElement | null;
-        const chartH = Math.floor(inner?.clientHeight ?? host.clientHeight ?? 0);
-        range = clampVisiblePriceRange(range, refPrice, chartH);
+        range = clampVisiblePriceRange(range, refPrice, chartH, { manual: true });
       }
-
-      const rect = host.getBoundingClientRect();
-      const scaleW = Math.max(48, ps.width() || 56);
-      let anchor: number | undefined;
-      if (e.clientX < rect.right - scaleW - 2) {
-        try {
-          const y = e.clientY - rect.top;
-          const p = candleSeries.coordinateToPrice(y);
-          if (p != null && Number.isFinite(p as number)) anchor = p as number;
-        } catch {
-          /* mid */
-        }
-      }
-
-      const next = zoomPriceRange(range, step, { step, anchor, refPrice });
-      if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return;
 
       priceScaleManual = true;
+      const anchor =
+        priceAnchorFromPointer(e.clientY, host, candleSeries) ?? (range.from + range.to) / 2;
+      const next = applyPriceWheelZoom(range, dy, anchor, refPrice, chartH);
+      if (!(next.to > next.from) || !Number.isFinite(next.from) || !Number.isFinite(next.to)) return;
+
       ps.setAutoScale(false);
       try {
         ps.setVisibleRange(next);
@@ -2688,7 +2832,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   const onDblClick = (e: MouseEvent) => {
     if (isMobileLayout()) return;
     if (!chart || !hostEl) return;
-    if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
+    if (!isOverPriceScaleEl(e.clientX, e.clientY, hostEl)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     priceScaleManual = false;
@@ -2700,7 +2844,7 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
   // path — heal only after drag ends so pan/zoom is not fighting the user mid-gesture.
   const onPointerDown = (e: PointerEvent) => {
     if (isMobileLayout()) return;
-    if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
+    if (!isOverPriceScaleEl(e.clientX, e.clientY, hostEl)) return;
     axisPointerDown = true;
   };
   const onPointerMove = (e: PointerEvent) => {

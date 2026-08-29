@@ -485,6 +485,45 @@ async function testHotkeysOverlay(page) {
   await dismissOverlays(page);
 }
 
+async function testPriceScaleWheel(page) {
+  await dismissOverlays(page);
+  const before = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
+  if (!before?.span || before.span <= 0) {
+    note("P1", "price-scale-debug", "getPriceScaleDebug unavailable");
+    return;
+  }
+  const scaleCanvas = page.locator("#chart-host .tv-lightweight-charts table tr:first-child td:last-child canvas").first();
+  const box = await scaleCanvas.boundingBox();
+  if (!box || box.width < 8) {
+    note("P1", "price-scale-box", "price scale canvas missing");
+    return;
+  }
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.45, { steps: 6 });
+  for (let i = 0; i < 10; i++) {
+    await page.mouse.wheel(0, 120);
+    await sleep(45);
+  }
+  await sleep(350);
+  const mid = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
+  if (!mid?.span || !(mid.span < before.span * 0.9)) {
+    note("P0", "price-scale-zoom-in", `span ${before.span} → ${mid?.span}`);
+    return;
+  }
+  ok(`price scale wheel zoom-in (${before.span.toExponential(2)} → ${mid.span.toExponential(2)})`);
+
+  for (let i = 0; i < 24; i++) {
+    await page.mouse.wheel(0, 120);
+    await sleep(30);
+  }
+  await sleep(300);
+  const deep = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
+  if (!deep?.span || !(deep.span < mid.span * 0.82)) {
+    note("P0", "price-scale-wall", `early stop span=${deep?.span} mid=${mid.span}`);
+    return;
+  }
+  ok("price scale wheel continues past former clamp wall");
+}
+
 async function testMultiChartIndependent(page) {
   await dismissOverlays(page);
   const btn = await openMultiChartPicker(page);
@@ -909,6 +948,45 @@ async function testMobileDeep(browser) {
 
     await testMobileChartMore(page);
 
+    await page.locator("#mp-tab-chart").click();
+    await waitChart(page);
+    const scaleBox = await page.locator("#chart-host .tv-lightweight-charts table tr td:last-child").first().boundingBox();
+    if (!scaleBox) {
+      note("P1", "mobile-price-axis-box", "price scale column missing");
+    } else {
+      const beforePan = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
+      const cx = scaleBox.x + scaleBox.width * 0.5;
+      const cy = scaleBox.y + scaleBox.height * 0.5;
+      await page.evaluate(
+        ({ x, y0, y1 }) => {
+          const cell = document.querySelector("#chart-host .tv-lightweight-charts table tr td:last-child");
+          if (!cell) return;
+          const mk = (type, y, buttons = 1) =>
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              clientX: x,
+              clientY: y,
+              pointerId: 42,
+              pointerType: "touch",
+              isPrimary: true,
+              buttons,
+            });
+          cell.dispatchEvent(mk("pointerdown", y0));
+          cell.dispatchEvent(mk("pointermove", y1));
+          cell.dispatchEvent(mk("pointerup", y1, 0));
+        },
+        { x: cx, y0: cy, y1: cy - 110 },
+      );
+      await sleep(500);
+      const afterPan = await page.evaluate(() => window.__hackmeChart?.getPriceScaleDebug?.());
+      const mid0 = beforePan?.range ? (beforePan.range.from + beforePan.range.to) / 2 : 0;
+      const mid1 = afterPan?.range ? (afterPan.range.from + afterPan.range.to) / 2 : 0;
+      const shifted = beforePan?.span && Math.abs(mid1 - mid0) > beforePan.span * 0.03;
+      if (!shifted) note("P0", "mobile-price-axis-pan", `mid ${mid0} → ${mid1}`);
+      else ok("mobile price axis vertical drag");
+    }
+
     await page.locator("#mp-tab-orders").click();
     await sleep(300);
     await testActivityTabs(page);
@@ -943,6 +1021,7 @@ async function testDesktopDeep(browser) {
     await testActivityTabs(page);
     await testDrawToolsA11y(page);
     await testHotkeysOverlay(page);
+    await testPriceScaleWheel(page);
     await testMultiChartIndependent(page);
     await testMultiChartLinked(page);
     await testLayoutPresets(page);

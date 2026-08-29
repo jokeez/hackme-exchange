@@ -116,10 +116,12 @@ describe("mobile layout helpers", () => {
         dispatchEvent: () => true,
       }) as MediaQueryList) as typeof window.matchMedia;
     const mobile = chartInteractionOptions();
-    expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
+    expect(mobile.handleScale.axisPressedMouseMove.price).toBe(true);
+    expect(mobile.handleScale.axisDoubleClickReset.price).toBe(true);
     expect(mobile.handleScale.mouseWheel).toBe(false);
     expect(mobile.handleScale.pinch).toBe(true);
     expect(mobile.handleScroll.horzTouchDrag).toBe(true);
+    expect(mobile.handleScroll.vertTouchDrag).toBe(true);
     expect(mobile.handleScroll.mouseWheel).toBe(false);
     expect(mobilePanelResizeEnabled()).toBe(false);
     window.matchMedia = orig;
@@ -137,6 +139,8 @@ describe("mobile layout helpers", () => {
         dispatchEvent: () => true,
       }) as MediaQueryList) as typeof window.matchMedia;
     const desk = chartInteractionOptions();
+    expect(desk.handleScale.axisPressedMouseMove.price).toBe(true);
+    expect(desk.handleScroll.vertTouchDrag).toBe(true);
     expect(desk.handleScale.mouseWheel).toBe(false);
     expect(desk.handleScroll.mouseWheel).toBe(false);
     window.matchMedia = origDesk;
@@ -228,7 +232,7 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain(".mobile-chart-trade-bar");
   });
 
-  it("ships mobile tools sheet, locked price axis, no panel rails", () => {
+  it("ships mobile tools sheet, draggable price axis, no panel rails", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
     expect(css).toContain("html.mobile-layout .btn-mobile-tools");
