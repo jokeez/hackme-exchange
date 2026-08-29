@@ -13,7 +13,7 @@ import {
 } from "./store";
 import { baseState, installMemoryLocalStorage, sampleMarket } from "./testFixtures";
 import { STORAGE_KEY } from "./theme";
-import { STATE_VERSION } from "./types";
+import { DEFAULT_CHART_OVERLAYS, STATE_VERSION } from "./types";
 
 describe("store wallet helpers", () => {
   it("walletEquityUsdt sums legs", () => {
@@ -181,6 +181,20 @@ describe("store order mutations", () => {
     const loaded = loadState();
     expect(loaded.stateVersion).toBe(STATE_VERSION);
     expect(loaded.candles).toEqual({});
+  });
+
+  it("clears legacy orderPreview when quick order is off", () => {
+    const map = installMemoryLocalStorage();
+    const stale = {
+      ...baseState(),
+      stateVersion: STATE_VERSION - 1,
+      chartOverlays: { ...DEFAULT_CHART_OVERLAYS, orderPreview: true, quickOrder: false },
+    };
+    map.set(STORAGE_KEY, JSON.stringify(stale));
+    const loaded = loadState();
+    expect(loaded.chartOverlays.orderPreview).toBe(false);
+    expect(loaded.chartOverlays.quickOrder).toBe(false);
+    expect(loaded.stateVersion).toBe(STATE_VERSION);
   });
 
   it("default-like state includes priceAlerts array", () => {

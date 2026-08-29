@@ -5,7 +5,7 @@ import { feeScheduleLabel, previewFeeRole, quoteAssetForPair, volume30dUsdt } fr
 import { baseState } from "./testFixtures";
 import { defaultIndicatorConfig, defaultOverlays } from "./chartModals";
 import { countActiveIndicators, clearAllIndicators, clearIndicatorConfig, toggleIndicator } from "./chart";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG } from "./types";
+import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG, normalizeChartOverlays } from "./types";
 import { isLiveMode, INTEGRATION } from "./config/integration";
 import { isLoopbackOrigin } from "./sanitize";
 
@@ -105,6 +105,15 @@ describe("chart indicator helpers (pure)", () => {
     const cfg = clearIndicatorConfig();
     expect(cfg.ma.every((m) => !m.enabled)).toBe(true);
     expect(countActiveIndicators(settings, cfg)).toBe(0);
+  });
+});
+
+describe("chart overlay normalization", () => {
+  it("drops preview when quick order is off", () => {
+    expect(normalizeChartOverlays({ ...DEFAULT_CHART_OVERLAYS, orderPreview: true }).orderPreview).toBe(false);
+    expect(
+      normalizeChartOverlays({ ...DEFAULT_CHART_OVERLAYS, quickOrder: true, orderPreview: true }).orderPreview,
+    ).toBe(true);
   });
 });
 

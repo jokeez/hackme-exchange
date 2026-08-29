@@ -27,7 +27,11 @@ describe("chrome overlays menu", () => {
     expect(menu!.querySelector(".pop-menu-title")?.textContent).toBe("Overlays");
     const vol = menu!.querySelector("#ov-vol") as HTMLInputElement;
     const quick = menu!.querySelector("#ov-quick") as HTMLInputElement;
+    const preview = menu!.querySelector("#ov-preview") as HTMLInputElement;
     expect(vol.checked).toBe(true);
+    expect(quick.checked).toBe(false);
+    expect(preview.checked).toBe(false);
+    expect(preview.disabled).toBe(true);
     quick.checked = true;
     quick.dispatchEvent(new Event("change", { bubbles: true }));
     expect(document.querySelector(".pop-menu")).toBeTruthy();
