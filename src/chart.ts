@@ -10,6 +10,7 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { CHART_SHOT_BG, registerChartScreenshotHooks, runChartScreenshot, type ChartScreenshotResult } from "./chartScreenshot";
 import type {
   Candle,
   ChartMode,
@@ -2730,55 +2731,37 @@ export function applyOverlays(overlays: ChartMountOpts["overlays"], orders: Orde
   }
 }
 
-export function chartScreenshot(): void {
-  if (!chart || !hostEl) return;
-  // Solid dark plate under LWC capture — transparent layout otherwise becomes white in PNG viewers.
-  const bg = "#05070d";
+export function chartScreenshot(): ChartScreenshotResult {
+  return runChartScreenshot();
+}
+
+function captureMainLwcCanvas(): HTMLCanvasElement | null {
+  if (!chart || !hostEl) return null;
+  try {
+    chart.applyOptions({ layout: { background: { color: CHART_SHOT_BG } } });
+    return chart.takeScreenshot(true, false);
+  } catch {
+    return hostEl.querySelector(".chart-inner canvas") as HTMLCanvasElement | null;
+  }
+}
+
+function restoreMainChartShotBg(): void {
+  if (!chart) return;
+  const bg = lastOpts?.settings?.bgGradient ? "transparent" : CHART_SHOT_BG;
   try {
     chart.applyOptions({ layout: { background: { color: bg } } });
   } catch {
     /* ignore */
   }
-  let shot: HTMLCanvasElement;
-  try {
-    shot = chart.takeScreenshot(true, false);
-  } catch {
-    const fallback = hostEl.querySelector(".chart-inner canvas") as HTMLCanvasElement | null;
-    if (!fallback) return;
-    shot = fallback;
-  }
-  const out = document.createElement("canvas");
-  out.width = shot.width;
-  out.height = shot.height;
-  const ctx = out.getContext("2d");
-  if (!ctx) return;
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, out.width, out.height);
-  ctx.drawImage(shot, 0, 0);
-  // Context strip: pair · timeframe
-  if (lastOpts) {
-    const label = `${lastOpts.watermark ?? `${lastOpts.pairId} · ${lastOpts.tf}`}`;
-    ctx.font = "600 13px JetBrains Mono, monospace";
-    ctx.fillStyle = "rgba(155, 176, 204, 0.92)";
-    ctx.fillText(label, 12, 20);
-  }
-  const link = document.createElement("a");
-  link.href = out.toDataURL("image/png");
-  link.download = `hackme-chart-${Date.now()}.png`;
-  link.click();
-  // Restore gradient/transparent preference if set
-  if (lastOpts?.settings) {
-    try {
-      chart.applyOptions({
-        layout: {
-          background: { color: lastOpts.settings.bgGradient ? "transparent" : bg },
-        },
-      });
-    } catch {
-      /* ignore */
-    }
-  }
 }
+
+registerChartScreenshotHooks({
+  captureMain: captureMainLwcCanvas,
+  restoreMain: restoreMainChartShotBg,
+  mainLabel: () =>
+    lastOpts ? `${lastOpts.watermark ?? `${lastOpts.pairId} · ${lastOpts.tf}`}` : "chart",
+  mainHost: () => hostEl,
+});
 
 /** Re-measure after panel drag, iframe chrome, or orientation change. */
 export function applyChartInteractionOptions(): void {

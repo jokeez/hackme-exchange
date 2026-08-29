@@ -66,6 +66,7 @@ import { tickInputValue } from "./tick";
 import { Ico, drawToolIcon, pairAssetIcons, type DrawIconId } from "./icons";
 import { uid } from "./id";
 import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, syncSecondaryChart, updateSecondaryChart, getSecondaryViewportDebug, listSecondaryCrosshairPanes, refreshSecondaryPaneOrderLines, setSecondaryCrosshairMode } from "./chartSecondary";
+import { detectMultiChartLayout, listChartPaneHosts } from "./chartScreenshot";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
 import { showUnifiedSettingsModal } from "./settingsModal";
@@ -2994,6 +2995,15 @@ function quickPlaceFromChart(
   document.getElementById("activity-body")!.innerHTML = renderActivityBody();
 }
 
+function toastChartScreenshot(): void {
+  const shot = chartScreenshot();
+  if (!shot.ok) {
+    toast("Chart not ready", "warn");
+    return;
+  }
+  toast(shot.panes > 1 ? `Screenshot saved (${shot.panes} panes)` : "Screenshot saved", "ok");
+}
+
 function handleChartPricePick(
   price: number,
   clientX: number,
@@ -4835,8 +4845,7 @@ function wireEvents(): void {
           toast("Jumped to date", "info");
         });
       } else if (action === "screenshot") {
-        chartScreenshot();
-        toast("Screenshot saved", "ok");
+        toastChartScreenshot();
       } else if (action === "hotkeys") {
         showHotkeysHelp();
       }
@@ -4920,7 +4929,7 @@ function wireEvents(): void {
       applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
     }, () => el.classList.remove("active"));
   });
-  document.getElementById("btn-screenshot")?.addEventListener("click", () => { chartScreenshot(); toast("Screenshot saved", "ok"); });
+  document.getElementById("btn-screenshot")?.addEventListener("click", () => toastChartScreenshot());
   document.getElementById("btn-fullscreen")?.addEventListener("click", () => {
     toggleChartFullscreen();
   });
@@ -5761,6 +5770,13 @@ export async function boot(): Promise<void> {
       },
       get multiChartIndependent() {
         return !state.multiChartLinked;
+      },
+      chartScreenshotProbe() {
+        const split = document.querySelector(".chart-split") as HTMLElement | null;
+        return {
+          layout: detectMultiChartLayout(split),
+          hosts: listChartPaneHosts(split).map((h) => h.id),
+        };
       },
       seedOpenOrderForE2E(price: number, amountBase = 120) {
         const o = {

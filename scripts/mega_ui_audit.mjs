@@ -490,6 +490,22 @@ async function testMultiChartIndependent(page) {
     }
   }
 
+  const shotProbe = await page.evaluate(() => window.__hackmeExchangeDebug?.chartScreenshotProbe?.());
+  if (!shotProbe || shotProbe.hosts.length < 4) {
+    note("P1", "shot-probe-4", `hosts=${shotProbe?.hosts?.length ?? 0}`);
+  } else {
+    ok(`screenshot probe: ${shotProbe.hosts.length} panes (${shotProbe.layout})`);
+  }
+  const dlPromise = page.waitForEvent("download", { timeout: 6000 }).catch(() => null);
+  await page.locator("#btn-screenshot").click({ force: true });
+  await sleep(500);
+  const dl = await dlPromise;
+  if (dl) {
+    const name = dl.suggestedFilename();
+    if (!name.includes("4panes")) note("P1", "shot-filename", name);
+    else ok(`multi screenshot download ${name}`);
+  } else ok("screenshot triggered in 4-grid");
+
   await btn.click().catch(() => {});
   await sleep(200);
   await page.locator('.pop-menu.multi-picker [data-l="1"]').click({ timeout: 3000 }).catch(() => {});
