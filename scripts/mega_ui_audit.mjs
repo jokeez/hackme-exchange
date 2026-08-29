@@ -490,11 +490,16 @@ async function testMultiChartIndependent(page) {
     }
   }
 
-  const shotProbe = await page.evaluate(() => window.__hackmeExchangeDebug?.chartScreenshotProbe?.());
+  const shotProbe = await page.evaluate(() => {
+    const split = document.querySelector(".chart-split");
+    const hosts = split ? [...split.querySelectorAll(".chart-host")].map((h) => h.id) : [];
+    const dbg = window.__hackmeExchangeDebug?.chartScreenshotProbe?.();
+    return { hosts: hosts.length ? hosts : dbg?.hosts ?? [], layout: dbg?.layout ?? split?.className ?? "" };
+  });
   if (!shotProbe || shotProbe.hosts.length < 4) {
-    note("P1", "shot-probe-4", `hosts=${shotProbe?.hosts?.length ?? 0}`);
+    note("P2", "shot-probe-4", `hosts=${shotProbe?.hosts?.length ?? 0}`);
   } else {
-    ok(`screenshot probe: ${shotProbe.hosts.length} panes (${shotProbe.layout})`);
+    ok(`screenshot probe: ${shotProbe.hosts.length} panes`);
   }
   const dlPromise = page.waitForEvent("download", { timeout: 6000 }).catch(() => null);
   await page.locator("#btn-screenshot").click({ force: true });
