@@ -13,6 +13,7 @@ import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
 import { barSpacingForWidth, clampVisiblePriceRange, normalizeWheelDeltaY, panLogicalRangeByWheel, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange } from "./chart";
+import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
 import { chartInteractionOptions, isMobileLayout } from "./mobile";
@@ -866,3 +867,25 @@ export function getSecondaryViewportDebug(hostId: string): { barSpacing: number;
     return null;
   }
 }
+
+export function captureSecondaryLwcCanvas(hostId: string): HTMLCanvasElement | null {
+  const slot = slots.get(hostId);
+  if (!slot) return null;
+  try {
+    slot.chart.applyOptions({ layout: { background: { color: CHART_SHOT_BG } } });
+    return slot.chart.takeScreenshot(true, false);
+  } catch {
+    return slot.shell.querySelector("canvas") as HTMLCanvasElement | null;
+  }
+}
+
+export function getSecondaryPaneLabel(hostId: string): string {
+  const slot = slots.get(hostId);
+  if (!slot) return hostId;
+  return `${slot.pairLabel || slot.pairId} · ${slot.tf}`;
+}
+
+registerChartScreenshotHooks({
+  captureSecondary: captureSecondaryLwcCanvas,
+  secondaryLabel: getSecondaryPaneLabel,
+});
