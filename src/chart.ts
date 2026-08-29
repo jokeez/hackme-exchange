@@ -38,6 +38,7 @@ import {
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
 import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { clearChartViewport, loadChartViewport, saveChartViewport } from "./chartViewport";
 import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
 
 const SCHEMES = {
@@ -108,6 +109,10 @@ let liveDrawings: Drawing[] = [];
 let firstDataApplied = false;
 /** Preserve zoom/pan across soft remounts (indicator toggle, lock, layout). */
 let savedLogicalRange: { from: number; to: number } | null = null;
+let viewportPersistCleanup: (() => void) | null = null;
+let viewportSaveTimer = 0;
+let viewportPairId = "";
+let viewportTf = "";
 let priceScaleManual = false;
 let drawPointerMove: ((e: PointerEvent) => void) | null = null;
 let drawPointerUp: ((e: PointerEvent) => void) | null = null;
@@ -1954,7 +1959,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       barSpacing: spacing,
       rightBarStaysOnScroll: false,
     },
-    crosshair: { mode: 0 },
+    crosshair: { mode: isMobileLayout() ? 1 : 0 },
     localization: chartLocalization(),
   });
 
@@ -2037,7 +2042,10 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   setupPriceScaleWheel(shell);
   setupMobileChartPan(el);
   bindChartDebugProbe();
-  anchorToLatestCandle(visibleBarBudget(hostW, spacing));
+  bindChartViewportPersistence(opts.pairId, opts.tf);
+  if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
+    anchorToLatestCandle(visibleBarBudget(hostW, spacing));
+  }
 
   if (opts.onCrosshair) {
     chart.subscribeCrosshairMove((param) => {
@@ -2642,6 +2650,11 @@ export function setupPortableChartPan(
   const cleanups: Array<() => void> = [];
   let healTimer = 0;
   let activeTouches = 0;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchMoved = false;
+  const DBL_TAP_MS = 320;
+  const DBL_TAP_DIST = 28;
   const scheduleHeal = () => {
     if (activeTouches > 0) return;
     if (healTimer) window.clearTimeout(healTimer);
@@ -2653,16 +2666,53 @@ export function setupPortableChartPan(
   };
   const onTouchStart = (e: TouchEvent) => {
     activeTouches = e.touches.length;
+    if (e.touches.length === 1) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchMoved = false;
+    }
   };
+  const onTouchMove = (e: TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - touchStartX;
+    const dy = e.touches[0].clientY - touchStartY;
+    if (dx * dx + dy * dy > DBL_TAP_DIST * DBL_TAP_DIST) touchMoved = true;
+  };
+  let lastTapMs = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+
   const onTouchEnd = (e: TouchEvent) => {
     activeTouches = e.touches.length;
-    if (activeTouches === 0 && e.changedTouches.length === 1) scheduleHeal();
+    if (activeTouches === 0 && e.changedTouches.length === 1) {
+      const t = e.changedTouches[0];
+      if (!touchMoved) {
+        const now = Date.now();
+        const quickOn = !!lastOpts?.overlays.quickOrder;
+        if (
+          !quickOn &&
+          now - lastTapMs < DBL_TAP_MS &&
+          Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < DBL_TAP_DIST
+        ) {
+          lastTapMs = 0;
+          resetChartView();
+          e.preventDefault();
+          return;
+        }
+        lastTapMs = now;
+        lastTapX = t.clientX;
+        lastTapY = t.clientY;
+      }
+      scheduleHeal();
+    }
   };
   shell.addEventListener("touchstart", onTouchStart, { passive: true });
+  shell.addEventListener("touchmove", onTouchMove, { passive: true });
   shell.addEventListener("touchend", onTouchEnd, { passive: true });
   shell.addEventListener("touchcancel", onTouchEnd, { passive: true });
   cleanups.push(() => {
     shell.removeEventListener("touchstart", onTouchStart);
+    shell.removeEventListener("touchmove", onTouchMove);
     shell.removeEventListener("touchend", onTouchEnd);
     shell.removeEventListener("touchcancel", onTouchEnd);
   });
@@ -3113,7 +3163,108 @@ export function resizeChart(): void {
   });
 }
 
+function captureViewportState(): { barSpacing: number; from: number; to: number } | null {
+  if (!chart) return null;
+  try {
+    const ts = chart.timeScale();
+    const lr = ts.getVisibleLogicalRange();
+    if (!lr) return null;
+    return { barSpacing: ts.options().barSpacing ?? 8, from: lr.from as number, to: lr.to as number };
+  } catch {
+    return null;
+  }
+}
+
+export function saveCurrentChartViewport(): void {
+  if (!lastOpts?.pairId || !lastOpts?.tf) return;
+  const vp = captureViewportState();
+  if (!vp) return;
+  saveChartViewport(lastOpts.pairId, lastOpts.tf, vp);
+}
+
+function tryRestoreChartViewport(pairId: string, tf: Timeframe): boolean {
+  const saved = loadChartViewport(pairId, tf);
+  if (!saved || !chart || currentCandles.length < 2) return false;
+  const n = currentCandles.length;
+  const span = Math.max(1, saved.to - saved.from);
+  let from = saved.from;
+  let to = saved.to;
+  const maxTo = n - 1 + 3;
+  if (to > maxTo || from > n - 1) {
+    to = Math.min(to, maxTo);
+    from = to - span;
+  }
+  if (from < -1) {
+    to += -1 - from;
+    from = -1;
+  }
+  const hostW = hostEl?.clientWidth || 800;
+  const rightPad = chartRightOffset(hostW, tf);
+  try {
+    chart.timeScale().applyOptions({
+      barSpacing: saved.barSpacing,
+      rightOffset: rightPad,
+      minBarSpacing: Math.max(4, Math.floor(saved.barSpacing * 0.45)),
+    });
+    chart.timeScale().setVisibleLogicalRange({ from, to });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bindChartViewportPersistence(pairId: string, tf: Timeframe): void {
+  viewportPersistCleanup?.();
+  viewportPersistCleanup = null;
+  if (viewportSaveTimer) {
+    window.clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = 0;
+  }
+  viewportPairId = pairId;
+  viewportTf = tf;
+  if (!chart) return;
+  const scheduleSave = () => {
+    if (viewportSaveTimer) window.clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = window.setTimeout(() => {
+      viewportSaveTimer = 0;
+      const vp = captureViewportState();
+      if (vp) saveChartViewport(viewportPairId, viewportTf, vp);
+    }, 180);
+  };
+  try {
+    chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleSave);
+  } catch {
+    return;
+  }
+  viewportPersistCleanup = () => {
+    if (viewportSaveTimer) {
+      window.clearTimeout(viewportSaveTimer);
+      viewportSaveTimer = 0;
+    }
+    try {
+      chart?.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleSave);
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
+/** TF switch without destroy/remount — restores saved zoom per pair+tf. */
+export function switchChartTimeframe(candles: Candle[], opts: ChartMountOpts): boolean {
+  if (!mounted || !chart) return false;
+  saveCurrentChartViewport();
+  setCandleData(candles, opts, { scrollToLive: false });
+  bindChartViewportPersistence(opts.pairId, opts.tf);
+  if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
+    anchorToLatestCandle();
+  }
+  return true;
+}
+
 export function destroyChart(): void {
+  saveCurrentChartViewport();
+  viewportPersistCleanup?.();
+  viewportPersistCleanup = null;
   if (resizeRaf) {
     cancelAnimationFrame(resizeRaf);
     resizeRaf = 0;
@@ -3206,6 +3357,7 @@ export function resetChartView(): void {
   priceScaleManual = false;
   priceWheelResidual = 0;
   chart.priceScale("right").setAutoScale(true);
+  if (lastOpts?.pairId && lastOpts?.tf) clearChartViewport(lastOpts.pairId, lastOpts.tf);
   anchorToLatestCandle();
   savedLogicalRange = null;
 }

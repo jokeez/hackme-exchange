@@ -50,6 +50,7 @@ async function bootPage(browser, vp) {
   const ctx = await browser.newContext({
     viewport: vp,
     locale: "en-US",
+    hasTouch: true,
   });
   const page = await ctx.newPage();
   const errors = [];
@@ -338,10 +339,72 @@ async function testChartQuickOrderNoPanPopup(page) {
     return;
   }
   ok("chart click opens quick order popup");
+  const amt = pop.locator(".cqo-amt");
+  if (await amt.isVisible().catch(() => false)) {
+    await amt.fill("100");
+    await pop.locator(".cqo-buy").click();
+    await sleep(400);
+    const err = pop.locator(".cqo-err:not([hidden])");
+    const confirm = pop.locator(".cqo-confirm:not(.hidden)");
+    if (await confirm.isVisible().catch(() => false)) {
+      ok("chart quick order confirm step");
+    } else if (await err.isVisible().catch(() => false)) {
+      ok(`chart quick order inline validation (${(await err.textContent())?.slice(0, 40)})`);
+    } else {
+      note("P1", "chart-quick-confirm", "confirm step missing after buy");
+    }
+  }
   await page.keyboard.press("Escape");
   await sleep(200);
   if (await pop.count()) note("P1", "chart-popup-esc", "quick order popup stayed after Esc");
   else ok("quick order Esc closes popup");
+}
+
+async function testTfViewportPersistence(page) {
+  await dismissOverlays(page);
+  await waitChart(page);
+  const host = page.locator("#chart-host");
+  const box = await host.boundingBox();
+  if (!box) {
+    note("P2", "tf-vp-box", "chart host missing");
+    return;
+  }
+  const cx = box.x + box.width * 0.55;
+  await page.evaluate(
+    (x) => {
+      const w = window.__hackmeChart;
+      if (w?.applyMainPlotWheel) w.applyMainPlotWheel(-240, x);
+    },
+    cx,
+  );
+  await sleep(350);
+  const before = await page.evaluate(() => window.__hackmeExchangeDebug?.getMainViewport?.());
+  if (!before?.barSpacing) {
+    note("P2", "tf-vp-before", "could not read viewport before TF switch");
+    return;
+  }
+  const tf1h = page.locator('.tfq[data-tf="1H"]');
+  if (!(await tf1h.isVisible().catch(() => false))) {
+    note("P2", "tf-1h-btn", "1H tf button missing");
+    return;
+  }
+  await tf1h.click();
+  await sleep(450);
+  const on1h = await page.evaluate(() => window.__hackmeExchangeDebug?.getMainViewport?.());
+  if (!on1h?.barSpacing) note("P2", "tf-vp-1h", "viewport missing after TF→1H");
+  else ok("TF switch to 1H keeps chart mounted");
+
+  await page.locator('.tfq[data-tf="15m"]').click();
+  await sleep(450);
+  const restored = await page.evaluate(() => window.__hackmeExchangeDebug?.getMainViewport?.());
+  if (!restored?.barSpacing) {
+    note("P1", "tf-vp-restore", "viewport missing after TF→15m restore");
+    return;
+  }
+  const spacingDelta = Math.abs(restored.barSpacing - before.barSpacing);
+  if (spacingDelta > 1.2) {
+    note("P1", "tf-vp-spacing", `barSpacing drift ${before.barSpacing}→${restored.barSpacing}`);
+  } else ok(`TF switch restores zoom (spacing ${restored.barSpacing.toFixed(1)})`);
 }
 
 async function testInlineOrderAmend(page) {
@@ -950,6 +1013,74 @@ async function testMobileChartMore(page) {
   await dismissOverlays(page);
 }
 
+async function testMobileQuickOrderSheet(page) {
+  await dismissOverlays(page);
+  await page.locator("#mp-tab-chart").click();
+  await waitChart(page);
+
+  const more = page.locator("#btn-mobile-chart-more");
+  if (await more.isVisible().catch(() => false)) {
+    await more.click({ force: true });
+    await sleep(200);
+    await page.locator('#chart-more-drop [data-chart-more="overlays"]').click();
+    await sleep(250);
+    const quick = page.locator(".pop-menu.overlay-menu #ov-quick");
+    if (await quick.isVisible().catch(() => false) && !(await quick.isChecked())) {
+      await quick.check();
+      await sleep(200);
+    }
+    await dismissOverlays(page);
+    await page.locator("#mp-tab-chart").click();
+    await waitChart(page);
+  }
+
+  const host = page.locator("#chart-host");
+  const box = await host.boundingBox();
+  if (!box) {
+    note("P2", "mobile-qo-box", "chart host missing");
+    return;
+  }
+  const cx = box.x + box.width * 0.5;
+  const cy = box.y + box.height * 0.42;
+  await page.mouse.click(cx, cy);
+  await sleep(500);
+
+  const sheet = page.locator(".chart-quick-order.sheet");
+  if (!(await sheet.isVisible().catch(() => false))) {
+    note("P1", "mobile-qo-sheet", "mobile quick order sheet missing on chart tap");
+    return;
+  }
+  ok("mobile chart tap opens quick order sheet");
+
+  const backdrop = page.locator(".cqo-backdrop");
+  if (!(await backdrop.isVisible().catch(() => false))) {
+    note("P2", "mobile-qo-backdrop", "sheet backdrop missing");
+  } else ok("mobile quick order backdrop");
+
+  await sheet.locator(".cqo-amt").fill("50");
+  await sheet.locator(".cqo-buy").click();
+  await sleep(400);
+  const confirm = sheet.locator(".cqo-confirm:not(.hidden)");
+  const err = sheet.locator(".cqo-err:not([hidden])");
+  if (await confirm.isVisible().catch(() => false)) {
+    ok("mobile quick order confirm step");
+    await sheet.locator(".cqo-back").click();
+    await sleep(200);
+    if (await sheet.locator(".cqo-form:not(.hidden)").isVisible().catch(() => false)) {
+      ok("mobile quick order back to form");
+    } else note("P1", "mobile-qo-back", "back button did not restore form");
+  } else if (await err.isVisible().catch(() => false)) {
+    ok(`mobile quick order validation (${(await err.textContent())?.slice(0, 36)})`);
+  } else {
+    note("P1", "mobile-qo-confirm", "confirm step missing on mobile");
+  }
+
+  await backdrop.click({ force: true });
+  await sleep(250);
+  if (await sheet.count()) note("P1", "mobile-qo-dismiss", "sheet stayed after backdrop tap");
+  else ok("mobile quick order backdrop dismisses");
+}
+
 async function testMobileDeep(browser) {
   const vp = { width: 390, height: 844 };
   const { ctx, page, errors } = await bootPage(browser, vp);
@@ -995,6 +1126,8 @@ async function testMobileDeep(browser) {
     }
 
     await testMobileChartMore(page);
+
+    await testMobileQuickOrderSheet(page);
 
     await page.locator("#mp-tab-chart").click();
     await waitChart(page);
@@ -1110,6 +1243,7 @@ async function testDesktopDeep(browser) {
     await testDesktopOverlayMenu(page);
     await testChartToolbarButtons(page);
     await testChartQuickOrderNoPanPopup(page);
+    await testTfViewportPersistence(page);
     await testInlineOrderAmend(page);
     await testAdvancedOrderTypes(page);
     await testActivityTabs(page);

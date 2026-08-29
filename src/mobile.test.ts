@@ -323,6 +323,22 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain(".chart-chrome");
   });
 
+  it("ships mobile quick order sheet, viewport persistence, haptics", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    const chart = readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8");
+    expect(css).toContain(".chart-quick-order.sheet");
+    expect(css).toContain(".cqo-backdrop");
+    expect(css).toContain(".cqo-confirm");
+    expect(app).toContain("buildQuickOrderValidation");
+    expect(app).toContain("switchChartTimeframe");
+    expect(app).toContain("bootstrapMobileQuickOrder");
+    expect(chart).toContain("switchChartTimeframe");
+    expect(chart).toContain("tryRestoreChartViewport");
+    expect(readFileSync(resolve(process.cwd(), "src/haptic.ts"), "utf8")).toContain("navigator.vibrate");
+    expect(readFileSync(resolve(process.cwd(), "src/chartViewport.ts"), "utf8")).toContain("sessionStorage");
+  });
+
   it("ships mobile chart-more sheet and trade tape strip", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");

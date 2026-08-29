@@ -4062,6 +4062,34 @@ html:not(.mobile-layout) .btn-mobile-tools { display: none !important; }
 .chart-quick-order .btn-primary.buy { background: rgba(0,192,115,.18); border-color: var(--buy); color: var(--buy); }
 .chart-quick-order .btn-primary.sell { background: rgba(219,68,85,.14); border-color: var(--sell); color: var(--sell); }
 .chart-quick-order .cqo-hint { margin: 0.35rem 0 0; }
+.chart-quick-order .cqo-err { margin: 0.25rem 0 0; color: var(--sell); }
+.chart-quick-order .cqo-balance-hint { margin: 0.2rem 0 0; }
+.chart-quick-order .cqo-confirm-text { margin: 0.35rem 0 0.65rem; font-weight: 600; }
+.chart-quick-order .cqo-confirm-actions { display: grid; gap: 0.35rem; }
+.chart-quick-order .cqo-confirm-btn.buy { background: rgba(0,192,115,.18); border-color: var(--buy); color: var(--buy); }
+.chart-quick-order .cqo-confirm-btn.sell { background: rgba(219,68,85,.14); border-color: var(--sell); color: var(--sell); }
+.cqo-backdrop {
+  position: fixed; inset: 0; z-index: 1295;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(2px);
+}
+.chart-quick-order.sheet {
+  left: 0; right: 0; bottom: 0; top: auto; width: auto;
+  max-width: none; border-radius: 14px 14px 0 0;
+  padding: 0.75rem 0.85rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+  z-index: 1300;
+}
+.chart-quick-order.sheet::before {
+  content: "";
+  display: block;
+  width: 2.5rem; height: 0.25rem; margin: 0 auto 0.55rem;
+  border-radius: 999px; background: rgba(255,255,255,.22);
+}
+.chart-quick-order .hidden { display: none !important; }
+body.cqo-sheet-open { overflow: hidden; }
+html.mobile-layout .chart-quick-order.sheet .cqo-actions button {
+  min-height: 2.75rem;
+}
 
 .act-edit-inp { width: 5.5rem; padding: 0.1rem 0.25rem; font-size: 0.78rem; }
 .act-edit { padding: 0; border: none; background: transparent; cursor: pointer; }
