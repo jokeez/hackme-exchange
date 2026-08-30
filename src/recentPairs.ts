@@ -1,4 +1,5 @@
 import type { PairId } from "./types";
+import { isValidPairId } from "./registry";
 
 const KEY = "hmx-recent-pairs";
 const MAX = 6;
@@ -21,7 +22,7 @@ export function loadRecentPairs(): PairId[] {
     if (!raw) return [];
     const arr = JSON.parse(raw) as unknown;
     if (!Array.isArray(arr)) return [];
-    return arr.filter((x): x is PairId => typeof x === "string" && x.includes("_")).slice(0, MAX);
+    return arr.filter((x): x is PairId => typeof x === "string" && isValidPairId(x)).slice(0, MAX);
   } catch {
     return [];
   }

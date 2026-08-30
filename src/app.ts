@@ -845,7 +845,7 @@ function patchRecentPairsStrip(): void {
     .map((p) => {
       const meta = pairById(p);
       const mid = pairQuote(p).mid;
-      return `<button type="button" class="recent-pair" data-recent-pair="${p}"><span>${meta.label}</span>${
+      return `<button type="button" class="recent-pair" data-recent-pair="${escapeHtml(p)}"><span>${escapeHtml(meta.label)}</span>${
         mid ? `<span class="mono muted">${formatPrice(mid)}</span>` : ""
       }</button>`;
     })
@@ -2130,7 +2130,7 @@ function renderSpot(): string {
           .map((p) => {
             const meta = pairById(p);
             const mid = pairQuote(p).mid;
-            return `<button type="button" class="recent-pair" data-recent-pair="${p}"><span>${meta.label}</span>${
+            return `<button type="button" class="recent-pair" data-recent-pair="${escapeHtml(p)}"><span>${escapeHtml(meta.label)}</span>${
               mid ? `<span class="mono muted">${formatPrice(mid)}</span>` : ""
             }</button>`;
           })
