@@ -6,6 +6,8 @@
  *   cd hackme-exchange-demo && npx tsx scripts/lab-smoke.ts
  */
 import * as ed from "@noble/ed25519";
+import { hmac } from "@noble/hashes/hmac";
+import { sha1 } from "@noble/hashes/sha1";
 import { sha256 } from "@noble/hashes/sha256";
 import { sha512 } from "@noble/hashes/sha512";
 import { readFileSync } from "node:fs";
@@ -67,6 +69,43 @@ function minQtyMinor(priceMinor: number, minNotional: number): number {
   const whole = Math.ceil(raw / 100_000_000) * 100_000_000;
   return Math.max(whole, 100_000_000);
 }
+
+function base32Decode(s: string): Uint8Array {
+  const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = s.replace(/\s/g, "").replace(/=+$/, "").toUpperCase();
+  let bits = 0;
+  let val = 0;
+  const out: number[] = [];
+  for (const c of clean) {
+    const idx = alpha.indexOf(c);
+    if (idx < 0) continue;
+    val = (val << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((val >> bits) & 0xff);
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+function totpCode(secret: Uint8Array, timeMs = Date.now()): string {
+  const counter = Math.floor(timeMs / 1000 / 30);
+  const buf = new Uint8Array(8);
+  let n = counter;
+  for (let i = 7; i >= 0; i--) {
+    buf[i] = n & 0xff;
+    n = Math.floor(n / 256);
+  }
+  const mac = hmac(sha1, secret, buf);
+  const off = mac[mac.length - 1]! & 0x0f;
+  const bin =
+    ((mac[off]! & 0x7f) << 24) |
+    ((mac[off + 1]! & 0xff) << 16) |
+    ((mac[off + 2]! & 0xff) << 8) |
+    (mac[off + 3]! & 0xff);
+  return String(bin % 1_000_000).padStart(6, "0");
+}
 function noteCookies(res: Response): void {
   const raw = res.headers.getSetCookie?.() ?? [];
   for (const line of raw) {
@@ -90,7 +129,7 @@ function cookieHeader(): string {
 
 async function api(
   path: string,
-  init: RequestInit & { json?: unknown; csrf?: string; admin?: boolean } = {},
+  init: RequestInit & { json?: unknown; csrf?: string; admin?: boolean; totp?: string } = {},
 ): Promise<{ status: number; body: any; res: Response }> {
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string> | undefined),
@@ -99,6 +138,7 @@ async function api(
     headers["Content-Type"] = "application/json";
   }
   if (init.csrf) headers["X-CSRF-Token"] = init.csrf;
+  if (init.totp) headers["X-2FA-Code"] = init.totp;
   if (init.admin) {
     const tok = loadAdminToken();
     if (!tok) throw new Error("EXCHANGE_ADMIN_TOKEN missing");
@@ -415,22 +455,76 @@ async function main(): Promise<number> {
     );
   }
 
+  // 7b) per-user 2FA enroll + withdraw gate
+  let totpSecret: Uint8Array | null = null;
+  {
+    const st0 = await api("/auth/2fa/status", { method: "GET" });
+    record(
+      "GET /auth/2fa/status",
+      st0.status === 200 && st0.body?.enabled === false,
+      `enabled=${st0.body?.enabled} pending=${st0.body?.pending}`,
+    );
+    const setup = await api("/auth/2fa/setup", { method: "POST", csrf, json: {} });
+    const b32 = String(setup.body?.secret_base32 || "");
+    totpSecret = b32 ? base32Decode(b32) : null;
+    record(
+      "POST /auth/2fa/setup",
+      setup.status === 200 && !!totpSecret?.length,
+      b32 ? `${b32.slice(0, 8)}…` : `status=${setup.status}`,
+    );
+    if (totpSecret?.length) {
+      const code = totpCode(totpSecret);
+      const confirm = await api("/auth/2fa/confirm", { method: "POST", csrf, json: { code } });
+      record(
+        "POST /auth/2fa/confirm",
+        confirm.status === 200 && confirm.body?.enabled === true,
+        `status=${confirm.status}`,
+      );
+      const st1 = await api("/auth/2fa/status", { method: "GET" });
+      record("GET /auth/2fa/status enabled", st1.body?.enabled === true, "");
+    }
+  }
+
   // 8) withdraw request
   {
     const dest = "HMC-deadbeefdeadbeef"; // external stub dest
+    const wdBody = {
+      asset: "HMC",
+      amount: 10_000_000,
+      destination: dest,
+      client_withdraw_id: `smoke-wd-${Date.now()}`,
+    };
+    const wdNo2fa = await api("/withdraw", { method: "POST", csrf, json: wdBody });
+    if (totpSecret?.length) {
+      record(
+        "POST /withdraw without 2FA (expect 401)",
+        wdNo2fa.status === 401,
+        `status=${wdNo2fa.status} ${wdNo2fa.body?.code || wdNo2fa.body?.error || ""}`,
+      );
+    }
+    const code = totpSecret?.length ? totpCode(totpSecret) : "";
     const wd = await api("/withdraw", {
       method: "POST",
       csrf,
-      json: { asset: "HMC", amount: 10_000_000, destination: dest, client_withdraw_id: `smoke-wd-${Date.now()}` },
+      totp: code || undefined,
+      json: wdBody,
     });
     const ok =
       wd.status === 200 &&
       (wd.body?.withdraw?.status === "pending" || wd.body?.ok === true);
     record(
       "POST /withdraw request",
-      ok || wd.status === 401 /* 2fa required still proves route */,
+      ok || (!totpSecret?.length && (wd.status === 401 || wd.status === 200)),
       `status=${wd.status} ${wd.body?.error || wd.body?.withdraw?.status || wd.body?.code || ""}`,
     );
+    if (totpSecret?.length) {
+      const off = await api("/auth/2fa/disable", {
+        method: "POST",
+        csrf,
+        json: { code: totpCode(totpSecret) },
+      });
+      record("POST /auth/2fa/disable", off.status === 200 && off.body?.enabled === false, `status=${off.status}`);
+    }
     const list = await api("/withdrawals");
     record("GET /withdrawals", list.status === 200, `n=${(list.body?.withdrawals || []).length}`);
   }

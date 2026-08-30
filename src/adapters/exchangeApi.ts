@@ -38,6 +38,7 @@ export type SessionRestoreResponse =
       address: string;
       csrf_token: string;
       session_ver?: number;
+      totp?: { enabled: boolean; pending: boolean };
       note?: string;
     }
   | {
@@ -595,6 +596,118 @@ export async function authSessionRestore(
       code: "unreachable",
       message: e instanceof Error ? e.message : String(e),
     };
+  }
+}
+
+export type TwoFAStatusResponse =
+  | { ok: true; enabled: boolean; pending: boolean; note?: string }
+  | ExchangeApiError;
+
+export type TwoFASetupResponse =
+  | {
+      ok: true;
+      otpauth_url: string;
+      secret_base32: string;
+      pending: boolean;
+      note?: string;
+    }
+  | ExchangeApiError;
+
+/** GET /auth/2fa/status */
+export async function auth2faStatus(
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<TwoFAStatusResponse | ExchangeApiError> {
+  const url = apiUrl("/auth/2fa/status", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { method: "GET", mode: "cors", credentials: "include", headers: { Accept: "application/json" }, cache: "no-store" },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "2fa status failed");
+    return body as TwoFAStatusResponse;
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** POST /auth/2fa/setup */
+export async function auth2faSetup(
+  timeoutMs = 8_000,
+  baseOverride?: string,
+): Promise<TwoFASetupResponse | ExchangeApiError> {
+  const url = apiUrl("/auth/2fa/setup", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { method: "POST", mode: "cors", credentials: "include", headers: csrfHeaders(true), body: "{}" },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "2fa setup failed");
+    return body as TwoFASetupResponse;
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** POST /auth/2fa/confirm */
+export async function auth2faConfirm(
+  code: string,
+  timeoutMs = 8_000,
+  baseOverride?: string,
+): Promise<{ ok: true; enabled: boolean; note?: string } | ExchangeApiError> {
+  const url = apiUrl("/auth/2fa/confirm", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        mode: "cors",
+        credentials: "include",
+        headers: csrfHeaders(true),
+        body: JSON.stringify({ code: code.trim() }),
+      },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "2fa confirm failed");
+    return body as { ok: true; enabled: boolean; note?: string };
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** POST /auth/2fa/disable */
+export async function auth2faDisable(
+  code: string,
+  timeoutMs = 8_000,
+  baseOverride?: string,
+): Promise<{ ok: true; enabled: boolean; note?: string } | ExchangeApiError> {
+  const url = apiUrl("/auth/2fa/disable", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        mode: "cors",
+        credentials: "include",
+        headers: csrfHeaders(true),
+        body: JSON.stringify({ code: code.trim() }),
+      },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "2fa disable failed");
+    return body as { ok: true; enabled: boolean; note?: string };
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
   }
 }
 

@@ -74,6 +74,10 @@ import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug }
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
 import { showUnifiedSettingsModal } from "./settingsModal";
 import {
+  auth2faConfirm,
+  auth2faDisable,
+  auth2faSetup,
+  auth2faStatus,
   authLogout,
   authRevokeAll,
   displayToMinor,
@@ -356,6 +360,7 @@ let oracleMeta: OracleMeta = {
 let tradingGuards: TradingGuards = { ...DEFAULT_TRADING_GUARDS };
 /** Lab fee-collection address from /health `fee_wallet` (null → hide UI). */
 let labFeeWallet: string | null = null;
+let labUser2faEnabled = false;
 /** Convert desk selection — survives re-render without form wipe. */
 let convertFrom: keyof Wallet = "hmc";
 let convertTo: keyof Wallet = "usdt";
@@ -2966,6 +2971,10 @@ async function labWithdrawRequestUi(): Promise<void> {
     toast("Amount and destination required", "warn");
     return;
   }
+  if (labUser2faEnabled && !totp) {
+    toast("2FA code required — enable in Security below or enter code", "warn");
+    return;
+  }
   const destCheck = validateLabWithdrawDestination(asset, destination);
   if (!destCheck.ok) {
     if (msg) msg.textContent = destCheck.hint;
@@ -3110,6 +3119,98 @@ async function labCounterpartyUi(): Promise<void> {
   refreshAfterLabTrade();
 }
 
+function applyLab2faPanels(enabled: boolean, pending: boolean): void {
+  const status = document.getElementById("lab-2fa-status");
+  const setupPanel = document.getElementById("lab-2fa-setup-panel");
+  const enabledPanel = document.getElementById("lab-2fa-enabled-panel");
+  const idlePanel = document.getElementById("lab-2fa-idle-panel");
+  const wd2fa = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
+  if (status) {
+    status.textContent = enabled ? "Status: enabled" : pending ? "Status: pending — confirm below" : "Status: off";
+  }
+  if (setupPanel) setupPanel.hidden = !pending;
+  if (enabledPanel) enabledPanel.hidden = !enabled;
+  if (idlePanel) idlePanel.hidden = enabled || pending;
+  if (wd2fa) wd2fa.placeholder = enabled ? "required" : "if enabled";
+  labUser2faEnabled = enabled;
+}
+
+async function lab2faRefreshUi(): Promise<void> {
+  const msg = document.getElementById("lab-2fa-msg");
+  if (!useLabMatching()) {
+    applyLab2faPanels(false, false);
+    if (msg) msg.textContent = "Connect LAB session to manage 2FA";
+    return;
+  }
+  const res = await auth2faStatus();
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    return;
+  }
+  applyLab2faPanels(res.enabled, res.pending);
+  if (msg) msg.textContent = res.note || "";
+}
+
+async function lab2faSetupUi(): Promise<void> {
+  const msg = document.getElementById("lab-2fa-msg");
+  if (!useLabMatching()) {
+    toast("Connect DEMO/LAB fixture first", "warn");
+    return;
+  }
+  const res = await auth2faSetup();
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    toast(res.message, "warn");
+    return;
+  }
+  const secretEl = document.getElementById("lab-2fa-secret");
+  const linkEl = document.getElementById("lab-2fa-otpauth") as HTMLAnchorElement | null;
+  if (secretEl) secretEl.textContent = res.secret_base32;
+  if (linkEl) {
+    linkEl.href = res.otpauth_url;
+    linkEl.textContent = "Open in authenticator app";
+  }
+  applyLab2faPanels(false, true);
+  if (msg) msg.textContent = res.note || "Scan QR or copy secret, then confirm";
+  toast("2FA setup started — confirm with a code", "ok");
+}
+
+async function lab2faConfirmUi(): Promise<void> {
+  const msg = document.getElementById("lab-2fa-msg");
+  const code = ((document.getElementById("lab-2fa-confirm-code") as HTMLInputElement | null)?.value || "").trim();
+  if (!code) {
+    toast("Enter 6-digit code", "warn");
+    return;
+  }
+  const res = await auth2faConfirm(code);
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    toast(res.message, "warn");
+    return;
+  }
+  if (msg) msg.textContent = res.note || "2FA enabled";
+  toast("2FA enabled", "ok");
+  await lab2faRefreshUi();
+}
+
+async function lab2faDisableUi(): Promise<void> {
+  const msg = document.getElementById("lab-2fa-msg");
+  const code = ((document.getElementById("lab-2fa-disable-code") as HTMLInputElement | null)?.value || "").trim();
+  if (!code) {
+    toast("Enter 6-digit code to disable", "warn");
+    return;
+  }
+  const res = await auth2faDisable(code);
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    toast(res.message, "warn");
+    return;
+  }
+  if (msg) msg.textContent = res.note || "2FA disabled";
+  toast("2FA disabled", "ok");
+  await lab2faRefreshUi();
+}
+
 function wireLabApiButtons(): void {
   const click = (id: string, fn: () => void) => {
     const el = document.getElementById(id);
@@ -3133,6 +3234,10 @@ function wireLabApiButtons(): void {
   click("btn-lab-wd-refresh", () => void labWithdrawRefreshUi());
   click("btn-lab-wd-quote", () => void labWithdrawQuoteUi());
   click("btn-lab-fills-refresh", () => void labFillsRefreshUi());
+  click("btn-lab-2fa-setup", () => void lab2faSetupUi());
+  click("btn-lab-2fa-confirm", () => void lab2faConfirmUi());
+  click("btn-lab-2fa-disable", () => void lab2faDisableUi());
+  void lab2faRefreshUi();
   click("btn-lab-fee-wallet-copy", () => {
     const addr =
       labFeeWallet ||
