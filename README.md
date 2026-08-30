@@ -133,9 +133,9 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 | Gate | Command / note |
 |------|----------------|
 | Unit + security | `npm test` → **701 PASS** |
-| Full UI/UX | `node scripts/full_ui_ux_pass.mjs` |
-| Visual / mobile | `node scripts/g10_visual_pass.mjs` |
-| Chart pairs | `node scripts/b_chart_manual_pass.mjs` |
+| Full UI/UX (G10) | `npm run test:e2e` |
+| Deep UI audit | `npm run test:e2e:full` |
+| Visual / mobile | `npm run test:viewport` (alias of G10) |
 | D0 static tarball | `npm run d0:static` (gitignored `dist-d0/`) |
 | Lab API smoke | `npm run smoke:lab` (API on `:18443`) |
 | Full local audit | `npm run audit:full` |

@@ -42,11 +42,10 @@ Admin complete / fee sweep stay **CLI + `X-Admin-Token`** — the SPA never embe
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/lab-smoke.ts` | Lab smoke against `:18443` |
+| `scripts/lab-smoke.ts` | Lab smoke against `:18443` (`npm run smoke:lab`) |
 | `scripts/d1-smoke.ts` | D1 staging smoke (`npm run smoke:d1`) |
-| `scripts/lab-mm-bot.ts` | Poll `POST /lab/mm/seed` (`EXCHANGE_MM_BOT_ONCE=1` for one-shot) |
-| `scripts/prepare_d0_static.sh` | Paper D0 tarball (no lab wiring in dist) |
-| `scripts/g10_visual_pass.mjs` | Desktop/mobile visual gate |
+| `scripts/prepare_d0_static.sh` | Paper D0 tarball (`npm run d0:static`) |
+| `scripts/g10_visual_pass.mjs` | Visual gate (`npm run test:e2e`) |
 
 ## Hard rules
 

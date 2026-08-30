@@ -32,6 +32,16 @@ step "D0 paper static build (CRYPTO-001 fixture guard)"
 bash scripts/prepare_d0_static.sh
 pass "prepare_d0_static"
 
+if [[ "${FULL_AUDIT_SKIP_E2E:-}" != "1" ]]; then
+  step "G10 visual pass (preview on :5199)"
+  if curl -sf "http://127.0.0.1:5199/" >/dev/null 2>&1; then
+    node scripts/g10_visual_pass.mjs
+    pass "g10_visual_pass"
+  else
+    echo "SKIP  start: npm run preview -- --port 5199"
+  fi
+fi
+
 if [[ "${FULL_AUDIT_SKIP_D1:-}" != "1" ]]; then
   API_ROOT="${HACKME_EXCHANGE_API:-$ROOT/../hackme-exchange-api}"
   if [[ -x "$API_ROOT/scripts/d1_local_up.sh" ]]; then
@@ -59,6 +69,9 @@ fi
   echo "| vitest full | PASS |"
   echo "| security subset | PASS |"
   echo "| prepare_d0_static | PASS |"
+  if [[ "${FULL_AUDIT_SKIP_E2E:-}" != "1" ]]; then
+    echo "| g10_visual_pass | PASS or SKIP |"
+  fi
   if [[ "${FULL_AUDIT_SKIP_D1:-}" != "1" ]]; then
     echo "| smoke:d1 | PASS or SKIP |"
   else
