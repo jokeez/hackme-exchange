@@ -408,20 +408,22 @@ async function main(): Promise<number> {
     );
   }
 
-  // 7) deposit address + bridge credit + SUP chain-watch stub
+  // 7) deposit address + node-watch probe + bridge credit
+  let hmcDepAddr = "";
   {
     const dep = await api("/deposit/address?asset=HMC");
+    hmcDepAddr = String(dep.body?.deposit_address || "");
     record(
       "GET /deposit/address HMC",
-      dep.status === 200 && String(dep.body?.deposit_address || "").startsWith("HMC-"),
-      dep.body?.deposit_address?.slice?.(0, 20),
+      dep.status === 200 && hmcDepAddr.startsWith("HMC-") && dep.body?.kind === "hmc_ed25519",
+      `${hmcDepAddr.slice(0, 20)} kind=${dep.body?.kind || "?"}`,
     );
     const sup = await api("/deposit/address?asset=SUP");
     const supAddr = String(sup.body?.deposit_address || "");
     record(
       "GET /deposit/address SUP",
-      sup.status === 200 && supAddr.startsWith("labdep"),
-      supAddr.slice(0, 20),
+      sup.status === 200 && supAddr.startsWith("HMC-") && sup.body?.kind === "sup_ed25519",
+      `${supAddr.slice(0, 20)} kind=${sup.body?.kind || "?"}`,
     );
     if (supAddr) {
       const cw = await api("/lab/chain-watch", {
@@ -439,6 +441,12 @@ async function main(): Promise<number> {
         `bal=${cw.body?.balance_after ?? cw.status}`,
       );
     }
+    const nws = await api("/admin/node-watch-sync", { method: "POST", admin: true, json: {} });
+    record(
+      "POST /admin/node-watch-sync",
+      nws.status === 200 || nws.status === 503,
+      `status=${nws.status} credited=${nws.body?.result?.credited ?? nws.body?.credited ?? "?"}`,
+    );
     const bridge = await api("/lab/bridge-credit", {
       method: "POST",
       csrf,

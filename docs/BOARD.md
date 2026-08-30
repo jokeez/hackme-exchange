@@ -21,8 +21,8 @@ Lightweight issue board until GitHub projects exist. Update status in place.
 |----|------|-------|--------|
 | C1 | Postgres schema for ledger/orders/fills | `d1_local_up.sh` | ✅ local |
 | C2 | `exchange-api` on separate VPS behind TLS | PRE_PUBLIC P0 | ⬜ deferred |
-| C3 | Deposit addresses HMC/SUP + watcher | caps + pause | ⬜ |
-| C4 | Withdraw queue + caps + 2FA | lab stub exists | 🟡 |
+| C3 | HMC/SUP deposit watchers | node-watch + sup activity | 🟢 |
+| C4 | Withdraw queue + caps + 2FA | lab stub + per-user TOTP | 🟢 |
 | C5 | Fee → treasury wallet runbook | lab fee wallet | ✅ |
 | C6 | OpenAPI freeze | `/auth/session`, `/ws/market` | ✅ lab |
 | C7 | Fresh DB — no lab fixture residue on edge | P0-13 | ⬜ |
