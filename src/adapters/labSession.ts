@@ -3,7 +3,7 @@
  */
 
 import { isLabApiEnabled } from "../config/integration";
-import { labFixtureConnect } from "./labFixture";
+import { labSessionRestoreOrConnect } from "./labSessionRestore";
 import { isLabSessionStale, syncLabOrdersFillsLight, useLabMatching } from "./labMatching";
 import type { DemoState, MarketSnapshot } from "../types";
 
@@ -30,16 +30,17 @@ export function startLabSessionGuard(opts: LabSessionGuardOpts): () => void {
     tickN += 1;
 
     if (isLabSessionStale()) {
-      opts.onStale("Lab session stale — reconnecting fixture…");
+      opts.onStale("Lab session stale — reconnecting…");
       if (!reconnectInFlight) {
         reconnectInFlight = true;
         try {
-          const res = await labFixtureConnect();
+          const res = await labSessionRestoreOrConnect();
           if (res.ok) {
             const sync = await syncLabOrdersFillsLight(opts.getState(), opts.getMarket());
             if (sync.ok) {
               opts.saveState();
-              opts.onReconnected(`Lab reconnected · ${res.fixture.address.slice(0, 14)}…`);
+              const via = res.via === "session" ? "session restored" : "fixture re-signed";
+              opts.onReconnected(`Lab reconnected (${via}) · ${res.address.slice(0, 14)}…`);
               opts.onSync(sync.note);
               opts.onBookRefresh?.();
             }

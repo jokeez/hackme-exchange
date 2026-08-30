@@ -2,28 +2,29 @@
 
 Lightweight issue board until GitHub projects exist. Update status in place.
 
-## Now (lab / paper → D0)
+## Now (D0 paper — freeze)
 
 | ID | Item | Owner track | Status |
 |----|------|-------------|--------|
-| B1 | Paper SPA QA green + STATUS | demo | ✅ 2026-08-21 · 544 tests · P0=0 |
+| B1 | Paper SPA QA green + STATUS | demo | ✅ 699 tests · P0=0 |
 | B2 | Lab matching smoke (orders/cancel/fill/convert) | api+demo | ✅ |
 | B3 | Soft-mid convert smoke size | demo script | ✅ mid **0.05** |
 | B4 | D0 static tarball script | demo | ✅ `scripts/prepare_d0_static.sh` |
-| B5 | Human visual pass desktop/mobile | demo | ✅ G10 / full UI · P0=0 (2026-08-21) |
+| B5 | Human visual pass desktop/mobile | demo | ✅ G10 / full UI · P0=0 |
 | B6 | Draft TG paper-only post (do not publish) | social | ⬜ |
 | B7 | Reference mids 0.05 / 0.01 · no GH price scale | demo+api | ✅ |
+| B8 | WS market stream + session reconnect | api+demo | ✅ |
 
-## Next (after D0 → D1)
+## Next (D1 staging — local first)
 
 | ID | Item | Notes | Status |
 |----|------|-------|--------|
-| C1 | Postgres schema for ledger/orders/fills | replace lab SQLite for public | ⬜ |
-| C2 | `exchange-api` on separate VPS behind TLS | PRE_PUBLIC P0 checklist | ⬜ |
-| C3 | Deposit addresses HMC/SUP + watcher | caps + pause switches | ⬜ |
-| C4 | Withdraw queue + caps + 2FA | default off on edge | ⬜ |
-| C5 | Fee → treasury wallet runbook | already sketched in lab | ⬜ |
-| C6 | OpenAPI freeze `/orders` `/convert` `/balances` | `openapi.yaml` exists (lab) | 🟡 lab only |
+| C1 | Postgres schema for ledger/orders/fills | `d1_local_up.sh` | ✅ local |
+| C2 | `exchange-api` on separate VPS behind TLS | PRE_PUBLIC P0 | ⬜ deferred |
+| C3 | Deposit addresses HMC/SUP + watcher | caps + pause | ⬜ |
+| C4 | Withdraw queue + caps + 2FA | lab stub exists | 🟡 |
+| C5 | Fee → treasury wallet runbook | lab fee wallet | ✅ |
+| C6 | OpenAPI freeze | `/auth/session`, `/ws/market` | ✅ lab |
 | C7 | Fresh DB — no lab fixture residue on edge | P0-13 | ⬜ |
 
 ## Later (D2+)
@@ -31,8 +32,7 @@ Lightweight issue board until GitHub projects exist. Update status in place.
 | ID | Item | Status |
 |----|------|--------|
 | D1 | USDT/BTC partner rails | ⬜ |
-| D2 | Stop/OCO server-side | 501 by design today |
-| D3 | Foreign PoW CEX outreach | after D1 KPI |
+| D2 | Foreign PoW CEX outreach | after D1 KPI |
 
 ## Anti-goals
 

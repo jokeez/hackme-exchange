@@ -92,6 +92,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
+import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
   clearLabBookCache,
@@ -2686,13 +2687,27 @@ function settleOpenOrdersFromTickers(showToast = false): string[] {
   return notes;
 }
 
-/** Reconnect DEMO/LAB fixture when address survived reload but CSRF did not. */
+/** Reconnect when address survived reload but CSRF did not — session probe first, then fixture. */
 async function maybeAutoReconnectLabSession(): Promise<void> {
   const meta = getLabSessionMeta();
   if (meta.hasCsrf || !meta.address) return;
   const msg = document.getElementById("lab-api-msg");
-  if (msg) msg.textContent = "Session address present — reconnecting fixture…";
-  await labFixtureConnectUi();
+  if (msg) msg.textContent = "Session address present — restoring session…";
+  const res = await labSessionRestoreOrConnect();
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    return;
+  }
+  const sync = await syncLabBalancesAndBook(state, market);
+  if (sync.ok) {
+    saveState(state);
+    const note = res.via === "session" ? "Session restored from cookie" : "Fixture re-signed";
+    if (msg) msg.textContent = `${note} · ${res.address.slice(0, 14)}…`;
+    toast(note, "ok");
+    refreshAccountAfterLab();
+  } else if (msg) {
+    msg.textContent = sync.message;
+  }
 }
 
 /** Lab ledger sync (balances, open orders, fills, book). Does not touch node /api/wallet. */
