@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a1020"/>
+      <stop offset="1" stop-color="#05070d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop stop-color="#4de4ff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#4de4ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <rect x="28" y="28" width="456" height="456" rx="92" stroke="#4de4ff" stroke-opacity="0.22" stroke-width="3"/>
+  <image href="/logo-hex.png" x="80" y="92" width="352" height="352" preserveAspectRatio="xMidYMid meet"/>
+</svg>

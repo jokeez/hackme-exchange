@@ -3044,6 +3044,82 @@ html.mobile-layout .market-search {
   gap: 0.5rem;
   margin-top: 1.15rem;
 }
+.pwa-install-chip {
+  position: fixed;
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  right: 1rem;
+  z-index: 70;
+  border: 1px solid rgba(77, 228, 255, 0.35);
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(10, 16, 32, 0.92);
+  color: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.chart-tap-coach {
+  position: fixed;
+  z-index: 75;
+  max-width: min(260px, calc(100vw - 24px));
+  pointer-events: auto;
+}
+.chart-tap-coach-card {
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(77, 228, 255, 0.28);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+}
+.chart-tap-coach-title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.depth-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+  margin-bottom: 0.45rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--edge);
+}
+.depth-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.62rem;
+  min-width: 0;
+}
+.depth-stat span:last-child { font-size: 0.72rem; }
+.depth-stat-mid { text-align: center; }
+.depth-stat-spread { text-align: right; }
+.depth-mid-line {
+  stroke: rgba(77, 228, 255, 0.45);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.depth-mid-label {
+  fill: rgba(77, 228, 255, 0.75);
+  font-size: 8px;
+  font-family: var(--mono);
+}
+.depth-row.depth-flash-up { animation: depth-flash-up 0.52s ease; }
+.depth-row.depth-flash-down { animation: depth-flash-down 0.52s ease; }
+@keyframes depth-flash-up {
+  0% { background: rgba(0, 192, 115, 0.22); }
+  100% { background: transparent; }
+}
+@keyframes depth-flash-down {
+  0% { background: rgba(219, 68, 85, 0.2); }
+  100% { background: transparent; }
+}
+@media (max-width: 720px) {
+  .depth-summary { grid-template-columns: repeat(2, 1fr); }
+  .depth-stat-spread { text-align: left; }
+}
 .role-badge {
   font-size: 0.6rem; text-transform: uppercase; padding: 0.1rem 0.35rem; border-radius: 4px;
   border: 1px solid var(--line);

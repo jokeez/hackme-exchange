@@ -62,6 +62,7 @@ async function bootPage(browser, vp) {
     try {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
       sessionStorage.setItem("hackme-ex-mobile-panel-v1", "chart");
+      localStorage.setItem("hackme-ex-chart-hint-v1", "1");
       localStorage.removeItem("hackme-exchange-demo-v5-layout-v3");
       localStorage.removeItem("hackme-ex-layout-v3");
       if (!sessionStorage.getItem("e2e-demo-reset")) {
@@ -92,7 +93,9 @@ async function openSystemMenu(page) {
 
 async function dismissOverlays(page) {
   await page.evaluate(() => {
-    document.querySelectorAll(".modal-backdrop, #hotkeys-overlay, .pop-menu, .chart-ctx-menu").forEach((el) => el.remove());
+    document.querySelectorAll(
+      ".modal-backdrop, #hotkeys-overlay, .pop-menu, .chart-ctx-menu, .tour-backdrop, #chart-tap-coach, #pwa-install-chip, .chart-qo-sheet-backdrop",
+    ).forEach((el) => el.remove());
     for (const id of ["chart-type-drop", "chart-more-drop", "chart-type-backdrop", "chart-more-backdrop"]) {
       const el = document.getElementById(id);
       if (el) {
@@ -179,10 +182,12 @@ async function testChartOverlayDefaults(page) {
   await sleep(150);
   const quick = page.locator("#set-ov-quick");
   const preview = page.locator("#set-ov-preview");
-  if (await quick.isChecked()) note("P1", "ov-quick-default", "quickOrder should be off by default");
-  else ok("quickOrder off by default");
+  if (!(await quick.isChecked())) note("P1", "ov-quick-default", "quickOrder should be on (first-visit onboarding)");
+  else ok("quickOrder on by default");
   if (await preview.isChecked()) note("P1", "ov-preview-default", "orderPreview should be off by default");
   else ok("orderPreview off by default");
+  await quick.uncheck();
+  await sleep(120);
   await page.locator("#set-close").click();
   await sleep(200);
 
