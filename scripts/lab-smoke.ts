@@ -178,6 +178,13 @@ async function main(): Promise<number> {
     csrf = ver.body?.csrf_token || "";
     record("auth/verify", ver.status === 200 && !!csrf && ver.body?.ok === true, `csrf=${csrf.slice(0, 8)}…`);
     if (!csrf) return failOut();
+
+    const sess = await api("/auth/session", { method: "GET" });
+    record(
+      "GET /auth/session",
+      sess.status === 200 && sess.body?.ok === true && sess.body?.csrf_token === csrf,
+      `addr=${String(sess.body?.address || "").slice(0, 14)}…`,
+    );
   }
 
   // 2) admin credit HMC + USDT (top-up for smoke)
@@ -361,7 +368,7 @@ async function main(): Promise<number> {
     );
   }
 
-  // 7) deposit address + bridge credit
+  // 7) deposit address + bridge credit + SUP chain-watch stub
   {
     const dep = await api("/deposit/address?asset=HMC");
     record(
@@ -369,6 +376,29 @@ async function main(): Promise<number> {
       dep.status === 200 && String(dep.body?.deposit_address || "").startsWith("HMC-"),
       dep.body?.deposit_address?.slice?.(0, 20),
     );
+    const sup = await api("/deposit/address?asset=SUP");
+    const supAddr = String(sup.body?.deposit_address || "");
+    record(
+      "GET /deposit/address SUP",
+      sup.status === 200 && supAddr.startsWith("labdep"),
+      supAddr.slice(0, 20),
+    );
+    if (supAddr) {
+      const cw = await api("/lab/chain-watch", {
+        method: "POST",
+        csrf,
+        json: {
+          deposit_address: supAddr,
+          amount: 25_000_000,
+          tx_id: `smoke-sup-cw-${Date.now()}`,
+        },
+      });
+      record(
+        "POST /lab/chain-watch SUP",
+        cw.status === 200 && cw.body?.ok === true,
+        `bal=${cw.body?.balance_after ?? cw.status}`,
+      );
+    }
     const bridge = await api("/lab/bridge-credit", {
       method: "POST",
       csrf,
