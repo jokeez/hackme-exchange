@@ -20,6 +20,21 @@ export function applyHubEmbedChrome(): void {
   }
 }
 
+/** Parent hub origins allowed for postMessage (loopback lab + production hackme.tech). */
+export function hubParentPostMessageOrigin(referrer?: string): string | null {
+  const fallback = "http://127.0.0.1:8080";
+  const ref = (referrer ?? "").trim();
+  if (!ref) return fallback;
+  try {
+    const origin = new URL(ref).origin;
+    if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(origin)) return origin;
+    if (/^https:\/\/([a-z0-9-]+\.)*hackme\.tech$/i.test(origin)) return origin;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Ask parent hub to switch tab (wallet, etc.). No-op when not embedded. */
 export function postHubGotoTab(tab: string): boolean {
   if (!isHubEmbed() || typeof window === "undefined" || !window.parent || window.parent === window) {
@@ -38,19 +53,13 @@ export function postHubGotoTab(tab: string): boolean {
     "reports",
     "orders",
     "fuzz",
+    "hms-market",
   ]);
   if (!allowed.has(tab)) return false;
-  let target = "http://127.0.0.1:8080";
-  try {
-    if (document.referrer) {
-      const origin = new URL(document.referrer).origin;
-      // Loopback hub only
-      if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)) target = origin;
-      else return false;
-    }
-  } catch {
-    /* keep default */
-  }
+  const target = hubParentPostMessageOrigin(
+    typeof document !== "undefined" ? document.referrer : undefined,
+  );
+  if (!target) return false;
   try {
     window.parent.postMessage({ type: "hackme-exchange", action: "goto-tab", tab }, target);
     return true;

@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-30 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
+**Updated:** 2026-08-31 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
 
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
 [![SPA](https://img.shields.io/badge/SPA-hackme--exchange-7fe7ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme-exchange)
@@ -62,7 +62,7 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 
 | Topic | Decision |
 |-------|----------|
-| Subdomain before D0? | **No** — hub `#exchange` + `:5199` only |
+| Hub `#exchange` embed | Code → `exchange.hackme.tech` (deploy with **rc17**); lab override `:5199` |
 | D0 | Static SPA + this STATUS — **no** public API/custody |
 | D1 DB | **Postgres** (lab SQLite stays private) |
 | D1 host | Separate **exchange-VPS** (not mining hub) |
@@ -73,7 +73,7 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 
 - Not a licensed exchange · not financial advice  
 - Not real USDT/BTC custody in the browser  
-- Not `exchange.hackme.tech` until D0  
+- Not **live** custody / matching on `exchange.hackme.tech` until post-D0 gates  
 - Not a promise of foreign CEX listing  
 
 ## How to run (private)
