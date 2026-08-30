@@ -222,5 +222,5 @@ Expect the quote asset (or HMC if pay-fees-in-HMC) `available` on the fee wallet
 | `src/execution.ts` | Fill + fee apply |
 | `src/account.ts` | Fee schedule UI |
 | `src/adapters/settlement.ts` | Demo vs future settle boundary |
-| `docs/ARCHITECTURE.md` | Phase 2 topology |
+| `docs/INTEGRATION.md` | Topology + deploy |
 | `docs/SECURITY.md` | Custody principles |

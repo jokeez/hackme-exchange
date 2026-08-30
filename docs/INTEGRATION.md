@@ -1,11 +1,24 @@
-# Integration Guide — Site, Wallet, Payments
+# Integration Guide — Site, Wallet, API
 
-> Phase 1+ lab: demo SPA + API on loopback; optional **thin hub tab** embeds the SPA  
-> (`dashboard.html` → `#exchange` iframe → `:5199`). See [`HUB_TAB.md`](HUB_TAB.md).  
-> Still **do not** add public nginx / real custody without an explicit go.  
-> See [`SCOPE.md`](SCOPE.md).
+> Paper SPA at [exchange.hackme.tech](https://exchange.hackme.tech/) · private lab API on loopback only.  
+> Hub embed: [`HUB_TAB.md`](HUB_TAB.md). Boundaries: [`SCOPE.md`](SCOPE.md).
 
-## 1. `exchange.hackme.tech` (future — not deployed)
+## Current architecture
+
+```
+exchange.hackme.tech (static SPA, paper default)
+        │
+        ├─► hackme.tech — pool oracle, hub iframe
+        ├─► hackme-node :8080 — optional HMC/SUP wallet read
+        └─► exchange-api :18443 — lab/staging only (127.0.0.1)
+              ├─ Postgres or SQLite ledger
+              ├─ in-memory matching + WS /ws/market
+              └─ session JWT + CSRF (GET /auth/session reconnect)
+```
+
+**Public edge:** no matching API, no custody. PRE_PUBLIC checklist gates any bind.
+
+## 1. `exchange.hackme.tech` (D0 static — live)
 
 ### What to deploy
 
@@ -14,11 +27,9 @@
 
 ### Nginx sketch
 
-See `docs/ARCHITECTURE.md` for full block. Summary:
-
-- Static root: `/opt/hackme/web/exchange`
-- API proxy: `/api/*` → future `hackme-exchange-api` on loopback
-- TLS same cert as `hackme.tech` (SAN or wildcard)
+- Static root: `dist/` from `npm run build`
+- No public `/api` proxy until PRE_PUBLIC green
+- TLS on `exchange.hackme.tech` (separate from hub mining stack)
 
 ### Environment at build time
 

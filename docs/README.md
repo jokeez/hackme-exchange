@@ -38,8 +38,7 @@ Paper / private-lab UI docs. Canonical **API** security & hosting live in the si
 
 | Doc | Purpose |
 |-----|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | SPA structure |
-| [INTEGRATION.md](INTEGRATION.md) | Origins · proxies · modes |
+| [INTEGRATION.md](INTEGRATION.md) | Origins · proxies · architecture |
 | [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
 | [SECURITY.md](SECURITY.md) | SPA threat checklist |
 

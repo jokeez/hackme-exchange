@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-21 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
+**Updated:** 2026-08-30 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
 
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
 [![SPA](https://img.shields.io/badge/SPA-hackme--exchange-7fe7ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme-exchange)

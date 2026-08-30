@@ -32,6 +32,20 @@ export type VerifyResponse = {
   expires_at: string;
 };
 
+export type SessionRestoreResponse =
+  | {
+      ok: true;
+      address: string;
+      csrf_token: string;
+      session_ver?: number;
+      note?: string;
+    }
+  | {
+      ok: false;
+      address?: string;
+      note?: string;
+    };
+
 export type BalanceRow = {
   asset: string;
   available: number;
@@ -538,6 +552,42 @@ export async function authChallenge(
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "challenge failed");
     return body as ChallengeResponse;
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      code: "unreachable",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** GET /auth/session — restore CSRF when httpOnly JWT cookie is still valid. */
+export async function authSessionRestore(
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<SessionRestoreResponse | ExchangeApiError> {
+  const url = apiUrl("/auth/session", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "session probe failed");
+    const out = body as SessionRestoreResponse;
+    if (out.ok && out.csrf_token && out.address) {
+      persistSession(out.address, out.csrf_token);
+    }
+    return out;
   } catch (e) {
     return {
       ok: false,
