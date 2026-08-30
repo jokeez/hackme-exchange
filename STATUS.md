@@ -5,8 +5,8 @@
 **Updated:** 2026-08-31 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
 
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
-[![SPA](https://img.shields.io/badge/SPA-hackme--exchange-7fe7ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme-exchange)
-[![API](https://img.shields.io/badge/API-HOLD-ff6b9d?style=for-the-badge)](https://github.com/jokeez/hackme-exchange-api)
+[![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
+[![API](https://img.shields.io/badge/public_API-HOLD-ff6b9d?style=for-the-badge)](https://github.com/jokeez/hackme-exchange-api)
 
 **[🏠 Main HackMe](https://github.com/jokeez/hackme)** · **[hackme.tech](https://hackme.tech)** · **[README](README.md)** · **[D0 checklist](docs/D0_CHECKLIST.md)**
 
@@ -14,17 +14,17 @@
 
 ---
 
-**Public:** **NO** — private lab / localhost only.  
-**Soft-public target:** **D0 Paper · 2026-09-15** (`exchange.hackme.tech` static).  
-**Go / no-go:** **2026-09-10**.
+**Public:** **NO** — paper / private lab only until explicit go-live gates.  
+**Soft-public target:** **D0 Paper · 2026-09-15** — static SPA on `exchange.hackme.tech` (no public matching API).  
+**Hub iframe:** code points at paper host — **deploy with HackMe rc17** (no early hub restart).
 
 ## Ecosystem
 
 | Project | Link |
 |---------|------|
-| **HackMe hub (main)** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| Exchange SPA | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
-| Exchange API | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
+| **HackMe hub** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
+| **Paper SPA** | [exchange.hackme.tech](https://exchange.hackme.tech) · source in this repo |
+| **Exchange API** | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) (private lab · **HOLD** public) |
 
 ## Messaging (locked)
 
@@ -62,7 +62,7 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 
 | Topic | Decision |
 |-------|----------|
-| Hub `#exchange` embed | Code → `exchange.hackme.tech` (deploy with **rc17**); lab override `:5199` |
+| Hub `#exchange` embed | `exchange.hackme.tech` — **rc17** deploy + hub restart |
 | D0 | Static SPA + this STATUS — **no** public API/custody |
 | D1 DB | **Postgres** (lab SQLite stays private) |
 | D1 host | Separate **exchange-VPS** (not mining hub) |
@@ -73,48 +73,38 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 
 - Not a licensed exchange · not financial advice  
 - Not real USDT/BTC custody in the browser  
-- Not **live** custody / matching on `exchange.hackme.tech` until post-D0 gates  
+- Not live matching / custody on `exchange.hackme.tech` until post-D0 gates  
 - Not a promise of foreign CEX listing  
 
-## How to run (private)
-
-```bash
-# SPA
-cd hackme-exchange && npm test && npm run build && npm run dev
-# → http://127.0.0.1:5199
-
-# Optional lab API
-cd hackme-exchange-api && go test ./... && go run ./cmd/exchange-api
-# → http://127.0.0.1:18443/health
-```
-
-## QA snapshot (2026-08-21)
+## QA snapshot (2026-08-31)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **544** pass |
+| `npm test` | **701** pass |
+| `npm run d0:static` | **ok** — paper dist, `frame-ancestors` hackme.tech |
+| `npm run smoke:lab` | **32/32** (loopback API) |
 | Full UI/UX · G10 · B-chart | **P0=0** |
-| `bash scripts/prepare_d0_static.sh` | **ok** — paper dist, CSP without loopback `:18443` |
 | API `go test ./...` | **ok** |
 | PRE_PUBLIC dry-run | **ok** · public still **HOLD** |
-| Public edge | **HOLD** |
+
+Setup: [README.md](README.md) · Scripts: [scripts/README.md](scripts/README.md)
 
 ## Roadmap
 
 | Gate | Date | Public |
 |------|------|--------|
 | **D0 Paper** | 2026-09-15 | static SPA, PAPER only |
+| **rc17 hub cut** | with D0 | hub iframe + SUP nginx |
 | **D1 Live HMC/SUP** | 2026-11-01 | real HMC/SUP in/out + caps |
 | **D2 Stables** | 2027-01-15 | USDT/BTC rails |
 | **D3 Foreign CEX** | 2027-02+ | outreach *if* D1 KPI |
 
 ## Docs
 
+- [`docs/README.md`](docs/README.md) — index  
 - [`docs/D0_CHECKLIST.md`](docs/D0_CHECKLIST.md) — Sep 10 go/no-go  
-- [`docs/SCOPE.md`](docs/SCOPE.md) — boundaries  
-- [`docs/ECONOMICS.md`](docs/ECONOMICS.md) — fees · reference mids  
+- [`docs/SCOPE.md`](docs/SCOPE.md) · [`docs/ECONOMICS.md`](docs/ECONOMICS.md)  
 - [API PRE_PUBLIC checklist](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRE_PUBLIC_CHECKLIST.md)  
-- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Contact
 

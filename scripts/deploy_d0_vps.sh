@@ -1,32 +1,23 @@
 #!/usr/bin/env bash
-# Build paper SPA and rsync to exchange.hackme.tech static root.
+# HOLD — manual static deploy for exchange.hackme.tech (D0 / rc17 cut window only).
+# Does NOT run unless you invoke it explicitly. Prefer prepare_d0_static.sh for local QA.
 #
-#   EXCHANGE_VPS=root@89.150.41.40 EXCHANGE_VPS_PATH=/var/www/exchange bash scripts/deploy_d0_vps.sh
+#   EXCHANGE_VPS=user@host EXCHANGE_VPS_PATH=/var/www/exchange bash scripts/deploy_d0_vps.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VPS="${EXCHANGE_VPS:-root@89.150.41.40}"
+VPS="${EXCHANGE_VPS:?set EXCHANGE_VPS=user@host}"
 REMOTE_PATH="${EXCHANGE_VPS_PATH:-/var/www/exchange}"
 
-echo "[deploy] npm test"
-npm test
+echo "[deploy] D0 static gate (local)"
+bash scripts/prepare_d0_static.sh
 
-echo "[deploy] paper build (no lab fixture in bundle)"
-VITE_INTEGRATION_MODE=paper \
-VITE_LAB_API=0 \
-VITE_EXCHANGE_API_ORIGIN= \
-  npm run build
+OUT_DIR="${OUT_DIR:-$ROOT/dist-d0}"
+echo "[deploy] rsync dist-d0 → ${VPS}:${REMOTE_PATH}/"
+rsync -avz --delete "$OUT_DIR/" "${VPS}:${REMOTE_PATH}/"
 
-if grep -Rqs '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20' dist/assets/*.js 2>/dev/null; then
-  echo "[deploy] FAIL: lab fixture seed in dist" >&2
-  exit 1
-fi
-
-echo "[deploy] rsync → ${VPS}:${REMOTE_PATH}/"
-rsync -avz --delete dist/ "${VPS}:${REMOTE_PATH}/"
-
-echo "[deploy] remote index probe"
+echo "[deploy] remote probe"
 ssh "$VPS" "wc -c '${REMOTE_PATH}/index.html' && ls -la '${REMOTE_PATH}/assets/' | head -5"
 
-echo "[deploy] OK — https://exchange.hackme.tech/"
+echo "[deploy] OK — verify https://exchange.hackme.tech/"

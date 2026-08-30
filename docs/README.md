@@ -7,7 +7,7 @@ Paper / private-lab UI docs. Canonical **API** security & hosting live in the si
 | Project | Link |
 |---------|------|
 | HackMe hub | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| This SPA | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
+| Paper SPA (D0) | [exchange.hackme.tech](https://exchange.hackme.tech) · source: [../README.md](../README.md) |
 | Exchange API | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) · [API docs](https://github.com/jokeez/hackme-exchange-api/tree/main/docs) |
 
 ## Start here
@@ -17,6 +17,7 @@ Paper / private-lab UI docs. Canonical **API** security & hosting live in the si
 | [../README.md](../README.md) | Quick start · modes · QA |
 | [../STATUS.md](../STATUS.md) | Soft / live ladder · messaging · reference mids |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Setup · PRs · secrets |
+| [../scripts/README.md](../scripts/README.md) | QA / release scripts |
 
 ## Launch & scope
 

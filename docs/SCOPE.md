@@ -4,7 +4,7 @@
 
 | Location | What belongs here |
 |----------|-------------------|
-| **[hackme-exchange](https://github.com/jokeez/hackme-exchange)** (this SPA) | Spot / Convert / Account / Pool UI, adapters, tests |
+| **This repo** (SPA) | Spot / Convert / Account / Pool UI, adapters, tests |
 | **[hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api)** | Private loopback matching API |
 | **[hackme](https://github.com/jokeez/hackme)** hub | Node, pool, dashboard — Exchange is a **sidecar tab** (iframe), not merged product code |
 

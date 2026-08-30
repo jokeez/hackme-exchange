@@ -34,9 +34,9 @@
 | | |
 |:---:|:---|
 | **Parent network** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| **This SPA** | [github.com/jokeez/hackme-exchange](https://github.com/jokeez/hackme-exchange) |
+| **Paper site (D0)** | [exchange.hackme.tech](https://exchange.hackme.tech) |
 | **Lab matching API** | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
-| **Soft target** | `exchange.hackme.tech` · **D0 Paper · 2026-09-15** |
+| **Soft target** | **D0 Paper · 2026-09-15** |
 
 </div>
 
@@ -59,7 +59,7 @@ flowchart LR
     POOL["Pool / oracle"]
     NODE["Node / HMC"]
   end
-  subgraph ex["hackme-exchange · this SPA"]
+  subgraph ex["Paper SPA · this repo"]
     SPOT["Spot desk"]
     CV["Convert"]
     ACCT["Account"]
@@ -132,11 +132,13 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 
 | Gate | Command / note |
 |------|----------------|
-| Unit + security | `npm test` → **700 PASS** |
+| Unit + security | `npm test` → **701 PASS** |
 | Full UI/UX | `node scripts/full_ui_ux_pass.mjs` |
 | Visual / mobile | `node scripts/g10_visual_pass.mjs` |
 | Chart pairs | `node scripts/b_chart_manual_pass.mjs` |
-| D0 static tarball | `bash scripts/prepare_d0_static.sh` (gitignored) |
+| D0 static tarball | `npm run d0:static` (gitignored `dist-d0/`) |
+| Lab API smoke | `npm run smoke:lab` (API on `:18443`) |
+| Full local audit | `npm run audit:full` |
 | API pre-public | sibling `bash scripts/pre_public_dry_run.sh` → public **HOLD** |
 
 ---
@@ -153,6 +155,7 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 | [`docs/ECONOMICS.md`](docs/ECONOMICS.md) | Fees · VIP · reference mids |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | SPA threat checklist |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup · PRs · secrets |
+| [`scripts/README.md`](scripts/README.md) | QA / release scripts |
 
 Canonical **API** security / hosting / pre-public:  
 [hackme-exchange-api/docs](https://github.com/jokeez/hackme-exchange-api/tree/main/docs)
@@ -164,6 +167,7 @@ Canonical **API** security / hosting / pre-public:
 | Project | Link |
 |---------|------|
 | **HackMe Network (main)** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) |
+| **Paper site (D0)** | [exchange.hackme.tech](https://exchange.hackme.tech) |
 | **Site / pool** | [hackme.tech](https://hackme.tech) |
 | **Exchange API** | [github.com/jokeez/hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) |
 

@@ -17,7 +17,10 @@
     "test:mega": "node scripts/mega_ui_audit.mjs",
     "test:all": "vitest run",
     "dev:d1": "bash scripts/d1-local-dev.sh",
-    "smoke:d1": "npx tsx scripts/d1-smoke.ts"
+    "smoke:d1": "npx tsx scripts/d1-smoke.ts",
+    "smoke:lab": "npx tsx scripts/lab-smoke.ts",
+    "audit:full": "bash scripts/full_audit.sh",
+    "d0:static": "bash scripts/prepare_d0_static.sh"
   },
   "devDependencies": {
     "happy-dom": "^20.10.6",
