@@ -10,7 +10,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | Topic | Decision |
 |-------|----------|
-| Subdomain now? | **NO** until D0 week — localhost / hub `#exchange` only |
+| Subdomain now? | **D0 week** — static on `exchange.hackme.tech`; hub iframe via **rc17** |
 | D0 content | Static SPA from `dist/` + `STATUS.md` — **no** exchange-api on public edge |
 | Live mode | Remains **blocked** in SPA |
 | DB for D1 | **Postgres** (lab SQLite stays private) |
@@ -22,7 +22,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit / UI suite | `npm test` | ✅ **700** (2026-08-30) |
+| G1 | Unit / UI suite | `npm test` | ✅ **701** (2026-08-31) |
 | G2 | UI smoke | `npm run test:ui-smoke` | ✅ |
 | G3 | Production build | `npm run build` / `prepare_d0_static.sh` | ✅ |
 | G4 | XSS / sanitize / redteam | vitest sanitize + stress_redteam | ✅ |
@@ -39,11 +39,13 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 | G15 | Reference mids | HMC **0.05** · SUP **0.01** · no GH price scale | ✅ |
 | G16 | WebSocket book/fills (`/ws/market`, `health.streams`) | ✅ (private lab) |
 | G17 | Session reconnect (`GET /auth/session`) | SPA `labSessionRestore.ts` + API | ✅ |
+| G18 | Hub embed postMessage | `embed.ts` allows `hackme.tech` parent | ✅ |
 
 ## Explicitly NOT required for D0
 
 - Public `exchange-api` / custody / withdraw  
 - Postgres · new VPS · real USDT/BTC · foreign CEX outreach  
+- **Production hub restart** (bundle with HackMe **rc17** after static is on mirror)
 
 ## Commands
 

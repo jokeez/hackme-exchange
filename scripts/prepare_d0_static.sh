@@ -36,6 +36,10 @@ if grep -Rqs '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20' 
   echo "[d0-static] FAIL: lab fixture Ed25519 seed present in dist — build without VITE_LAB_API / VITE_EXCHANGE_API_ORIGIN" >&2
   exit 1
 fi
+if ! grep -qs 'frame-ancestors.*hackme\.tech' "$OUT_DIR"/index.html 2>/dev/null; then
+  echo "[d0-static] FAIL: paper CSP missing frame-ancestors https://hackme.tech (hub embed)" >&2
+  exit 1
+fi
 # The blocked-live console string is expected in the bundle; ignore it.
 
 tar -C "$(dirname "$OUT_DIR")" -czf "$TAR" "$(basename "$OUT_DIR")"
