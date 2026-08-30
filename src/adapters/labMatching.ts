@@ -424,3 +424,36 @@ export async function syncLabBalancesAndBook(
     note: `Lab sync · ${bal.address.slice(0, 14)}… · ${openN} open · +${added} fill(s) · book ${depth} lvl`,
   };
 }
+
+/** Light sync — open orders + recent fills + book (no balance fetch). */
+export async function syncLabOrdersFillsLight(
+  state: DemoState,
+  market?: MarketSnapshot | null,
+): Promise<
+  | { ok: true; note: string; changed: boolean; bookChanged: boolean }
+  | ExchangeApiError
+> {
+  if (!isLabApiEnabled()) {
+    return { ok: false, status: 0, code: "disabled", message: "lab API not enabled" };
+  }
+  const account = getLabSessionMeta().address;
+  const ordersBefore = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;
+  const tradesBefore = state.trades.length;
+
+  const orders = await listExchangeOrders();
+  if (orders.ok) mergeServerOpenOrders(state, orders.orders);
+
+  const fills = await listExchangeFills(30);
+  let added = 0;
+  if (fills.ok) added = mergeServerFills(state, fills.fills, account, market ?? null);
+
+  const bookRes = await refreshLabBook(state.activePair);
+  const ordersAfter = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;
+  const changed = ordersAfter !== ordersBefore || state.trades.length !== tradesBefore || added > 0;
+  return {
+    ok: true,
+    note: `Lab stream · ${ordersAfter} open · +${added} fill(s)`,
+    changed,
+    bookChanged: bookRes.changed,
+  };
+}

@@ -141,6 +141,9 @@ import {
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
+import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
+import { createMarketStream, type MarketStream } from "./adapters/marketStream";
+import { startLabSessionGuard, stopLabSessionGuard } from "./adapters/labSession";
 import { renderOracleStatusHtml, patchOracleStatusDom, type OracleMeta } from "./oracleStatus";
 import { parseRouteHash, writeRouteHash } from "./routeHash";
 import { appendSyntheticTrade, mergeTapeRows, seedPublicTape, type TapePrint } from "./tape";
@@ -276,8 +279,9 @@ let hotkeysWired = false;
 let lastOhlc: Candle | null = null;
 let prevMids: Partial<Record<PairId, number>> = {};
 let tickTimer: number | undefined;
-let labBookTimer: number | undefined;
 let oracleAgeTimer: number | undefined;
+let marketStream: MarketStream | null = null;
+let stopLabGuard: (() => void) | null = null;
 let publicTape: TapePrint[] = [];
 let bookPhase = 0;
 let announceDismissed =
@@ -2768,6 +2772,7 @@ async function labFixtureConnectUi(): Promise<void> {
     saveState(state);
     if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
   }
+  startMarketStreamLoop();
   // Full remount so Deposit/Withdraw buttons + hints match live CSRF session.
   if (state.mainView === "account") render();
   else {
@@ -3904,19 +3909,72 @@ function patchLive(): void {
 }
 
 const throttledBookTapePatch = throttle(() => {
+  patchBookTapeDom();
+}, 350);
+
+function patchBookTapeDom(): void {
   const book = document.getElementById("book");
   if (book) {
     const prevSnap = snapshotBookLevels(book);
     book.innerHTML = renderBook();
     bookFlashSnap = applyBookFlashes(prevSnap.size ? prevSnap : bookFlashSnap, book);
-    // Preserve delegation flag after innerHTML wipe
     book.dataset.bookTabsWired = "1";
     wireBookTabs();
   }
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
   patchMobileTradeTape();
-}, 350);
+}
+
+function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStreamEvent): void {
+  if (state.mainView !== "spot") return;
+  if (ev.type === "book" && ev.changed) {
+    throttledBookTapePatch();
+    return;
+  }
+  if (ev.type === "tape") {
+    const tape = document.getElementById("tape");
+    if (tape) tape.innerHTML = renderTape();
+    patchMobileTradeTape();
+    return;
+  }
+  if (ev.type === "trades") {
+    refreshActivityPanel();
+    throttledBookTapePatch();
+  }
+}
+
+function startMarketStreamLoop(): void {
+  marketStream?.stop();
+  marketStream = createMarketStream(
+    { onEvent: handleMarketStreamEvent },
+    {
+      getActivePair: () => state.activePair,
+      isSpotView: () => state.mainView === "spot",
+      useLab: () => useLabMatching(),
+      getState: () => state,
+      getMarket: () => market,
+      saveState: () => saveState(state),
+    },
+  );
+  marketStream.start();
+}
+
+function startLabSessionLoop(): void {
+  stopLabGuard?.();
+  stopLabGuard = startLabSessionGuard({
+    getState: () => state,
+    getMarket: () => market,
+    saveState: () => saveState(state),
+    onStale: (note) => {
+      const msg = document.getElementById("lab-api-msg");
+      if (msg) msg.textContent = note;
+    },
+    onReconnected: (note) => toast(note, "ok"),
+    onSync: () => {},
+    onBookRefresh: () => throttledBookTapePatch(),
+  });
+}
 
 function previewFeeLabel(fee: { feeQuote: number; feeHmc: number; paidInHmc: boolean }, quote: string): string {
   // Client float estimate — server quotes in minor units; label as estimate.
@@ -5735,14 +5793,9 @@ function microTickPrices(): void {
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
   patchMobileTradeTape();
-  // Book DOM is heavier — refresh every ~2.1s at 700ms tick (paper synthetic only;
-  // lab book updates via labBookTimer / fill sync).
+  // Book DOM — paper synthetic via local stream (lab uses marketStream poll/ws).
   if (!useLabMatching() && liveTickN % 3 === 0) {
-    const book = document.getElementById("book");
-    if (book) {
-      book.innerHTML = renderBook();
-      wireBookTabs();
-    }
+    marketStream?.notifyLocalBookTape();
   }
   if (liveTickN % 2 === 0) {
     patchMarketRowsInPlace();
@@ -5946,6 +5999,13 @@ export async function boot(): Promise<void> {
     }
   }
   maybeShowTour();
+  applyFirstVisitPrefs(state, {
+    saveState: () => saveState(state),
+    normalizeOverlays: normalizeChartOverlays,
+  });
+  scheduleChartTapHint();
+  startMarketStreamLoop();
+  startLabSessionLoop();
   void refreshTradingGuardsFromHealth();
   pollTimer = window.setInterval(async () => {
     try {
@@ -5957,17 +6017,6 @@ export async function boot(): Promise<void> {
   }, 4_000);
   tickTimer = window.setInterval(microTickPrices, 700);
   oracleAgeTimer = window.setInterval(tickOracleAge, 1000);
-  labBookTimer = window.setInterval(() => {
-    void (async () => {
-      if (!useLabMatching() || state.mainView !== "spot") return;
-      const res = await refreshLabBook(state.activePair);
-      if (!res.ok || !res.changed) return;
-      const book = document.getElementById("book");
-      if (!book) return;
-      book.innerHTML = renderBook();
-      wireBookTabs();
-    })();
-  }, 350);
   window.addEventListener("resize", () => {
     onMobileLayoutChange();
     positionSystemDrop();
@@ -6053,6 +6102,9 @@ function maybeShowTour(): void {
         ? "HackMe Spot can run as paper or private DEMO/LAB matching. Connect a fixture on Account for live L2 — still not production custody."
         : "HackMe Spot is a paper demo. Prices follow the live pool oracle — not a live CEX matching engine.",
     },
+    { t: "Chart · quick order", d: isMobileLayout()
+        ? "Quick order is on — tap the chart to buy or sell at a price. Pinch to zoom; double-tap resets the view."
+        : "Quick order is on — click the chart to place buy/sell at a price. Use the ruler for measurements." },
     { t: "Chart · tools", d: "Ruler: click-drag for Δprice / % / bars / time. Cursor: drag handles or whole object. Delete removes selected; lock freezes edits." },
     {
       t: "Trade",
@@ -6075,6 +6127,7 @@ function maybeShowTour(): void {
     window.removeEventListener("keydown", onKey);
     bd.remove();
     if (doneToast) toast("You're set — try a market buy", "ok");
+    scheduleChartTapHint({ delayMs: 600 });
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") dismiss();
@@ -6113,7 +6166,9 @@ window.addEventListener("beforeunload", () => {
   if (pollTimer) clearInterval(pollTimer);
   if (tickTimer) clearInterval(tickTimer);
   if (oracleAgeTimer) clearInterval(oracleAgeTimer);
-  if (labBookTimer) clearInterval(labBookTimer);
+  marketStream?.stop();
+  stopLabGuard?.();
+  stopLabSessionGuard();
   clearTimeSyncRegistry();
   destroyChart();
 });

@@ -105,6 +105,13 @@ export type HealthResponse = {
     price_band_bps?: number;
     band_bps?: number;
   };
+  /** Optional live market stream endpoints (WebSocket URL or path template with {pair}). */
+  streams?: {
+    market?: string;
+    book?: string;
+    l2?: string;
+    trades?: string;
+  };
   deposit?: { enabled?: boolean; pause?: string };
   custody_fees?: { enabled?: boolean; quote?: string; pause?: string };
   withdraw?: {
