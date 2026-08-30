@@ -1,19 +1,17 @@
 /* HackMe Exchange — offline shell + static asset cache (no trading API cache). */
-const CACHE = "hackme-ex-v2";
+const CACHE = "hackme-ex-v3";
 const SHELL = [
   "/",
   "/offline.html",
   "/manifest.webmanifest",
   "/theme-boot.js",
   "/logo-hex.png",
+  "/icons/favicon.ico",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
   "/icons/apple-touch-icon.png",
   "/icons/favicon-32.png",
-  "/icons/icon-192.svg",
-  "/icons/icon-512.svg",
-  "/icons/icon-maskable.svg",
 ];
 
 self.addEventListener("install", (event) => {
