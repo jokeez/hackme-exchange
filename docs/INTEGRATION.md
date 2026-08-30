@@ -24,7 +24,7 @@ exchange.hackme.tech (static SPA, paper default)
 
 - Run `npm run d0:static` → `dist-d0/` + tarball (see `scripts/prepare_d0_static.sh`)
 - Separate subdomain keeps main site lightweight and allows independent releases
-- **Deploy only in D0/rc17 window** — `scripts/deploy_d0_vps.sh` is manual HOLD
+- **Deploy** is manual ops at rc17/D0 (rsync `dist-d0/` to mirror) — not automated here
 
 ### Nginx sketch
 
