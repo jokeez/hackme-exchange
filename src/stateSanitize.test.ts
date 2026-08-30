@@ -54,6 +54,7 @@ describe("paper build CSP (FE-M-CSP)", () => {
     expect(csp).toContain("connect-src 'self' https://hackme.tech https://api.binance.com");
     expect(csp).toContain("https://static.cloudflareinsights.com");
     expect(csp).toContain("https://api.binance.com");
+    expect(csp).toContain("frame-ancestors 'self' http://127.0.0.1:8080 http://localhost:8080");
   });
 
   it("dev index.html may keep loopback; paper transform strips it", () => {

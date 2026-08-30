@@ -47,7 +47,7 @@ function loadAdminToken(): string {
     resolve(here, "../hackme-exchange-api"),
     "/home/kapa/Desktop/hackme-exchange-api",
   ].filter(Boolean) as string[];
-  const files = [".env.d1.local", ".env"];
+  const files = [".env", ".env.d1.local"];
   for (const root of roots) {
     for (const name of files) {
       try {
