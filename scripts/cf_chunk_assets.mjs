@@ -5,9 +5,10 @@
  */
 import { readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DIST = join(ROOT, "dist");
 const ASSETS = join(DIST, "assets");
 /** Verified safe through CF orange-cloud on exchange.hackme.tech (Aug 2026). */

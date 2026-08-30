@@ -276,8 +276,8 @@ async function testOverlayMenu(page, vpId) {
   if (title?.trim() !== "Overlays") note("P1", `${vpId}-overlay-title`, `title=${title}`);
   else ok(`${vpId} overlay menu title`);
   const labels = await menu.locator("label").count();
-  if (labels !== 5) note("P1", `${vpId}-overlay-count`, `expected 5 labels, got ${labels}`);
-  else ok(`${vpId} overlay menu 5 items`);
+  if (labels !== 6) note("P1", `${vpId}-overlay-count`, `expected 6 labels, got ${labels}`);
+  else ok(`${vpId} overlay menu 6 items`);
   await page.mouse.click(8, 8);
   await sleep(200);
   if (await menu.isVisible().catch(() => false)) note("P1", `${vpId}-overlay-close`, "menu stayed open");
