@@ -19,7 +19,7 @@
 
 [![D0 Paper](https://img.shields.io/badge/D0_Paper-2026--09--15-00d1ff?style=for-the-badge)](STATUS.md)
 [![Go%2Fno--go](https://img.shields.io/badge/go%2Fno--go-2026--09--10-7fe7ff?style=for-the-badge)](docs/D0_CHECKLIST.md)
-[![Tests](https://img.shields.io/badge/tests-699_PASS-39ff14?style=for-the-badge&logo=vitest&logoColor=white)](package.json)
+[![Tests](https://img.shields.io/badge/tests-700_PASS-39ff14?style=for-the-badge&logo=vitest&logoColor=white)](package.json)
 [![Public API](https://img.shields.io/badge/public_API-HOLD-ff6b9d?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/jokeez/hackme-exchange-api)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
 [![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.01-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
@@ -132,7 +132,7 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 
 | Gate | Command / note |
 |------|----------------|
-| Unit + security | `npm test` → **699 PASS** |
+| Unit + security | `npm test` → **700 PASS** |
 | Full UI/UX | `node scripts/full_ui_ux_pass.mjs` |
 | Visual / mobile | `node scripts/g10_visual_pass.mjs` |
 | Chart pairs | `node scripts/b_chart_manual_pass.mjs` |
