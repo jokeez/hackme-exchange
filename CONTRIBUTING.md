@@ -17,14 +17,24 @@ Copy `.env.example` → `.env` for local overrides. **Never commit `.env`.**
 |------|------|
 | [hackme](https://github.com/jokeez/hackme) | Hub · pool · node |
 | [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) | Private lab matching |
-| [hackme-exchange](https://github.com/jokeez/hackme-exchange) | This SPA |
+| **This repo** | Paper / lab Spot SPA |
 
 ## Pull requests
 
 - Keep changes focused (UI, docs, or lab wiring — not mixed with public-edge work).
 - Soft **D0** ships static paper UI only — do not enable a public matching API in the same change set.
 - Author identity should match the project’s existing GitHub account.
-- Do **not** commit dry-run dumps, tarballs (`hackme-exchange-d0-*.tar.gz`), `.cache/`, or `docs/.local/`.
+- Do **not** commit dry-run dumps, tarballs (`hackme-exchange-d0-*.tar.gz`), `dist/`, `dist-d0/`, `.cache/`, or `docs/.local/`.
+
+## QA before merge
+
+```bash
+npm test
+npm run d0:static          # paper build gate
+npm run smoke:lab          # optional — needs API on :18443
+```
+
+See [scripts/README.md](scripts/README.md) for the full script catalog.
 
 ## Secrets
 

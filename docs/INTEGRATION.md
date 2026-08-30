@@ -22,12 +22,13 @@ exchange.hackme.tech (static SPA, paper default)
 
 ### What to deploy
 
-- Build artifact: `npm run build` → `dist/`
+- Run `npm run d0:static` → `dist-d0/` + tarball (see `scripts/prepare_d0_static.sh`)
 - Separate subdomain keeps main site lightweight and allows independent releases
+- **Deploy only in D0/rc17 window** — `scripts/deploy_d0_vps.sh` is manual HOLD
 
 ### Nginx sketch
 
-- Static root: `dist/` from `npm run build`
+- Static root: contents of `dist-d0/` (paper build)
 - No public `/api` proxy until PRE_PUBLIC green
 - TLS on `exchange.hackme.tech` (separate from hub mining stack)
 
@@ -36,7 +37,7 @@ exchange.hackme.tech (static SPA, paper default)
 Copy `.env.example` → `.env.local`:
 
 ```env
-VITE_INTEGRATION_MODE=demo
+VITE_INTEGRATION_MODE=paper
 VITE_EXCHANGE_ORIGIN=https://exchange.hackme.tech
 VITE_HUB_ORIGIN=https://hackme.tech
 VITE_NODE_ORIGIN=http://127.0.0.1:8080

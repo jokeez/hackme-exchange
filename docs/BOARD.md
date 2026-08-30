@@ -6,10 +6,10 @@ Lightweight issue board until GitHub projects exist. Update status in place.
 
 | ID | Item | Owner track | Status |
 |----|------|-------------|--------|
-| B1 | Paper SPA QA green + STATUS | demo | ✅ 699 tests · P0=0 |
+| B1 | Paper SPA QA green + STATUS | demo | ✅ 701 tests · P0=0 |
 | B2 | Lab matching smoke (orders/cancel/fill/convert) | api+demo | ✅ |
 | B3 | Soft-mid convert smoke size | demo script | ✅ mid **0.05** |
-| B4 | D0 static tarball script | demo | ✅ `scripts/prepare_d0_static.sh` |
+| B4 | D0 static tarball script | demo | ✅ `npm run d0:static` |
 | B5 | Human visual pass desktop/mobile | demo | ✅ G10 / full UI · P0=0 |
 | B6 | Draft TG paper-only post (do not publish) | social | ⬜ |
 | B7 | Reference mids 0.05 / 0.01 · no GH price scale | demo+api | ✅ |

@@ -1,9 +1,9 @@
-# Dependencies & build
-node_modules/
+# Build artifacts (regenerate locally)
 dist/
 dist-d0/
 hackme-exchange-d0-*.tar.gz
 *.tar.gz
+*.tgz
 *.tgz
 *.local
 

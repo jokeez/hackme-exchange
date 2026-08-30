@@ -34,7 +34,7 @@
 
 - [ ] Build with **no** `VITE_HACKME_ADMIN_TOKEN` (prod strip is belt-and-suspenders — still omit from CI secrets)
 - [ ] Keep `VITE_NODE_ORIGIN` as loopback in public SPA (Sync / Node wallet links stay local)
-- [ ] Confirm `VITE_INTEGRATION_MODE` is `demo` or `paper` (never rely on `live` until exchange-api)
+- [ ] Confirm `VITE_INTEGRATION_MODE` is `paper` (never rely on `live` until exchange-api)
 - [ ] Serve with HTTP CSP headers (not only the meta tag) — drop `'unsafe-inline'` for scripts when theme boot can move to nonce/hash
 - [ ] Self-host fonts or add SRI to Google Fonts stylesheet
 - [ ] Wipe / ignore demo `localStorage` keys before any live-mode cutover

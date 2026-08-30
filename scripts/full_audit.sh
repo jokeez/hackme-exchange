@@ -15,7 +15,7 @@ pass() { echo "PASS  $*"; }
 
 step "vitest (full suite)"
 npm test
-pass "vitest 622+"
+pass "vitest 701+"
 
 step "security / redteam subset"
 npx vitest run \

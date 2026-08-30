@@ -8,7 +8,7 @@ Thin integration: HackMe node dashboard (`#exchange`) embeds this SPA in an ifra
 Hub (hackme.tech or :8080)  --tab Exchange-->  iframe  exchange.hackme.tech/?embed=hub
 ```
 
-- SPA code stays in [hackme-exchange](https://github.com/jokeez/hackme-exchange) (not inside the HackMe git tree).
+- SPA code lives in **this repository** (not inside the HackMe git tree).
 - Hub tab is **Exchange**, not Market (`#orders` = useful-PoW/fuzz market; HMS Market = storage).
 - Node Wallet remains `#wallet` (hub chrome + SPA System → Hub wallet via `postMessage`).
 - **D0 default:** static paper SPA on `https://exchange.hackme.tech` — no public matching API.
