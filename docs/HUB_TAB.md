@@ -1,16 +1,17 @@
-# Hub Exchange tab (private lab)
+# Hub Exchange tab
 
-Thin integration: HackMe node dashboard (`http://127.0.0.1:8080/#exchange`) embeds this SPA in an iframe with `?embed=hub`.
+Thin integration: HackMe node dashboard (`#exchange`) embeds this SPA in an iframe with `?embed=hub`.
 
 ## Layout
 
 ```
-Hub :8080  --tab Exchange-->  iframe  :5199/?embed=hub  -->  API :18443
+Hub (hackme.tech or :8080)  --tab Exchange-->  iframe  exchange.hackme.tech/?embed=hub
 ```
 
 - SPA code stays in [hackme-exchange](https://github.com/jokeez/hackme-exchange) (not inside the HackMe git tree).
 - Hub tab is **Exchange**, not Market (`#orders` = useful-PoW/fuzz market; HMS Market = storage).
 - Node Wallet remains `#wallet` (hub chrome + SPA System → Hub wallet via `postMessage`).
+- **D0 default:** static paper SPA on `https://exchange.hackme.tech` — no public matching API.
 
 ## Embed chrome
 
@@ -26,20 +27,24 @@ With `?embed=hub` (or nested iframe):
 
 ## Requirements
 
-1. [hackme-exchange](https://github.com/jokeez/hackme-exchange) on `127.0.0.1:5199`
-2. [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) on `127.0.0.1:18443`
-3. Hub node ([hackme](https://github.com/jokeez/hackme)) with rebuilt `dashboard.html` on `:8080`
+1. Static paper build on `https://exchange.hackme.tech` (see `scripts/prepare_d0_static.sh`)
+2. Hub node ([hackme](https://github.com/jokeez/hackme)) with `dashboard.html` + CSP `frame-src https://exchange.hackme.tech`
+3. **Optional private lab:** loopback override (below) + API on `127.0.0.1:18443`
 
 ## CSP
 
-`frame-ancestors 'self' http://127.0.0.1:8080 http://localhost:8080`
+Paper build `frame-ancestors`:
 
-## Override SPA origin
+`frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
+
+## Override SPA origin (private lab dev)
 
 ```js
 localStorage.setItem('hackme.exchange.origin', 'http://127.0.0.1:5199')
 ```
 
+Allowed overrides: `https://exchange.hackme.tech`, `http://127.0.0.1:5199`, `http://localhost:5199`.
+
 ## Verdict
 
-**GO** for private lab (loopback). **HOLD** for public bind / real USDT custody.
+**GO** for hub paper embed (D0). **HOLD** for public matching API / real USDT custody.
