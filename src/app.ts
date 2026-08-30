@@ -385,8 +385,8 @@ let orderInFlight = false;
 /** Block double mint / bridge / withdraw while a custody call is in flight. */
 let custodyInFlight = false;
 
-const PAPER_BADGE = `<span class="demo-badge" title="Simulated exchange — not a real CEX">PAPER · SYNTHETIC</span>`;
-const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Simulated exchange — not a real CEX">PAPER</span>`;
+const PAPER_BADGE = `<span class="demo-badge" title="Paper desk — operator reference mid, not a live market price">PAPER · REF MID</span>`;
+const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Paper desk — operator reference mid, not a live market price">PAPER</span>`;
 const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">DEMO/LAB · LIVE BOOK</span>`;
 const LAB_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from private lab matching engine">LAB</span>`;
 
