@@ -216,7 +216,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             </label>
             <p class="muted small lab-wd-dest-hint">HMC → <code>HMC-</code>+16 hex · SUP/USDT/BTC → paper stubs e.g. <code>paper-usdt-ops-wallet-01</code> (not deposit addresses)</p>
             <label class="lab-field">2FA
-              <input id="lab-wd-2fa" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="optional" />
+              <input id="lab-wd-2fa" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="if enabled" />
             </label>
           </div>
           <p id="lab-wd-fee-quote" class="muted small lab-fee-quote" role="status">Fee quote appears after amount · GET /fees/custody</p>
@@ -340,6 +340,30 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Hub wallet" : "Node wallet"}</a>
           </div>
           <p id="sync-node-msg" class="muted small sync-msg"></p>
+        </article>
+        <article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
+          <h4>Security · 2FA</h4>
+          <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled.</p>
+          <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
+          <div id="lab-2fa-setup-panel" hidden>
+            <p class="muted small">Add to Google Authenticator / Authy:</p>
+            <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
+            <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
+            <label class="lab-field">Confirm code
+              <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+            </label>
+            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
+          </div>
+          <div id="lab-2fa-enabled-panel" hidden>
+            <label class="lab-field">Code to disable
+              <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+            </label>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
+          </div>
+          <div id="lab-2fa-idle-panel">
+            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${labLive ? "" : " disabled"}>Enable 2FA</button>
+          </div>
+          <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
         </article>
       </section>`
           : ""
