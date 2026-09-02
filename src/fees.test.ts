@@ -9,10 +9,12 @@ import {
   sanitizeFeeConfig,
   volume30dUsdt,
 } from "./fees";
+import { convert, type ConvertRoute } from "./convert";
 import { executeFill } from "./execution";
+import { recordConvert } from "./ledger";
 import { placeOrder, processOpenOrders } from "./orders";
 import { tickerFromMarket } from "./market";
-import type { DemoState, PairId, Ticker } from "./types";
+import type { DemoState, PairId, Ticker, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION } from "./types";
 import type { MultiPanePairs, MultiPaneTfs } from "./types";
 import { sampleMarket } from "./testFixtures";
@@ -260,5 +262,146 @@ describe("sanitizeFeeConfig", () => {
 
   it("zero discount stays valid", () => {
     expect(sanitizeFeeConfig({ hmcDiscountPct: 0 }).hmcDiscountPct).toBe(0);
+  });
+});
+
+/** 1e-8 minor-unit parity — matches calcFee / server QuoteFee rounding. */
+function penny(n: number): number {
+  return Math.round(n * 1e8) / 1e8;
+}
+
+function walletDelta(before: Wallet, after: Wallet): Wallet {
+  return {
+    usdt: penny(after.usdt - before.usdt),
+    hmc: penny(after.hmc - before.hmc),
+    sup: penny(after.sup - before.sup),
+    btc: penny(after.btc - before.btc),
+  };
+}
+
+function sumLedger(entries: { asset: string; amount: number }[]): Wallet {
+  const d: Wallet = { usdt: 0, hmc: 0, sup: 0, btc: 0 };
+  for (const e of entries) {
+    const k = e.asset.toLowerCase() as keyof Wallet;
+    if (k in d) d[k] = penny(d[k] + e.amount);
+  }
+  return d;
+}
+
+describe("wallet ↔ fee ↔ ledger penny reconciliation", () => {
+  it("calcFee taker on 1000 USDT is exactly 1 USDT at Regular tier", () => {
+    const s = baseState();
+    const fee = calcFee(s, market, "HMC_USDT", 1000, "taker");
+    expect(fee.feeQuote).toBe(1);
+    expect(fee.bps).toBe(10);
+  });
+
+  it("market buy: trade.feeQuote, ledger fee row, and wallet USDT debit align", () => {
+    const s = baseState();
+    const before = { ...s.wallet };
+    const mid = market.hmcUsdt;
+    const amt = 12_345;
+    const quote = penny(mid * amt);
+    const res = executeFill(s, market, "HMC_USDT", "buy", mid, amt, quote, "market");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const feeRow = s.ledger.find((e) => e.kind === "fee");
+    expect(feeRow).toBeDefined();
+    expect(feeRow!.amount).toBe(-res.fee.feeQuote);
+    expect(s.trades[0]!.feeQuote).toBe(res.fee.feeQuote);
+    const d = walletDelta(before, s.wallet);
+    expect(d.usdt).toBe(-penny(quote + res.fee.feeQuote));
+    expect(d.hmc).toBe(amt);
+  });
+
+  it("market sell: fee debited from USDT proceeds; ledger matches wallet", () => {
+    const s = baseState();
+    const before = { ...s.wallet };
+    const mid = market.hmcUsdt;
+    const amt = 20_000;
+    const quote = penny(mid * amt);
+    const res = executeFill(s, market, "HMC_USDT", "sell", mid, amt, quote, "market");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const feeRow = s.ledger.find((e) => e.kind === "fee")!;
+    expect(feeRow.amount).toBe(-res.fee.feeQuote);
+    expect(s.trades[0]!.feeQuote).toBe(res.fee.feeQuote);
+    const d = walletDelta(before, s.wallet);
+    expect(d.usdt).toBe(penny(quote - res.fee.feeQuote));
+    expect(d.hmc).toBe(-amt);
+  });
+
+  it("payFeesInHmc sell: HMC fee in trade, ledger, and wallet match at 1e-8", () => {
+    const s = baseState();
+    s.feeConfig.payFeesInHmc = true;
+    s.feeConfig.hmcDiscountPct = 25;
+    const before = { ...s.wallet };
+    const mid = market.hmcUsdt;
+    const amt = 20_000;
+    const quote = penny(mid * amt);
+    const res = executeFill(s, market, "HMC_USDT", "sell", mid, amt, quote, "market");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const feeRow = s.ledger.find((e) => e.kind === "fee")!;
+    expect(feeRow.asset).toBe("HMC");
+    expect(feeRow.amount).toBe(-res.fee.feeHmc);
+    expect(s.trades[0]!.feeHmc).toBe(res.fee.feeHmc);
+    expect(s.trades[0]!.feePaidInHmc).toBe(true);
+    const d = walletDelta(before, s.wallet);
+    expect(d.hmc).toBe(-penny(amt + res.fee.feeHmc));
+    expect(d.usdt).toBe(quote);
+  });
+
+  const convertRoutes: { route: ConvertRoute; amt: number; wallet: Wallet }[] = [
+    { route: "HMC_USDT", amt: 1000, wallet: { usdt: 100, hmc: 10_000, sup: 0, btc: 0.01 } },
+    { route: "USDT_HMC", amt: 50, wallet: { usdt: 10_000, hmc: 0, sup: 0, btc: 0 } },
+    { route: "SUP_USDT", amt: 500, wallet: { usdt: 0, hmc: 0, sup: 5000, btc: 0 } },
+    { route: "HMC_SUP", amt: 10, wallet: { usdt: 0, hmc: 100, sup: 0, btc: 0 } },
+    { route: "HMC_BTC", amt: 2000, wallet: { usdt: 0, hmc: 10_000, sup: 0, btc: 0 } },
+  ];
+
+  it.each(convertRoutes)("convert $route + recordConvert: ledger sums match wallet ($amt)", ({ route, amt, wallet }) => {
+    const s = baseState({ wallet });
+    const before = { ...s.wallet };
+    const ledgerBefore = s.ledger.length;
+    const res = convert(s, market, route, amt);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const from = route.split("_")[0]!;
+    const to = route.split("_")[1]!;
+    recordConvert(s, from, to, amt, res.got, market, res.fee, route);
+    const entries = s.ledger.slice(0, s.ledger.length - ledgerBefore);
+    const ld = sumLedger(entries);
+    const wd = walletDelta(before, s.wallet);
+    expect(ld.usdt).toBe(wd.usdt);
+    expect(ld.hmc).toBe(wd.hmc);
+    expect(ld.sup).toBe(wd.sup);
+    expect(ld.btc).toBe(wd.btc);
+    const feeRow = entries.find((e) => e.kind === "fee");
+    if (res.fee.paidInHmc) {
+      expect(feeRow?.amount).toBe(-res.fee.feeHmc);
+    } else if (res.fee.feeQuote > 0) {
+      expect(feeRow?.amount).toBe(-res.fee.feeQuote);
+    }
+  });
+
+  it("convert HMC_USDT payFeesInHmc: ledger HMC fee matches wallet debit", () => {
+    const s = baseState({ wallet: { usdt: 100, hmc: 10_000, sup: 0, btc: 0 } });
+    s.feeConfig.payFeesInHmc = true;
+    s.feeConfig.hmcDiscountPct = 25;
+    const before = { ...s.wallet };
+    const ledgerBefore = s.ledger.length;
+    const amt = 1000;
+    const res = convert(s, market, "HMC_USDT", amt);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    recordConvert(s, "HMC", "USDT", amt, res.got, market, res.fee, "HMC_USDT");
+    const entries = s.ledger.slice(0, s.ledger.length - ledgerBefore);
+    const feeRow = entries.find((e) => e.kind === "fee")!;
+    expect(feeRow.asset).toBe("HMC");
+    expect(feeRow.amount).toBe(-res.fee.feeHmc);
+    const d = walletDelta(before, s.wallet);
+    expect(d.hmc).toBe(-penny(amt + res.fee.feeHmc));
+    expect(d.usdt).toBe(penny(res.got));
   });
 });

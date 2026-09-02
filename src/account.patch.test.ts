@@ -51,4 +51,15 @@ describe("patchAccountFundsDom", () => {
     expect(document.getElementById("acct-total-eq")?.dataset.denom).toBe("HMC");
     expect(document.querySelector('[data-denom="HMC"]')?.classList.contains("active")).toBe(true);
   });
+
+  it("patchAccountFundsDom refreshes oracle mids strip", () => {
+    const s = baseState();
+    const m = sampleMarket({ hmcUsdt: 0.05, supUsdt: 0.01, btcUsd: 68_000 });
+    document.body.innerHTML = renderAccountPage(s, m);
+    patchAccountFundsDom(s, sampleMarket({ hmcUsdt: 0.0523, supUsdt: 0.0104, btcUsd: 92_500 }));
+    expect(document.querySelector('[data-acct-oracle-mid="hmc"]')?.textContent).toContain("0.0523");
+    expect(document.querySelector('[data-acct-oracle-mid="sup"]')?.textContent).toContain("0.0104");
+    expect(document.querySelector('[data-acct-oracle-mid="btc"]')?.textContent).toContain("92,500");
+    expect(document.querySelector('[data-acct-promo-mid="hmc"]')?.textContent).toContain("0.0523");
+  });
 });

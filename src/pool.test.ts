@@ -73,15 +73,34 @@ describe("pool html helpers", () => {
   });
 
   it("patchPoolLiveDom updates stat cells in place", () => {
-    document.body.innerHTML = renderPoolPage(liveOk, sampleMarket());
+    document.body.innerHTML = renderPoolPage(liveOk, sampleMarket(), {
+      oracleMeta: { source: "live", fetchedAt: Date.now() - 5000, poolStatus: "ok" },
+    });
     patchPoolLiveDom(
       { ...liveOk, poolGh: 120, workers: 99 },
-      sampleMarket(),
+      sampleMarket({ hmcUsdt: 0.0512, supUsdt: 0.0108, btcUsd: 91_000 }),
       { source: "live", fetchedAt: Date.now() - 5000, poolStatus: "ok" },
     );
     expect(document.querySelector('[data-pool-stat="hashrate"]')?.textContent).toContain("120");
     expect(document.querySelector('[data-pool-stat="workers"]')?.textContent).toBe("99");
     expect(document.getElementById("pool-updated-at")?.textContent).toContain("5s ago");
+    expect(document.querySelector('[data-pool-mid="hmc"]')?.textContent).toContain("0.0512");
+    expect(document.getElementById("pool-oracle-pill")?.classList.contains("live")).toBe(true);
+    expect(document.querySelector('[data-oracle-trans-mid="hmc"]')?.textContent).toContain("0.0512");
+  });
+
+  it("patchPoolLiveDom marks stale oracle pill", () => {
+    const now = 1_700_000_000_000;
+    document.body.innerHTML = renderPoolPage(liveOk, sampleMarket(), {
+      oracleMeta: { source: "live", fetchedAt: now - 2000, poolStatus: "ok" },
+    });
+    patchPoolLiveDom(
+      liveOk,
+      sampleMarket(),
+      { source: "live", fetchedAt: now - 20_000, poolStatus: "ok" },
+      now,
+    );
+    expect(document.getElementById("pool-oracle-pill")?.classList.contains("stale")).toBe(true);
   });
 });
 

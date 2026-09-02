@@ -1,4 +1,5 @@
 import { applyFeeToWallet, calcFee, liquidityRole, type FeeQuote } from "./fees";
+import { assertOrderFunds } from "./balance";
 import { recordTradeLedger } from "./ledger";
 import type { DemoState, MarketSnapshot, OrderKind, OrderSide, PairId, Trade } from "./types";
 import { applyMarketTrade, uid } from "./store";
@@ -18,10 +19,24 @@ export function executeFill(
   kind: OrderKind,
   triggered = false,
   immediateFill = false,
+  excludeOrderId?: string,
 ): FillResult {
   if (!Number.isFinite(price) || price <= 0) return { ok: false, reason: "Invalid price" };
   if (!Number.isFinite(amountBase) || amountBase <= 0) return { ok: false, reason: "Amount must be > 0" };
   if (!Number.isFinite(quoteGross) || quoteGross < 0) return { ok: false, reason: "Invalid quote amount" };
+
+  const funds = assertOrderFunds(
+    state,
+    m,
+    pairId,
+    side,
+    amountBase,
+    price,
+    kind,
+    immediateFill,
+    excludeOrderId,
+  );
+  if (!funds.ok) return funds;
 
   const walletBefore = { ...state.wallet };
   const tradesSnapshot = state.trades.slice();

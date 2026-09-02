@@ -21,6 +21,16 @@ export type RouteHash = {
   poolAddress?: string;
 };
 
+export type RouteHashWriteContext = {
+  view: MainView;
+  pair: PairId;
+  tf: Timeframe;
+  convertFrom?: keyof Wallet;
+  convertTo?: keyof Wallet;
+  accountSection?: string;
+  poolAddress?: string;
+};
+
 function parseWalletKey(raw: string | undefined): keyof Wallet | undefined {
   const k = raw?.toLowerCase();
   if (k && WALLET_KEYS.has(k as keyof Wallet)) return k as keyof Wallet;
@@ -47,13 +57,15 @@ export function parseRouteHash(hash: string): RouteHash {
     return out;
   }
 
-  if (out.view === "account" && parts[i] && ACCOUNT_SECTIONS.has(parts[i]!)) {
-    out.section = parts[i];
+  if (out.view === "account") {
+    if (parts[i] && ACCOUNT_SECTIONS.has(parts[i]!)) out.section = parts[i];
     return out;
   }
 
-  if (out.view === "pool" && parts[i] === "lookup") {
-    if (parts[i + 1]) out.poolAddress = decodeURIComponent(parts[i + 1]!);
+  if (out.view === "pool") {
+    if (parts[i] === "lookup" && parts[i + 1]) {
+      out.poolAddress = decodeURIComponent(parts[i + 1]!);
+    }
     return out;
   }
 
@@ -68,8 +80,7 @@ export function parseRouteHash(hash: string): RouteHash {
 }
 
 export function formatRouteHash(view: MainView, pair: PairId, tf: Timeframe): string {
-  if (view === "spot") return `#${view}/${pair}/${tf}`;
-  return `#${view}`;
+  return buildRouteHash({ view, pair, tf });
 }
 
 export function formatAccountSectionHash(section: string): string {
@@ -84,9 +95,31 @@ export function formatPoolLookupHash(address: string): string {
   return `#pool/lookup/${encodeURIComponent(address.trim())}`;
 }
 
-export function writeRouteHash(view: MainView, pair: PairId, tf: Timeframe): void {
+/** Build location hash for the current view, preserving view-specific deep-link segments. */
+export function buildRouteHash(ctx: RouteHashWriteContext): string {
+  if (ctx.view === "spot") return `#spot/${ctx.pair}/${ctx.tf}`;
+  if (ctx.view === "convert") {
+    if (ctx.convertFrom && ctx.convertTo && ctx.convertFrom !== ctx.convertTo) {
+      return formatConvertPairHash(ctx.convertFrom, ctx.convertTo);
+    }
+    return "#convert";
+  }
+  if (ctx.view === "account") {
+    if (ctx.accountSection && ACCOUNT_SECTIONS.has(ctx.accountSection)) {
+      return formatAccountSectionHash(ctx.accountSection);
+    }
+    return "#account";
+  }
+  if (ctx.view === "pool") {
+    if (ctx.poolAddress?.trim()) return formatPoolLookupHash(ctx.poolAddress);
+    return "#pool";
+  }
+  return `#${ctx.view}`;
+}
+
+export function writeRouteHash(ctx: RouteHashWriteContext): void {
   if (typeof location === "undefined") return;
-  const next = formatRouteHash(view, pair, tf);
+  const next = buildRouteHash(ctx);
   if (location.hash !== next) {
     history.replaceState(null, "", next);
   }

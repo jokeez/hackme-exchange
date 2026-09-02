@@ -3,8 +3,8 @@ import { INTEGRATION } from "./config/integration";
 import { escapeHtml } from "./sanitize";
 import { formatGh, formatNum, formatPrice, formatRewardPerM, tickerFromMarket } from "./market";
 import { fetchWithTimeout } from "./fetchTimeout";
-import { oracleStatusLabel, type OracleMeta } from "./oracleStatus";
-import { renderOracleTransparencyPanel } from "./product/oraclePanel";
+import { oracleStatusKind, oracleStatusLabel, type OracleMeta } from "./oracleStatus";
+import { patchOracleTransparencyDom, renderOracleTransparencyPanel } from "./product/oraclePanel";
 import { renderWorkerLookupPanel } from "./product/poolWorker";
 
 function poolBase(): string {
@@ -174,9 +174,10 @@ export function patchPoolLiveDom(
   const oracle = document.getElementById("pool-oracle-pill");
   if (oracle) {
     oracle.textContent = oracleStatusLabel(meta, now);
-    const kind = meta.source === "live" && meta.poolStatus === "ok" ? "live" : "fallback";
-    oracle.className = `pool-oracle-pill ${kind}`;
+    oracle.className = `pool-oracle-pill ${oracleStatusKind(meta, now)}`;
   }
+
+  patchOracleTransparencyDom(meta, market, live, now);
 }
 
 export function renderPoolPage(

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { calcFee } from "./fees";
+import { executeFill } from "./execution";
 import {
   appendLedger,
   recordConvert,
@@ -8,6 +10,11 @@ import {
 } from "./ledger";
 import { baseState, sampleMarket } from "./testFixtures";
 import type { FeeQuote } from "./fees";
+import type { Wallet } from "./types";
+
+function penny(n: number): number {
+  return Math.round(n * 1e8) / 1e8;
+}
 
 describe("ledger", () => {
   const market = sampleMarket();
@@ -104,5 +111,46 @@ describe("ledger", () => {
     recordTradeLedger(s, market, "HMC_USDT", "sell", 100, 0.043, fee, "limit");
     const feeRow = s.ledger.find((e) => e.kind === "fee");
     expect(feeRow?.note).toMatch(/HMC [−-]25%/);
+  });
+
+  it("recordTradeLedger fee amount matches FeeQuote at penny precision", () => {
+    const s = baseState();
+    const fee = calcFee(s, market, "HMC_USDT", 1234.5678, "taker");
+    recordTradeLedger(s, market, "HMC_USDT", "buy", 100, 1234.5678, fee, "market");
+    const feeRow = s.ledger.find((e) => e.kind === "fee")!;
+    expect(feeRow.amount).toBe(fee.paidInHmc ? -fee.feeHmc : -fee.feeQuote);
+    expect(feeRow.usdtValue).toBe(-fee.feeQuote);
+  });
+
+  it("executeFill ledger fee row equals wallet fee debit (maker limit)", () => {
+    const s = baseState();
+    const before: Wallet = { ...s.wallet };
+    const mid = market.hmcUsdt;
+    const amt = 5000;
+    const quote = penny(mid * amt);
+    const res = executeFill(s, market, "HMC_USDT", "buy", mid, amt, quote, "limit");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.fee.role).toBe("maker");
+    const feeRow = s.ledger.find((e) => e.kind === "fee")!;
+    expect(feeRow.amount).toBe(-res.fee.feeQuote);
+    expect(penny(s.wallet.usdt - before.usdt)).toBe(-penny(quote + res.fee.feeQuote));
+  });
+
+  it("recordConvert fee asset matches quote leg for non-HMC fee routes", () => {
+    const s = baseState();
+    const fee: FeeQuote = {
+      role: "taker",
+      bps: 10,
+      feeQuote: 0.00001234,
+      feeHmc: 0,
+      paidInHmc: false,
+      vipName: "Regular",
+      hmcDiscountPct: 0,
+    };
+    recordConvert(s, "HMC", "BTC", 1000, 0.0000064, market, fee, "HMC_BTC");
+    const feeRow = s.ledger.find((e) => e.kind === "fee")!;
+    expect(feeRow.asset).toBe("BTC");
+    expect(feeRow.amount).toBe(-0.00001234);
   });
 });

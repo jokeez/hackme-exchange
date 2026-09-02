@@ -67,9 +67,12 @@ export function equityInDenom(
   }
 }
 
+/** Equity denom ring buttons — scoped so portfolio chart `data-chart-denom` never collides. */
+export const DENOM_ORB_SEL = ".acct-denom-orb[data-denom]";
+
 /** Keep denom ring in sync after soft account patches (oracle refresh). */
 export function syncDenomRingDom(denom: EquityDenom): void {
-  document.querySelectorAll<HTMLElement>("[data-denom]").forEach((orb) => {
+  document.querySelectorAll<HTMLElement>(DENOM_ORB_SEL).forEach((orb) => {
     const on = orb.dataset.denom === denom;
     orb.classList.toggle("active", on);
     orb.setAttribute("aria-checked", on ? "true" : "false");

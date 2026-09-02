@@ -166,6 +166,20 @@ export function previewConvert(
   };
 }
 
+export function isConvertPreviewError(
+  prev: ConvertPreview | { ok: false; reason: string },
+): prev is { ok: false; reason: string } {
+  return "ok" in prev && prev.ok === false;
+}
+
+/** Drift between expected and actual net receive in basis points (0 when incomparable). */
+export function convertSlippageDriftBps(expectedNet: number, actualNet: number): number {
+  if (!(expectedNet > 0) || !(actualNet > 0) || !Number.isFinite(expectedNet) || !Number.isFinite(actualNet)) {
+    return 0;
+  }
+  return (Math.abs(actualNet - expectedNet) / expectedNet) * 10_000;
+}
+
 /** Net receive after quote-side taker fee (USDT/BTC/SUP legs); HMC-fee routes credit gross. */
 export function convertNetReceive(preview: Pick<ConvertPreview, "got" | "fee" | "to" | "pair">): number {
   const { got, fee, to, pair } = preview;
@@ -183,7 +197,7 @@ export function convert(
   amountFrom: number,
 ): { ok: true; got: number; fee: FeeQuote } | { ok: false; reason: string } {
   const prev = previewConvert(state, market, route, amountFrom);
-  if ("ok" in prev && prev.ok === false) return prev;
+  if (isConvertPreviewError(prev)) return prev;
   const p = prev as ConvertPreview;
   if (state.wallet[p.from] < amountFrom) {
     return { ok: false, reason: "Insufficient balance" };

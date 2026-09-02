@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, feeQuoteFromLabConvert, flipRoute, formatConvertFeeToast, formatLabConvertFeeToast, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
+import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, convertSlippageDriftBps, feeQuoteFromLabConvert, flipRoute, formatConvertFeeToast, formatLabConvertFeeToast, isConvertPreviewError, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("convert", () => {
@@ -219,5 +219,38 @@ describe("convert", () => {
     const suffix = formatConvertFeeToast(prev.fee, prev.pair);
     expect(suffix).toContain("USDT");
     expect(convertFeeHintLine(prev)).toContain("USDT");
+  });
+
+  it("convertNetReceive matches wallet delta for quote-fee and HMC-fee routes", () => {
+    const sQuote = baseState({ wallet: { usdt: 100, hmc: 10_000, sup: 0, btc: 0 } });
+    const amt = 1000;
+    const prev = previewConvert(sQuote, market, "HMC_USDT", amt);
+    expect(isConvertPreviewError(prev)).toBe(false);
+    const expectedNet = convertNetReceive(prev as ConvertPreview);
+    const res = convert(sQuote, market, "HMC_USDT", amt);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(sQuote.wallet.usdt - 100).toBeCloseTo(expectedNet, 10);
+
+    const sHmc = baseState({ wallet: { usdt: 100, hmc: 10_000, sup: 0, btc: 0 } });
+    sHmc.feeConfig.payFeesInHmc = true;
+    const beforeUsdt = sHmc.wallet.usdt;
+    const beforeHmc = sHmc.wallet.hmc;
+    const hmcPrev = previewConvert(sHmc, market, "HMC_USDT", amt);
+    const expectedHmcNet = convertNetReceive(hmcPrev as ConvertPreview);
+    const hmcRes = convert(sHmc, market, "HMC_USDT", amt);
+    expect(hmcRes.ok).toBe(true);
+    if (!hmcRes.ok) return;
+    expect(sHmc.wallet.usdt - beforeUsdt).toBeCloseTo(expectedHmcNet, 10);
+    expect(sHmc.wallet.hmc).toBeCloseTo(beforeHmc - amt - hmcRes.fee.feeHmc, 8);
+  });
+
+  it("convertSlippageDriftBps and isConvertPreviewError", () => {
+    expect(convertSlippageDriftBps(100, 100.5)).toBe(50);
+    expect(convertSlippageDriftBps(0, 10)).toBe(0);
+    const bad = previewConvert(baseState(), market, "HMC_USDT", 0);
+    expect(isConvertPreviewError(bad)).toBe(true);
+    const ok = previewConvert(baseState(), market, "HMC_USDT", 10);
+    expect(isConvertPreviewError(ok)).toBe(false);
   });
 });

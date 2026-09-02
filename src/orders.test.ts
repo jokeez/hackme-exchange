@@ -101,6 +101,23 @@ describe("placeOrder / OCO", () => {
     expect(s.wallet.usdt).toBeLessThan(before);
   });
 
+  it("marketable IOC limit fills immediately as taker", () => {
+    const s = baseState();
+    const before = s.wallet.usdt;
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.051, undefined, undefined, "IOC", false, market);
+    expect("id" in o && o.status === "filled").toBe(true);
+    expect(s.trades[0]?.feeRole).toBe("taker");
+    expect(s.wallet.usdt).toBeLessThan(before);
+    expect(s.orders.filter((x) => x.status === "open")).toHaveLength(0);
+  });
+
+  it("marketable FOK limit fills immediately as taker", () => {
+    const s = baseState();
+    const o = placeOrder(s, "HMC_USDT", "sell", "limit", 100, 0.0004, undefined, undefined, "FOK", false, market);
+    expect("id" in o && o.status === "filled").toBe(true);
+    expect(s.trades[0]?.feeRole).toBe("taker");
+  });
+
   it("rejects second buy limit when funds reserved by first", () => {
     const s = baseState({ wallet: { usdt: 50, hmc: 0, sup: 0, btc: 0 } });
     const first = placeOrder(s, "HMC_USDT", "buy", "limit", 1000, 0.04, undefined, undefined, "GTC", false, market);
@@ -176,7 +193,49 @@ describe("processOpenOrders", () => {
     placeOrder(s, "HMC_USDT", "buy", "stop_limit", 100, 0.00045, 0.00044);
     const m = sampleMarket({ hmcUsdt: 0.00045 });
     processOpenOrders(s, m, tickersFor(m));
-    expect(["triggered", "filled", "cancelled"]).toContain(s.orders[0].status);
+    expect(s.orders[0].status).toBe("filled");
+    expect(s.trades[0]?.feeRole).toBe("taker");
+  });
+
+  it("sell stop-limit triggers then fills when mid reaches limit", () => {
+    const s = baseState();
+    placeOrder(s, "HMC_USDT", "sell", "stop_limit", 100, 0.048, 0.049);
+    let m = sampleMarket({ hmcUsdt: 0.047 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(s.orders[0].status).toBe("triggered");
+    m = sampleMarket({ hmcUsdt: 0.048 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(s.orders[0].status).toBe("filled");
+    expect(s.trades[0]?.feeRole).toBe("taker");
+  });
+
+  it("buy OCO SL triggers on mid rise then fills at limit", () => {
+    const s = baseState();
+    const placed = placeOco(s, "HMC_USDT", "buy", 1000, 0.04, 0.055, 0.052, market);
+    expect("tp" in placed).toBe(true);
+    if (!("tp" in placed)) return;
+    let m = sampleMarket({ hmcUsdt: 0.056 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(placed.sl.status).toBe("triggered");
+    expect(placed.tp.status).toBe("open");
+    m = sampleMarket({ hmcUsdt: 0.051 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(placed.sl.status).toBe("filled");
+    expect(placed.tp.status).toBe("cancelled");
+  });
+
+  it("trailing stop sell triggers after rise then drop", () => {
+    const s = baseState();
+    const o = placeOrder(s, "HMC_USDT", "sell", "trailing_stop", 500, 0.05, undefined, 2, "GTC", false, market);
+    expect("id" in o).toBe(true);
+    if (!("id" in o)) return;
+    let m = sampleMarket({ hmcUsdt: 0.055 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(o.status).toBe("open");
+    expect(o.trailAnchor).toBe(0.055);
+    m = sampleMarket({ hmcUsdt: 0.0535 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(o.status).toBe("filled");
   });
 });
 

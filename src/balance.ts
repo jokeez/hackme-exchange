@@ -32,18 +32,26 @@ function quoteNeedForLeg(
 ): number {
   let need = o.price * remaining;
   if (m) {
-    const fee = calcFee(state, m, o.pairId, need, liquidityRole(o.kind));
+    // Stop-limit always fills as taker once triggered — reserve taker fees upfront.
+    const role =
+      o.kind === "stop_limit" ? "taker" : liquidityRole(o.kind, o.status === "triggered");
+    const fee = calcFee(state, m, o.pairId, need, role);
     if (!fee.paidInHmc) need += fee.feeQuote;
   }
   return need;
 }
 
 /** Quote/base locked by open resting orders (demo reservation — not on-chain). */
-export function reservedBalances(state: DemoState, m?: MarketSnapshot): Wallet {
+export function reservedBalances(
+  state: DemoState,
+  m?: MarketSnapshot,
+  excludeOrderId?: string,
+): Wallet {
   const reserved: Wallet = { usdt: 0, hmc: 0, sup: 0, btc: 0 };
   const ocoSeen = new Set<string>();
 
   for (const o of state.orders) {
+    if (excludeOrderId && o.id === excludeOrderId) continue;
     if (o.status !== "open" && o.status !== "triggered") continue;
     // Server-side lab orders: balances sync uses available (already net of reserve).
     if (o.source === "lab") continue;
@@ -84,8 +92,13 @@ export function reservedBalances(state: DemoState, m?: MarketSnapshot): Wallet {
   return reserved;
 }
 
-export function freeBalance(state: DemoState, asset: keyof Wallet, m?: MarketSnapshot): number {
-  const reserved = reservedBalances(state, m);
+export function freeBalance(
+  state: DemoState,
+  asset: keyof Wallet,
+  m?: MarketSnapshot,
+  excludeOrderId?: string,
+): number {
+  const reserved = reservedBalances(state, m, excludeOrderId);
   return Math.max(0, state.wallet[asset] - reserved[asset]);
 }
 
@@ -179,15 +192,17 @@ export function assertOrderFunds(
   price: number,
   kind: Order["kind"] = "limit",
   immediateFill = false,
+  excludeOrderId?: string,
 ): { ok: true } | { ok: false; reason: string } {
   if (!Number.isFinite(amountBase) || amountBase <= 0) {
     return { ok: false, reason: "Amount must be > 0" };
   }
   const pair = PAIRS.find((p) => p.id === pairId)!;
-  const role = liquidityRole(kind, false, immediateFill);
+  const role =
+    kind === "stop_limit" ? "taker" : liquidityRole(kind, false, immediateFill);
   if (side === "sell") {
     const baseK = balKey(pair.base);
-    const free = freeBalance(state, baseK, m);
+    const free = freeBalance(state, baseK, m, excludeOrderId);
     if (free < amountBase) {
       return { ok: false, reason: `Insufficient ${pair.base} (reserved in open orders)` };
     }
@@ -196,7 +211,7 @@ export function assertOrderFunds(
       const fee = calcFee(state, m, pairId, quoteGross, role);
       if (fee.paidInHmc) {
         // Selling HMC reduces free HMC — fee must fit in leftover (or other free HMC).
-        const hmcFree = freeBalance(state, "hmc", m);
+        const hmcFree = freeBalance(state, "hmc", m, excludeOrderId);
         const leftover = baseK === "hmc" ? hmcFree - amountBase : hmcFree;
         if (leftover < fee.feeHmc) {
           return { ok: false, reason: "Insufficient HMC for fee (reserved in open orders)" };
@@ -209,12 +224,12 @@ export function assertOrderFunds(
   const quoteGross = price * amountBase;
   const fee = calcFee(state, m, pairId, quoteGross, role);
   const quoteNeed = quoteGross + (fee.paidInHmc ? 0 : fee.feeQuote);
-  const free = freeBalance(state, quoteK, m);
+  const free = freeBalance(state, quoteK, m, excludeOrderId);
   if (free < quoteNeed) {
     return { ok: false, reason: `Insufficient ${pair.quote} (reserved in open orders)` };
   }
   if (fee.paidInHmc) {
-    const hmcFree = freeBalance(state, "hmc", m);
+    const hmcFree = freeBalance(state, "hmc", m, excludeOrderId);
     if (hmcFree < fee.feeHmc) {
       return { ok: false, reason: "Insufficient HMC for fee (reserved in open orders)" };
     }

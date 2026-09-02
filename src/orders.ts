@@ -50,8 +50,8 @@ export function placeOrder(
     if (mid > 0) {
       const check = validateLimitOrder(side, price, mid, timeInForce, postOnly);
       if (!check.ok) return check;
-      // Marketable GTC limit must take liquidity — never rest as maker (fee undercharge).
-      if (kind === "limit" && check.immediate && timeInForce === "GTC" && !postOnly) {
+      // Marketable limit must take liquidity — never rest as maker (fee undercharge).
+      if (kind === "limit" && check.immediate && !postOnly) {
         const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind, true);
         if (!funds.ok) return funds;
         const quoteGross = price * amountBase;
@@ -180,6 +180,7 @@ function fillOrder(
     order.kind,
     triggered,
     immediateFill,
+    order.id,
   );
   if (!res.ok) {
     order.status = "cancelled";
@@ -192,7 +193,7 @@ function fillOrder(
 }
 
 function limitShouldFill(order: Order, mid: number): boolean {
-  if (order.kind === "limit" || order.kind === "oco") {
+  if (order.kind === "limit" || order.kind === "oco" || order.kind === "stop_limit") {
     return order.side === "buy" ? mid <= order.price : mid >= order.price;
   }
   return false;

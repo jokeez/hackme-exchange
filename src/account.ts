@@ -264,9 +264,9 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
       <div class="fee-tier-grid">${tierCards}</div>
       <div class="acct-fees-grid">
         <article class="acct-oracle-strip">
-          <span class="acct-oracle-pill"><span class="muted">HMC</span> <strong class="mono">${formatPrice(market.hmcUsdt)}</strong></span>
-          <span class="acct-oracle-pill"><span class="muted">SUP</span> <strong class="mono">${formatPrice(market.supUsdt)}</strong></span>
-          <span class="acct-oracle-pill"><span class="muted">BTC</span> <strong class="mono">$${formatNum(market.btcUsd, 0)}</strong></span>
+          <span class="acct-oracle-pill"><span class="muted">HMC</span> <strong class="mono" data-acct-oracle-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></span>
+          <span class="acct-oracle-pill"><span class="muted">SUP</span> <strong class="mono" data-acct-oracle-mid="sup">${formatPrice(market.supUsdt)}</strong></span>
+          <span class="acct-oracle-pill"><span class="muted">BTC</span> <strong class="mono" data-acct-oracle-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></span>
         </article>
         <table class="fee-table compact">
           <thead><tr><th>Tier</th><th>Vol</th><th>Maker</th><th>Taker</th></tr></thead>
@@ -586,7 +586,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <a class="acct-promo-card glass-inset" href="#spot/HMC_USDT/15m">
         <span class="acct-promo-tag">Spot</span>
         <strong>HMC/USDT</strong>
-        <span class="mono">${formatPrice(market.hmcUsdt)}</span>
+        <span class="mono" data-acct-promo-mid="hmc">${formatPrice(market.hmcUsdt)}</span>
         <span class="muted small">Limit &amp; market orders</span>
       </a>
       <a class="acct-promo-card glass-inset" href="#convert">
@@ -912,6 +912,18 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
 
   const host = document.getElementById("acct-alloc-host");
   if (host) host.innerHTML = allocationBars(w, market, eq);
+
+  const acctMids: Record<string, string> = {
+    hmc: formatPrice(market.hmcUsdt),
+    sup: formatPrice(market.supUsdt),
+    btc: `$${formatNum(market.btcUsd, 0)}`,
+  };
+  for (const [key, value] of Object.entries(acctMids)) {
+    const el = document.querySelector(`[data-acct-oracle-mid="${key}"]`);
+    if (el) el.textContent = value;
+  }
+  const promoHmc = document.querySelector('[data-acct-promo-mid="hmc"]');
+  if (promoHmc) promoHmc.textContent = formatPrice(market.hmcUsdt);
 
   syncDenomRingDom(denom);
 
