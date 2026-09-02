@@ -31,11 +31,11 @@ const ROUTES: Record<ConvertRoute, RouteDef> = {
   BTC_SUP: { from: "btc", to: "sup", pair: "SUP_BTC", invert: true },
 };
 
-export const CONVERT_ASSETS: { key: keyof Wallet; symbol: string }[] = [
-  { key: "hmc", symbol: "HMC" },
-  { key: "sup", symbol: "SUP" },
-  { key: "usdt", symbol: "USDT" },
-  { key: "btc", symbol: "BTC" },
+export const CONVERT_ASSETS: { key: keyof Wallet; symbol: string; name: string }[] = [
+  { key: "hmc", symbol: "HMC", name: "HackMe Coin" },
+  { key: "sup", symbol: "SUP", name: "Superior Companion" },
+  { key: "usdt", symbol: "USDT", name: "Tether USD" },
+  { key: "btc", symbol: "BTC", name: "Bitcoin" },
 ];
 
 export function convertRouteDef(route: ConvertRoute): RouteDef | null {

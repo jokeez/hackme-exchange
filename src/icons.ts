@@ -49,21 +49,22 @@ export const Ico = {
       `<path d="m2 2 20 20"/><path d="M6.7 6.7C4.1 8.5 2 12 2 12s3 7 10 7c1.8 0 3.4-.5 4.8-1.2"/><path d="M17.3 17.3C19.9 15.5 22 12 22 12s-3-7-10-7c-1.8 0-3.4.5-4.8 1.2"/><path d="M9.5 9.5a3 3 0 0 0 4.2 4.2"/>`,
     ),
   search: () => svg(`<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`),
+  swap: () => svg(`<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>`),
   more: () => svg(`<circle cx="12" cy="5" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.25" fill="currentColor" stroke="none"/>`),
 } as const;
 
-/** Bump when coin SVG/PNG art changes — busts CDN cache on exchange.hackme.tech. */
-const COIN_ICON_REV = 3;
+/** Bump when coin art changes — busts CDN cache on exchange.hackme.tech. */
+const COIN_ICON_REV = 4;
 
 const COIN_ICON_SRC: Record<string, string> = {
-  HMC: `/assets/coins/hmc.svg?v=${COIN_ICON_REV}`,
-  USDT: `/assets/coins/usdt.svg?v=${COIN_ICON_REV}`,
-  BTC: `/assets/coins/btc.svg?v=${COIN_ICON_REV}`,
+  HMC: `/logo-hex.png?v=${COIN_ICON_REV}`,
+  USDT: `/assets/coins/usdt.png?v=${COIN_ICON_REV}`,
+  BTC: `/assets/coins/btc.png?v=${COIN_ICON_REV}`,
   SUP: `/assets/coins/sup.svg?v=${COIN_ICON_REV}`,
 };
 
 const COIN_ICON_CLASS: Record<string, string> = {
-  HMC: "asset-hmc asset-coin-logo",
+  HMC: "asset-hmc asset-hmc-logo",
   USDT: "asset-usdt asset-coin-logo",
   BTC: "asset-btc asset-coin-logo",
   SUP: "asset-sup asset-coin-logo",

@@ -143,6 +143,16 @@ import {
   type ConvertPreview,
   type ConvertRoute,
 } from "./convert";
+import {
+  patchConvertPickerBalances,
+  renderConvertAssetOptions,
+  renderConvertAssetPicker,
+  renderConvertBalanceList,
+  renderConvertQuickRoutes,
+  renderConvertRecentList,
+  syncConvertPickerUi,
+  wireConvertAssetPickers,
+} from "./convertUi";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
@@ -1445,48 +1455,24 @@ function renderConvert(): string {
       ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · paper only until health advertises hmc_fee_pay"}`
       : `Fees in quote asset · toggle HMC (−${state.feeConfig.hmcDiscountPct}%) on Account or Spot`;
 
-  const fromOpts = CONVERT_ASSETS.map(
-    (a) =>
-      `<option value="${a.key}" ${a.key === convertFrom ? "selected" : ""}>${a.symbol}</option>`,
-  ).join("");
-  const toOpts = CONVERT_ASSETS.map(
-    (a) =>
-      `<option value="${a.key}" ${a.key === convertTo ? "selected" : ""}>${a.symbol}</option>`,
-  ).join("");
+  const activeRoute = routeForAssets(convertFrom, convertTo);
+  const fromOpts = renderConvertAssetOptions(convertFrom);
+  const toOpts = renderConvertAssetOptions(convertTo);
 
-  const balRows = CONVERT_ASSETS.map((a) => {
-    const v = freeBalance(state, a.key);
-    return `<li><span>${a.symbol}</span><strong class="mono">${formatNum(v, a.key === "btc" ? 8 : 4)}</strong></li>`;
-  }).join("");
+  const balRows = CONVERT_ASSETS.map((a) => ({
+    symbol: a.symbol,
+    name: a.name,
+    value: formatNum(freeBalance(state, a.key), a.key === "btc" ? 8 : 4),
+  }));
 
-  const recent = state.ledger
+  const recentRows = state.ledger
     .filter((e) => e.kind === "convert" && e.amount < 0)
     .slice(-6)
     .reverse()
-    .map(
-      (e) =>
-        `<li class="mono"><span>${escapeHtml(e.note ?? "")}</span><span>${formatNum(Math.abs(e.amount), 4)}</span></li>`,
-    )
-    .join("");
-
-  const quickIds: ConvertRoute[] = [
-    "HMC_USDT",
-    "USDT_HMC",
-    "SUP_USDT",
-    "HMC_SUP",
-    "HMC_BTC",
-    "BTC_HMC",
-    "SUP_BTC",
-    "BTC_SUP",
-  ];
-  const quick = quickIds
-    .map((id) => {
-      const r = CONVERT_ROUTES.find((x) => x.id === id);
-      if (!r) return "";
-      const active = routeForAssets(convertFrom, convertTo) === r.id;
-      return `<button type="button" class="cv-chip ${active ? "active" : ""}" data-cv-route="${r.id}">${r.label}</button>`;
-    })
-    .join("");
+    .map((e) => ({
+      note: e.note ?? "",
+      amount: formatNum(Math.abs(e.amount), 4),
+    }));
 
   return `
   <section class="convert-page glass">
@@ -1499,15 +1485,22 @@ function renderConvert(): string {
       </header>
       <div class="convert-desk-wrap">
       <div class="convert-desk glass-inset">
-        <div class="cv-quick" id="cv-quick">${quick}</div>
-        <div class="cv-leg">
+        <div class="cv-quick-head">
+          <span class="cv-quick-label">Popular routes</span>
+          <span class="muted small">Tap a pair to prefill</span>
+        </div>
+        <div class="cv-quick cv-route-grid" id="cv-quick" data-active-route="${activeRoute ?? ""}">${renderConvertQuickRoutes(activeRoute)}</div>
+        <div class="cv-swap-stack">
+        <div class="cv-leg cv-leg-from">
           <div class="cv-leg-head">
             <span>From</span>
             <button type="button" class="linkish" id="cv-max">Max</button>
           </div>
-          <div class="cv-leg-row">
-            <select id="cv-from" class="inp mono" aria-label="From asset">${fromOpts}</select>
-            <input id="cv-amt" class="inp mono" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount" />
+          ${renderConvertAssetPicker("from", convertFrom, convertTo)}
+          <select id="cv-from" class="cv-sel-native" aria-hidden="true" tabindex="-1">${fromOpts}</select>
+          <div class="cv-amt-wrap">
+            <label class="muted small cv-amt-label" for="cv-amt">Amount</label>
+            <input id="cv-amt" class="inp mono cv-amt-inp" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount" placeholder="0.00" />
           </div>
           <div class="cv-bal muted small mono" id="cv-from-bal"></div>
           <div class="cv-pct" role="group" aria-label="Quick size">
@@ -1517,13 +1510,18 @@ function renderConvert(): string {
             <button type="button" data-cv-pct="100">Max</button>
           </div>
         </div>
-        <button type="button" class="cv-flip" id="cv-flip" title="Flip direction" aria-label="Flip From and To">⇅</button>
-        <div class="cv-leg">
+        <div class="cv-flip-wrap">
+          <button type="button" class="cv-flip" id="cv-flip" title="Flip direction" aria-label="Flip From and To">${Ico.swap()}</button>
+        </div>
+        <div class="cv-leg cv-leg-to">
           <div class="cv-leg-head"><span>To</span><span class="muted small" id="cv-to-label">You receive</span></div>
-          <div class="cv-leg-row">
-            <select id="cv-to" class="inp mono" aria-label="To asset">${toOpts}</select>
+          ${renderConvertAssetPicker("to", convertTo, convertFrom)}
+          <select id="cv-to" class="cv-sel-native" aria-hidden="true" tabindex="-1">${toOpts}</select>
+          <div class="cv-receive-wrap">
+            <span class="muted small cv-receive-label">Estimated receive</span>
             <div class="cv-receive mono" id="cv-got">—</div>
           </div>
+        </div>
         </div>
         <div class="cv-quote mono" id="cv-quote">
           <div class="cv-q-row"><span>Rate</span><span id="cv-rate">—</span></div>
@@ -1542,9 +1540,9 @@ function renderConvert(): string {
       </div>
       <aside class="convert-side glass-inset">
         <h3>Balances</h3>
-        <ul class="cv-bal-list">${balRows}</ul>
+        <ul class="cv-bal-list">${renderConvertBalanceList(balRows)}</ul>
         <h3>Recent</h3>
-        ${recent ? `<ul class="cv-recent">${recent}</ul>` : `<p class="muted small">No converts yet</p>`}
+        ${renderConvertRecentList(recentRows)}
       </aside>
       </div>
     </div>
@@ -1568,6 +1566,14 @@ async function refreshConvertPreviewAsync(): Promise<void> {
 
   const avail = freeBalance(state, convertFrom, market ?? undefined);
   balEl.textContent = `Available ${formatNum(avail, convertFrom === "btc" ? 8 : 4)} ${assetSymbol(convertFrom)}`;
+  const pickerBals: Partial<Record<keyof Wallet, string>> = {};
+  for (const a of CONVERT_ASSETS) {
+    pickerBals[a.key] = formatNum(freeBalance(state, a.key, market ?? undefined), a.key === "btc" ? 8 : 4);
+  }
+  patchConvertPickerBalances(pickerBals);
+  syncConvertPickerUi(convertFrom, convertTo);
+  const quickEl = document.getElementById("cv-quick");
+  if (quickEl) quickEl.dataset.activeRoute = routeForAssets(convertFrom, convertTo) ?? "";
 
   const route = routeForAssets(convertFrom, convertTo);
   if (!route) {
@@ -1837,41 +1843,36 @@ function softPatchConvertDesk(): void {
   if (state.mainView !== "convert" || !document.getElementById("cv-amt")) return;
   const list = document.querySelector(".cv-bal-list");
   if (list) {
-    list.innerHTML = CONVERT_ASSETS.map((a) => {
-      const v = freeBalance(state, a.key);
-      return `<li><span>${a.symbol}</span><strong class="mono">${formatNum(v, a.key === "btc" ? 8 : 4)}</strong></li>`;
-    }).join("");
+    list.innerHTML = renderConvertBalanceList(
+      CONVERT_ASSETS.map((a) => ({
+        symbol: a.symbol,
+        name: a.name,
+        value: formatNum(freeBalance(state, a.key), a.key === "btc" ? 8 : 4),
+      })),
+    );
   }
   const side = document.querySelector(".convert-side");
   if (side) {
-    const recentHtml = state.ledger
+    const recentRows = state.ledger
       .filter((e) => e.kind === "convert" && e.amount < 0)
       .slice(-6)
       .reverse()
-      .map(
-        (e) =>
-          `<li class="mono"><span>${escapeHtml(e.note ?? "")}</span><span>${formatNum(Math.abs(e.amount), 4)}</span></li>`,
-      )
-      .join("");
+      .map((e) => ({
+        note: e.note ?? "",
+        amount: formatNum(Math.abs(e.amount), 4),
+      }));
     const recentH = [...side.querySelectorAll("h3")].find((h) => /recent/i.test(h.textContent || ""));
     if (recentH) {
       let node = recentH.nextElementSibling;
-      while (node && (node.matches("p.muted") || node.matches("ul.cv-recent"))) {
+      while (node && (node.matches("p.muted") || node.matches("ul.cv-recent") || node.matches("p.cv-recent-empty"))) {
         const next = node.nextElementSibling;
         node.remove();
         node = next;
       }
-      if (recentHtml) {
-        const ul = document.createElement("ul");
-        ul.className = "cv-recent";
-        ul.innerHTML = recentHtml;
-        recentH.after(ul);
-      } else {
-        const p = document.createElement("p");
-        p.className = "muted small";
-        p.textContent = "No converts yet";
-        recentH.after(p);
-      }
+      const wrap = document.createElement("div");
+      wrap.innerHTML = renderConvertRecentList(recentRows);
+      const child = wrap.firstElementChild;
+      if (child) recentH.after(child);
     }
   }
   softPatchFeePayChrome();
@@ -1928,12 +1929,14 @@ function wireConvertDesk(): void {
         toSel.value = alt.key;
       }
     }
+    syncConvertPickerUi(convertFrom, convertTo);
     refreshConvertPreview();
   };
 
   fromSel.addEventListener("change", sync);
   toSel.addEventListener("change", sync);
   amtInp.addEventListener("input", sync);
+  wireConvertAssetPickers(fromSel, toSel, sync);
 
   document.getElementById("cv-flip")?.addEventListener("click", () => {
     const route = routeForAssets(convertFrom, convertTo);
@@ -1949,6 +1952,7 @@ function wireConvertDesk(): void {
     }
     fromSel.value = convertFrom;
     toSel.value = convertTo;
+    syncConvertPickerUi(convertFrom, convertTo);
     refreshConvertPreview();
   });
 
@@ -1984,6 +1988,7 @@ function wireConvertDesk(): void {
         convertAmtStr = defAmt;
         amtInp.value = defAmt;
       }
+      syncConvertPickerUi(convertFrom, convertTo);
       refreshConvertPreview();
     });
   });
