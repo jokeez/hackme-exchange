@@ -9,6 +9,23 @@ import { formatNum, formatPct, formatPrice } from "./market";
 import { pnlPct, walletEquityFromMarket } from "./store";
 import { dailyPnlCalendar, pnlWindows, renderPnlCalendarHtml } from "./pnl";
 import { ASSET_REGISTRY, PLANNED_ASSETS } from "./adapters/assets";
+import { Ico, assetBadgeLg } from "./icons";
+import {
+  buildAssetPortfolioRows,
+  equityInDenom,
+  equitySparklineSvg,
+  formatTxTime,
+  getEquityDenom,
+  isBalanceHidden,
+  maskBalance,
+  recentTransactions,
+  renderAssetTableRows,
+  renderDenomRing,
+  setBalanceHidden,
+  setEquityDenom,
+  todayPnl,
+  type EquityDenom,
+} from "./accountPortfolio";
 import type { DemoState, MarketSnapshot } from "./types";
 
 export type AccountPageOpts = {
@@ -63,7 +80,6 @@ function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: numb
     ${rows
       .map((r) => {
         const pct = Math.max(0, Math.min(100, (r.usdt / eq) * 100));
-        // Tiny marks (e.g. HMC dust vs USDT) — show one decimal instead of rounding to "0%".
         const pctLabel = pct > 0 && pct < 1 ? pct.toFixed(1) : pct.toFixed(0);
         return `<div class="acct-alloc-row">
           <span>${r.sym}</span>
@@ -75,84 +91,8 @@ function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: numb
   </div>`;
 }
 
-export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts?: AccountPageOpts): string {
-  const eq = walletEquityFromMarket(state.wallet, market);
-  const pnl = pnlPct(state, market);
-  const windows = pnlWindows(state, market);
-  const w = state.wallet;
-  const vip = activeVipTier(state, market);
-  const vol = volume30dUsdt(state, market);
-  const vipProg = nextVipProgress(state, market);
-  const labOn = isLabApiEnabled();
-  const labLive = useLabMatching();
-  const session = labSessionLabel();
-  const ledger = state.ledger.slice(0, 24);
-  const calHtml = renderPnlCalendarHtml(dailyPnlCalendar(state, market, 28));
-
+function renderDepositCard(labOn: boolean, labLive: boolean, session: ReturnType<typeof labSessionLabel>): string {
   return `
-  <section class="account-page glass">
-    <header class="acct-head">
-      <div>
-        <p class="kicker">Wallet</p>
-        <h2>Account</h2>
-        <p class="muted small acct-sub">${modeBlurb()} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span></p>
-      </div>
-      <div class="acct-head-actions">
-        <a class="btn-sm btn-secondary" href="#acct-cash">Deposit / Withdraw</a>
-        <a class="btn-sm btn-secondary" href="#acct-balances">Balances</a>
-        <a class="btn-sm btn-secondary" href="#acct-activity">History</a>
-      </div>
-    </header>
-
-    <div class="account-hero">
-      <div class="acct-hero-main">
-        <span class="muted small">Total equity</span>
-        <p class="account-eq mono">${formatNum(eq, 2)} <span class="muted">USDT</span></p>
-        <p class="${pnl >= 0 ? "up" : "down"} mono acct-alltime">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
-        <div class="acct-vip-row">
-          <span class="vip-badge lg" title="Demo VIP from local trade history — farmable offline; server volume applies in live lab/API">
-            <span class="vip-name">${vip.name}</span>
-            <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
-            <span class="vip-demo muted small">demo</span>
-          </span>
-          <div class="vip-progress">
-            <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
-            <p class="muted small">${
-              vipProg.next
-                ? `${formatNum(vol, 0)} / ${formatNum(vipProg.next.minVolUsdt, 0)} USDT · need ${formatNum(vipProg.remaining, 0)} → ${vipProg.next.name}`
-                : `${formatNum(vol, 0)} USDT · top VIP`
-            }</p>
-          </div>
-        </div>
-      </div>
-      <div class="pnl-cards">
-        ${windows
-          .map(
-            (x) => `<article class="pnl-card glass-inset">
-              <span class="muted small">${x.label}</span>
-              <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
-              <span class="dim mono">${x.abs >= 0 ? "+" : ""}${formatNum(x.abs, 2)} USDT</span>
-            </article>`,
-          )
-          .join("")}
-      </div>
-    </div>
-
-    <section class="acct-cash glass-inset${labOn ? " lab-custody-card" : ""}" id="acct-cash" aria-label="Deposit and withdraw">
-      <header class="acct-cash-head">
-        <div>
-          <p class="acct-cash-kicker">Primary actions</p>
-          <h3>Deposit &amp; Withdraw</h3>
-        </div>
-        <p class="muted small">${
-          labLive
-            ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
-            : labOn
-              ? "Connect fixture once, then deposit / withdraw here"
-              : "Sync HMC/SUP from node · LAB unlocks paper mint & withdraw"
-        }</p>
-      </header>
-      <div class="acct-cash-grid">
         <article class="acct-cash-card deposit">
           <div class="acct-cash-title">
             <span class="acct-cash-ico deposit" aria-hidden="true">↓</span>
@@ -187,8 +127,11 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <p id="sync-node-msg" class="muted small sync-msg"></p>
           <p class="muted small acct-cash-hint">No demo +USDT/+HMC. Enable loopback LAB API for paper mint.</p>`
           }
-        </article>
+        </article>`;
+}
 
+function renderWithdrawCard(labOn: boolean, labLive: boolean): string {
+  return `
         <article class="acct-cash-card withdraw">
           <div class="acct-cash-title">
             <span class="acct-cash-ico withdraw" aria-hidden="true">↑</span>
@@ -233,7 +176,33 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" target="_blank" rel="noopener noreferrer">Node wallet →</a>
           </div>`
           }
-        </article>
+        </article>`;
+}
+
+function renderCashDock(
+  labOn: boolean,
+  labLive: boolean,
+  session: ReturnType<typeof labSessionLabel>,
+  opts?: AccountPageOpts,
+): string {
+  return `
+    <section class="acct-cash-dock glass-inset${labOn ? " lab-custody-card" : ""}" id="acct-cash" aria-label="Deposit and withdraw">
+      <div class="acct-cash-tabs" role="tablist" aria-label="Funds">
+        <button type="button" class="acct-cash-tab active" data-cash-tab="deposit" role="tab" aria-selected="true">Deposit</button>
+        <button type="button" class="acct-cash-tab" data-cash-tab="withdraw" role="tab" aria-selected="false">Withdraw</button>
+      </div>
+      <p class="muted small acct-cash-intro">${
+        labLive
+          ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
+          : labOn
+            ? "Connect fixture once, then deposit / withdraw here"
+            : "Sync HMC/SUP from node · LAB unlocks paper mint & withdraw"
+      }</p>
+      <div class="acct-cash-panel" data-cash-panel="deposit" id="acct-cash-deposit">
+        ${renderDepositCard(labOn, labLive, session)}
+      </div>
+      <div class="acct-cash-panel" data-cash-panel="withdraw" id="acct-cash-withdraw" hidden>
+        ${renderWithdrawCard(labOn, labLive)}
       </div>
       ${
         labOn
@@ -246,215 +215,429 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       ${labFeeWalletSection(opts?.feeWallet)}`
           : ""
       }
+    </section>`;
+}
+
+function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnType<typeof activeVipTier>, vol: number): string {
+  return `
+    <section class="acct-fees-block glass-inset" id="acct-fees">
+      <header class="acct-block-head">
+        <h3>Fees · VIP · Oracle</h3>
+        <p class="muted small">30d <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}</p>
+      </header>
+      <div class="acct-fees-grid">
+        <article class="acct-oracle-strip">
+          <span class="acct-oracle-pill"><span class="muted">HMC</span> <strong class="mono">${formatPrice(market.hmcUsdt)}</strong></span>
+          <span class="acct-oracle-pill"><span class="muted">SUP</span> <strong class="mono">${formatPrice(market.supUsdt)}</strong></span>
+          <span class="acct-oracle-pill"><span class="muted">BTC</span> <strong class="mono">$${formatNum(market.btcUsd, 0)}</strong></span>
+        </article>
+        <table class="fee-table compact">
+          <thead><tr><th>Tier</th><th>Vol</th><th>Maker</th><th>Taker</th></tr></thead>
+          <tbody>
+            ${[...VIP_TIERS]
+              .sort((a, b) => a.minVolUsdt - b.minVolUsdt)
+              .map(
+                (t) => `<tr class="${t.name === vip.name ? "active-tier" : ""}">
+                  <td>${t.name}</td>
+                  <td>≥ ${formatNum(t.minVolUsdt, 0)}</td>
+                  <td>${formatBps(t.makerBps)}</td>
+                  <td>${formatBps(t.takerBps)}</td>
+                </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>
+        <label class="fee-toggle mono">
+          <input type="checkbox" id="acct-pay-hmc" ${state.feeConfig.payFeesInHmc ? "checked" : ""} />
+          Pay fees in HMC (−${state.feeConfig.hmcDiscountPct}%)
+        </label>
+      </div>
+    </section>`;
+}
+
+function renderActivityBlock(
+  ledger: DemoState["ledger"],
+  calHtml: string,
+  labLive: boolean,
+  session: ReturnType<typeof labSessionLabel>,
+): string {
+  const rows = ledger.slice(0, 24);
+  return `
+    <section class="acct-activity-block" id="acct-activity">
+      <header class="acct-block-head">
+        <h3>Activity</h3>
+        <p class="muted small">Ledger · lab fills · 28-day PnL calendar</p>
+      </header>
+      <div class="acct-activity-grid">
+        <article class="glass-inset account-card acct-ledger-card" id="account-ledger">
+          <div class="acct-card-title-row">
+            <h4>Ledger</h4>
+            <div class="acct-ledger-filters" id="acct-ledger-filters" role="group" aria-label="Filter ledger">
+              <button type="button" class="acct-chip active" data-ledger-filter="all">All</button>
+              <button type="button" class="acct-chip" data-ledger-filter="trade">Trades</button>
+              <button type="button" class="acct-chip" data-ledger-filter="fee">Fees</button>
+              <button type="button" class="acct-chip" data-ledger-filter="other">Other</button>
+            </div>
+          </div>
+          ${
+            rows.length
+              ? `<ul class="pool-list mono ledger-mini" id="acct-ledger-list">
+            ${rows
+              .map((r) => {
+                const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
+                return `<li data-ledger-kind="${bucket}"><span class="${r.amount >= 0 ? "up" : "down"}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.asset)} <strong>${formatNum(r.amount, 4)}</strong> <span class="dim">${escapeHtml(r.note || "")}</span></li>`;
+              })
+              .join("")}
+          </ul>`
+              : `<div class="acct-empty-state">
+            <p class="muted">No history yet</p>
+            <p class="muted small">Trades, converts, and deposits appear here.</p>
+          </div>`
+          }
+        </article>
+        <article class="glass-inset account-card" id="account-lab-fills">
+          <div class="acct-card-title-row">
+            <h4>Lab fills</h4>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-fills-refresh"${labLive ? "" : " disabled"}>↻ Sync</button>
+          </div>
+          <p class="muted small">Server SQLite · GET /fills</p>
+          <ul id="lab-fills-list" class="pool-list mono ledger-mini" aria-live="polite"></ul>
+          <p id="lab-fills-msg" class="muted small sync-msg" role="status">${
+            labLive
+              ? "Tap Sync after trading."
+              : session.address
+                ? "Reconnect fixture to load lab fills."
+                : "Connect LAB session to load fills."
+          }</p>
+        </article>
+        <article class="glass-inset account-card acct-cal-card">
+          ${calHtml}
+        </article>
+      </div>
+    </section>`;
+}
+
+function renderRoadmapBlock(): string {
+  return `
+    <section class="acct-roadmap-block" id="acct-roadmap">
+      <details class="acct-details" data-ui="asset-roadmap" id="acct-roadmap-details">
+        <summary>Asset roadmap</summary>
+        <div class="acct-roadmap-grid">
+          ${ASSET_REGISTRY.map(
+            (a) => `<article class="acct-roadmap-card glass-inset">
+            <div class="acct-roadmap-top">${assetBadgeLg(a.symbol)}<strong>${a.symbol}</strong></div>
+            <p class="muted small">${escapeHtml(a.name)}</p>
+            <div class="acct-roadmap-tags">
+              <span class="acct-roadmap-tag">${a.settlement}</span>
+              ${a.exchangeEnabled ? `<span class="acct-roadmap-tag live">Exchange</span>` : ""}
+              ${a.walletTabPlanned ? `<span class="acct-roadmap-tag">Wallet tab</span>` : ""}
+            </div>
+          </article>`,
+          ).join("")}
+          ${PLANNED_ASSETS.map(
+            (a) => `<article class="acct-roadmap-card glass-inset dim">
+            <div class="acct-roadmap-top"><span class="asset-ico asset-ico-lg asset-unk">${escapeHtml(a.symbol.slice(0, 1))}</span><strong>${a.symbol}</strong></div>
+            <p class="muted small">${escapeHtml(a.name)}</p>
+            <span class="acct-roadmap-tag">Future</span>
+          </article>`,
+          ).join("")}
+        </div>
+      </details>
+    </section>`;
+}
+
+function renderRecentTxTable(state: DemoState, hidden: boolean): string {
+  const txs = recentTransactions(state.ledger, 8);
+  if (!txs.length) {
+    return `<p class="muted small acct-tx-empty">No transactions yet — trades and deposits appear here.</p>`;
+  }
+  return `<table class="acct-tx-table">
+    <thead><tr><th>Transaction</th><th>Amount</th><th>Time</th><th>Status</th></tr></thead>
+    <tbody>
+      ${txs
+        .map((tx) => {
+          const sign = tx.amount >= 0 ? "+" : "";
+          const amt = `${sign}${formatNum(tx.amount, 4)} ${escapeHtml(tx.asset)}`;
+          return `<tr>
+            <td class="acct-tx-label">
+              <span class="acct-tx-ico ${tx.direction}" aria-hidden="true">${tx.direction === "in" ? "↓" : "↑"}</span>
+              ${escapeHtml(tx.label)}
+            </td>
+            <td class="mono ${tx.amount >= 0 ? "up" : "down"}" data-raw-amt="${escapeHtml(amt)}">${maskBalance(amt, hidden)}</td>
+            <td class="muted small">${formatTxTime(tx.ts)}</td>
+            <td><span class="acct-tx-status ${tx.status}">Completed</span></td>
+          </tr>`;
+        })
+        .join("")}
+    </tbody>
+  </table>`;
+}
+
+export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts?: AccountPageOpts): string {
+  const eq = walletEquityFromMarket(state.wallet, market);
+  const pnl = pnlPct(state, market);
+  const windows = pnlWindows(state, market);
+  const w = state.wallet;
+  const vip = activeVipTier(state, market);
+  const vol = volume30dUsdt(state, market);
+  const vipProg = nextVipProgress(state, market);
+  const labOn = isLabApiEnabled();
+  const labLive = useLabMatching();
+  const session = labSessionLabel();
+  const ledger = state.ledger.slice(0, 24);
+  const calHtml = renderPnlCalendarHtml(dailyPnlCalendar(state, market, 28));
+  const hidden = isBalanceHidden();
+  const dayPnl = todayPnl(state, market);
+  const denom = getEquityDenom();
+  const eqView = equityInDenom(eq, market, denom);
+  const assetRows = buildAssetPortfolioRows(state, market);
+  const spark = equitySparklineSvg(state.equitySnapshots);
+
+  return `
+  <section class="account-page glass">
+    <header class="acct-head">
+      <div>
+        <p class="kicker">Wallet</p>
+        <h2>Account</h2>
+        <p class="muted small acct-sub">${modeBlurb()} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span></p>
+      </div>
+      <div class="acct-vip-pill" title="Demo VIP from local trade history">
+        <span class="vip-badge"><span class="vip-name">${vip.name}</span></span>
+        <span class="muted small mono">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
+      </div>
+    </header>
+
+    <div class="acct-top-grid">
+      <article class="acct-portfolio glass-inset" id="acct-portfolio">
+        <div class="acct-portfolio-main">
+          <div class="acct-portfolio-label">
+            <span class="muted small">Est. total value</span>
+            <button type="button" class="acct-eye-btn" id="acct-toggle-balance" aria-pressed="${hidden}" title="${hidden ? "Show balances" : "Hide balances"}">
+              ${hidden ? Ico.eyeOff() : Ico.eye()}
+            </button>
+          </div>
+          <p class="account-eq mono" id="acct-total-eq" data-hidden="${hidden ? "1" : "0"}" data-denom="${denom}">
+            ${maskBalance(eqView.primary, hidden)} <span class="acct-eq-unit muted" id="acct-eq-unit">${eqView.unit}</span>
+          </p>
+          <p class="acct-fiat muted small" id="acct-fiat-eq">${maskBalance(eqView.secondary, hidden)}</p>
+          <p class="acct-today-pnl ${dayPnl.abs >= 0 ? "up" : "down"} mono small" id="acct-today-pnl">
+            Today's PnL <strong>${dayPnl.abs >= 0 ? "+" : ""}${maskBalance(formatNum(dayPnl.abs, 2), hidden)}</strong>
+            <span class="dim">USDT (${formatPct(dayPnl.pct)})</span>
+          </p>
+          <p class="acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
+          <div id="acct-denom-host">${renderDenomRing(denom)}</div>
+          <div class="acct-quick-actions">
+            <button type="button" class="acct-qa-btn primary" id="btn-acct-deposit" data-cash-tab="deposit">Deposit</button>
+            <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>
+            <button type="button" class="acct-qa-btn" data-goto-view="convert">Convert</button>
+            <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>
+          </div>
+        </div>
+        <div class="acct-portfolio-chart" id="acct-spark-host">${spark}</div>
+      </article>
+
+      ${renderCashDock(labOn, labLive, session, opts)}
+    </div>
+
+    <section class="acct-assets-panel glass-inset" id="acct-balances">
+      <header class="acct-assets-head">
+        <div class="acct-assets-tabs" role="tablist" aria-label="Wallet views">
+          <button type="button" class="acct-tab active" data-acct-tab="assets" role="tab" aria-selected="true">Assets</button>
+          <button type="button" class="acct-tab" data-acct-tab="account" role="tab" aria-selected="false">Overview</button>
+        </div>
+        <div class="acct-assets-tools">
+          <label class="acct-search-wrap">${Ico.search()}
+            <input type="search" id="acct-asset-search" class="acct-search" placeholder="Search" autocomplete="off" />
+          </label>
+          <a class="acct-tool-link" href="#convert">Convert dust</a>
+          <label class="acct-hide-small">
+            <input type="checkbox" id="acct-hide-small" />
+            Hide &lt; 1 USD
+          </label>
+        </div>
+      </header>
+
+      <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds">
+        <table class="acct-asset-table data-table">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Amount</th>
+              <th>Price / Cost</th>
+              <th>Floating PnL</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="acct-asset-tbody">
+            ${renderAssetTableRows(assetRows, hidden, eq)}
+            <tr class="total" data-asset="EQ">
+              <td>Total</td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td class="mono" data-col="usdt">${maskBalance(formatNum(eq, 2), hidden)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="acct-tab-panel" data-acct-panel="account" hidden>
+        <div class="acct-account-view">
+          <div class="acct-vip-row">
+            <span class="vip-badge lg" title="Demo VIP from local trade history">
+              <span class="vip-name">${vip.name}</span>
+              <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
+              <span class="vip-demo muted small">demo</span>
+            </span>
+            <div class="vip-progress">
+              <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
+              <p class="muted small">${
+                vipProg.next
+                  ? `${formatNum(vol, 0)} / ${formatNum(vipProg.next.minVolUsdt, 0)} USDT · need ${formatNum(vipProg.remaining, 0)} → ${vipProg.next.name}`
+                  : `${formatNum(vol, 0)} USDT · top VIP`
+              }</p>
+            </div>
+          </div>
+          <div id="acct-alloc-host">${allocationBars(w, market, eq)}</div>
+          <div class="pnl-cards compact">
+            ${windows
+              .map(
+                (x) => `<article class="pnl-card glass-inset">
+                  <span class="muted small">${x.label}</span>
+                  <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
+                  <span class="dim mono">${x.abs >= 0 ? "+" : ""}${formatNum(x.abs, 2)} USDT</span>
+                </article>`,
+              )
+              .join("")}
+          </div>
+        </div>
+      </div>
     </section>
 
-    <div class="acct-sections">
-      <section class="acct-section" id="acct-balances">
-        <header class="acct-section-head">
-          <h3>Balances</h3>
-          <p class="muted small">${labLive ? "Lab ledger · Spot uses these balances" : "Paper wallet marks"}</p>
-        </header>
-        <div class="acct-section-grid acct-bal-grid">
-          <article class="glass-inset account-card" id="account-funds">
-            <table class="data-table funds-mini">
-              <thead><tr><th>Asset</th><th>Free</th><th>≈ USDT</th></tr></thead>
-              <tbody>
-                <tr data-asset="USDT"><td>USDT</td><td class="mono" data-col="free">${formatNum(w.usdt, 2)}</td><td class="mono" data-col="usdt">${formatNum(w.usdt, 2)}</td></tr>
-                <tr data-asset="HMC"><td>HMC</td><td class="mono" data-col="free">${formatNum(w.hmc, 4)}</td><td class="mono" data-col="usdt">${formatNum(w.hmc * market.hmcUsdt, 2)}</td></tr>
-                <tr data-asset="SUP"><td>SUP</td><td class="mono" data-col="free">${formatNum(w.sup, 4)}</td><td class="mono" data-col="usdt">${formatNum(w.sup * market.supUsdt, 4)}</td></tr>
-                <tr data-asset="BTC"><td>BTC</td><td class="mono" data-col="free">${formatPrice(w.btc)}</td><td class="mono" data-col="usdt">${formatNum(w.btc * market.btcUsd, 2)}</td></tr>
-                <tr class="total" data-asset="EQ"><td>Equity</td><td></td><td class="mono" data-col="usdt">${formatNum(eq, 2)}</td></tr>
-              </tbody>
-            </table>
-            <div id="acct-alloc-host">${allocationBars(w, market, eq)}</div>
-            ${
-              labLive
-                ? `<div class="fund-btns spaced acct-quick-fund">
-              <button type="button" class="btn-sm" data-lab-bridge="USDT">Quick +10 USDT</button>
-              <button type="button" class="btn-sm" data-lab-bridge="BTC">Quick +0.01 BTC</button>
-              <a class="btn-sm btn-secondary" href="#acct-cash">Deposit ↑</a>
-            </div>`
-                : labOn
-                  ? `<div class="fund-btns spaced acct-quick-fund">
-              <a class="btn-sm btn-secondary" href="#acct-lab">Connect LAB →</a>
-            </div>`
-                  : ""
-            }
-          </article>
-          <article class="glass-inset account-card fee-card" id="acct-fees">
-            <h4>Fees · VIP</h4>
-            <p class="muted small">30d <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}</p>
-            <table class="fee-table">
-              <thead><tr><th>Tier</th><th>Vol</th><th>Maker</th><th>Taker</th></tr></thead>
-              <tbody>
-                ${[...VIP_TIERS]
-                  .sort((a, b) => a.minVolUsdt - b.minVolUsdt)
-                  .map(
-                    (t) => `<tr class="${t.name === vip.name ? "active-tier" : ""}">
-                      <td>${t.name}</td>
-                      <td>≥ ${formatNum(t.minVolUsdt, 0)}</td>
-                      <td>${formatBps(t.makerBps)}</td>
-                      <td>${formatBps(t.takerBps)}</td>
-                    </tr>`,
-                  )
-                  .join("")}
-              </tbody>
-            </table>
-            <label class="fee-toggle mono spaced">
-              <input type="checkbox" id="acct-pay-hmc" ${state.feeConfig.payFeesInHmc ? "checked" : ""} />
-              Pay fees in HMC (−${state.feeConfig.hmcDiscountPct}%)
-            </label>
-            <div class="acct-oracle-mini">
-              <span class="muted small">Oracle</span>
-              <span class="mono">HMC ${formatPrice(market.hmcUsdt)}</span>
-              <span class="mono">SUP ${formatPrice(market.supUsdt)}</span>
-              <span class="mono">BTC $${formatNum(market.btcUsd, 0)}</span>
-            </div>
-          </article>
+    <section class="acct-promo-row" aria-label="Quick links">
+      <a class="acct-promo-card glass-inset" href="#spot/HMC_USDT/15m">
+        <span class="acct-promo-tag">Spot</span>
+        <strong>HMC/USDT</strong>
+        <span class="mono">${formatPrice(market.hmcUsdt)}</span>
+        <span class="muted small">Limit &amp; market orders</span>
+      </a>
+      <a class="acct-promo-card glass-inset" href="#convert">
+        <span class="acct-promo-tag">Convert</span>
+        <strong>Instant swap</strong>
+        <span class="muted small">Paper convert between assets</span>
+      </a>
+      <a class="acct-promo-card glass-inset" href="#pool">
+        <span class="acct-promo-tag">Pool</span>
+        <strong>Mining</strong>
+        <span class="muted small">Useful-PoW · HMC accrual</span>
+      </a>
+    </section>
+
+    <section class="acct-recent glass-inset" id="acct-recent-tx">
+      <header class="acct-recent-head">
+        <h3>Recent transactions</h3>
+        <a class="acct-more-link" href="#acct-activity">View all →</a>
+      </header>
+      <div id="acct-recent-tx-body">${renderRecentTxTable(state, hidden)}</div>
+    </section>
+
+    ${renderFeesBlock(state, market, vip, vol)}
+
+    ${
+      labOn
+        ? `<details class="acct-panel" id="acct-lab">
+      <summary>Lab session &amp; security</summary>
+      <article class="glass-inset account-card lab-api-card">
+        <div class="acct-lab-status">
+          <span class="lab-badge">DEMO · LAB</span>
+          <p class="muted small">Session: <strong class="mono" id="lab-session-addr">${escapeHtml(session.label)}</strong></p>
         </div>
-      </section>
-
-      ${
-        labOn
-          ? `<section class="acct-section" id="acct-lab">
-        <header class="acct-section-head">
-          <h3>Lab session</h3>
-          <p class="muted small mono">${escapeHtml(INTEGRATION.exchangeApiOrigin)}</p>
-        </header>
-        <article class="glass-inset account-card lab-api-card">
-          <div class="acct-lab-status">
-            <span class="lab-badge">DEMO · LAB</span>
-            <p class="muted small">Session: <strong class="mono" id="lab-session-addr">${escapeHtml(session.label)}</strong></p>
-          </div>
-          <div class="lab-action-grid lab-session-actions">
-            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-fixture-connect">Connect fixture</button>
-            <button type="button" class="btn-lab" id="btn-lab-api-sync">↻ Sync balances</button>
-            <button type="button" class="btn-lab btn-lab-accent" id="btn-lab-counterparty" title="Second fixture wallet crosses your resting order">Counterparty bot</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-api-logout">Logout</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-revoke-all" title="Invalidate all sessions">Revoke all</button>
-          </div>
-          <p class="muted small">Spot limit → Counterparty bot (self-trade blocked). Fixture key is lab-only — never fund it.</p>
-          <p id="lab-api-msg" class="muted small sync-msg" role="status"></p>
-          <div class="fund-btns spaced">
-            <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
-            <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Hub wallet" : "Node wallet"}</a>
-          </div>
-          <p id="sync-node-msg" class="muted small sync-msg"></p>
-        </article>
-        <article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
-          <h4>Security · 2FA</h4>
-          <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled.</p>
-          <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
-          <div id="lab-2fa-setup-panel" hidden>
-            <p class="muted small">Add to Google Authenticator / Authy:</p>
-            <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
-            <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
-            <label class="lab-field">Confirm code
-              <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-            </label>
-            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
-          </div>
-          <div id="lab-2fa-enabled-panel" hidden>
-            <label class="lab-field">Code to disable
-              <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-            </label>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
-          </div>
-          <div id="lab-2fa-idle-panel">
-            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${labLive ? "" : " disabled"}>Enable 2FA</button>
-          </div>
-          <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
-        </article>
-      </section>`
-          : ""
-      }
-
-      <section class="acct-section" id="acct-activity">
-        <header class="acct-section-head">
-          <h3>Activity</h3>
-          <p class="muted small">Ledger · fills · daily PnL</p>
-        </header>
-        <div class="acct-section-grid acct-activity-grid">
-          <article class="glass-inset account-card" id="account-ledger">
-            <div class="acct-card-title-row">
-              <h4>Ledger</h4>
-              <div class="acct-ledger-filters" id="acct-ledger-filters" role="group" aria-label="Filter ledger">
-                <button type="button" class="acct-chip active" data-ledger-filter="all">All</button>
-                <button type="button" class="acct-chip" data-ledger-filter="trade">Trades</button>
-                <button type="button" class="acct-chip" data-ledger-filter="fee">Fees</button>
-                <button type="button" class="acct-chip" data-ledger-filter="other">Other</button>
-              </div>
-            </div>
-            ${
-              ledger.length
-                ? `<ul class="pool-list mono ledger-mini" id="acct-ledger-list">
-              ${ledger
-                .map((r) => {
-                  const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
-                  return `<li data-ledger-kind="${bucket}"><span class="${r.amount >= 0 ? "up" : "down"}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.asset)} <strong>${formatNum(r.amount, 4)}</strong> <span class="dim">${escapeHtml(r.note || "")}</span></li>`;
-                })
-                .join("")}
-            </ul>`
-                : `<p class="muted small">No history yet — trades and converts show up here.</p>`
-            }
-          </article>
-          <article class="glass-inset account-card" id="account-lab-fills">
-            <div class="acct-card-title-row">
-              <h4>Lab fills</h4>
-              <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-fills-refresh"${labLive ? "" : " disabled"}>↻ Sync</button>
-            </div>
-            <p class="muted small">Server SQLite history · GET /fills</p>
-            <ul id="lab-fills-list" class="pool-list mono ledger-mini" aria-live="polite"></ul>
-            <p id="lab-fills-msg" class="muted small sync-msg" role="status">${
-              labLive
-                ? "Tap Sync after trading."
-                : session.address
-                  ? "Reconnect fixture to load lab fills."
-                  : "Connect LAB session to load fills."
-            }</p>
-          </article>
-          <article class="glass-inset account-card acct-cal-card">
-            ${calHtml}
-          </article>
+        <div class="lab-action-grid lab-session-actions">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-fixture-connect">Connect fixture</button>
+          <button type="button" class="btn-lab" id="btn-lab-api-sync">↻ Sync balances</button>
+          <button type="button" class="btn-lab btn-lab-accent" id="btn-lab-counterparty" title="Second fixture wallet crosses your resting order">Counterparty bot</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-api-logout">Logout</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-revoke-all" title="Invalidate all sessions">Revoke all</button>
         </div>
-      </section>
+        <p class="muted small">Spot limit → Counterparty bot (self-trade blocked). Fixture key is lab-only — never fund it.</p>
+        <p id="lab-api-msg" class="muted small sync-msg" role="status"></p>
+        <div class="fund-btns spaced">
+          <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
+          <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Hub wallet" : "Node wallet"}</a>
+        </div>
+        <p id="sync-node-msg" class="muted small sync-msg"></p>
+      </article>
+      <article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
+        <h4>Security · 2FA</h4>
+        <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled.</p>
+        <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
+        <div id="lab-2fa-setup-panel" hidden>
+          <p class="muted small">Add to Google Authenticator / Authy:</p>
+          <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
+          <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
+          <label class="lab-field">Confirm code
+            <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          </label>
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
+        </div>
+        <div id="lab-2fa-enabled-panel" hidden>
+          <label class="lab-field">Code to disable
+            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          </label>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
+        </div>
+        <div id="lab-2fa-idle-panel">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${labLive ? "" : " disabled"}>Enable 2FA</button>
+        </div>
+        <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
+      </article>
+    </details>`
+        : ""
+    }
 
-      <section class="acct-section acct-roadmap" id="acct-roadmap">
-        <details class="acct-details" data-ui="asset-roadmap" id="acct-roadmap-details">
-          <summary>Asset roadmap</summary>
-          <table class="fee-table asset-roadmap">
-            <thead><tr><th>Asset</th><th>Settlement</th><th>Exchange</th><th>Wallet tab</th></tr></thead>
-            <tbody>
-              ${ASSET_REGISTRY.map(
-                (a) => `<tr>
-                <td>${a.symbol}</td>
-                <td class="dim">${a.settlement}</td>
-                <td>${a.exchangeEnabled ? "✓" : "—"}</td>
-                <td>${a.walletTabPlanned ? "planned" : "—"}</td>
-              </tr>`,
-              ).join("")}
-              ${PLANNED_ASSETS.map(
-                (a) => `<tr class="dim">
-                <td>${a.symbol}</td>
-                <td>${a.settlement}</td>
-                <td>—</td>
-                <td>future</td>
-              </tr>`,
-              ).join("")}
-            </tbody>
-          </table>
-        </details>
-      </section>
-    </div>
+    ${renderActivityBlock(state.ledger, calHtml, labLive, session)}
+
+    ${renderRoadmapBlock()}
   </section>`;
 }
 
-export function wireAccountFunding(state: DemoState, _market: MarketSnapshot, onUpdate: () => void): void {
-  document.getElementById("link-acct-wallet")?.addEventListener("click", (ev) => {
-    if (isHubEmbed() && postHubGotoTab("wallet")) {
-      ev.preventDefault();
-    }
+function applyAssetFilters(): void {
+  const q = (document.getElementById("acct-asset-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
+  const hideSmall = (document.getElementById("acct-hide-small") as HTMLInputElement | null)?.checked ?? false;
+  document.querySelectorAll<HTMLElement>(".acct-asset-row").forEach((row) => {
+    const sym = row.dataset.asset ?? "";
+    const val = parseFloat(row.dataset.usdtValue ?? "0");
+    const text = row.textContent?.toLowerCase() ?? "";
+    const matchQ = !q || sym.toLowerCase().includes(q) || text.includes(q);
+    const matchSize = !hideSmall || val >= 1;
+    const hide = !(matchQ && matchSize);
+    row.hidden = hide;
+    const detail = document.querySelector(`[data-asset-detail="${sym}"]`) as HTMLElement | null;
+    if (detail && hide) detail.hidden = true;
   });
+}
+
+function applyBalanceVisibility(hidden: boolean): void {
+  document.querySelectorAll<HTMLElement>("[data-hidden]").forEach((el) => {
+    el.dataset.hidden = hidden ? "1" : "0";
+  });
+  const eye = document.getElementById("acct-toggle-balance");
+  if (eye) {
+    eye.setAttribute("aria-pressed", hidden ? "true" : "false");
+    eye.title = hidden ? "Show balances" : "Hide balances";
+    eye.innerHTML = hidden ? Ico.eyeOff() : Ico.eye();
+  }
+}
+
+export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onUpdate: () => void): void {
+  document.querySelectorAll("#link-acct-wallet").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      if (isHubEmbed() && postHubGotoTab("wallet")) {
+        ev.preventDefault();
+      }
+    });
+  });
+
   document.getElementById("acct-pay-hmc")?.addEventListener("change", (e) => {
     state.feeConfig.payFeesInHmc = (e.target as HTMLInputElement).checked;
     onUpdate();
@@ -475,6 +658,93 @@ export function wireAccountFunding(state: DemoState, _market: MarketSnapshot, on
       });
     });
   }
+
+  document.getElementById("acct-toggle-balance")?.addEventListener("click", () => {
+    const next = !isBalanceHidden();
+    setBalanceHidden(next);
+    applyBalanceVisibility(next);
+    patchAccountFundsDom(state, market);
+  });
+
+  document.getElementById("acct-asset-search")?.addEventListener("input", applyAssetFilters);
+  document.getElementById("acct-hide-small")?.addEventListener("change", applyAssetFilters);
+
+  document.querySelectorAll("[data-acct-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = (btn as HTMLElement).dataset.acctTab ?? "assets";
+      document.querySelectorAll("[data-acct-tab]").forEach((b) => {
+        const on = (b as HTMLElement).dataset.acctTab === tab;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll("[data-acct-panel]").forEach((panel) => {
+        const on = (panel as HTMLElement).dataset.acctPanel === tab;
+        (panel as HTMLElement).hidden = !on;
+      });
+    });
+  });
+
+  document.querySelectorAll("[data-asset-expand]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sym = (btn as HTMLElement).dataset.assetExpand ?? "";
+      const detail = document.querySelector(`[data-asset-detail="${sym}"]`) as HTMLElement | null;
+      if (!detail) return;
+      const open = detail.hidden;
+      detail.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  });
+
+  const switchCashTab = (tab: "deposit" | "withdraw") => {
+    document.querySelectorAll("[data-cash-tab]").forEach((btn) => {
+      const on = (btn as HTMLElement).dataset.cashTab === tab;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll("[data-cash-panel]").forEach((panel) => {
+      const on = (panel as HTMLElement).dataset.cashPanel === tab;
+      (panel as HTMLElement).hidden = !on;
+    });
+    document.getElementById("acct-cash")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (tab === "withdraw") document.getElementById("lab-wd-amt")?.focus();
+  };
+
+  document.querySelectorAll("[data-cash-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = (btn as HTMLElement).dataset.cashTab as "deposit" | "withdraw";
+      if (tab) switchCashTab(tab);
+    });
+  });
+
+  document.getElementById("btn-acct-deposit")?.addEventListener("click", () => switchCashTab("deposit"));
+  document.getElementById("btn-acct-withdraw")?.addEventListener("click", () => switchCashTab("withdraw"));
+  document.getElementById("btn-acct-history")?.addEventListener("click", () => {
+    document.getElementById("acct-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.querySelectorAll("[data-denom]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const d = (btn as HTMLElement).dataset.denom as EquityDenom | undefined;
+      if (!d) return;
+      setEquityDenom(d);
+      document.querySelectorAll("[data-denom]").forEach((orb) => {
+        const on = (orb as HTMLElement).dataset.denom === d;
+        orb.classList.toggle("active", on);
+        orb.setAttribute("aria-checked", on ? "true" : "false");
+      });
+      patchAccountFundsDom(state, market);
+    });
+  });
+
+  document.querySelectorAll("[data-goto-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = (btn as HTMLElement).dataset.gotoView;
+      if (view) location.hash = `#${view}`;
+    });
+  });
+
+  applyBalanceVisibility(isBalanceHidden());
+  applyAssetFilters();
 }
 
 /**
@@ -484,25 +754,77 @@ export function wireAccountFunding(state: DemoState, _market: MarketSnapshot, on
 export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): void {
   const w = state.wallet;
   const eq = walletEquityFromMarket(w, market);
-  const rows: { asset: string; free: string; usdt: string }[] = [
-    { asset: "USDT", free: formatNum(w.usdt, 2), usdt: formatNum(w.usdt, 2) },
-    { asset: "HMC", free: formatNum(w.hmc, 4), usdt: formatNum(w.hmc * market.hmcUsdt, 2) },
-    { asset: "SUP", free: formatNum(w.sup, 4), usdt: formatNum(w.sup * market.supUsdt, 4) },
-    { asset: "BTC", free: formatPrice(w.btc), usdt: formatNum(w.btc * market.btcUsd, 2) },
-    { asset: "EQ", free: "", usdt: formatNum(eq, 2) },
-  ];
-  for (const r of rows) {
-    const tr = document.querySelector(`tr[data-asset="${r.asset}"]`);
+  const hidden = isBalanceHidden();
+  const assetRows = buildAssetPortfolioRows(state, market);
+  const dayPnl = todayPnl(state, market);
+
+  for (const r of assetRows) {
+    const tr = document.querySelector(`tr.acct-asset-row[data-asset="${r.symbol}"]`) as HTMLElement | null;
     if (!tr) continue;
-    const free = tr.querySelector('[data-col="free"]');
-    const usdt = tr.querySelector('[data-col="usdt"]');
-    if (free && r.asset !== "EQ") free.textContent = r.free;
-    if (usdt) usdt.textContent = r.usdt;
+    const decimals = r.symbol === "BTC" ? 8 : r.symbol === "USDT" ? 2 : 4;
+    const amtStr = r.symbol === "BTC" ? formatPrice(r.amount) : formatNum(r.amount, decimals);
+    const priceStr = r.symbol === "USDT" ? "1.00" : formatPrice(r.price);
+    const valueStr = formatNum(r.usdtValue, 2);
+    const costStr = formatNum(r.costBasisUsdt, 2);
+    const pnlStr = `${r.floatingPnl >= 0 ? "+" : ""}${formatNum(r.floatingPnl, 2)} (${formatPct(r.floatingPnlPct)})`;
+    const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
+
+    tr.querySelector('[data-col="free"]')!.textContent = maskBalance(amtStr, hidden);
+    tr.querySelector('[data-col="usdt"]')!.textContent = maskBalance(valueStr, hidden);
+    const pnlEl = tr.querySelector('[data-col="pnl"]');
+    if (pnlEl) {
+      pnlEl.textContent = hidden ? "****" : pnlStr;
+      pnlEl.classList.remove("up", "down");
+      pnlEl.classList.add(pnlCls);
+    }
+    const priceCell = tr.querySelector(".acct-asset-price");
+    if (priceCell) {
+      priceCell.innerHTML = `<span>${maskBalance(priceStr, hidden)}</span><span class="muted small acct-cost-line">Cost ${maskBalance(costStr, hidden)}</span>`;
+    }
+    tr.dataset.usdtValue = r.usdtValue.toFixed(4);
   }
-  const eqHero = document.querySelector(".account-eq");
-  if (eqHero) eqHero.innerHTML = `${formatNum(eq, 2)} <span class="muted">USDT</span>`;
+
+  const eqRow = document.querySelector('tr[data-asset="EQ"] [data-col="usdt"]');
+  if (eqRow) eqRow.textContent = maskBalance(formatNum(eq, 2), hidden);
+
+  const denom = getEquityDenom();
+  const eqView = equityInDenom(eq, market, denom);
+  const eqHero = document.getElementById("acct-total-eq");
+  if (eqHero) {
+    eqHero.innerHTML = `${maskBalance(eqView.primary, hidden)} <span class="acct-eq-unit muted" id="acct-eq-unit">${eqView.unit}</span>`;
+    eqHero.dataset.hidden = hidden ? "1" : "0";
+    eqHero.dataset.denom = denom;
+  }
+
+  const fiat = document.getElementById("acct-fiat-eq");
+  if (fiat) fiat.textContent = maskBalance(eqView.secondary, hidden);
+
+  const todayEl = document.getElementById("acct-today-pnl");
+  if (todayEl) {
+    todayEl.classList.remove("up", "down");
+    todayEl.classList.add(dayPnl.abs >= 0 ? "up" : "down");
+    const pnlAbs = `${dayPnl.abs >= 0 ? "+" : ""}${maskBalance(formatNum(dayPnl.abs, 2), hidden)}`;
+    todayEl.innerHTML = `Today's PnL <strong>${pnlAbs}</strong> <span class="dim">USDT (${formatPct(dayPnl.pct)})</span>`;
+  }
+
+  document.querySelectorAll<HTMLElement>(".acct-tx-table [data-raw-amt]").forEach((cell) => {
+    const raw = cell.dataset.rawAmt ?? "";
+    cell.textContent = maskBalance(raw, hidden);
+  });
+
+  document.querySelectorAll<HTMLElement>(".acct-asset-detail-inner").forEach((row) => {
+    row.querySelectorAll("strong.mono").forEach((el) => {
+      const raw = (el as HTMLElement).dataset.raw;
+      if (raw != null) el.textContent = maskBalance(raw, hidden);
+    });
+  });
+
   const host = document.getElementById("acct-alloc-host");
   if (host) host.innerHTML = allocationBars(w, market, eq);
+
+  const sparkHost = document.getElementById("acct-spark-host");
+  if (sparkHost) sparkHost.innerHTML = equitySparklineSvg(state.equitySnapshots);
+
   const sess = document.getElementById("lab-session-addr");
   if (sess) sess.textContent = labSessionLabel().label;
 }

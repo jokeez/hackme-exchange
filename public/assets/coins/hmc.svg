@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HMC">
+  <defs>
+    <linearGradient id="hmc-ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4de4ff"/>
+      <stop offset="100%" stop-color="#00b8ff"/>
+    </linearGradient>
+    <linearGradient id="hmc-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d3d4a"/>
+      <stop offset="100%" stop-color="#051820"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#hmc-fill)" stroke="url(#hmc-ring)" stroke-width="2.5"/>
+  <polygon points="32,14 46,22 46,42 32,50 18,42 18,22" fill="none" stroke="url(#hmc-ring)" stroke-width="2.2" stroke-linejoin="round"/>
+  <text x="32" y="37" text-anchor="middle" font-family="system-ui,Segoe UI,sans-serif" font-size="13" font-weight="800" fill="#4de4ff">HMC</text>
+</svg>

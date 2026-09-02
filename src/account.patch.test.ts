@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { patchAccountFundsDom, renderAccountPage } from "./account";
+import { setBalanceHidden } from "./accountPortfolio";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("patchAccountFundsDom", () => {
@@ -23,5 +24,17 @@ describe("patchAccountFundsDom", () => {
     expect(hmcFree?.textContent).toMatch(/60[,.]?000/);
     expect(usdtFree?.textContent).toMatch(/9[,.]?500/);
     if (roadmap) expect(roadmap.open).toBe(true);
+  });
+
+  it("masks balances instantly without remount", () => {
+    const s = baseState();
+    const m = sampleMarket();
+    document.body.innerHTML = renderAccountPage(s, m);
+    setBalanceHidden(true);
+    patchAccountFundsDom(s, m);
+    expect(document.getElementById("acct-total-eq")?.textContent).toContain("****");
+    setBalanceHidden(false);
+    patchAccountFundsDom(s, m);
+    expect(document.getElementById("acct-total-eq")?.textContent).not.toContain("****");
   });
 });

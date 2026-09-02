@@ -2437,6 +2437,565 @@ html.mobile-layout .market-search {
 .pnl-dashboard.pad { padding: 0.55rem 0.65rem !important; }
 .account-page { margin: 1rem; padding: 1.25rem 1.5rem; border-radius: 1rem; }
 .account-page h2 { font-family: var(--display); margin: 0.25rem 0 0.35rem; }
+.acct-vip-pill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(77, 228, 255, 0.22);
+  background: rgba(0, 0, 0, 0.2);
+}
+.acct-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  align-items: stretch;
+}
+@media (max-width: 960px) {
+  .acct-top-grid { grid-template-columns: 1fr; }
+}
+.acct-cash-dock {
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid rgba(77, 228, 255, 0.22);
+  background:
+    linear-gradient(160deg, rgba(77, 228, 255, 0.05), transparent 50%),
+    rgba(0, 0, 0, 0.26);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 100%;
+}
+.acct-cash-tabs {
+  display: flex;
+  gap: 0.15rem;
+  border-bottom: 1px solid rgba(87, 118, 168, 0.2);
+  padding-bottom: 0.35rem;
+}
+.acct-cash-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.35rem 0.35rem 0 0;
+  cursor: pointer;
+}
+.acct-cash-tab.active {
+  color: var(--primary);
+  background: rgba(77, 228, 255, 0.08);
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+.acct-cash-dock .acct-cash-card {
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0 0;
+  box-shadow: none;
+}
+.acct-cash-panel { min-width: 0; }
+.acct-denom-ring {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.65rem 0 0.25rem;
+}
+.acct-denom-orb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid rgba(87, 118, 168, 0.22);
+  border-radius: 0.65rem;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--muted);
+  cursor: pointer;
+  min-width: 3.1rem;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.acct-denom-orb:hover {
+  border-color: rgba(77, 228, 255, 0.35);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.acct-denom-orb.active {
+  border-color: rgba(77, 228, 255, 0.55);
+  color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(77, 228, 255, 0.2), 0 0 18px rgba(77, 228, 255, 0.12);
+}
+.acct-denom-glow {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 30%, rgba(77, 228, 255, 0.25), transparent 70%);
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.acct-denom-orb.active .acct-denom-glow { opacity: 1; }
+.acct-denom-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.acct-denom-fiat-mark {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 800;
+  border-radius: 50%;
+  background: rgba(77, 228, 255, 0.1);
+  border: 1px solid rgba(77, 228, 255, 0.25);
+  color: var(--primary);
+}
+.account-page .asset-ico-lg {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+}
+.account-page .asset-ico-lg img,
+.acct-denom-orb .asset-ico-lg img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  display: block;
+}
+.account-page .acct-asset-cell .asset-ico-lg {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+.acct-denom-orb .asset-ico-lg {
+  width: 2rem;
+  height: 2rem;
+}
+.acct-qa-btn.primary {
+  border-color: rgba(77, 228, 255, 0.45);
+  background: rgba(77, 228, 255, 0.12);
+  color: var(--primary);
+}
+.acct-qa-btn.primary:hover {
+  background: rgba(77, 228, 255, 0.2);
+  border-color: var(--primary);
+}
+.acct-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.65rem;
+}
+.acct-block-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-family: var(--display);
+  color: var(--text);
+}
+.acct-fees-block {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(87, 118, 168, 0.2);
+}
+.acct-fees-grid { display: flex; flex-direction: column; gap: 0.65rem; }
+.acct-oracle-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.acct-oracle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(87, 118, 168, 0.22);
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 0.72rem;
+}
+.fee-table.compact th,
+.fee-table.compact td { padding: 0.28rem 0.45rem; font-size: 0.72rem; }
+.acct-activity-block {
+  margin-bottom: 1rem;
+  scroll-margin-top: 0.75rem;
+}
+.acct-activity-block .acct-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+@media (max-width: 1100px) {
+  .acct-activity-block .acct-activity-grid { grid-template-columns: 1fr; }
+}
+.acct-empty-state {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  border: 1px dashed rgba(87, 118, 168, 0.22);
+  border-radius: var(--radius);
+}
+.acct-roadmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.5rem;
+}
+.acct-roadmap-card {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(87, 118, 168, 0.18);
+}
+.acct-roadmap-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.25rem;
+}
+.acct-roadmap-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.35rem; }
+.acct-roadmap-tag {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.38rem;
+  border-radius: 999px;
+  border: 1px solid rgba(87, 118, 168, 0.22);
+  color: var(--muted);
+}
+.acct-roadmap-tag.live {
+  color: var(--primary);
+  border-color: rgba(77, 228, 255, 0.35);
+  background: rgba(77, 228, 255, 0.08);
+}
+.acct-portfolio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid rgba(87, 118, 168, 0.22);
+  background:
+    linear-gradient(135deg, rgba(77, 228, 255, 0.06), transparent 45%),
+    rgba(0, 0, 0, 0.24);
+}
+.acct-portfolio-main { flex: 1 1 16rem; min-width: 0; }
+.acct-portfolio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.15rem;
+}
+.acct-eye-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.acct-eye-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.acct-fiat { margin: 0.1rem 0 0.35rem; }
+.acct-today-pnl { margin: 0 0 0.2rem; }
+.acct-today-pnl strong { font-weight: 700; }
+.acct-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+.acct-qa-btn {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(87, 118, 168, 0.28);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.acct-qa-btn:hover {
+  border-color: rgba(77, 228, 255, 0.4);
+  background: rgba(77, 228, 255, 0.08);
+}
+.acct-qa-btn.muted { color: var(--muted); }
+.acct-portfolio-chart {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 10rem;
+  padding: 0.35rem 0.5rem;
+}
+.acct-sparkline {
+  width: 200px;
+  height: 72px;
+  color: var(--primary);
+  display: block;
+}
+.acct-sparkline.up { color: var(--ok, #00e676); }
+.acct-sparkline.down { color: var(--sell, #ff5252); }
+.acct-sparkline .acct-spark-dot { opacity: 0.95; }
+.acct-assets-panel {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid rgba(87, 118, 168, 0.2);
+}
+.acct-assets-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid rgba(87, 118, 168, 0.16);
+}
+.acct-assets-tabs { display: flex; gap: 0.15rem; }
+.acct-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 0.65rem;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.acct-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+.acct-assets-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+}
+.acct-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(87, 118, 168, 0.22);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--muted);
+}
+.acct-search {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.75rem;
+  width: 6.5rem;
+  outline: none;
+}
+.acct-tool-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+.acct-tool-link:hover { color: var(--primary); }
+.acct-hide-small {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.acct-asset-table th,
+.acct-asset-table td { vertical-align: middle; }
+.acct-asset-table th:nth-child(n+2),
+.acct-asset-table td:nth-child(n+2) { text-align: right; }
+.acct-asset-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  text-align: left !important;
+}
+.acct-asset-expand {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.acct-asset-expand[aria-expanded="true"] { transform: rotate(90deg); color: var(--primary); }
+.acct-asset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+.acct-asset-meta strong { font-size: 0.82rem; }
+.acct-cost-line { display: block; margin-top: 0.1rem; }
+.acct-asset-detail td {
+  padding: 0 !important;
+  border-top: none !important;
+  background: rgba(0, 0, 0, 0.18);
+}
+.acct-asset-detail-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1.25rem;
+  padding: 0.55rem 0.75rem 0.65rem 2.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.acct-asset-trade {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 0.72rem;
+}
+.acct-promo-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+.acct-promo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(87, 118, 168, 0.2);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.acct-promo-card:hover {
+  border-color: rgba(77, 228, 255, 0.35);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+.acct-promo-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+.acct-promo-card strong { font-size: 0.9rem; color: var(--text); }
+.acct-recent {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(87, 118, 168, 0.2);
+}
+.acct-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+.acct-recent-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-family: var(--display);
+  color: var(--text);
+}
+.acct-more-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+.acct-more-link:hover { color: var(--primary); }
+.acct-tx-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.acct-tx-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid rgba(87, 118, 168, 0.16);
+}
+.acct-tx-table th:nth-child(2),
+.acct-tx-table td:nth-child(2) { text-align: right; }
+.acct-tx-table th:nth-child(3),
+.acct-tx-table td:nth-child(3) { text-align: center; }
+.acct-tx-table th:nth-child(4),
+.acct-tx-table td:nth-child(4) { text-align: right; }
+.acct-tx-table td { padding: 0.45rem 0.5rem; border-bottom: 1px solid rgba(87, 118, 168, 0.08); }
+.acct-tx-label { display: flex; align-items: center; gap: 0.45rem; }
+.acct-tx-ico {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.acct-tx-ico.in { background: rgba(0, 192, 115, 0.15); color: #7dffb0; }
+.acct-tx-ico.out { background: rgba(219, 68, 85, 0.15); color: #ff9aaa; }
+.acct-tx-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+}
+.acct-tx-status.completed { background: rgba(0, 192, 115, 0.15); color: #7dffb0; }
+.acct-panel {
+  margin-bottom: 0.65rem;
+  border: 1px solid rgba(87, 118, 168, 0.18);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
+  background: rgba(0, 0, 0, 0.18);
+  scroll-margin-top: 0.75rem;
+}
+.acct-panel summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: var(--display);
+}
+.acct-panel summary:hover { color: var(--primary); }
+.acct-panel[open] summary { margin-bottom: 0.65rem; }
+.acct-cash-inner { padding-top: 0.15rem; }
+.acct-cash-intro { margin: 0 0 0.65rem; }
+.pnl-cards.compact {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+.pnl-cards.compact .pnl-card { padding: 0.55rem 0.65rem; }
+.acct-account-view { padding: 0.25rem 0.15rem 0.5rem; }
+@media (max-width: 720px) {
+  .acct-asset-table th:nth-child(3),
+  .acct-asset-table td:nth-child(3),
+  .acct-asset-table th:nth-child(4),
+  .acct-asset-table td:nth-child(4) { display: none; }
+  .acct-portfolio-chart { width: 100%; justify-content: flex-start; }
+}
 .acct-head {
   display: flex;
   flex-wrap: wrap;

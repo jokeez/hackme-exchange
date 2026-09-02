@@ -42,30 +42,39 @@ export const Ico = {
   trash: () => svg(`<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>`),
   lock: () => svg(`<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`),
   chevronDown: () => svg(`<path d="m6 9 6 6 6-6"/>`, 12),
+  chevronRight: () => svg(`<path d="m9 6 6 6-6 6"/>`, 12),
+  eye: () => svg(`<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>`),
+  eyeOff: () =>
+    svg(
+      `<path d="m2 2 20 20"/><path d="M6.7 6.7C4.1 8.5 2 12 2 12s3 7 10 7c1.8 0 3.4-.5 4.8-1.2"/><path d="M17.3 17.3C19.9 15.5 22 12 22 12s-3-7-10-7c-1.8 0-3.4.5-4.8 1.2"/><path d="M9.5 9.5a3 3 0 0 0 4.2 4.2"/>`,
+    ),
+  search: () => svg(`<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`),
   more: () => svg(`<circle cx="12" cy="5" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.25" fill="currentColor" stroke="none"/>`),
 } as const;
 
 /** Bump when coin SVG/PNG art changes — busts CDN cache on exchange.hackme.tech. */
-const COIN_ICON_REV = 2;
+const COIN_ICON_REV = 3;
 
 const COIN_ICON_SRC: Record<string, string> = {
-  HMC: `/logo-hex.png?v=${COIN_ICON_REV}`,
+  HMC: `/assets/coins/hmc.svg?v=${COIN_ICON_REV}`,
   USDT: `/assets/coins/usdt.svg?v=${COIN_ICON_REV}`,
   BTC: `/assets/coins/btc.svg?v=${COIN_ICON_REV}`,
   SUP: `/assets/coins/sup.svg?v=${COIN_ICON_REV}`,
 };
 
 const COIN_ICON_CLASS: Record<string, string> = {
-  HMC: "asset-hmc asset-hmc-logo",
+  HMC: "asset-hmc asset-coin-logo",
   USDT: "asset-usdt asset-coin-logo",
   BTC: "asset-btc asset-coin-logo",
   SUP: "asset-sup asset-coin-logo",
 };
 
-function coinLogoBadge(symbol: string, src: string, extraClass = ""): string {
+function coinLogoBadge(symbol: string, src: string, extraClass = "", size = 16): string {
   const key = symbol.toUpperCase();
   const cls = COIN_ICON_CLASS[key] ?? "asset-unk asset-coin-logo";
-  return `<span class="asset-ico ${cls} ${extraClass}" title="${escapeHtml(key)}" aria-hidden="true"><img src="${src}" alt="" width="16" height="16" decoding="async" /></span>`;
+  const lg = extraClass.includes("asset-ico-lg");
+  const px = lg ? 32 : size;
+  return `<span class="asset-ico ${cls} ${extraClass}" title="${escapeHtml(key)}" aria-hidden="true"><img src="${src}" alt="" width="${px}" height="${px}" decoding="async" loading="lazy" /></span>`;
 }
 
 /** Markets list: one badge for the base asset only (no USDT/BTC stack). */
@@ -75,6 +84,15 @@ export function assetBadge(symbol: string): string {
   if (src) return coinLogoBadge(key, src);
   const mark = escapeHtml(key.slice(0, 1) || "?");
   return `<span class="asset-ico asset-unk" title="${escapeHtml(key)}" aria-hidden="true">${mark}</span>`;
+}
+
+/** Account / wallet tables — crisp 32px coin art (no squeeze). */
+export function assetBadgeLg(symbol: string): string {
+  const key = symbol.toUpperCase();
+  const src = COIN_ICON_SRC[key];
+  if (src) return coinLogoBadge(key, src, "asset-ico-lg");
+  const mark = escapeHtml(key.slice(0, 1) || "?");
+  return `<span class="asset-ico asset-ico-lg asset-unk" title="${escapeHtml(key)}" aria-hidden="true">${mark}</span>`;
 }
 
 /** Pair row icon — base coin only (HMC or SUP), never quote $.₿ */
