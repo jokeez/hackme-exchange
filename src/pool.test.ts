@@ -76,7 +76,7 @@ describe("pool html helpers", () => {
     patchPoolLiveDom(
       { ...liveOk, poolGh: 120, workers: 99 },
       sampleMarket(),
-      { source: "live", fetchedAt: Date.now() - 5000 },
+      { source: "live", fetchedAt: Date.now() - 5000, poolStatus: "ok" },
     );
     expect(document.querySelector('[data-pool-stat="hashrate"]')?.textContent).toContain("120");
     expect(document.querySelector('[data-pool-stat="workers"]')?.textContent).toBe("99");

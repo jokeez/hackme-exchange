@@ -43,8 +43,12 @@ describe("patchAccountFundsDom", () => {
     const s = baseState();
     const m = sampleMarket();
     document.body.innerHTML = renderAccountPage(s, m);
+    // Simulate old oracle refresh bug that forced USDT label.
+    const eq = document.getElementById("acct-total-eq");
+    if (eq) eq.innerHTML = `99,999.00 <span class="acct-eq-unit muted" id="acct-eq-unit">USDT</span>`;
     patchAccountFundsDom(s, m);
     expect(document.getElementById("acct-eq-unit")?.textContent).toBe("HMC");
     expect(document.getElementById("acct-total-eq")?.dataset.denom).toBe("HMC");
+    expect(document.querySelector('[data-denom="HMC"]')?.classList.contains("active")).toBe(true);
   });
 });

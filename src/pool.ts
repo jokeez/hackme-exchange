@@ -127,7 +127,7 @@ export function formatPoolUpdatedAt(fetchedAt: number, now = Date.now()): string
 export function patchPoolLiveDom(
   live: PoolLive,
   market: MarketSnapshot,
-  meta: Pick<OracleMeta, "source" | "fetchedAt">,
+  meta: OracleMeta,
   now = Date.now(),
 ): void {
   const spreadBps = tickerFromMarket(market, "HMC_USDT").spreadBps;
@@ -171,8 +171,9 @@ export function patchPoolLiveDom(
 
   const oracle = document.getElementById("pool-oracle-pill");
   if (oracle) {
-    oracle.textContent = oracleStatusLabel(meta as OracleMeta, now);
-    oracle.className = `pool-oracle-pill ${meta.source === "live" ? "live" : "fallback"}`;
+    oracle.textContent = oracleStatusLabel(meta, now);
+    const kind = meta.source === "live" && meta.poolStatus === "ok" ? "live" : "fallback";
+    oracle.className = `pool-oracle-pill ${kind}`;
   }
 }
 

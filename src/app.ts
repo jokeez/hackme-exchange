@@ -1917,7 +1917,15 @@ function softPatchFeePayChrome(): void {
   if (spot) spot.checked = state.feeConfig.payFeesInHmc;
 }
 
+function persistConvertDesk(): void {
+  saveConvertDesk(convertFrom, convertTo, convertAmtStr);
+}
+
 function wireConvertDesk(): void {
+  const desk = document.querySelector(".convert-desk");
+  if (!desk || desk.getAttribute("data-cv-wired") === "1") return;
+  desk.setAttribute("data-cv-wired", "1");
+
   const fromSel = document.getElementById("cv-from") as HTMLSelectElement | null;
   const toSel = document.getElementById("cv-to") as HTMLSelectElement | null;
   const amtInp = document.getElementById("cv-amt") as HTMLInputElement | null;
@@ -1936,7 +1944,7 @@ function wireConvertDesk(): void {
       }
     }
     syncConvertPickerUi(convertFrom, convertTo);
-    saveConvertDesk(convertFrom, convertTo, convertAmtStr);
+    persistConvertDesk();
     refreshConvertPreview();
   };
 
@@ -1960,6 +1968,7 @@ function wireConvertDesk(): void {
     fromSel.value = convertFrom;
     toSel.value = convertTo;
     syncConvertPickerUi(convertFrom, convertTo);
+    persistConvertDesk();
     refreshConvertPreview();
   });
 
@@ -1967,6 +1976,7 @@ function wireConvertDesk(): void {
     convertAmtStr = String(maxConvertibleFrom());
     amtInp.value = convertAmtStr;
     markConvertPct(100);
+    persistConvertDesk();
     refreshConvertPreview();
   });
 
@@ -1977,6 +1987,7 @@ function wireConvertDesk(): void {
       convertAmtStr = String((avail * pct) / 100);
       amtInp.value = convertAmtStr;
       markConvertPct(pct);
+      persistConvertDesk();
       refreshConvertPreview();
     });
   });
@@ -1996,6 +2007,7 @@ function wireConvertDesk(): void {
         amtInp.value = defAmt;
       }
       syncConvertPickerUi(convertFrom, convertTo);
+      persistConvertDesk();
       refreshConvertPreview();
     });
   });
@@ -2039,6 +2051,10 @@ function wireConvertDesk(): void {
 }
 
 function wirePoolPage(): void {
+  const page = document.querySelector(".pool-page");
+  if (!page || page.getAttribute("data-pool-wired") === "1") return;
+  page.setAttribute("data-pool-wired", "1");
+
   document.getElementById("pool-copy-url")?.addEventListener("click", async () => {
     const url = document.getElementById("pool-endpoint-url")?.textContent?.trim();
     if (!url) return;
