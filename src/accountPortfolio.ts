@@ -392,8 +392,8 @@ export function renderAssetTableRows(
         <td colspan="5">
           <div class="acct-asset-detail-inner">
             <span>Allocation <strong class="mono">${allocPct.toFixed(1)}%</strong></span>
-            <span>Reserved <strong class="mono" data-raw="${escapeHtml(formatNum(r.reserved, decimals))}">${maskBalance(formatNum(r.reserved, decimals), hidden)}</strong></span>
-            <span>Available <strong class="mono" data-raw="${escapeHtml(formatNum(Math.max(0, r.amount - r.reserved), decimals))}">${maskBalance(formatNum(Math.max(0, r.amount - r.reserved), decimals), hidden)}</strong></span>
+            <span>Reserved <strong class="mono" data-raw="${escapeHtml(formatNum(r.reserved, decimals))}" data-raw-slot="reserved">${maskBalance(formatNum(r.reserved, decimals), hidden)}</strong></span>
+            <span>Available <strong class="mono" data-raw="${escapeHtml(formatNum(Math.max(0, r.amount - r.reserved), decimals))}" data-raw-slot="avail">${maskBalance(formatNum(Math.max(0, r.amount - r.reserved), decimals), hidden)}</strong></span>
             <a class="acct-asset-trade" href="#spot/${r.symbol === "BTC" ? "BTC_USDT" : r.symbol === "SUP" ? "SUP_USDT" : "HMC_USDT"}/15m" data-goto-spot="${r.symbol}">Trade →</a>
           </div>
         </td>

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { patchAccountFundsDom, renderAccountPage } from "./account";
-import { setBalanceHidden, setEquityDenom } from "./accountPortfolio";
+import { DENOM_ORB_SEL, setBalanceHidden, setEquityDenom } from "./accountPortfolio";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("patchAccountFundsDom", () => {
@@ -49,7 +49,30 @@ describe("patchAccountFundsDom", () => {
     patchAccountFundsDom(s, m);
     expect(document.getElementById("acct-eq-unit")?.textContent).toBe("HMC");
     expect(document.getElementById("acct-total-eq")?.dataset.denom).toBe("HMC");
-    expect(document.querySelector('[data-denom="HMC"]')?.classList.contains("active")).toBe(true);
+    expect(document.querySelector(`${DENOM_ORB_SEL}[data-denom="HMC"]`)?.classList.contains("active")).toBe(true);
+  });
+
+  it("renderAccountPage restores equity denom from localStorage on load", () => {
+    setEquityDenom("RUB");
+    document.body.innerHTML = renderAccountPage(baseState(), sampleMarket());
+    expect(document.getElementById("acct-eq-unit")?.textContent).toBe("₽");
+    expect(document.querySelector(`${DENOM_ORB_SEL}[data-denom="RUB"]`)?.classList.contains("active")).toBe(true);
+    expect(document.querySelector("[data-portfolio-chart]")?.getAttribute("data-chart-denom")).toBe("RUB");
+  });
+
+  it("patchAccountFundsDom updates multi-wallet paper row and dust panel", () => {
+    const s = baseState();
+    s.wallet.hmc = 0.0005;
+    s.wallet.usdt = 50;
+    const m = sampleMarket();
+    document.body.innerHTML = renderAccountPage(s, m);
+    s.wallet.usdt = 12_500;
+    s.wallet.hmc = 0;
+    s.wallet.sup = 0;
+    s.wallet.btc = 0;
+    patchAccountFundsDom(s, m);
+    expect(document.querySelector('[data-wallet-slice="paper"] .mono')?.textContent).toMatch(/12[,.]?500/);
+    expect(document.getElementById("acct-dust")?.textContent).toMatch(/No dust/i);
   });
 
   it("patchAccountFundsDom refreshes oracle mids strip", () => {

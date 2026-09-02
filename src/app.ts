@@ -2039,6 +2039,7 @@ function softPatchConvertDesk(): void {
   }
   softPatchFeePayChrome();
   refreshConvertPreview();
+  patchAccountDomIfPresent();
 }
 
 /** Update VIP / pay-in-HMC copy on Account + Convert without remount. */
@@ -2627,7 +2628,7 @@ function patchNonSpotChrome(): void {
     strip.textContent = `${p.base}_${p.quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}`;
   }
   if (state.mainView === "account" && market) {
-    patchAccountFundsDom(state, market);
+    patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
   }
   if (state.mainView === "pool" && poolLive && market) {
     patchPoolLiveDom(poolLive, market, oracleMeta);
@@ -2889,6 +2890,13 @@ function showSystemDrop(show?: boolean): void {
   }, 0);
 }
 
+/** Soft-update Account balances when the page is mounted (trade/convert without remount). */
+function patchAccountDomIfPresent(): void {
+  if (!market || !document.getElementById("acct-total-eq")) return;
+  snapshotEquity(state, market);
+  patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
+}
+
 function refreshAfterLabTrade(): void {
   saveState(state);
   patchModeChrome();
@@ -2899,6 +2907,7 @@ function refreshAfterLabTrade(): void {
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();
   patchMobileTradeTape();
+  patchAccountDomIfPresent();
 }
 
 /**
@@ -2908,7 +2917,8 @@ function refreshAfterLabTrade(): void {
 function refreshAccountAfterLab(): void {
   if (!market) return;
   if (state.mainView === "account") {
-    patchAccountFundsDom(state, market);
+    snapshotEquity(state, market);
+    patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
     patchNonSpotChrome();
     return;
   }
@@ -3005,7 +3015,7 @@ async function syncNodeHmcSupUi(): Promise<void> {
   if (msgEl) msgEl.textContent = note;
   toast(note, "ok");
   if (state.mainView === "account") {
-    patchAccountFundsDom(state, market!);
+    patchAccountFundsDom(state, market!, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
     patchNonSpotChrome();
   } else patchLive();
 }
