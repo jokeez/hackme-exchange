@@ -154,6 +154,7 @@ import {
   wireConvertAssetPickers,
 } from "./convertUi";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
+import { loadConvertDesk, loadActivityTab, saveActivityTab, saveConvertDesk } from "./uiPrefs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
 import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
@@ -215,7 +216,7 @@ import {
   snapshotEquity,
   volumeRatio5m,
 } from "./pnl";
-import { fetchPoolLive, offlinePoolLive, pendingPoolLive, renderPoolPage } from "./pool";
+import { fetchPoolLive, offlinePoolLive, pendingPoolLive, patchPoolLiveDom, renderPoolPage } from "./pool";
 import { copyTextToClipboard, escapeHtml, sanitizeOracleAnchor } from "./sanitize";
 import {
   cancelAllOpenOrders,
@@ -268,7 +269,7 @@ let pollTimer: number | undefined;
 let uiType: OrderKind = "limit";
 let uiTif: TimeInForce = "GTC";
 let uiPostOnly = false;
-let activityTab: "tape" | "orders" | "history" | "alerts" = "orders";
+let activityTab: "tape" | "orders" | "history" | "alerts" = loadActivityTab();
 
 function normalizeActivityTab(raw: string | null | undefined): typeof activityTab {
   if (raw === "tape" || raw === "history" || raw === "alerts" || raw === "orders") return raw;
@@ -371,10 +372,11 @@ let tradingGuards: TradingGuards = { ...DEFAULT_TRADING_GUARDS };
 /** Lab fee-collection address from /health `fee_wallet` (null → hide UI). */
 let labFeeWallet: string | null = null;
 let labUser2faEnabled = false;
+const cvDeskInit = loadConvertDesk();
 /** Convert desk selection — survives re-render without form wipe. */
-let convertFrom: keyof Wallet = "hmc";
-let convertTo: keyof Wallet = "usdt";
-let convertAmtStr = "100";
+let convertFrom: keyof Wallet = cvDeskInit.from;
+let convertTo: keyof Wallet = cvDeskInit.to;
+let convertAmtStr = cvDeskInit.amt;
 let convertConfirmLarge = (() => {
   try {
     return sessionStorage.getItem("hackme-ex-cv-confirm-large") !== "0";
@@ -1934,6 +1936,7 @@ function wireConvertDesk(): void {
       }
     }
     syncConvertPickerUi(convertFrom, convertTo);
+    saveConvertDesk(convertFrom, convertTo, convertAmtStr);
     refreshConvertPreview();
   };
 
@@ -2033,6 +2036,27 @@ function wireConvertDesk(): void {
   });
 
   refreshConvertPreview();
+}
+
+function wirePoolPage(): void {
+  document.getElementById("pool-copy-url")?.addEventListener("click", async () => {
+    const url = document.getElementById("pool-endpoint-url")?.textContent?.trim();
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Pool API URL copied", "ok");
+    } catch {
+      toast("Copy failed — select the URL manually", "info");
+    }
+  });
+  document.querySelectorAll(".pool-jump a").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      const href = (link as HTMLAnchorElement).getAttribute("href");
+      if (!href?.startsWith("#")) return;
+      e.preventDefault();
+      document.getElementById(href.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 function markConvertPct(pct: number): void {
@@ -2397,11 +2421,10 @@ function patchNonSpotChrome(): void {
     strip.textContent = `${p.base}_${p.quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}`;
   }
   if (state.mainView === "account" && market) {
-    const eq = walletEquityFromMarket(state.wallet, market);
-    const eqEl = document.querySelector(".account-eq");
-    if (eqEl) {
-      eqEl.innerHTML = `${formatNum(eq, 2)} <span class="muted">USDT</span>`;
-    }
+    patchAccountFundsDom(state, market);
+  }
+  if (state.mainView === "pool" && poolLive && market) {
+    patchPoolLiveDom(poolLive, market, oracleMeta);
   }
   if (state.mainView === "convert") {
     refreshConvertPreview();
@@ -5304,6 +5327,10 @@ function wireEvents(): void {
   if (state.mainView === "convert") {
     wireConvertDesk();
   }
+  if (state.mainView === "pool") {
+    wirePoolPage();
+    if (poolLive && market) patchPoolLiveDom(poolLive, market, oracleMeta);
+  }
 
   if (!hotkeysWired) {
     document.addEventListener("keydown", onKeydown);
@@ -5541,6 +5568,7 @@ function wireEvents(): void {
   document.querySelectorAll("#activity-tabs button").forEach((btn) => {
     btn.addEventListener("click", () => {
       activityTab = normalizeActivityTab((btn as HTMLElement).dataset.tab);
+      saveActivityTab(activityTab);
       document.querySelectorAll("#activity-tabs button").forEach((b) => {
         const on = b === btn;
         b.classList.toggle("active", on);

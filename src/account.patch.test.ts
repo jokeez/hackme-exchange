@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { patchAccountFundsDom, renderAccountPage } from "./account";
-import { setBalanceHidden } from "./accountPortfolio";
+import { setBalanceHidden, setEquityDenom } from "./accountPortfolio";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("patchAccountFundsDom", () => {
@@ -36,5 +36,15 @@ describe("patchAccountFundsDom", () => {
     setBalanceHidden(false);
     patchAccountFundsDom(s, m);
     expect(document.getElementById("acct-total-eq")?.textContent).not.toContain("****");
+  });
+
+  it("patchAccountFundsDom keeps selected equity denom (HMC)", () => {
+    setEquityDenom("HMC");
+    const s = baseState();
+    const m = sampleMarket();
+    document.body.innerHTML = renderAccountPage(s, m);
+    patchAccountFundsDom(s, m);
+    expect(document.getElementById("acct-eq-unit")?.textContent).toBe("HMC");
+    expect(document.getElementById("acct-total-eq")?.dataset.denom).toBe("HMC");
   });
 });

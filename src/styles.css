@@ -4533,6 +4533,39 @@ label { display: block; font-size: 0.68rem; color: var(--muted); margin-bottom: 
   gap: 0.85rem 1.25rem;
   margin-bottom: 0.85rem;
 }
+.pool-endpoint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0;
+}
+.pool-copy-url { flex-shrink: 0; }
+.pool-stratum-hint {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px dashed rgba(77, 228, 255, 0.22);
+  background: rgba(77, 228, 255, 0.04);
+}
+.pool-oracle-pill {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  border: 1px solid rgba(120, 160, 210, 0.28);
+  color: var(--muted);
+}
+.pool-oracle-pill.live {
+  border-color: rgba(77, 228, 255, 0.45);
+  color: rgba(77, 228, 255, 0.95);
+  background: rgba(77, 228, 255, 0.08);
+}
 .pool-page .pool-lead { margin: 0.25rem 0 0; max-width: 42rem; }
 .pool-stat-grid {
   display: grid;

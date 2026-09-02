@@ -1,8 +1,9 @@
 import type { MarketSnapshot, PoolLive, PoolStats, WorkStats } from "./types";
 import { INTEGRATION } from "./config/integration";
 import { escapeHtml } from "./sanitize";
-import { formatGh, formatNum, formatPrice, formatRewardPerM } from "./market";
+import { formatGh, formatNum, formatPrice, formatRewardPerM, tickerFromMarket } from "./market";
 import { fetchWithTimeout } from "./fetchTimeout";
+import { oracleStatusLabel, type OracleMeta } from "./oracleStatus";
 
 function poolBase(): string {
   return INTEGRATION.poolCoordinatorOrigin.replace(/\/$/, "");
@@ -117,6 +118,64 @@ export function poolStatusBanner(live: PoolLive): string {
   </div>`;
 }
 
+export function formatPoolUpdatedAt(fetchedAt: number, now = Date.now()): string {
+  if (!fetchedAt) return "Updated — waiting for sync";
+  const age = Math.max(0, Math.floor((now - fetchedAt) / 1000));
+  return `Updated ${age}s ago`;
+}
+
+export function patchPoolLiveDom(
+  live: PoolLive,
+  market: MarketSnapshot,
+  meta: Pick<OracleMeta, "source" | "fetchedAt">,
+  now = Date.now(),
+): void {
+  const spreadBps = tickerFromMarket(market, "HMC_USDT").spreadBps;
+  const stats: Record<string, string> = {
+    hashrate: formatGh(live.poolGh),
+    workers: formatNum(live.workers, 0),
+    miners: formatNum(live.miners, 0),
+    block: `#${formatNum(live.blockHeight, 0)}`,
+    reward: formatRewardPerM(live.rewardPerM),
+    target: formatNum(live.targetMod, 0),
+    payout: `${formatNum(live.totalPayoutHmc, 2)} HMC`,
+  };
+  for (const [key, value] of Object.entries(stats)) {
+    const el = document.querySelector(`[data-pool-stat="${key}"]`);
+    if (el) el.textContent = value;
+  }
+
+  const mids: Record<string, string> = {
+    hmc: formatPrice(market.hmcUsdt),
+    sup: formatPrice(market.supUsdt),
+    hmcSup: formatPrice(market.hmcSup),
+    btc: `$${formatNum(market.btcUsd, 0)}`,
+    spread: `${formatNum(spreadBps, 1)} bps`,
+  };
+  for (const [key, value] of Object.entries(mids)) {
+    const el = document.querySelector(`[data-pool-mid="${key}"]`);
+    if (el) el.textContent = value;
+  }
+
+  const pill = document.getElementById("pool-status-pill");
+  if (pill) {
+    const statusCls = live.status === "ok" ? "" : live.status;
+    const statusLabel =
+      live.status === "ok" ? "live" : live.status === "pending" ? "connecting" : live.status;
+    pill.className = `pool-live-pill ${statusCls}`.trim();
+    pill.textContent = statusLabel;
+  }
+
+  const updated = document.getElementById("pool-updated-at");
+  if (updated) updated.textContent = formatPoolUpdatedAt(meta.fetchedAt, now);
+
+  const oracle = document.getElementById("pool-oracle-pill");
+  if (oracle) {
+    oracle.textContent = oracleStatusLabel(meta as OracleMeta, now);
+    oracle.className = `pool-oracle-pill ${meta.source === "live" ? "live" : "fallback"}`;
+  }
+}
+
 export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
   const poolHref = escapeHtml(poolBase());
   const emptyStats =
@@ -127,6 +186,7 @@ export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
   const statusCls = live.status === "ok" ? "" : live.status;
   const statusLabel =
     live.status === "ok" ? "live" : live.status === "pending" ? "connecting" : live.status;
+  const spreadBps = tickerFromMarket(market, "HMC_USDT").spreadBps;
 
   return `
   <section class="pool-page glass">
@@ -147,8 +207,12 @@ export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
 
     <section class="pool-section" id="pool-live">
       <header class="pool-section-head">
-        <h3>Live coordinator <span class="pool-live-pill ${statusCls}">${statusLabel}</span></h3>
-        <p class="muted small mono">${poolHref}</p>
+        <h3>Live coordinator <span class="pool-live-pill ${statusCls}" id="pool-status-pill">${statusLabel}</span></h3>
+        <p class="muted small pool-endpoint-row">
+          <code class="mono" id="pool-endpoint-url">${poolHref}</code>
+          <button type="button" class="btn-sm pool-copy-url" id="pool-copy-url" title="Copy pool API base URL">Copy</button>
+        </p>
+        <p class="muted small mono" id="pool-updated-at">Updated — waiting for sync</p>
       </header>
       ${
         emptyStats
@@ -158,48 +222,49 @@ export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
       <div class="pool-stat-grid" aria-label="Pool metrics">
         <article class="pool-stat glass-inset">
           <span class="muted small">Hashrate</span>
-          <strong class="mono">${formatGh(live.poolGh)}</strong>
+          <strong class="mono" data-pool-stat="hashrate">${formatGh(live.poolGh)}</strong>
         </article>
         <article class="pool-stat glass-inset">
           <span class="muted small">Workers</span>
-          <strong class="mono">${formatNum(live.workers, 0)}</strong>
+          <strong class="mono" data-pool-stat="workers">${formatNum(live.workers, 0)}</strong>
         </article>
         <article class="pool-stat glass-inset">
           <span class="muted small">Miners</span>
-          <strong class="mono">${formatNum(live.miners, 0)}</strong>
+          <strong class="mono" data-pool-stat="miners">${formatNum(live.miners, 0)}</strong>
         </article>
         <article class="pool-stat glass-inset">
           <span class="muted small">Block</span>
-          <strong class="mono">#${formatNum(live.blockHeight, 0)}</strong>
+          <strong class="mono" data-pool-stat="block">#${formatNum(live.blockHeight, 0)}</strong>
         </article>
         <article class="pool-stat glass-inset">
           <span class="muted small">reward / M</span>
-          <strong class="mono">${formatRewardPerM(live.rewardPerM)}</strong>
+          <strong class="mono" data-pool-stat="reward">${formatRewardPerM(live.rewardPerM)}</strong>
         </article>
         <article class="pool-stat glass-inset">
           <span class="muted small">Target mod</span>
-          <strong class="mono">${formatNum(live.targetMod, 0)}</strong>
+          <strong class="mono" data-pool-stat="target">${formatNum(live.targetMod, 0)}</strong>
         </article>
         <article class="pool-stat glass-inset pool-stat-wide">
           <span class="muted small">Total paid</span>
-          <strong class="mono">${formatNum(live.totalPayoutHmc, 2)} HMC</strong>
+          <strong class="mono" data-pool-stat="payout">${formatNum(live.totalPayoutHmc, 2)} HMC</strong>
         </article>
       </div>
+      <p class="muted small pool-stratum-hint mono">Miner endpoint: <code>stratum+tcp://hackme.tech:3333</code> · worker <code>YOUR_HMC_ADDRESS</code></p>
     </section>
 
     <section class="pool-section" id="pool-oracle">
       <header class="pool-section-head">
-        <h3>Oracle → Exchange</h3>
+        <h3>Oracle → Exchange <span class="pool-oracle-pill fallback" id="pool-oracle-pill">Oracle fallback</span></h3>
         <p class="muted small">Mids used on Spot / Convert · demo formula, not investment advice</p>
       </header>
       <div class="pool-grid">
         <article class="pool-card glass-inset">
           <h4>Oracle mids (USDT)</h4>
           <ul class="pool-list mono">
-            <li>HMC <strong>${formatPrice(market.hmcUsdt)}</strong></li>
-            <li>SUP <strong>${formatPrice(market.supUsdt)}</strong></li>
-            <li>HMC/SUP <strong>${formatPrice(market.hmcSup)}</strong></li>
-            <li>BTC ref <strong>$${formatNum(market.btcUsd, 0)}</strong></li>
+            <li>HMC <strong data-pool-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></li>
+            <li>SUP <strong data-pool-mid="sup">${formatPrice(market.supUsdt)}</strong></li>
+            <li>HMC/SUP <strong data-pool-mid="hmcSup">${formatPrice(market.hmcSup)}</strong></li>
+            <li>BTC ref <strong data-pool-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></li>
           </ul>
         </article>
         <article class="pool-card glass-inset">
@@ -209,7 +274,7 @@ export function renderPoolPage(live: PoolLive, market: MarketSnapshot): string {
             <li><span>HMC ref</span><strong>0.05 USDT (Settings)</strong></li>
             <li><span>SUP ref</span><strong>0.01 USDT</strong></li>
             <li><span>BTC crosses</span><strong>synced from live BTC/USD</strong></li>
-            <li><span>Spread</span><strong>8–36 bps from pool GH/s</strong></li>
+            <li><span>Spread now</span><strong data-pool-mid="spread">${formatNum(spreadBps, 1)} bps</strong></li>
           </ul>
         </article>
         <article class="pool-card glass-inset">
