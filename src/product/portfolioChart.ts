@@ -1,4 +1,10 @@
-import { equityInDenom, type EquityDenom, maskBalance, isBalanceHidden } from "../accountPortfolio";
+import {
+  equityInDenom,
+  getEquityDenom,
+  type EquityDenom,
+  maskBalance,
+  isBalanceHidden,
+} from "../accountPortfolio";
 import { formatNum } from "../market";
 import type { EquitySnapshot, MarketSnapshot } from "../types";
 
@@ -149,7 +155,8 @@ export function portfolioEquityChart30d(
     ? ` data-hmc-usdt="${opts.market.hmcUsdt}" data-btc-usd="${opts.market.btcUsd}" data-sup-usdt="${opts.market.supUsdt}"`
     : "";
 
-  return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-denom="${opts.denom ?? "USDT"}"${marketAttrs}>
+  const chartDenom = opts.denom ?? getEquityDenom();
+  return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-chart-denom="${chartDenom}"${marketAttrs}>
     <div class="portfolio-30d-head">
       <span class="portfolio-30d-val mono" id="portfolio-30d-val">${formatBalance(last.equityUsdt, opts)}</span>
       <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)}</p>
@@ -210,10 +217,12 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   if (rawPts.length < 2) return;
   const chartPts = chartPoints(rawPts.map((p) => ({ ts: p.ts, equityUsdt: p.eq })));
 
-  const denom = (host.dataset.denom as EquityDenom) || "USDT";
-  const hidden = isBalanceHidden();
   const market = marketFromHost(host);
-  const fmtOpts = (): PortfolioChartOpts => ({ market, denom, hidden });
+  const fmtOpts = (): PortfolioChartOpts => ({
+    market,
+    denom: getEquityDenom(),
+    hidden: isBalanceHidden(),
+  });
 
   const paint = (idx: number) => {
     const p = chartPts[idx];

@@ -182,3 +182,29 @@ describe("100% pct sizing (buy + sell)", () => {
     }
   });
 });
+
+describe("executeFill respects open-order reservations", () => {
+  const market = sampleMarket();
+
+  it("blocks market fill that would spend reserved quote", async () => {
+    const { executeFill } = await import("./execution");
+    const s = baseState({ wallet: { usdt: 100, hmc: 10_000, sup: 0, btc: 0 } });
+    const price = 0.0004;
+    // Reserve ~88 USDT — leaves <20 free; market buy for 20+ should fail.
+    placeOrder(s, "HMC_USDT", "buy", "limit", 220_000, price, undefined, undefined, "GTC", false, market);
+    expect(freeBalance(s, "usdt", market)).toBeLessThan(20);
+    const res = executeFill(s, market, "HMC_USDT", "buy", price, 50_000, price * 50_000, "market");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/reserved|Insufficient/i);
+  });
+
+  it("resting limit fill excludes its own reservation", async () => {
+    const { executeFill } = await import("./execution");
+    const s = baseState({ wallet: { usdt: 100, hmc: 0, sup: 0, btc: 0 } });
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 100_000, 0.0004, undefined, undefined, "GTC", false, market);
+    expect("id" in o).toBe(true);
+    if (!("id" in o)) return;
+    const res = executeFill(s, market, "HMC_USDT", "buy", 0.0004, 100_000, 40, "limit", false, false, o.id);
+    expect(res.ok).toBe(true);
+  });
+});

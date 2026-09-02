@@ -27,28 +27,28 @@ export function renderOracleTransparencyPanel(
   return `<section class="oracle-transparency glass-inset" id="oracle-transparency" role="region" aria-label="Oracle transparency">
     <header class="oracle-trans-head">
       <h3>Oracle transparency</h3>
-      <span class="oracle-trans-pill ${kind}">${escapeHtml(label)}</span>
+      <span class="oracle-trans-pill ${kind}" id="oracle-trans-pill">${escapeHtml(label)}</span>
     </header>
     <div class="oracle-trans-grid">
       <article>
         <span class="muted small">Feed</span>
         <strong>${meta.source === "live" ? "Pool coordinator + economics" : "Local fallback formula"}</strong>
-        <p class="muted small mono">Last sync ${age != null ? `${age}s ago` : "—"} · pool ${escapeHtml(poolLive?.status ?? "—")}</p>
+        <p class="muted small mono" id="oracle-trans-sync">Last sync ${age != null ? `${age}s ago` : "—"} · pool ${escapeHtml(poolLive?.status ?? "—")}</p>
       </article>
       <article>
         <span class="muted small">Mids (USDT)</span>
         <ul class="oracle-trans-mids mono">
-          <li>HMC <strong>${formatPrice(market.hmcUsdt)}</strong></li>
-          <li>SUP <strong>${formatPrice(market.supUsdt)}</strong></li>
-          <li>BTC <strong>$${formatNum(market.btcUsd, 0)}</strong></li>
+          <li>HMC <strong data-oracle-trans-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></li>
+          <li>SUP <strong data-oracle-trans-mid="sup">${formatPrice(market.supUsdt)}</strong></li>
+          <li>BTC <strong data-oracle-trans-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></li>
         </ul>
       </article>
       <article>
         <span class="muted small">Pool telemetry</span>
         <ul class="oracle-trans-mids mono">
-          <li>Hashrate <strong>${poolLive ? formatGh(poolLive.poolGh) : "—"}</strong></li>
-          <li>Workers <strong>${poolLive ? formatNum(poolLive.workers, 0) : "—"}</strong></li>
-          <li>Spread <strong>${formatNum(spreadBps, 1)} bps</strong></li>
+          <li>Hashrate <strong data-oracle-trans-stat="hashrate">${poolLive ? formatGh(poolLive.poolGh) : "—"}</strong></li>
+          <li>Workers <strong data-oracle-trans-stat="workers">${poolLive ? formatNum(poolLive.workers, 0) : "—"}</strong></li>
+          <li>Spread <strong data-oracle-trans-stat="spread">${formatNum(spreadBps, 1)} bps</strong></li>
         </ul>
       </article>
       <article>
@@ -58,4 +58,52 @@ export function renderOracleTransparencyPanel(
       </article>
     </div>
   </section>`;
+}
+
+/** Soft-update transparency panel on oracle tick — avoids remounting pool / spot chrome. */
+export function patchOracleTransparencyDom(
+  meta: OracleMeta,
+  market: MarketSnapshot,
+  poolLive: PoolLive | null,
+  now = Date.now(),
+): boolean {
+  const root = document.getElementById("oracle-transparency");
+  if (!root) return false;
+  const kind = oracleStatusKind(meta, now);
+  const label = oracleStatusLabel(meta, now);
+  const age = oracleAgeSec(meta, now);
+  const spreadBps = tickerFromMarket(market, "HMC_USDT").spreadBps;
+
+  const pill = document.getElementById("oracle-trans-pill");
+  if (pill) {
+    pill.className = `oracle-trans-pill ${kind}`;
+    pill.textContent = label;
+  }
+
+  const sync = document.getElementById("oracle-trans-sync");
+  if (sync) {
+    sync.textContent = `Last sync ${age != null ? `${age}s ago` : "—"} · pool ${poolLive?.status ?? "—"}`;
+  }
+
+  const mids: Record<string, string> = {
+    hmc: formatPrice(market.hmcUsdt),
+    sup: formatPrice(market.supUsdt),
+    btc: `$${formatNum(market.btcUsd, 0)}`,
+  };
+  for (const [key, value] of Object.entries(mids)) {
+    const el = root.querySelector(`[data-oracle-trans-mid="${key}"]`);
+    if (el) el.textContent = value;
+  }
+
+  const stats: Record<string, string> = {
+    hashrate: poolLive ? formatGh(poolLive.poolGh) : "—",
+    workers: poolLive ? formatNum(poolLive.workers, 0) : "—",
+    spread: `${formatNum(spreadBps, 1)} bps`,
+  };
+  for (const [key, value] of Object.entries(stats)) {
+    const el = root.querySelector(`[data-oracle-trans-stat="${key}"]`);
+    if (el) el.textContent = value;
+  }
+
+  return true;
 }

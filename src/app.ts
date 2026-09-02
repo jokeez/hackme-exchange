@@ -132,11 +132,13 @@ import {
   convertFeeHintLine,
   convertNetReceive,
   convertRateLabel,
+  convertSlippageDriftBps,
   pairQuoteSym,
   feeQuoteFromLabConvert,
   flipRoute,
   formatConvertFeeToast,
   formatLabConvertFeeToast,
+  isConvertPreviewError,
   previewConvert,
   convertRouteDef,
   routeForAssets,
@@ -159,7 +161,7 @@ import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { exportFillsCsv, exportOrdersCsv, exportOrdersFilename } from "./product/exportOrders";
 import { renderSpotEmptyState } from "./product/emptyStates";
 import { lookupWorkersByAddress, renderWorkerLookupResult } from "./product/poolWorker";
-import { renderOracleTransparencyPanel } from "./product/oraclePanel";
+import { renderOracleTransparencyPanel, patchOracleTransparencyDom } from "./product/oraclePanel";
 import { TOUR_V2_STEPS, markTourV2Done, renderTourV2Overlay, tourV2Done } from "./product/tourV2";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
 import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
@@ -279,6 +281,9 @@ let lastConvertPreviewNet = 0;
 let cachedNodeWallet: { hmc: number; sup: number } | null = null;
 let pendingAccountSection: string | undefined;
 let pendingPoolAddress: string | undefined;
+/** Survives render/oracle refresh so syncRouteHash keeps account/pool deep links. */
+let accountRouteSection: string | undefined;
+let poolRouteAddress: string | undefined;
 
 function normalizeActivityTab(raw: string | null | undefined): typeof activityTab {
   if (raw === "tape" || raw === "history" || raw === "alerts" || raw === "orders") return raw;
@@ -287,6 +292,8 @@ function normalizeActivityTab(raw: string | null | undefined): typeof activityTa
 
 function gotoMainView(view: MainView): void {
   state.mainView = view;
+  if (view !== "account") accountRouteSection = undefined;
+  if (view !== "pool") poolRouteAddress = undefined;
   saveState(state);
   chartMounted = false;
   if (view === "account" && isLabApiEnabled()) void refreshTradingGuardsFromHealth();
@@ -455,7 +462,20 @@ function renderMobileChartTradeBar(): string {
 const app = document.getElementById("app")!;
 
 function syncRouteHash(): void {
-  writeRouteHash(state.mainView, state.activePair, state.activeTf);
+  writeRouteHash({
+    view: state.mainView,
+    pair: state.activePair,
+    tf: state.activeTf,
+    convertFrom: state.mainView === "convert" ? convertFrom : undefined,
+    convertTo: state.mainView === "convert" ? convertTo : undefined,
+    accountSection: state.mainView === "account" ? accountRouteSection : undefined,
+    poolAddress: state.mainView === "pool" ? poolRouteAddress : undefined,
+  });
+}
+
+function ensureDistinctConvertLegs(): void {
+  if (convertFrom !== convertTo) return;
+  convertTo = convertFrom === "hmc" ? "usdt" : "hmc";
 }
 
 function applyHashToState(): void {
@@ -465,9 +485,28 @@ function applyHashToState(): void {
   if (h.tf) state.activeTf = h.tf;
   if (h.convertFrom) convertFrom = h.convertFrom;
   if (h.convertTo) convertTo = h.convertTo;
-  if (h.convertFrom || h.convertTo) saveConvertDesk(convertFrom, convertTo, convertAmtStr);
-  pendingAccountSection = h.section;
-  pendingPoolAddress = h.poolAddress;
+  if (h.convertFrom || h.convertTo) {
+    ensureDistinctConvertLegs();
+    saveConvertDesk(convertFrom, convertTo, convertAmtStr);
+  }
+  if (h.section) {
+    accountRouteSection = h.section;
+    pendingAccountSection = h.section;
+  } else if (h.view === "account") {
+    accountRouteSection = undefined;
+    pendingAccountSection = undefined;
+  } else if (h.view) {
+    accountRouteSection = undefined;
+  }
+  if (h.poolAddress) {
+    poolRouteAddress = h.poolAddress;
+    pendingPoolAddress = h.poolAddress;
+  } else if (h.view === "pool") {
+    poolRouteAddress = undefined;
+    pendingPoolAddress = undefined;
+  } else if (h.view) {
+    poolRouteAddress = undefined;
+  }
 }
 
 function applyPendingDeepLinks(): void {
@@ -1760,7 +1799,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
   }
 
   const prev = previewConvert(state, market, route, amt);
-  if ("ok" in prev && prev.ok === false) {
+  if (isConvertPreviewError(prev)) {
     gotEl.textContent = "—";
     rateEl.textContent = "—";
     feeEl.textContent = prev.reason;
@@ -1838,28 +1877,38 @@ async function runConvertDesk(): Promise<void> {
     if (!confirm(`Convert ${formatNum(amt, 4)} ${assetSymbol(convertFrom)} (>50% of balance)?`)) return;
   }
 
+  const r = CONVERT_ROUTES.find((x) => x.id === route)!;
+  const def = convertRouteDef(route)!;
+  const [from, to] = r.label.split(" → ").map((s) => s.trim());
+
   const slippageBps = loadConvertSlippageBps();
   if (slippageBps > 0 && lastConvertPreviewNet > 0) {
-    const fresh = previewConvert(state, market, route, amt);
-    if (!("ok" in fresh && fresh.ok === false)) {
-      const freshNet = convertNetReceive(fresh as ConvertPreview);
-      const drift = Math.abs(freshNet - lastConvertPreviewNet) / lastConvertPreviewNet;
-      if (drift * 10_000 > slippageBps) {
-        const driftPct = (drift * 100).toFixed(2);
-        if (
-          !confirm(
-            `Quote moved ${driftPct}% since preview (guard ${slippageBps} bps). Continue with ≈ ${formatPrice(freshNet)} ${assetSymbol(convertTo)}?`,
-          )
-        ) {
-          return;
-        }
+    let freshNet = 0;
+    if (tradingGuards.convertFeeServer && useLabMatching()) {
+      const q = await getLabConvertQuote({
+        from,
+        to,
+        amount: displayToMinor(amt),
+        pay_fee_in_hmc:
+          tradingGuards.hmcFeePayServer && state.feeConfig.payFeesInHmc ? true : undefined,
+      });
+      if (q.ok) freshNet = minorToDisplay(q.net_to);
+    } else {
+      const fresh = previewConvert(state, market, route, amt);
+      if (!isConvertPreviewError(fresh)) freshNet = convertNetReceive(fresh);
+    }
+    const driftBps = convertSlippageDriftBps(lastConvertPreviewNet, freshNet);
+    if (driftBps > slippageBps) {
+      const driftPct = (driftBps / 100).toFixed(2);
+      if (
+        !confirm(
+          `Quote moved ${driftPct}% since preview (guard ${slippageBps} bps). Continue with ≈ ${formatPrice(freshNet)} ${assetSymbol(convertTo)}?`,
+        )
+      ) {
+        return;
       }
     }
   }
-
-  const r = CONVERT_ROUTES.find((x) => x.id === route)!;
-  const def = convertRouteDef(route);
-  const [from, to] = r.label.split(" → ").map((s) => s.trim());
   const go = document.getElementById("cv-go") as HTMLButtonElement | null;
   convertInFlight = true;
   if (go) go.disabled = true;
@@ -1895,6 +1944,14 @@ async function runConvertDesk(): Promise<void> {
       await syncLabBalancesAndBook(state, market);
       recordConvert(state, from, to, amt, got, market, labFee, def.pair);
       saveState(state);
+      const resultDriftBps =
+        slippageBps > 0 && lastConvertPreviewNet > 0
+          ? convertSlippageDriftBps(lastConvertPreviewNet, net)
+          : 0;
+      const driftNote =
+        resultDriftBps > slippageBps
+          ? ` · preview drift ${(resultDriftBps / 100).toFixed(2)}%`
+          : "";
       toast(
         `Lab convert → ${formatNum(net, 4)} net${formatLabConvertFeeToast(
           {
@@ -1903,8 +1960,8 @@ async function runConvertDesk(): Promise<void> {
             feeHmcDisplay,
           },
           def ? pairQuoteSym(def.pair) : "USDT",
-        )}`,
-        "ok",
+        )}${driftNote}`,
+        resultDriftBps > slippageBps ? "warn" : "ok",
       );
       softPatchConvertDesk();
       return;
@@ -2017,7 +2074,9 @@ function softPatchFeePayChrome(): void {
 }
 
 function persistConvertDesk(): void {
+  ensureDistinctConvertLegs();
   saveConvertDesk(convertFrom, convertTo, convertAmtStr);
+  if (state.mainView === "convert") syncRouteHash();
 }
 
 function wireConvertDesk(): void {
@@ -2154,20 +2213,30 @@ function wireConvertDesk(): void {
   refreshConvertPreview();
 }
 
+function runPoolWorkerLookup(): Promise<void> {
+  return (async () => {
+    const inp = document.getElementById("pool-worker-addr") as HTMLInputElement | null;
+    const out = document.getElementById("pool-worker-result");
+    if (!inp || !out) return;
+    out.innerHTML = `<span class="muted small">Looking up…</span>`;
+    const result = await lookupWorkersByAddress(inp.value);
+    out.innerHTML = renderWorkerLookupResult(result);
+  })();
+}
+
 function wirePoolPage(): void {
   const page = document.querySelector(".pool-page");
   if (!page || page.getAttribute("data-pool-wired") === "1") return;
   page.setAttribute("data-pool-wired", "1");
 
   document.getElementById("pool-worker-search")?.addEventListener("click", () => {
-    void (async () => {
-      const inp = document.getElementById("pool-worker-addr") as HTMLInputElement | null;
-      const out = document.getElementById("pool-worker-result");
-      if (!inp || !out) return;
-      out.innerHTML = `<span class="muted small">Looking up…</span>`;
-      const result = await lookupWorkersByAddress(inp.value);
-      out.innerHTML = renderWorkerLookupResult(result);
-    })();
+    void runPoolWorkerLookup();
+  });
+  document.getElementById("pool-worker-addr")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void runPoolWorkerLookup();
+    }
   });
 
   document.getElementById("pool-copy-url")?.addEventListener("click", async () => {
@@ -4194,6 +4263,7 @@ function patchLive(): void {
   updatePreview();
   patchAvailChips();
   patchOracleStatus();
+  if (market && poolLive) patchOracleTransparencyDom(oracleMeta, market, poolLive);
   const ms = measurePerf("patchLive", "patchLive-start", "patchLive-end");
   if (ms != null && ms > 32) console.debug(`[perf] patchLive ${ms.toFixed(1)}ms`);
 }
@@ -4378,6 +4448,21 @@ function submitOrder(side: "buy" | "sell"): void {
     if (!paperGuardsOrWarn(side, "market", form.amt, 0)) return;
     const t = activeTicker();
     const m = matchMarket(t, side, form.amt);
+    const funds = assertOrderFunds(
+      state,
+      market!,
+      state.activePair,
+      side,
+      form.amt,
+      m.avgPrice,
+      "market",
+      true,
+    );
+    if (!funds.ok) {
+      setOrderMsg(side, funds.reason, "err");
+      toast(funds.reason, "warn");
+      return;
+    }
     const res = executeFill(state, market!, state.activePair, side, m.avgPrice, form.amt, m.quote, "market");
     if (!res.ok) { setOrderMsg(side, res.reason, "err"); toast(res.reason, "warn"); return; }
     placeAttachedTpsl(side, form.amt, exitSide);
@@ -5736,6 +5821,7 @@ function wireEvents(): void {
 
 function openAlertsPanel(): void {
   activityTab = "alerts";
+  saveActivityTab(activityTab);
   // Uncollapse markets column if needed so Alerts tab is visible.
   if (layoutPrefs.rightCollapsed) {
     layoutPrefs = togglePanelCollapsed(layoutPrefs, "right");

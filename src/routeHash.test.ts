@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRouteHash, parseRouteHash } from "./routeHash";
+import { buildRouteHash, formatRouteHash, parseRouteHash } from "./routeHash";
 import { exportDemoJson, parseDemoImport } from "./demoIo";
 import { baseState } from "./testFixtures";
 
@@ -21,10 +21,52 @@ describe("routeHash", () => {
     expect(parseRouteHash("#pool/lookup/HMC-abc")).toEqual({ view: "pool", poolAddress: "HMC-abc" });
   });
 
+  it("does not treat account/pool tails as spot pair/tf", () => {
+    expect(parseRouteHash("#account/HMC_USDT")).toEqual({ view: "account" });
+    expect(parseRouteHash("#pool/HMC_USDT")).toEqual({ view: "pool" });
+  });
+
   it("formats and ignores junk", () => {
     expect(formatRouteHash("spot", "HMC_USDT", "5m")).toBe("#spot/HMC_USDT/5m");
     expect(formatRouteHash("account", "HMC_USDT", "1m")).toBe("#account");
     expect(parseRouteHash("#nope/wat")).toEqual({});
+  });
+
+  it("buildRouteHash preserves view-specific deep links", () => {
+    expect(
+      buildRouteHash({
+        view: "convert",
+        pair: "HMC_USDT",
+        tf: "15m",
+        convertFrom: "hmc",
+        convertTo: "usdt",
+      }),
+    ).toBe("#convert/hmc/usdt");
+    expect(
+      buildRouteHash({
+        view: "account",
+        pair: "HMC_USDT",
+        tf: "15m",
+        accountSection: "deposit",
+      }),
+    ).toBe("#account/deposit");
+    expect(
+      buildRouteHash({
+        view: "pool",
+        pair: "HMC_USDT",
+        tf: "15m",
+        poolAddress: "HMC-abc",
+      }),
+    ).toBe("#pool/lookup/HMC-abc");
+    expect(
+      buildRouteHash({
+        view: "convert",
+        pair: "HMC_USDT",
+        tf: "15m",
+        convertFrom: "usdt",
+        convertTo: "usdt",
+      }),
+    ).toBe("#convert");
   });
 });
 
