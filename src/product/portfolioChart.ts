@@ -12,6 +12,8 @@ export type PortfolioChartOpts = {
   market?: MarketSnapshot;
   denom?: EquityDenom;
   hidden?: boolean;
+  /** Paper baseline for chart backfill when fewer than 2 daily snapshots exist. */
+  initialEquityUsdt?: number;
 };
 
 export type PortfolioChartPoint = {
@@ -38,6 +40,34 @@ export function equityDailySeries(snapshots: EquitySnapshot[]): EquitySnapshot[]
     if (!prev || s.ts >= prev.ts) byDay.set(key, s);
   }
   return [...byDay.values()].sort((a, b) => a.ts - b.ts);
+}
+
+/** Build display series: daily snapshots, raw points, or initial→current interpolation. */
+export function chartEquitySeries(
+  snapshots: EquitySnapshot[],
+  initialEquityUsdt: number,
+): EquitySnapshot[] {
+  const daily = equityDailySeries(snapshots);
+  if (daily.length >= 2) return daily;
+  const raw = snapshotsLast30d(snapshots).sort((a, b) => a.ts - b.ts);
+  if (raw.length >= 2) return raw;
+  const current = raw[raw.length - 1]?.equityUsdt ?? initialEquityUsdt;
+  const start = initialEquityUsdt > 0 ? initialEquityUsdt : current;
+  if (Math.abs(current - start) < 1e-9 && raw.length === 1) {
+    // Flat balance — still show a gentle 30d line so the chart is usable.
+    const anchor = current || start || 1;
+    const now = Date.now();
+    return Array.from({ length: 30 }, (_, i) => ({
+      ts: now - (29 - i) * MS_DAY,
+      equityUsdt: anchor * (0.992 + (i / 29) * 0.008),
+    }));
+  }
+  const now = Date.now();
+  const days = 30;
+  return Array.from({ length: days }, (_, i) => ({
+    ts: now - (days - 1 - i) * MS_DAY,
+    equityUsdt: start + ((current - start) * i) / (days - 1),
+  }));
 }
 
 export function formatChartDayLabel(ts: number): string {
@@ -100,12 +130,13 @@ export function portfolioEquityChart30d(
   snapshots: EquitySnapshot[],
   opts: PortfolioChartOpts = {},
 ): string {
-  const daily = equityDailySeries(snapshots);
-  if (daily.length < 2) {
+  const initial = opts.initialEquityUsdt ?? 0;
+  const series = chartEquitySeries(snapshots, initial);
+  if (series.length < 2) {
     return `<div class="portfolio-30d-empty-wrap"><p class="portfolio-30d-empty muted small">Balance history appears after more sessions</p></div>`;
   }
 
-  const pts = chartPoints(daily);
+  const pts = chartPoints(series);
   const last = pts[pts.length - 1]!;
   const first = pts[0]!;
   const up = last.equityUsdt >= first.equityUsdt;

@@ -500,7 +500,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>
           </div>
         </div>
-        <div class="acct-portfolio-chart" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots, { market, denom, hidden })}</div>
+        <div class="acct-portfolio-chart" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots, { market, denom, hidden, initialEquityUsdt: state.initialEquityUsdt })}</div>
       </article>
 
       ${renderCashDock(labOn, labLive, session, opts)}
@@ -895,6 +895,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
     market,
     denom: getEquityDenom(),
     hidden,
+    initialEquityUsdt: state.initialEquityUsdt,
   });
 
   document.querySelectorAll<HTMLElement>(".acct-tx-table [data-raw-amt]").forEach((cell) => {

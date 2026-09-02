@@ -60,17 +60,22 @@ describe("portfolioChart", () => {
   it("renders interactive chart markup", () => {
     const now = Date.now();
     const html = portfolioEquityChart30d(
-      [
-        { ts: now - 5 * 864e5, equityUsdt: 15_000 },
-        { ts: now - 3 * 864e5, equityUsdt: 14_200 },
-        { ts: now, equityUsdt: 12_000 },
-      ],
-      { market: sampleMarket(), denom: "USDT" },
+      [{ ts: now, equityUsdt: 12_000 }],
+      { market: sampleMarket(), denom: "USDT", initialEquityUsdt: 10_000 },
     );
     expect(html).toContain("data-portfolio-chart");
     expect(html).toContain("portfolio-30d-stage");
     expect(html).toContain("12,000");
-    expect(html).toContain("USDT");
+  });
+
+  it("backfills chart from initial equity when only one snapshot", () => {
+    const now = Date.now();
+    const html = portfolioEquityChart30d(
+      [{ ts: now, equityUsdt: 24_000 }],
+      { market: sampleMarket(), initialEquityUsdt: 20_000 },
+    );
+    expect(html).not.toContain("portfolio-30d-empty");
+    expect(html).toContain("portfolio-30d-stage");
   });
 
   it("updates value on hover", () => {
