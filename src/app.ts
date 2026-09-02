@@ -160,7 +160,6 @@ import { exportFillsCsv, exportOrdersCsv, exportOrdersFilename } from "./product
 import { renderSpotEmptyState } from "./product/emptyStates";
 import { lookupWorkersByAddress, renderWorkerLookupResult } from "./product/poolWorker";
 import { renderOracleTransparencyPanel } from "./product/oraclePanel";
-import { wireStratumWizard } from "./product/stratumWizard";
 import { TOUR_V2_STEPS, markTourV2Done, renderTourV2Overlay, tourV2Done } from "./product/tourV2";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
 import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
@@ -2157,8 +2156,6 @@ function wirePoolPage(): void {
   const page = document.querySelector(".pool-page");
   if (!page || page.getAttribute("data-pool-wired") === "1") return;
   page.setAttribute("data-pool-wired", "1");
-
-  wireStratumWizard(page);
 
   document.getElementById("pool-worker-search")?.addEventListener("click", () => {
     void (async () => {

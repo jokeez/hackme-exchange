@@ -13,7 +13,6 @@ import { Ico, assetBadgeLg } from "./icons";
 import {
   buildAssetPortfolioRows,
   equityInDenom,
-  equitySparklineSvg,
   formatPnlAbsInDenom,
   formatTodayPnlHtml,
   formatTxTime,
@@ -461,7 +460,6 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
   const denom = getEquityDenom();
   const eqView = equityInDenom(eq, market, denom);
   const assetRows = buildAssetPortfolioRows(state, market);
-  const spark = equitySparklineSvg(state.equitySnapshots);
   const acctTab = loadAcctTab();
   const hideSmall = loadAcctHideSmall();
 
@@ -502,8 +500,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>
           </div>
         </div>
-        <div class="acct-portfolio-chart" id="acct-spark-host">${spark}</div>
-        <div class="acct-portfolio-30d" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots)}</div>
+        <div class="acct-portfolio-chart" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots)}</div>
       </article>
 
       ${renderCashDock(labOn, labLive, session, opts)}
@@ -910,9 +907,6 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
 
   const host = document.getElementById("acct-alloc-host");
   if (host) host.innerHTML = allocationBars(w, market, eq);
-
-  const sparkHost = document.getElementById("acct-spark-host");
-  if (sparkHost) sparkHost.innerHTML = equitySparklineSvg(state.equitySnapshots);
 
   syncDenomRingDom(denom);
 

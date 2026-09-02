@@ -6,7 +6,6 @@ import { fetchWithTimeout } from "./fetchTimeout";
 import { oracleStatusLabel, type OracleMeta } from "./oracleStatus";
 import { renderOracleTransparencyPanel } from "./product/oraclePanel";
 import { renderWorkerLookupPanel } from "./product/poolWorker";
-import { renderStratumWizard } from "./product/stratumWizard";
 
 function poolBase(): string {
   return INTEGRATION.poolCoordinatorOrigin.replace(/\/$/, "");
@@ -208,7 +207,6 @@ export function renderPoolPage(
         <a href="#pool-live">Live</a>
         <a href="#pool-oracle">Oracle</a>
         <a href="#pool-worker-lookup">Workers</a>
-        <a href="#stratum-wizard">Stratum</a>
         <a href="#pool-links">Links</a>
       </nav>
     </header>
@@ -259,12 +257,9 @@ export function renderPoolPage(
           <strong class="mono" data-pool-stat="payout">${formatNum(live.totalPayoutHmc, 2)} HMC</strong>
         </article>
       </div>
-      <p class="muted small pool-stratum-hint mono">Miner endpoint: <code>stratum+tcp://hackme.tech:3333</code> · worker <code>YOUR_HMC_ADDRESS</code> · <a href="#stratum-wizard">Open wizard →</a></p>
     </section>
 
     ${renderWorkerLookupPanel(opts?.poolAddress ?? "")}
-
-    ${renderStratumWizard()}
 
     <section class="pool-section" id="pool-oracle">
       <header class="pool-section-head">

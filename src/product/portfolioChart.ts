@@ -37,7 +37,7 @@ export function portfolioEquityChart30d(snapshots: EquitySnapshot[], width = 320
       <span class="muted small">30d equity</span>
       <span class="mono ${cls}">${delta >= 0 ? "+" : ""}${formatNum(delta, 2)} USDT (${formatNum(pct, 2)}%)</span>
     </div>
-    <svg class="portfolio-30d-chart" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
+    <svg class="portfolio-30d-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
       <polygon class="portfolio-30d-fill" points="${area}" />
       <polyline class="portfolio-30d-line" fill="none" points="${pts}" />
     </svg>

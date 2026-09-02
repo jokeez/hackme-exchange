@@ -31,7 +31,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "pool",
     title: "Mining pool",
-    body: "Live hashrate, worker lookup by payout address, and stratum wizard.",
+    body: "Live hashrate, worker lookup by payout address, and oracle transparency.",
     view: "pool",
   },
   {

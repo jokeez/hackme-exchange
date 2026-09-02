@@ -2742,11 +2742,16 @@ html.mobile-layout .market-search {
 .acct-portfolio-chart {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: center;
-  min-width: 10rem;
+  width: min(100%, 280px);
+  min-width: 12rem;
   padding: 0.35rem 0.5rem;
 }
+.portfolio-30d { width: 100%; }
+.portfolio-30d-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+.portfolio-30d-chart { width: 100%; height: 72px; display: block; color: var(--accent, #3dd68c); }
 .acct-sparkline {
   width: 200px;
   height: 72px;
@@ -5769,9 +5774,6 @@ html.mobile-layout[data-embed="hub"] .chart-inner {
 }
 
 /* Product pack — account / pool / convert / PWA */
-.acct-portfolio-30d { margin-top: 0.65rem; }
-.portfolio-30d-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
-.portfolio-30d-chart { width: 100%; max-width: 320px; color: var(--accent, #3dd68c); }
 .portfolio-30d-fill { fill: currentColor; opacity: 0.12; }
 .portfolio-30d-line { stroke: currentColor; stroke-width: 2; }
 .multi-wallet-list { display: grid; gap: 0.5rem; }
@@ -5789,9 +5791,6 @@ html.mobile-layout[data-embed="hub"] .chart-inner {
 .pool-worker-row { display: flex; gap: 0.5rem; margin-top: 0.35rem; }
 .pool-worker-row .inp { flex: 1; }
 .pool-worker-table { margin-top: 0.5rem; width: 100%; }
-.stratum-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.65rem; }
-.stratum-steps li { display: grid; grid-template-columns: 1fr auto; gap: 0.35rem 0.5rem; align-items: center; }
-.stratum-code { grid-column: 1 / -1; display: block; padding: 0.45rem 0.55rem; border-radius: 8px; background: color-mix(in srgb, var(--bg) 70%, transparent); overflow-x: auto; }
 .oracle-transparency { margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; }
 .oracle-trans-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
 .oracle-trans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.65rem; }
