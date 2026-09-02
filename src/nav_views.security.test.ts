@@ -87,11 +87,12 @@ describe("main-nav route allowlist", () => {
     expect(parseRouteHash("#account")).toEqual({ view: "account" });
     expect(parseRouteHash("#pool")).toEqual({ view: "pool" });
     expect(parseRouteHash(`#${XSS}`)).toEqual({});
-    expect(parseRouteHash("#convert/HMC_USDT/15m")).toEqual({
+    expect(parseRouteHash("#convert/hmc/usdt")).toEqual({
       view: "convert",
-      pair: "HMC_USDT",
-      tf: "15m",
+      convertFrom: "hmc",
+      convertTo: "usdt",
     });
+    expect(parseRouteHash("#account/fees")).toEqual({ view: "account", section: "fees" });
     expect(parseRouteHash("#spot/NOPE/15m")).toEqual({ view: "spot" });
     expect(parseRouteHash("#spot/HMC_USDT/nope")).toEqual({ view: "spot", pair: "HMC_USDT" });
     expect(formatRouteHash("account", "HMC_USDT", "1m")).toBe("#account");

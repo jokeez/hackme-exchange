@@ -16,6 +16,9 @@ describe("routeHash", () => {
   it("parses non-spot views", () => {
     expect(parseRouteHash("#convert")).toEqual({ view: "convert" });
     expect(parseRouteHash("#pool")).toEqual({ view: "pool" });
+    expect(parseRouteHash("#convert/hmc/usdt")).toEqual({ view: "convert", convertFrom: "hmc", convertTo: "usdt" });
+    expect(parseRouteHash("#account/deposit")).toEqual({ view: "account", section: "deposit" });
+    expect(parseRouteHash("#pool/lookup/HMC-abc")).toEqual({ view: "pool", poolAddress: "HMC-abc" });
   });
 
   it("formats and ignores junk", () => {

@@ -148,6 +148,49 @@ export function todayPnl(state: DemoState, market: MarketSnapshot): { pct: numbe
   return { pct, abs };
 }
 
+/** Signed PnL absolute in the user's equity display currency. */
+export function formatPnlAbsInDenom(
+  absUsdt: number,
+  market: MarketSnapshot,
+  denom: EquityDenom,
+): { amount: string; unit: string } {
+  const sign = absUsdt >= 0 ? "+" : "-";
+  const abs = Math.abs(absUsdt);
+  switch (denom) {
+    case "BTC": {
+      const btc = market.btcUsd > 0 ? abs / market.btcUsd : 0;
+      return { amount: `${sign}${formatPrice(btc)}`, unit: "BTC" };
+    }
+    case "HMC": {
+      const hmc = market.hmcUsdt > 0 ? abs / market.hmcUsdt : 0;
+      return { amount: `${sign}${formatNum(hmc, 2)}`, unit: "HMC" };
+    }
+    case "RUB":
+      return { amount: `${sign}${formatNum(abs * FIAT_USDT_RUB, 2)}`, unit: "₽" };
+    default:
+      return { amount: `${sign}${formatNum(abs, 2)}`, unit: "USDT" };
+  }
+}
+
+export function formatTodayPnlHtml(
+  dayPnl: { pct: number; abs: number },
+  market: MarketSnapshot,
+  denom: EquityDenom,
+  hidden = isBalanceHidden(),
+): string {
+  const cls = dayPnl.abs >= 0 ? "up" : "down";
+  const pnl = formatPnlAbsInDenom(dayPnl.abs, market, denom);
+  const primary = maskBalance(`${pnl.amount} ${pnl.unit}`, hidden);
+  const usdtFallback =
+    denom === "USDT"
+      ? ""
+      : ` <span class="dim">(${maskBalance(`${dayPnl.abs >= 0 ? "+" : ""}${formatNum(dayPnl.abs, 2)} USDT`, hidden)})</span>`;
+  return `<p class="acct-today-pnl ${cls} mono small" id="acct-today-pnl">
+    Today's PnL <strong>${primary}</strong>${usdtFallback}
+    <span class="dim">${formatPct(dayPnl.pct)}</span>
+  </p>`;
+}
+
 function equityUsdt(wallet: Wallet, market: MarketSnapshot): number {
   return walletEquityFromMarket(wallet, market);
 }

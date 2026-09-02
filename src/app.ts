@@ -154,8 +154,14 @@ import {
   wireConvertAssetPickers,
 } from "./convertUi";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
-import { loadConvertDesk, loadActivityTab, saveActivityTab, saveConvertDesk } from "./uiPrefs";
+import { loadConvertDesk, loadActivityTab, loadConvertSlippageBps, saveActivityTab, saveConvertDesk, saveConvertSlippageBps } from "./uiPrefs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
+import { exportFillsCsv, exportOrdersCsv, exportOrdersFilename } from "./product/exportOrders";
+import { renderSpotEmptyState } from "./product/emptyStates";
+import { lookupWorkersByAddress, renderWorkerLookupResult } from "./product/poolWorker";
+import { renderOracleTransparencyPanel } from "./product/oraclePanel";
+import { wireStratumWizard } from "./product/stratumWizard";
+import { TOUR_V2_STEPS, markTourV2Done, renderTourV2Overlay, tourV2Done } from "./product/tourV2";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
 import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
 import { createMarketStream, type MarketStream } from "./adapters/marketStream";
@@ -270,6 +276,10 @@ let uiType: OrderKind = "limit";
 let uiTif: TimeInForce = "GTC";
 let uiPostOnly = false;
 let activityTab: "tape" | "orders" | "history" | "alerts" = loadActivityTab();
+let lastConvertPreviewNet = 0;
+let cachedNodeWallet: { hmc: number; sup: number } | null = null;
+let pendingAccountSection: string | undefined;
+let pendingPoolAddress: string | undefined;
 
 function normalizeActivityTab(raw: string | null | undefined): typeof activityTab {
   if (raw === "tape" || raw === "history" || raw === "alerts" || raw === "orders") return raw;
@@ -454,6 +464,57 @@ function applyHashToState(): void {
   if (h.view) state.mainView = h.view;
   if (h.pair) state.activePair = h.pair;
   if (h.tf) state.activeTf = h.tf;
+  if (h.convertFrom) convertFrom = h.convertFrom;
+  if (h.convertTo) convertTo = h.convertTo;
+  if (h.convertFrom || h.convertTo) saveConvertDesk(convertFrom, convertTo, convertAmtStr);
+  pendingAccountSection = h.section;
+  pendingPoolAddress = h.poolAddress;
+}
+
+function applyPendingDeepLinks(): void {
+  if (state.mainView === "account" && pendingAccountSection) {
+    const section = pendingAccountSection;
+    pendingAccountSection = undefined;
+    if (section === "deposit") {
+      document.getElementById("btn-acct-deposit")?.dispatchEvent(new Event("click"));
+    } else if (section === "withdraw") {
+      document.getElementById("btn-acct-withdraw")?.dispatchEvent(new Event("click"));
+    }
+    const anchor =
+      section === "fees"
+        ? "acct-fees"
+        : section === "activity"
+          ? "acct-activity"
+          : section === "dust"
+            ? "acct-dust"
+            : section === "deposit"
+              ? "acct-cash-deposit"
+              : section === "withdraw"
+                ? "acct-cash-withdraw"
+                : `acct-${section}`;
+    window.setTimeout(() => {
+      document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+  if (state.mainView === "pool" && pendingPoolAddress) {
+    const addr = pendingPoolAddress;
+    pendingPoolAddress = undefined;
+    const inp = document.getElementById("pool-worker-addr") as HTMLInputElement | null;
+    if (inp) inp.value = addr;
+    window.setTimeout(() => {
+      document.getElementById("pool-worker-search")?.dispatchEvent(new Event("click"));
+    }, 120);
+  }
+}
+
+async function ensureAlertNotifications(): Promise<void> {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission === "granted" || Notification.permission === "denied") return;
+  try {
+    await Notification.requestPermission();
+  } catch {
+    /* ignore */
+  }
 }
 
 function ensurePublicTape(force = false): void {
@@ -757,6 +818,18 @@ function refreshActivityPanel(): void {
   wireOrderAmendButtons();
   wireFundsFunding();
   wireAlertButtons();
+  wireActivityExports();
+}
+
+function wireActivityExports(): void {
+  document.getElementById("btn-export-fills")?.addEventListener("click", () => {
+    downloadText(exportOrdersFilename("fills"), exportFillsCsv(state));
+    toast("Fills exported", "ok");
+  });
+  document.getElementById("btn-export-orders")?.addEventListener("click", () => {
+    downloadText(exportOrdersFilename("orders"), exportOrdersCsv(state));
+    toast("Orders exported", "ok");
+  });
 }
 
 function refreshOpenOrderChartLines(): void {
@@ -1351,11 +1424,7 @@ function renderActivityBody(): string {
   if (activityTab === "alerts") {
     const rows = state.priceAlerts.filter((a) => a.pairId === state.activePair);
     if (!rows.length) {
-      return `<div class="bottom-empty act-empty">
-        <p class="empty-title">No alerts</p>
-        <p class="muted small">Chart right-click → Add alert</p>
-        <button type="button" class="btn-sm" id="btn-alert-at-mid">Alert at mid</button>
-      </div>`;
+      return renderSpotEmptyState("alerts");
     }
     return `<div class="act-list">${rows
       .map(
@@ -1376,12 +1445,17 @@ function renderActivityBody(): string {
   if (activityTab === "history") {
     const rows = state.trades.slice(0, 40);
     if (!rows.length) {
-      return `<div class="bottom-empty act-empty">
-        <p class="empty-title">No fills yet</p>
-        <p class="muted small">Filled orders show here</p>
-      </div>`;
+      return `${renderSpotEmptyState("history")}
+        <div class="act-export-row">
+          <button type="button" class="btn-sm" id="btn-export-fills" disabled>Export fills CSV</button>
+          <button type="button" class="btn-sm" id="btn-export-orders">Export orders CSV</button>
+        </div>`;
     }
-    return `<div class="act-list">${rows
+    return `<div class="act-export-row">
+        <button type="button" class="btn-sm" id="btn-export-fills">Export fills CSV</button>
+        <button type="button" class="btn-sm" id="btn-export-orders">Export orders CSV</button>
+      </div>
+      <div class="act-list">${rows
       .map((t) => {
         const p = pairById(t.pairId);
         return `<div class="act-row">
@@ -1402,14 +1476,12 @@ function renderActivityBody(): string {
   const rows = state.orders.filter((o) => o.status === "open" || o.status === "triggered");
   if (!rows.length) {
     const fills = state.trades.filter((t) => t.pairId === state.activePair).length;
-    return `<div class="bottom-empty act-empty">
-      <p class="empty-title">No open orders</p>
-      <p class="muted small">${
+    return `${renderSpotEmptyState("orders")}
+      <p class="muted small act-empty-hint">${
         fills
           ? `Fills are under the Fills tab · Limit rests off mid by default`
           : `Use Buy/Sell under the chart · Limit rests on the book; Market fills instantly`
-      }</p>
-    </div>`;
+      }</p>`;
   }
   return `<div class="act-list">${rows
     .map((o) => {
@@ -1534,6 +1606,11 @@ function renderConvert(): string {
           <div class="cv-q-row"><span>Fee</span><span id="cv-fee">—</span></div>
           <div class="cv-q-row"><span>Route</span><span id="cv-route-label">—</span></div>
         </div>
+        <label class="cv-slippage muted small mono">
+          Slippage guard
+          <input id="cv-slippage-bps" class="inp mono cv-slippage-inp" type="number" min="0" max="500" step="5" value="${loadConvertSlippageBps()}" aria-label="Slippage guard bps" />
+          bps
+        </label>
         <label class="cv-confirm-row muted small">
           <input type="checkbox" id="cv-confirm-large" ${convertConfirmLarge ? "checked" : ""} />
           Confirm when spending &gt;50% of available balance
@@ -1636,6 +1713,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
       const netDisp = minorToDisplay(q.net_to);
       const feeQ = minorToDisplay(q.fee_quote);
       const feeH = minorToDisplay(q.fee_hmc);
+      lastConvertPreviewNet = netDisp;
       gotEl.textContent = formatPrice(netDisp);
       rateEl.textContent = convertRateLabel(
         assetSymbol(convertFrom),
@@ -1691,6 +1769,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
   }
   const p = prev as ConvertPreview;
   const net = convertNetReceive(p);
+  lastConvertPreviewNet = net;
   gotEl.textContent = formatPrice(net);
   rateEl.textContent = convertRateLabel(
     assetSymbol(convertFrom),
@@ -1756,6 +1835,25 @@ async function runConvertDesk(): Promise<void> {
   const avail = freeBalance(state, convertFrom, market ?? undefined);
   if (convertConfirmLarge && amt > avail * 0.5) {
     if (!confirm(`Convert ${formatNum(amt, 4)} ${assetSymbol(convertFrom)} (>50% of balance)?`)) return;
+  }
+
+  const slippageBps = loadConvertSlippageBps();
+  if (slippageBps > 0 && lastConvertPreviewNet > 0) {
+    const fresh = previewConvert(state, market, route, amt);
+    if (!("ok" in fresh && fresh.ok === false)) {
+      const freshNet = convertNetReceive(fresh as ConvertPreview);
+      const drift = Math.abs(freshNet - lastConvertPreviewNet) / lastConvertPreviewNet;
+      if (drift * 10_000 > slippageBps) {
+        const driftPct = (drift * 100).toFixed(2);
+        if (
+          !confirm(
+            `Quote moved ${driftPct}% since preview (guard ${slippageBps} bps). Continue with ≈ ${formatPrice(freshNet)} ${assetSymbol(convertTo)}?`,
+          )
+        ) {
+          return;
+        }
+      }
+    }
   }
 
   const r = CONVERT_ROUTES.find((x) => x.id === route)!;
@@ -2021,6 +2119,11 @@ function wireConvertDesk(): void {
     }
   });
 
+  document.getElementById("cv-slippage-bps")?.addEventListener("change", (e) => {
+    const n = Number((e.target as HTMLInputElement).value);
+    if (Number.isFinite(n)) saveConvertSlippageBps(n);
+  });
+
   document.getElementById("cv-go")?.addEventListener("click", () => {
     void runConvertDesk();
   });
@@ -2055,6 +2158,19 @@ function wirePoolPage(): void {
   if (!page || page.getAttribute("data-pool-wired") === "1") return;
   page.setAttribute("data-pool-wired", "1");
 
+  wireStratumWizard(page);
+
+  document.getElementById("pool-worker-search")?.addEventListener("click", () => {
+    void (async () => {
+      const inp = document.getElementById("pool-worker-addr") as HTMLInputElement | null;
+      const out = document.getElementById("pool-worker-result");
+      if (!inp || !out) return;
+      out.innerHTML = `<span class="muted small">Looking up…</span>`;
+      const result = await lookupWorkersByAddress(inp.value);
+      out.innerHTML = renderWorkerLookupResult(result);
+    })();
+  });
+
   document.getElementById("pool-copy-url")?.addEventListener("click", async () => {
     const url = document.getElementById("pool-endpoint-url")?.textContent?.trim();
     if (!url) return;
@@ -2073,6 +2189,7 @@ function wirePoolPage(): void {
       document.getElementById(href.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
+  applyPendingDeepLinks();
 }
 
 function markConvertPct(pct: number): void {
@@ -2289,6 +2406,10 @@ function renderSpot(): string {
           <button type="button" class="btn-panel-toggle" id="btn-collapse-right" title="Hide markets">›</button>
         </div>
         ${renderOracleStatusHtml(oracleMeta)}
+        <details class="oracle-transparency-details" id="oracle-transparency-details">
+          <summary class="muted small">Oracle transparency</summary>
+          ${market && poolLive ? renderOracleTransparencyPanel(oracleMeta, market, poolLive) : ""}
+        </details>
         <input class="market-search" id="market-search" type="search" placeholder="Search…" aria-label="Search markets" value="${escapeHtml(marketSearch)}" />
         <div class="lane-tabs" id="lane-tabs">
           <button type="button" class="lane-tab ${marketLane === "all" ? "active" : ""}" data-lane="all">All</button>
@@ -2387,7 +2508,7 @@ function render(): void {
       </div>
     </div>
   </header>
-  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet }) : renderPoolPage(poolLive, market)}
+  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
   ${view === "pool" ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
@@ -2410,6 +2531,7 @@ function render(): void {
     });
     wireLabApiButtons();
     wireFundsFunding();
+    applyPendingDeepLinks();
     if (isLabApiEnabled()) {
       void maybeAutoReconnectLabSession();
       if (useLabMatching()) {
@@ -2798,6 +2920,7 @@ async function syncNodeHmcSupUi(): Promise<void> {
     toast(snap.reason, "warn");
     return;
   }
+  cachedNodeWallet = { hmc: snap.hmc, sup: snap.sup };
   if (useLabMatching() || isLabApiEnabled()) {
     // FE-M-STALE: never overwrite lab/paper hybrid when lab API is opted in.
     const note = useLabMatching()
@@ -4498,6 +4621,7 @@ function submitOrder(side: "buy" | "sell"): void {
 
 function wireAlertButtons(): void {
   document.getElementById("btn-alert-at-mid")?.addEventListener("click", () => {
+    void ensureAlertNotifications();
     if (!market) return;
     const price =
       (useLabMatching() ? labBookMid(state.activePair) : 0) || midForPair(market, state.activePair);
@@ -5590,10 +5714,8 @@ function wireEvents(): void {
         b.classList.toggle("active", on);
         b.setAttribute("aria-selected", on ? "true" : "false");
       });
-      document.getElementById("activity-body")!.innerHTML = renderActivityBody();
-      wireCancelButtons();
-      wireOrderAmendButtons();
-      wireAlertButtons();
+      if (activityTab === "alerts") void ensureAlertNotifications();
+      refreshActivityPanel();
     });
   });
 
@@ -6172,6 +6294,7 @@ export async function boot(): Promise<void> {
     }
   }
   maybeShowTour();
+  maybeShowTourV2();
   applyFirstVisitPrefs(state, {
     saveState: () => saveState(state),
     normalizeOverlays: normalizeChartOverlays,
@@ -6301,6 +6424,7 @@ function maybeShowTour(): void {
     bd.remove();
     if (doneToast) toast("You're set — try a market buy", "ok");
     scheduleChartTapHint({ delayMs: 600 });
+    maybeShowTourV2();
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") dismiss();
@@ -6333,6 +6457,53 @@ function maybeShowTour(): void {
   window.addEventListener("keydown", onKey);
   document.body.appendChild(bd);
   paint();
+}
+
+function maybeShowTourV2(): void {
+  if (isHubEmbed()) return;
+  if (tourV2Done()) return;
+  if (sessionStorage.getItem("hackme-ex-tour-v1") !== "1") return;
+
+  let i = 0;
+  const paint = () => {
+    const step = TOUR_V2_STEPS[i]!;
+    document.getElementById("tour-v2-backdrop")?.remove();
+    if (step.view && step.view !== state.mainView) {
+      state.mainView = step.view;
+      saveState(state);
+      syncRouteHash();
+      chartMounted = false;
+      render();
+    }
+    if (step.selector) {
+      document.querySelector(step.selector)?.scrollIntoView({ block: "nearest" });
+    }
+    const wrap = document.createElement("div");
+    wrap.innerHTML = renderTourV2Overlay(step, i, TOUR_V2_STEPS.length);
+    const bd = wrap.firstElementChild as HTMLElement;
+    document.body.appendChild(bd);
+    bd.querySelector("#tour-v2-skip")?.addEventListener("click", () => {
+      markTourV2Done();
+      bd.remove();
+    });
+    bd.querySelector("#tour-v2-next")?.addEventListener("click", () => {
+      if (i + 1 >= TOUR_V2_STEPS.length) {
+        markTourV2Done();
+        bd.remove();
+        toast("Tour complete — explore Account, Convert & Pool", "ok");
+        return;
+      }
+      i += 1;
+      paint();
+    });
+    bd.addEventListener("click", (e) => {
+      if (e.target === bd) {
+        markTourV2Done();
+        bd.remove();
+      }
+    });
+  };
+  window.setTimeout(paint, 800);
 }
 
 window.addEventListener("beforeunload", () => {

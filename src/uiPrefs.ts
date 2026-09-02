@@ -9,10 +9,13 @@ const KEYS = {
   convertFrom: "hackme.ui.convertFrom",
   convertTo: "hackme.ui.convertTo",
   convertAmt: "hackme.ui.convertAmt",
+  convertSlippageBps: "hackme.ui.convertSlippageBps",
   activityTab: "hackme.ui.activityTab",
   acctTab: "hackme.ui.acctTab",
   acctHideSmall: "hackme.ui.acctHideSmall",
 } as const;
+
+export const DEFAULT_CONVERT_SLIPPAGE_BPS = 50;
 
 function readStorage(getter: () => string | null): string | null {
   try {
@@ -81,4 +84,16 @@ export function saveAcctHideSmall(on: boolean): void {
     if (on) localStorage.setItem(KEYS.acctHideSmall, "1");
     else localStorage.removeItem(KEYS.acctHideSmall);
   });
+}
+
+export function loadConvertSlippageBps(): number {
+  const raw = readStorage(() => localStorage.getItem(KEYS.convertSlippageBps));
+  const n = raw != null ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 0 && n <= 500) return Math.round(n);
+  return DEFAULT_CONVERT_SLIPPAGE_BPS;
+}
+
+export function saveConvertSlippageBps(bps: number): void {
+  const clamped = Math.max(0, Math.min(500, Math.round(bps)));
+  writeStorage(() => localStorage.setItem(KEYS.convertSlippageBps, String(clamped)));
 }
