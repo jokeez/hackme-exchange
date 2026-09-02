@@ -23,6 +23,7 @@ import {
   renderDenomRing,
   setBalanceHidden,
   setEquityDenom,
+  syncDenomRingDom,
   todayPnl,
   type EquityDenom,
 } from "./accountPortfolio";
@@ -633,6 +634,10 @@ function applyBalanceVisibility(hidden: boolean): void {
 }
 
 export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onUpdate: () => void): void {
+  const page = document.querySelector(".account-page");
+  if (!page || page.getAttribute("data-acct-wired") === "1") return;
+  page.setAttribute("data-acct-wired", "1");
+
   document.querySelectorAll("#link-acct-wallet").forEach((el) => {
     el.addEventListener("click", (ev) => {
       if (isHubEmbed() && postHubGotoTab("wallet")) {
@@ -831,6 +836,8 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
 
   const sparkHost = document.getElementById("acct-spark-host");
   if (sparkHost) sparkHost.innerHTML = equitySparklineSvg(state.equitySnapshots);
+
+  syncDenomRingDom(denom);
 
   const sess = document.getElementById("lab-session-addr");
   if (sess) sess.textContent = labSessionLabel().label;

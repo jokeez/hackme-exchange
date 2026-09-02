@@ -60,11 +60,20 @@ export function equityInDenom(
       };
     default:
       return {
-        primary: formatNum(eqUsdt, 8),
+        primary: formatNum(eqUsdt, 2),
         unit: "USDT",
         secondary: `≈ ${formatNum(eqUsdt * FIAT_USDT_RUB, 2)} ₽`,
       };
   }
+}
+
+/** Keep denom ring in sync after soft account patches (oracle refresh). */
+export function syncDenomRingDom(denom: EquityDenom): void {
+  document.querySelectorAll<HTMLElement>("[data-denom]").forEach((orb) => {
+    const on = orb.dataset.denom === denom;
+    orb.classList.toggle("active", on);
+    orb.setAttribute("aria-checked", on ? "true" : "false");
+  });
 }
 
 export function renderDenomRing(active: EquityDenom): string {
