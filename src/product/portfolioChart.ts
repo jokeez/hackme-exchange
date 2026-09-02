@@ -1,45 +1,243 @@
-import type { EquitySnapshot } from "../types";
+import { equityInDenom, type EquityDenom, maskBalance, isBalanceHidden } from "../accountPortfolio";
 import { formatNum } from "../market";
+import type { EquitySnapshot, MarketSnapshot } from "../types";
 
 const MS_30D = 30 * 24 * 60 * 60 * 1000;
+const MS_DAY = 86_400_000;
+const CHART_W = 360;
+const CHART_H = 96;
+const PAD = { t: 10, r: 8, b: 10, l: 8 };
+
+export type PortfolioChartOpts = {
+  market?: MarketSnapshot;
+  denom?: EquityDenom;
+  hidden?: boolean;
+};
+
+export type PortfolioChartPoint = {
+  ts: number;
+  equityUsdt: number;
+  x: number;
+  y: number;
+};
 
 export function snapshotsLast30d(snapshots: EquitySnapshot[]): EquitySnapshot[] {
   const cutoff = Date.now() - MS_30D;
   return snapshots.filter((s) => s.ts >= cutoff).sort((a, b) => a.ts - b.ts);
 }
 
-/** Mini area chart for 30d equity (USDT). */
-export function portfolioEquityChart30d(snapshots: EquitySnapshot[], width = 320, height = 72): string {
+/** One point per calendar day — last snapshot of each day (smoother chart). */
+export function equityDailySeries(snapshots: EquitySnapshot[]): EquitySnapshot[] {
   const rows = snapshotsLast30d(snapshots);
-  if (rows.length < 2) {
-    return `<div class="portfolio-30d-empty muted small">30d chart unlocks after more equity snapshots</div>`;
+  if (!rows.length) return [];
+  const byDay = new Map<string, EquitySnapshot>();
+  for (const s of rows) {
+    const d = new Date(s.ts);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const prev = byDay.get(key);
+    if (!prev || s.ts >= prev.ts) byDay.set(key, s);
   }
+  return [...byDay.values()].sort((a, b) => a.ts - b.ts);
+}
+
+export function formatChartDayLabel(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  if (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  ) {
+    return "Today";
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate()
+  ) {
+    return "Yesterday";
+  }
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function chartPoints(rows: EquitySnapshot[]): PortfolioChartPoint[] {
+  if (rows.length < 2) return [];
   const vals = rows.map((r) => r.equityUsdt);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const span = max - min || 1;
-  const pad = 4;
-  const innerW = width - pad * 2;
-  const innerH = height - pad * 2;
-  const pts = vals
-    .map((v, i) => {
-      const x = pad + (i / (vals.length - 1)) * innerW;
-      const y = pad + innerH - ((v - min) / span) * innerH;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const area = `${pad},${pad + innerH} ${pts} ${pad + innerW},${pad + innerH}`;
-  const delta = vals[vals.length - 1]! - vals[0]!;
-  const pct = vals[0]! !== 0 ? (delta / vals[0]!) * 100 : 0;
-  const cls = delta >= 0 ? "up" : "down";
-  return `<div class="portfolio-30d">
+  let min = Math.min(...vals);
+  let max = Math.max(...vals);
+  const span = max - min || Math.max(max * 0.02, 1);
+  min -= span * 0.1;
+  max += span * 0.06;
+  const innerW = CHART_W - PAD.l - PAD.r;
+  const innerH = CHART_H - PAD.t - PAD.b;
+  return rows.map((r, i) => {
+    const x = PAD.l + (i / (rows.length - 1)) * innerW;
+    const y = PAD.t + innerH - ((r.equityUsdt - min) / (max - min)) * innerH;
+    return { ts: r.ts, equityUsdt: r.equityUsdt, x, y };
+  });
+}
+
+function formatBalance(
+  eqUsdt: number,
+  opts: PortfolioChartOpts,
+): string {
+  const hidden = opts.hidden ?? false;
+  if (opts.market && opts.denom) {
+    const v = equityInDenom(eqUsdt, opts.market, opts.denom);
+    return maskBalance(`${v.primary} ${v.unit}`, hidden);
+  }
+  return maskBalance(`${formatNum(eqUsdt, 2)} USDT`, hidden);
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+/** Interactive 30d equity chart — hover shows balance at each day. */
+export function portfolioEquityChart30d(
+  snapshots: EquitySnapshot[],
+  opts: PortfolioChartOpts = {},
+): string {
+  const daily = equityDailySeries(snapshots);
+  if (daily.length < 2) {
+    return `<div class="portfolio-30d-empty-wrap"><p class="portfolio-30d-empty muted small">Balance history appears after more sessions</p></div>`;
+  }
+
+  const pts = chartPoints(daily);
+  const last = pts[pts.length - 1]!;
+  const first = pts[0]!;
+  const up = last.equityUsdt >= first.equityUsdt;
+  const cls = up ? "up" : "down";
+  const linePts = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const baseY = (CHART_H - PAD.b).toFixed(1);
+  const area = `${PAD.l},${baseY} ${linePts} ${(CHART_W - PAD.r).toFixed(1)},${baseY}`;
+  const dataJson = escapeAttr(JSON.stringify(pts.map((p) => ({ ts: p.ts, eq: p.equityUsdt }))));
+  const marketAttrs = opts.market
+    ? ` data-hmc-usdt="${opts.market.hmcUsdt}" data-btc-usd="${opts.market.btcUsd}" data-sup-usdt="${opts.market.supUsdt}"`
+    : "";
+
+  return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-denom="${opts.denom ?? "USDT"}"${marketAttrs}>
     <div class="portfolio-30d-head">
-      <span class="muted small">30d equity</span>
-      <span class="mono ${cls}">${delta >= 0 ? "+" : ""}${formatNum(delta, 2)} USDT (${formatNum(pct, 2)}%)</span>
+      <span class="portfolio-30d-val mono" id="portfolio-30d-val">${formatBalance(last.equityUsdt, opts)}</span>
+      <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)}</p>
     </div>
-    <svg class="portfolio-30d-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-      <polygon class="portfolio-30d-fill" points="${area}" />
-      <polyline class="portfolio-30d-line" fill="none" points="${pts}" />
-    </svg>
+    <div class="portfolio-30d-stage" id="portfolio-30d-stage">
+      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="pf30-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.35" />
+            <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon class="portfolio-30d-fill" points="${area}" fill="url(#pf30-fill)" />
+        <polyline class="portfolio-30d-line" fill="none" points="${linePts}" />
+        <line class="portfolio-30d-cross" id="portfolio-30d-cross" y1="${PAD.t}" y2="${CHART_H - PAD.b}" hidden />
+        <circle class="portfolio-30d-dot" id="portfolio-30d-dot" r="4.5" hidden />
+      </svg>
+    </div>
   </div>`;
+}
+
+function setSvgVisible(el: SVGLineElement | SVGCircleElement | null, on: boolean): void {
+  if (!el) return;
+  if (on) el.removeAttribute("hidden");
+  else el.setAttribute("hidden", "true");
+}
+
+function marketFromHost(host: HTMLElement): MarketSnapshot | undefined {
+  const hmc = Number(host.dataset.hmcUsdt);
+  const btc = Number(host.dataset.btcUsd);
+  const sup = Number(host.dataset.supUsdt);
+  if (!Number.isFinite(hmc) || !Number.isFinite(btc)) return undefined;
+  return { hmcUsdt: hmc, btcUsd: btc, supUsdt: Number.isFinite(sup) ? sup : 0 } as unknown as MarketSnapshot;
+}
+
+function readPoints(root: HTMLElement): { ts: number; eq: number }[] {
+  try {
+    return JSON.parse(root.dataset.points ?? "[]") as { ts: number; eq: number }[];
+  } catch {
+    return [];
+  }
+}
+
+export function wirePortfolioEquityChart(root: ParentNode): void {
+  const host = root.querySelector<HTMLElement>("[data-portfolio-chart]");
+  if (!host || host.dataset.chartWired === "1") return;
+  host.dataset.chartWired = "1";
+
+  const stage = host.querySelector<HTMLElement>("#portfolio-30d-stage");
+  const svg = host.querySelector<SVGSVGElement>(".portfolio-30d-chart");
+  const valEl = host.querySelector<HTMLElement>("#portfolio-30d-val");
+  const dateEl = host.querySelector<HTMLElement>("#portfolio-30d-date");
+  const cross = host.querySelector<SVGLineElement>("#portfolio-30d-cross");
+  const dot = host.querySelector<SVGCircleElement>("#portfolio-30d-dot");
+  if (!stage || !svg || !valEl || !dateEl || !cross || !dot) return;
+
+  const rawPts = readPoints(host);
+  if (rawPts.length < 2) return;
+  const chartPts = chartPoints(rawPts.map((p) => ({ ts: p.ts, equityUsdt: p.eq })));
+
+  const denom = (host.dataset.denom as EquityDenom) || "USDT";
+  const hidden = isBalanceHidden();
+  const market = marketFromHost(host);
+  const fmtOpts = (): PortfolioChartOpts => ({ market, denom, hidden });
+
+  const paint = (idx: number) => {
+    const p = chartPts[idx];
+    if (!p) return;
+    setSvgVisible(cross, true);
+    setSvgVisible(dot, true);
+    cross.setAttribute("x1", String(p.x));
+    cross.setAttribute("x2", String(p.x));
+    dot.setAttribute("cx", String(p.x));
+    dot.setAttribute("cy", String(p.y));
+    valEl.textContent = formatBalance(p.equityUsdt, fmtOpts());
+    dateEl.textContent = formatChartDayLabel(p.ts);
+  };
+
+  const indexFromX = (clientX: number): number => {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return chartPts.length - 1;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(ratio * (chartPts.length - 1));
+  };
+
+  const onMove = (ev: PointerEvent) => paint(indexFromX(ev.clientX));
+  const onLeave = () => {
+    setSvgVisible(cross, false);
+    setSvgVisible(dot, false);
+    const last = chartPts[chartPts.length - 1]!;
+    valEl.textContent = formatBalance(last.equityUsdt, fmtOpts());
+    dateEl.textContent = formatChartDayLabel(last.ts);
+  };
+
+  stage.addEventListener("pointerenter", onMove);
+  stage.addEventListener("pointermove", onMove);
+  stage.addEventListener("pointerleave", onLeave);
+}
+
+export function refreshPortfolioChartHtml(
+  snapshots: EquitySnapshot[],
+  opts: PortfolioChartOpts = {},
+): void {
+  const host = document.getElementById("acct-portfolio-30d");
+  if (!host) return;
+  host.innerHTML = portfolioEquityChart30d(snapshots, opts);
+  wirePortfolioEquityChart(host);
+}
+
+/** @deprecated use wirePortfolioEquityChart */
+export const wirePortfolioChart30d = wirePortfolioEquityChart;
+
+/** @deprecated use refreshPortfolioChartHtml */
+export function refreshPortfolioChart30d(
+  host: HTMLElement | null,
+  snapshots: EquitySnapshot[],
+  opts: PortfolioChartOpts = {},
+): void {
+  if (!host) return;
+  host.innerHTML = portfolioEquityChart30d(snapshots, opts);
+  wirePortfolioEquityChart(host);
 }

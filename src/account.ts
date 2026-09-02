@@ -30,7 +30,7 @@ import {
 } from "./accountPortfolio";
 import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "./uiPrefs";
 import { renderDustPanel } from "./product/dustConvert";
-import { portfolioEquityChart30d } from "./product/portfolioChart";
+import { portfolioEquityChart30d, refreshPortfolioChartHtml, wirePortfolioEquityChart } from "./product/portfolioChart";
 import { renderMultiWalletCard, type WalletSlice } from "./product/multiWallet";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
@@ -500,7 +500,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>
           </div>
         </div>
-        <div class="acct-portfolio-chart" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots)}</div>
+        <div class="acct-portfolio-chart" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots, { market, denom, hidden })}</div>
       </article>
 
       ${renderCashDock(labOn, labLive, session, opts)}
@@ -825,6 +825,7 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
 
   applyBalanceVisibility(isBalanceHidden());
   applyAssetFilters();
+  wirePortfolioEquityChart(page);
 }
 
 /**
@@ -890,8 +891,11 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
     if (next) todayEl.replaceWith(next);
   }
 
-  const chart30 = document.getElementById("acct-portfolio-30d");
-  if (chart30) chart30.innerHTML = portfolioEquityChart30d(state.equitySnapshots);
+  refreshPortfolioChartHtml(state.equitySnapshots, {
+    market,
+    denom: getEquityDenom(),
+    hidden,
+  });
 
   document.querySelectorAll<HTMLElement>(".acct-tx-table [data-raw-amt]").forEach((cell) => {
     const raw = cell.dataset.rawAmt ?? "";
