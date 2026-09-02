@@ -1605,11 +1605,13 @@ function renderConvert(): string {
           <div class="cv-q-row"><span>Fee</span><span id="cv-fee">—</span></div>
           <div class="cv-q-row"><span>Route</span><span id="cv-route-label">—</span></div>
         </div>
-        <label class="cv-slippage muted small mono">
-          Slippage guard
-          <input id="cv-slippage-bps" class="inp mono cv-slippage-inp" type="number" min="0" max="500" step="5" value="${loadConvertSlippageBps()}" aria-label="Slippage guard bps" />
-          bps
-        </label>
+        <div class="cv-slippage-row">
+          <span class="cv-slippage-label muted small">Slippage guard</span>
+          <div class="cv-slippage-field mono">
+            <input id="cv-slippage-bps" class="cv-slippage-inp" type="number" min="0" max="500" step="5" value="${loadConvertSlippageBps()}" aria-label="Slippage guard bps" />
+            <span class="cv-slippage-suffix">bps</span>
+          </div>
+        </div>
         <label class="cv-confirm-row muted small">
           <input type="checkbox" id="cv-confirm-large" ${convertConfirmLarge ? "checked" : ""} />
           Confirm when spending &gt;50% of available balance
