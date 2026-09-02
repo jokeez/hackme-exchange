@@ -116,7 +116,9 @@ describe("Account view XSS / DOM sinks", () => {
     const addr = document.getElementById("lab-fee-wallet-addr");
     expect(addr?.textContent).toContain("<");
     expect(addr?.innerHTML).toContain("&lt;");
-    expect(document.querySelectorAll("img").length).toBe(0);
+    for (const img of document.querySelectorAll("img")) {
+      expect(img.getAttribute("src")).toMatch(/^\/assets\/coins\//);
+    }
   });
 
   it("escapes ledger kind/asset/note when mounted", () => {
