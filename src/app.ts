@@ -1496,11 +1496,13 @@ function renderConvert(): string {
             <span>From</span>
             <button type="button" class="linkish" id="cv-max">Max</button>
           </div>
-          ${renderConvertAssetPicker("from", convertFrom, convertTo)}
-          <select id="cv-from" class="cv-sel-native" aria-hidden="true" tabindex="-1">${fromOpts}</select>
-          <div class="cv-amt-wrap">
-            <label class="muted small cv-amt-label" for="cv-amt">Amount</label>
-            <input id="cv-amt" class="inp mono cv-amt-inp" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount" placeholder="0.00" />
+          <div class="cv-leg-row">
+            ${renderConvertAssetPicker("from", convertFrom, convertTo)}
+            <select id="cv-from" class="cv-sel-native" aria-hidden="true" tabindex="-1">${fromOpts}</select>
+            <div class="cv-amt-wrap cv-amt-wrap-inline">
+              <label class="muted small cv-amt-label" for="cv-amt">Amount</label>
+              <input id="cv-amt" class="inp mono cv-amt-inp" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount" placeholder="0.00" />
+            </div>
           </div>
           <div class="cv-bal muted small mono" id="cv-from-bal"></div>
           <div class="cv-pct" role="group" aria-label="Quick size">
@@ -1515,11 +1517,13 @@ function renderConvert(): string {
         </div>
         <div class="cv-leg cv-leg-to">
           <div class="cv-leg-head"><span>To</span><span class="muted small" id="cv-to-label">You receive</span></div>
-          ${renderConvertAssetPicker("to", convertTo, convertFrom)}
-          <select id="cv-to" class="cv-sel-native" aria-hidden="true" tabindex="-1">${toOpts}</select>
-          <div class="cv-receive-wrap">
-            <span class="muted small cv-receive-label">Estimated receive</span>
-            <div class="cv-receive mono" id="cv-got">—</div>
+          <div class="cv-leg-row">
+            ${renderConvertAssetPicker("to", convertTo, convertFrom)}
+            <select id="cv-to" class="cv-sel-native" aria-hidden="true" tabindex="-1">${toOpts}</select>
+            <div class="cv-receive-wrap cv-receive-wrap-inline">
+              <span class="muted small cv-receive-label">Estimated receive</span>
+              <div class="cv-receive mono" id="cv-got">—</div>
+            </div>
           </div>
         </div>
         </div>
