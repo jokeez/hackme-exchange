@@ -14,6 +14,8 @@ import {
   buildAssetPortfolioRows,
   equityInDenom,
   equitySparklineSvg,
+  formatPnlAbsInDenom,
+  formatTodayPnlHtml,
   formatTxTime,
   getEquityDenom,
   isBalanceHidden,
@@ -28,11 +30,16 @@ import {
   type EquityDenom,
 } from "./accountPortfolio";
 import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "./uiPrefs";
-import type { DemoState, MarketSnapshot } from "./types";
+import { renderDustPanel } from "./product/dustConvert";
+import { portfolioEquityChart30d } from "./product/portfolioChart";
+import { renderMultiWalletCard, type WalletSlice } from "./product/multiWallet";
+import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
 export type AccountPageOpts = {
   /** Lab fee-collection address from /health `fee_wallet` (omit → hide row). */
   feeWallet?: string | null;
+  /** Optional node wallet snapshot for multi-wallet row. */
+  nodeWallet?: { hmc: number; sup: number } | null;
 };
 
 /** Read-only lab fee sink row — empty when address missing (graceful hide). */
@@ -221,12 +228,41 @@ function renderCashDock(
 }
 
 function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnType<typeof activeVipTier>, vol: number): string {
+  const vipProg = nextVipProgress(state, market);
+  const tierCards = [...VIP_TIERS]
+    .sort((a, b) => a.minVolUsdt - b.minVolUsdt)
+    .map((t) => {
+      const active = t.name === vip.name;
+      const reached = vol >= t.minVolUsdt;
+      return `<article class="fee-tier-card${active ? " active" : ""}${reached ? " reached" : ""}">
+        <div class="fee-tier-top">
+          <strong>${t.name}</strong>
+          ${active ? `<span class="fee-tier-badge">Current</span>` : ""}
+        </div>
+        <p class="muted small mono">≥ ${formatNum(t.minVolUsdt, 0)} USDT / 30d</p>
+        <div class="fee-tier-rates mono small">
+          <span>Maker ${formatBps(t.makerBps)}</span>
+          <span>Taker ${formatBps(t.takerBps)}</span>
+        </div>
+      </article>`;
+    })
+    .join("");
+
   return `
     <section class="acct-fees-block glass-inset" id="acct-fees">
       <header class="acct-block-head">
         <h3>Fees · VIP · Oracle</h3>
-        <p class="muted small">30d <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}</p>
+        <p class="muted small">30d volume <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}</p>
+        <div class="vip-progress fee-vip-progress">
+          <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
+          <p class="muted small">${
+            vipProg.next
+              ? `${formatNum(vol, 0)} / ${formatNum(vipProg.next.minVolUsdt, 0)} USDT → ${vipProg.next.name}`
+              : "Top VIP tier unlocked"
+          }</p>
+        </div>
       </header>
+      <div class="fee-tier-grid">${tierCards}</div>
       <div class="acct-fees-grid">
         <article class="acct-oracle-strip">
           <span class="acct-oracle-pill"><span class="muted">HMC</span> <strong class="mono">${formatPrice(market.hmcUsdt)}</strong></span>
@@ -255,6 +291,38 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
         </label>
       </div>
     </section>`;
+}
+
+function buildMultiWalletSlices(state: DemoState, opts: AccountPageOpts | undefined): WalletSlice[] {
+  const paper: Wallet = { ...state.wallet };
+  const nodeBal: Wallet = {
+    usdt: 0,
+    hmc: opts?.nodeWallet?.hmc ?? 0,
+    sup: opts?.nodeWallet?.sup ?? 0,
+    btc: 0,
+  };
+  return [
+    {
+      id: "paper",
+      label: "Paper wallet",
+      subtitle: "Spot · Convert · localStorage demo",
+      wallet: paper,
+    },
+    {
+      id: "node",
+      label: "Node wallet",
+      subtitle: opts?.nodeWallet ? "Synced HMC/SUP from hackme-node" : "Connect node to sync on-chain balances",
+      wallet: nodeBal,
+      href: nodeWalletUrl(),
+    },
+    {
+      id: "lab",
+      label: "Lab ledger",
+      subtitle: useLabMatching() ? "Private DEMO/LAB matching session" : "Connect fixture for lab balances",
+      wallet: useLabMatching() ? paper : { usdt: 0, hmc: 0, sup: 0, btc: 0 },
+      href: "#account",
+    },
+  ];
 }
 
 function renderActivityBlock(
@@ -424,10 +492,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             ${maskBalance(eqView.primary, hidden)} <span class="acct-eq-unit muted" id="acct-eq-unit">${eqView.unit}</span>
           </p>
           <p class="acct-fiat muted small" id="acct-fiat-eq">${maskBalance(eqView.secondary, hidden)}</p>
-          <p class="acct-today-pnl ${dayPnl.abs >= 0 ? "up" : "down"} mono small" id="acct-today-pnl">
-            Today's PnL <strong>${dayPnl.abs >= 0 ? "+" : ""}${maskBalance(formatNum(dayPnl.abs, 2), hidden)}</strong>
-            <span class="dim">USDT (${formatPct(dayPnl.pct)})</span>
-          </p>
+          ${formatTodayPnlHtml(dayPnl, market, denom, hidden)}
           <p class="acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
           <div id="acct-denom-host">${renderDenomRing(denom)}</div>
           <div class="acct-quick-actions">
@@ -438,6 +503,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           </div>
         </div>
         <div class="acct-portfolio-chart" id="acct-spark-host">${spark}</div>
+        <div class="acct-portfolio-30d" id="acct-portfolio-30d">${portfolioEquityChart30d(state.equitySnapshots)}</div>
       </article>
 
       ${renderCashDock(labOn, labLive, session, opts)}
@@ -505,13 +571,14 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <div id="acct-alloc-host">${allocationBars(w, market, eq)}</div>
           <div class="pnl-cards compact">
             ${windows
-              .map(
-                (x) => `<article class="pnl-card glass-inset">
+              .map((x) => {
+                const pnlFmt = formatPnlAbsInDenom(x.abs, market, denom);
+                return `<article class="pnl-card glass-inset">
                   <span class="muted small">${x.label}</span>
                   <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
-                  <span class="dim mono">${x.abs >= 0 ? "+" : ""}${formatNum(x.abs, 2)} USDT</span>
-                </article>`,
-              )
+                  <span class="dim mono">${maskBalance(`${pnlFmt.amount} ${pnlFmt.unit}`, hidden)}</span>
+                </article>`;
+              })
               .join("")}
           </div>
         </div>
@@ -544,6 +611,10 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </header>
       <div id="acct-recent-tx-body">${renderRecentTxTable(state, hidden)}</div>
     </section>
+
+    ${renderMultiWalletCard(buildMultiWalletSlices(state, opts), market)}
+
+    ${renderDustPanel(w, market)}
 
     ${renderFeesBlock(state, market, vip, vol)}
 
@@ -813,11 +884,17 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
 
   const todayEl = document.getElementById("acct-today-pnl");
   if (todayEl) {
-    todayEl.classList.remove("up", "down");
-    todayEl.classList.add(dayPnl.abs >= 0 ? "up" : "down");
-    const pnlAbs = `${dayPnl.abs >= 0 ? "+" : ""}${maskBalance(formatNum(dayPnl.abs, 2), hidden)}`;
-    todayEl.innerHTML = `Today's PnL <strong>${pnlAbs}</strong> <span class="dim">USDT (${formatPct(dayPnl.pct)})</span>`;
+    const denom = getEquityDenom();
+    const hidden = isBalanceHidden();
+    const replacement = formatTodayPnlHtml(dayPnl, market, denom, hidden);
+    const wrap = document.createElement("div");
+    wrap.innerHTML = replacement;
+    const next = wrap.firstElementChild;
+    if (next) todayEl.replaceWith(next);
   }
+
+  const chart30 = document.getElementById("acct-portfolio-30d");
+  if (chart30) chart30.innerHTML = portfolioEquityChart30d(state.equitySnapshots);
 
   document.querySelectorAll<HTMLElement>(".acct-tx-table [data-raw-amt]").forEach((cell) => {
     const raw = cell.dataset.rawAmt ?? "";

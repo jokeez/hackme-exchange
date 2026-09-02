@@ -5768,6 +5768,51 @@ html.mobile-layout[data-embed="hub"] .chart-inner {
   touch-action: none;
 }
 
+/* Product pack — account / pool / convert / PWA */
+.acct-portfolio-30d { margin-top: 0.65rem; }
+.portfolio-30d-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+.portfolio-30d-chart { width: 100%; max-width: 320px; color: var(--accent, #3dd68c); }
+.portfolio-30d-fill { fill: currentColor; opacity: 0.12; }
+.portfolio-30d-line { stroke: currentColor; stroke-width: 2; }
+.multi-wallet-list { display: grid; gap: 0.5rem; }
+.multi-wallet-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.55rem 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.multi-wallet-row:last-child { border-bottom: 0; }
+.multi-wallet-bal { display: flex; flex-direction: column; align-items: flex-end; gap: 0.2rem; }
+.dust-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.dust-list li { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.fee-tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
+.fee-tier-card { padding: 0.55rem 0.65rem; border-radius: 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--glass) 80%, transparent); }
+.fee-tier-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.fee-tier-top { display: flex; align-items: center; gap: 0.35rem; }
+.fee-tier-badge { font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.pool-worker-form { padding: 0.75rem; border-radius: 12px; }
+.pool-worker-row { display: flex; gap: 0.5rem; margin-top: 0.35rem; }
+.pool-worker-row .inp { flex: 1; }
+.pool-worker-table { margin-top: 0.5rem; width: 100%; }
+.stratum-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.65rem; }
+.stratum-steps li { display: grid; grid-template-columns: 1fr auto; gap: 0.35rem 0.5rem; align-items: center; }
+.stratum-code { grid-column: 1 / -1; display: block; padding: 0.45rem 0.55rem; border-radius: 8px; background: color-mix(in srgb, var(--bg) 70%, transparent); overflow-x: auto; }
+.oracle-transparency { margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; }
+.oracle-trans-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.oracle-trans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.65rem; }
+.oracle-trans-mids { list-style: none; margin: 0.25rem 0 0; padding: 0; }
+.oracle-transparency-details summary { cursor: pointer; margin: 0.35rem 0; }
+.cv-slippage { display: flex; align-items: center; gap: 0.35rem; margin: 0.5rem 0; }
+.cv-slippage-inp { width: 4.5rem; padding: 0.2rem 0.35rem; }
+.act-export-row { display: flex; gap: 0.35rem; padding: 0.35rem 0.5rem 0.5rem; flex-wrap: wrap; }
+.pwa-install-banner {
+  position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 1200;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.75rem 1rem; border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+}
+.pwa-banner-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+.tour-v2-backdrop {
+  position: fixed; inset: 0; z-index: 1300; background: rgba(0,0,0,0.55);
+  display: grid; place-items: center; padding: 1rem;
+}
+.tour-v2-card { max-width: 420px; width: 100%; padding: 1rem 1.1rem; border-radius: 14px; }
+.tour-v2-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
