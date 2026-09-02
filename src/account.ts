@@ -26,6 +26,7 @@ import {
   todayPnl,
   type EquityDenom,
 } from "./accountPortfolio";
+import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "./uiPrefs";
 import type { DemoState, MarketSnapshot } from "./types";
 
 export type AccountPageOpts = {
@@ -392,6 +393,8 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
   const eqView = equityInDenom(eq, market, denom);
   const assetRows = buildAssetPortfolioRows(state, market);
   const spark = equitySparklineSvg(state.equitySnapshots);
+  const acctTab = loadAcctTab();
+  const hideSmall = loadAcctHideSmall();
 
   return `
   <section class="account-page glass">
@@ -442,8 +445,8 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
     <section class="acct-assets-panel glass-inset" id="acct-balances">
       <header class="acct-assets-head">
         <div class="acct-assets-tabs" role="tablist" aria-label="Wallet views">
-          <button type="button" class="acct-tab active" data-acct-tab="assets" role="tab" aria-selected="true">Assets</button>
-          <button type="button" class="acct-tab" data-acct-tab="account" role="tab" aria-selected="false">Overview</button>
+          <button type="button" class="acct-tab${acctTab === "assets" ? " active" : ""}" data-acct-tab="assets" role="tab" aria-selected="${acctTab === "assets"}">Assets</button>
+          <button type="button" class="acct-tab${acctTab === "account" ? " active" : ""}" data-acct-tab="account" role="tab" aria-selected="${acctTab === "account"}">Overview</button>
         </div>
         <div class="acct-assets-tools">
           <label class="acct-search-wrap">${Ico.search()}
@@ -451,13 +454,13 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           </label>
           <a class="acct-tool-link" href="#convert">Convert dust</a>
           <label class="acct-hide-small">
-            <input type="checkbox" id="acct-hide-small" />
+            <input type="checkbox" id="acct-hide-small" ${hideSmall ? "checked" : ""} />
             Hide &lt; 1 USD
           </label>
         </div>
       </header>
 
-      <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds">
+      <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds"${acctTab !== "assets" ? " hidden" : ""}>
         <table class="acct-asset-table data-table">
           <thead>
             <tr>
@@ -481,7 +484,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         </table>
       </div>
 
-      <div class="acct-tab-panel" data-acct-panel="account" hidden>
+      <div class="acct-tab-panel" data-acct-panel="account"${acctTab !== "account" ? " hidden" : ""}>
         <div class="acct-account-view">
           <div class="acct-vip-row">
             <span class="vip-badge lg" title="Demo VIP from local trade history">
@@ -667,11 +670,15 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
   });
 
   document.getElementById("acct-asset-search")?.addEventListener("input", applyAssetFilters);
-  document.getElementById("acct-hide-small")?.addEventListener("change", applyAssetFilters);
+  document.getElementById("acct-hide-small")?.addEventListener("change", (e) => {
+    saveAcctHideSmall((e.target as HTMLInputElement).checked);
+    applyAssetFilters();
+  });
 
   document.querySelectorAll("[data-acct-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const tab = (btn as HTMLElement).dataset.acctTab ?? "assets";
+      const tab = ((btn as HTMLElement).dataset.acctTab ?? "assets") as "assets" | "account";
+      saveAcctTab(tab);
       document.querySelectorAll("[data-acct-tab]").forEach((b) => {
         const on = (b as HTMLElement).dataset.acctTab === tab;
         b.classList.toggle("active", on);

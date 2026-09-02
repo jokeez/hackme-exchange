@@ -1,5 +1,8 @@
+/**
+ * @vitest-environment happy-dom
+ */
 import { describe, expect, it } from "vitest";
-import { renderPoolPage, renderPoolRail, poolStatusBanner } from "./pool";
+import { renderPoolPage, renderPoolRail, poolStatusBanner, patchPoolLiveDom } from "./pool";
 import { sampleMarket } from "./testFixtures";
 import type { PoolLive } from "./types";
 import { assetById, tradableQuoteAssets } from "./adapters/assets";
@@ -26,6 +29,9 @@ describe("pool html helpers", () => {
   it("renderPoolPage includes oracle mids and pool CTAs (not fuzz/CVE)", () => {
     const html = renderPoolPage(liveOk, sampleMarket());
     expect(html).toContain("Oracle mids");
+    expect(html).toContain("data-pool-stat=\"hashrate\"");
+    expect(html).toContain("pool-copy-url");
+    expect(html).toContain("stratum+tcp://hackme.tech:3333");
     expect(html).toContain("HMC");
     expect(html).toContain("SUP");
     expect(html).toContain("Mine HMC");
@@ -63,6 +69,18 @@ describe("pool html helpers", () => {
     expect(banner).toContain("Connecting");
     expect(banner).not.toContain("Coordinator offline");
     expect(renderPoolPage(pending, sampleMarket())).toContain("connecting");
+  });
+
+  it("patchPoolLiveDom updates stat cells in place", () => {
+    document.body.innerHTML = renderPoolPage(liveOk, sampleMarket());
+    patchPoolLiveDom(
+      { ...liveOk, poolGh: 120, workers: 99 },
+      sampleMarket(),
+      { source: "live", fetchedAt: Date.now() - 5000 },
+    );
+    expect(document.querySelector('[data-pool-stat="hashrate"]')?.textContent).toContain("120");
+    expect(document.querySelector('[data-pool-stat="workers"]')?.textContent).toBe("99");
+    expect(document.getElementById("pool-updated-at")?.textContent).toContain("5s ago");
   });
 });
 
