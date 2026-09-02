@@ -200,6 +200,12 @@ function readPoints(root: HTMLElement): { ts: number; eq: number }[] {
   }
 }
 
+function chartDenomFromHost(host: HTMLElement): EquityDenom {
+  const raw = host.dataset.chartDenom;
+  if (raw === "USDT" || raw === "BTC" || raw === "HMC" || raw === "RUB") return raw;
+  return getEquityDenom();
+}
+
 export function wirePortfolioEquityChart(root: ParentNode): void {
   const host = root.querySelector<HTMLElement>("[data-portfolio-chart]");
   if (!host || host.dataset.chartWired === "1") return;
@@ -220,7 +226,7 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const market = marketFromHost(host);
   const fmtOpts = (): PortfolioChartOpts => ({
     market,
-    denom: getEquityDenom(),
+    denom: chartDenomFromHost(host),
     hidden: isBalanceHidden(),
   });
 

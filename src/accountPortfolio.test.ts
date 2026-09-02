@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { equityInDenom, setEquityDenom, syncDenomRingDom } from "./accountPortfolio";
+import { equityInDenom, setEquityDenom, syncDenomRingDom, DENOM_ORB_SEL } from "./accountPortfolio";
 import { sampleMarket } from "./testFixtures";
 
 describe("accountPortfolio", () => {
@@ -28,7 +28,7 @@ describe("accountPortfolio", () => {
     </div>`;
     setEquityDenom("HMC");
     syncDenomRingDom("HMC");
-    expect(document.querySelector('[data-denom="HMC"]')?.classList.contains("active")).toBe(true);
-    expect(document.querySelector('[data-denom="USDT"]')?.classList.contains("active")).toBe(false);
+    expect(document.querySelector(`${DENOM_ORB_SEL}[data-denom="HMC"]`)?.classList.contains("active")).toBe(true);
+    expect(document.querySelector(`${DENOM_ORB_SEL}[data-denom="USDT"]`)?.classList.contains("active")).toBe(false);
   });
 });

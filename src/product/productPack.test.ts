@@ -11,6 +11,7 @@ import {
   snapshotsLast30d,
   wirePortfolioEquityChart,
 } from "./portfolioChart";
+import { setEquityDenom } from "../accountPortfolio";
 import { baseState, sampleMarket } from "../testFixtures";
 
 describe("dustConvert", () => {
@@ -78,7 +79,30 @@ describe("portfolioChart", () => {
     expect(html).toContain("portfolio-30d-stage");
   });
 
+  it("updates value on hover in selected equity denom", () => {
+    setEquityDenom("HMC");
+    const now = Date.now();
+    const market = sampleMarket();
+    document.body.innerHTML = `<div id="acct-portfolio-30d">${portfolioEquityChart30d(
+      [
+        { ts: now - 5 * 864e5, equityUsdt: 15_000 },
+        { ts: now - 3 * 864e5, equityUsdt: 14_200 },
+        { ts: now, equityUsdt: 12_000 },
+      ],
+      { market, denom: "HMC" },
+    )}</div>`;
+    wirePortfolioEquityChart(document.body);
+    const stage = document.getElementById("portfolio-30d-stage")!;
+    const svg = stage.querySelector("svg")!;
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 360, height: 96, right: 360, bottom: 96, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    stage.dispatchEvent(new PointerEvent("pointermove", { clientX: 0, bubbles: true }));
+    expect(document.getElementById("portfolio-30d-val")?.textContent).toMatch(/300[,.]?000/);
+    expect(formatChartDayLabel(now - 5 * 864e5)).not.toBe("Today");
+  });
+
   it("updates value on hover", () => {
+    setEquityDenom("USDT");
     const now = Date.now();
     const market = sampleMarket();
     document.body.innerHTML = `<div id="acct-portfolio-30d">${portfolioEquityChart30d(

@@ -25,6 +25,7 @@ import {
   setBalanceHidden,
   setEquityDenom,
   syncDenomRingDom,
+  DENOM_ORB_SEL,
   todayPnl,
   type EquityDenom,
 } from "./accountPortfolio";
@@ -802,12 +803,12 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
     document.getElementById("acct-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  document.querySelectorAll("[data-denom]").forEach((btn) => {
+  document.querySelectorAll(DENOM_ORB_SEL).forEach((btn) => {
     btn.addEventListener("click", () => {
       const d = (btn as HTMLElement).dataset.denom as EquityDenom | undefined;
       if (!d) return;
       setEquityDenom(d);
-      document.querySelectorAll("[data-denom]").forEach((orb) => {
+      document.querySelectorAll(DENOM_ORB_SEL).forEach((orb) => {
         const on = (orb as HTMLElement).dataset.denom === d;
         orb.classList.toggle("active", on);
         orb.setAttribute("aria-checked", on ? "true" : "false");
@@ -832,12 +833,13 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
  * Soft-update Account balances / equity / allocation without remounting the page
  * (keeps Asset roadmap, withdraw form, open CLI details intact).
  */
-export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): void {
+export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, opts?: AccountPageOpts): void {
   const w = state.wallet;
   const eq = walletEquityFromMarket(w, market);
   const hidden = isBalanceHidden();
   const assetRows = buildAssetPortfolioRows(state, market);
   const dayPnl = todayPnl(state, market);
+  const denom = getEquityDenom();
 
   for (const r of assetRows) {
     const tr = document.querySelector(`tr.acct-asset-row[data-asset="${r.symbol}"]`) as HTMLElement | null;
@@ -849,6 +851,8 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
     const costStr = formatNum(r.costBasisUsdt, 2);
     const pnlStr = `${r.floatingPnl >= 0 ? "+" : ""}${formatNum(r.floatingPnl, 2)} (${formatPct(r.floatingPnlPct)})`;
     const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
+    const reservedStr = formatNum(r.reserved, decimals);
+    const availStr = formatNum(Math.max(0, r.amount - r.reserved), decimals);
 
     tr.querySelector('[data-col="free"]')!.textContent = maskBalance(amtStr, hidden);
     tr.querySelector('[data-col="usdt"]')!.textContent = maskBalance(valueStr, hidden);
@@ -863,12 +867,26 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
       priceCell.innerHTML = `<span>${maskBalance(priceStr, hidden)}</span><span class="muted small acct-cost-line">Cost ${maskBalance(costStr, hidden)}</span>`;
     }
     tr.dataset.usdtValue = r.usdtValue.toFixed(4);
+
+    const detail = document.querySelector(`[data-asset-detail="${r.symbol}"]`);
+    if (detail) {
+      detail.querySelectorAll<HTMLElement>("[data-raw]").forEach((el) => {
+        const slot = el.dataset.rawSlot;
+        const raw = slot === "reserved" ? reservedStr : slot === "avail" ? availStr : el.dataset.raw;
+        if (raw != null) {
+          el.dataset.raw = raw;
+          el.textContent = maskBalance(raw, hidden);
+        }
+      });
+      const allocPct = eq > 0 ? (r.usdtValue / eq) * 100 : 0;
+      const allocStrong = detail.querySelector(".acct-asset-detail-inner > span:first-child strong.mono");
+      if (allocStrong) allocStrong.textContent = `${allocPct.toFixed(1)}%`;
+    }
   }
 
   const eqRow = document.querySelector('tr[data-asset="EQ"] [data-col="usdt"]');
   if (eqRow) eqRow.textContent = maskBalance(formatNum(eq, 2), hidden);
 
-  const denom = getEquityDenom();
   const eqView = equityInDenom(eq, market, denom);
   const eqHero = document.getElementById("acct-total-eq");
   if (eqHero) {
@@ -882,8 +900,6 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
 
   const todayEl = document.getElementById("acct-today-pnl");
   if (todayEl) {
-    const denom = getEquityDenom();
-    const hidden = isBalanceHidden();
     const replacement = formatTodayPnlHtml(dayPnl, market, denom, hidden);
     const wrap = document.createElement("div");
     wrap.innerHTML = replacement;
@@ -891,9 +907,34 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
     if (next) todayEl.replaceWith(next);
   }
 
+  const allTime = document.querySelector(".acct-alltime");
+  if (allTime) {
+    const pnl = pnlPct(state, market);
+    allTime.className = `acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}`;
+    allTime.textContent = `All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%`;
+  }
+
+  const pnlHost = document.querySelector(".acct-account-view .pnl-cards.compact");
+  if (pnlHost) {
+    const windows = pnlWindows(state, market);
+    pnlHost.innerHTML = windows
+      .map((x) => {
+        const pnlFmt = formatPnlAbsInDenom(x.abs, market, denom);
+        return `<article class="pnl-card glass-inset">
+          <span class="muted small">${x.label}</span>
+          <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
+          <span class="dim mono">${maskBalance(`${pnlFmt.amount} ${pnlFmt.unit}`, hidden)}</span>
+        </article>`;
+      })
+      .join("");
+  }
+
+  const recentHost = document.getElementById("acct-recent-tx-body");
+  if (recentHost) recentHost.innerHTML = renderRecentTxTable(state, hidden);
+
   refreshPortfolioChartHtml(state.equitySnapshots, {
     market,
-    denom: getEquityDenom(),
+    denom,
     hidden,
     initialEquityUsdt: state.initialEquityUsdt,
   });
@@ -924,6 +965,34 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot): 
   }
   const promoHmc = document.querySelector('[data-acct-promo-mid="hmc"]');
   if (promoHmc) promoHmc.textContent = formatPrice(market.hmcUsdt);
+
+  const paperBal = document.querySelector('[data-wallet-slice="paper"] .multi-wallet-bal .mono');
+  if (paperBal) {
+    const paperUsdt =
+      w.usdt + w.hmc * market.hmcUsdt + w.sup * market.supUsdt + w.btc * market.btcUsd;
+    paperBal.textContent = `${formatNum(paperUsdt, 2)} USDT`;
+  }
+
+  for (const slice of buildMultiWalletSlices(state, opts)) {
+    if (slice.id === "paper") continue;
+    const row = document.querySelector(`[data-wallet-slice="${slice.id}"]`);
+    if (!row) continue;
+    const usdt =
+      slice.wallet.usdt +
+      slice.wallet.hmc * market.hmcUsdt +
+      slice.wallet.sup * market.supUsdt +
+      slice.wallet.btc * market.btcUsd;
+    const mono = row.querySelector(".multi-wallet-bal .mono");
+    if (mono) mono.textContent = `${formatNum(usdt, 2)} USDT`;
+  }
+
+  const dustEl = document.getElementById("acct-dust");
+  if (dustEl) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = renderDustPanel(w, market);
+    const next = wrap.firstElementChild;
+    if (next) dustEl.replaceWith(next);
+  }
 
   syncDenomRingDom(denom);
 
