@@ -31,14 +31,15 @@ describe("pool html helpers", () => {
     expect(html).toContain("Oracle mids");
     expect(html).toContain("data-pool-stat=\"hashrate\"");
     expect(html).toContain("pool-copy-url");
-    expect(html).toContain("stratum+tcp://hackme.tech:3333");
+    expect(html).toContain("pool-worker-lookup");
     expect(html).toContain("HMC");
     expect(html).toContain("SUP");
     expect(html).toContain("Mine HMC");
     expect(html).toContain("https://hackme.tech/downloads.html#start");
     expect(html).toContain("https://hackme.tech/explorer-lite.html");
     expect(html).toContain("github.com/jokeez/hackme");
-    expect(html).not.toContain("Open coordinator");
+    expect(html).not.toContain("stratum-wizard");
+    expect(html).not.toContain("exchange.hackme.tech:3333");
     expect(html).not.toContain("/hub-proxy/");
     expect(html).not.toContain("B2B Fuzz");
     expect(html).not.toContain("CVE Research");
