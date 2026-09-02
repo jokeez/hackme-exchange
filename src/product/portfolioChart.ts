@@ -156,23 +156,49 @@ export function portfolioEquityChart30d(
     : "";
 
   const chartDenom = opts.denom ?? getEquityDenom();
+  const uid = `pf30-${Math.abs(series.length * 31 + Math.round(last.equityUsdt)) % 99999}`;
+  const innerH = CHART_H - PAD.t - PAD.b;
+  const gridLines = [0.25, 0.5, 0.75]
+    .map(
+      (r) =>
+        `<line class="portfolio-30d-grid-line" x1="${PAD.l}" x2="${CHART_W - PAD.r}" y1="${(PAD.t + innerH * r).toFixed(1)}" y2="${(PAD.t + innerH * r).toFixed(1)}" />`,
+    )
+    .join("");
   return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-chart-denom="${chartDenom}"${marketAttrs}>
     <div class="portfolio-30d-head">
       <span class="portfolio-30d-val mono" id="portfolio-30d-val">${formatBalance(last.equityUsdt, opts)}</span>
       <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)}</p>
     </div>
     <div class="portfolio-30d-stage" id="portfolio-30d-stage">
-      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet">
+      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <defs>
-          <linearGradient id="pf30-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.35" />
+          <linearGradient id="${uid}-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.42" />
+            <stop offset="55%" stop-color="currentColor" stop-opacity="0.14" />
             <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
           </linearGradient>
+          <linearGradient id="${uid}-stroke" gradientUnits="userSpaceOnUse" x1="${PAD.l}" y1="0" x2="${CHART_W - PAD.r}" y2="0">
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.45" />
+            <stop offset="35%" stop-color="currentColor" stop-opacity="0.88" />
+            <stop offset="100%" stop-color="currentColor" stop-opacity="1" />
+          </linearGradient>
+          <filter id="${uid}-glow" x="-12%" y="-20%" width="124%" height="140%">
+            <feGaussianBlur stdDeviation="1.6" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <filter id="${uid}-dot" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="2.2" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
         </defs>
-        <polygon class="portfolio-30d-fill" points="${area}" fill="url(#pf30-fill)" />
-        <polyline class="portfolio-30d-line" fill="none" points="${linePts}" />
+        <g class="portfolio-30d-grid">${gridLines}</g>
+        <line class="portfolio-30d-baseline" x1="${PAD.l}" x2="${CHART_W - PAD.r}" y1="${baseY}" y2="${baseY}" />
+        <polygon class="portfolio-30d-fill" points="${area}" fill="url(#${uid}-fill)" />
+        <polyline class="portfolio-30d-line-glow" fill="none" points="${linePts}" filter="url(#${uid}-glow)" />
+        <polyline class="portfolio-30d-line" fill="none" points="${linePts}" stroke="url(#${uid}-stroke)" />
         <line class="portfolio-30d-cross" id="portfolio-30d-cross" y1="${PAD.t}" y2="${CHART_H - PAD.b}" hidden />
-        <circle class="portfolio-30d-dot" id="portfolio-30d-dot" r="4.5" hidden />
+        <circle class="portfolio-30d-dot-ring" id="portfolio-30d-dot-ring" r="7.5" hidden />
+        <circle class="portfolio-30d-dot" id="portfolio-30d-dot" r="4" filter="url(#${uid}-dot)" hidden />
       </svg>
     </div>
   </div>`;
@@ -216,8 +242,9 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const valEl = host.querySelector<HTMLElement>("#portfolio-30d-val");
   const dateEl = host.querySelector<HTMLElement>("#portfolio-30d-date");
   const cross = host.querySelector<SVGLineElement>("#portfolio-30d-cross");
+  const dotRing = host.querySelector<SVGCircleElement>("#portfolio-30d-dot-ring");
   const dot = host.querySelector<SVGCircleElement>("#portfolio-30d-dot");
-  if (!stage || !svg || !valEl || !dateEl || !cross || !dot) return;
+  if (!stage || !svg || !valEl || !dateEl || !cross || !dotRing || !dot) return;
 
   const rawPts = readPoints(host);
   if (rawPts.length < 2) return;
@@ -234,9 +261,12 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
     const p = chartPts[idx];
     if (!p) return;
     setSvgVisible(cross, true);
+    setSvgVisible(dotRing, true);
     setSvgVisible(dot, true);
     cross.setAttribute("x1", String(p.x));
     cross.setAttribute("x2", String(p.x));
+    dotRing.setAttribute("cx", String(p.x));
+    dotRing.setAttribute("cy", String(p.y));
     dot.setAttribute("cx", String(p.x));
     dot.setAttribute("cy", String(p.y));
     valEl.textContent = formatBalance(p.equityUsdt, fmtOpts());
@@ -253,6 +283,7 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const onMove = (ev: PointerEvent) => paint(indexFromX(ev.clientX));
   const onLeave = () => {
     setSvgVisible(cross, false);
+    setSvgVisible(dotRing, false);
     setSvgVisible(dot, false);
     const last = chartPts[chartPts.length - 1]!;
     valEl.textContent = formatBalance(last.equityUsdt, fmtOpts());
