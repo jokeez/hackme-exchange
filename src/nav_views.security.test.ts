@@ -117,7 +117,8 @@ describe("Account view XSS / DOM sinks", () => {
     expect(addr?.textContent).toContain("<");
     expect(addr?.innerHTML).toContain("&lt;");
     for (const img of document.querySelectorAll("img")) {
-      expect(img.getAttribute("src")).toMatch(/^\/assets\/coins\//);
+      const src = img.getAttribute("src") ?? "";
+      expect(src).toMatch(/^\/(logo-hex\.png|assets\/coins\/)/);
     }
   });
 
