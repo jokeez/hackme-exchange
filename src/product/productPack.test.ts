@@ -1,7 +1,16 @@
+/**
+ * @vitest-environment happy-dom
+ */
 import { describe, expect, it } from "vitest";
 import { findDustBalances, DUST_USD_THRESHOLD } from "./dustConvert";
 import { exportFillsCsv, exportOrdersCsv } from "./exportOrders";
-import { snapshotsLast30d } from "./portfolioChart";
+import {
+  equityDailySeries,
+  formatChartDayLabel,
+  portfolioEquityChart30d,
+  snapshotsLast30d,
+  wirePortfolioEquityChart,
+} from "./portfolioChart";
 import { baseState, sampleMarket } from "../testFixtures";
 
 describe("dustConvert", () => {
@@ -31,5 +40,57 @@ describe("portfolioChart", () => {
       { ts: now, equityUsdt: 115 },
     ];
     expect(snapshotsLast30d(snaps)).toHaveLength(2);
+  });
+
+  it("aggregates daily equity points", () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    const snaps = [
+      { ts: now - 3 * day, equityUsdt: 10_000 },
+      { ts: now - 3 * day + 3600e3, equityUsdt: 10_200 },
+      { ts: now - day, equityUsdt: 12_000 },
+      { ts: now, equityUsdt: 11_500 },
+    ];
+    const daily = equityDailySeries(snaps);
+    expect(daily).toHaveLength(3);
+    expect(daily[0]!.equityUsdt).toBe(10_200);
+    expect(daily.at(-1)!.equityUsdt).toBe(11_500);
+  });
+
+  it("renders interactive chart markup", () => {
+    const now = Date.now();
+    const html = portfolioEquityChart30d(
+      [
+        { ts: now - 5 * 864e5, equityUsdt: 15_000 },
+        { ts: now - 3 * 864e5, equityUsdt: 14_200 },
+        { ts: now, equityUsdt: 12_000 },
+      ],
+      { market: sampleMarket(), denom: "USDT" },
+    );
+    expect(html).toContain("data-portfolio-chart");
+    expect(html).toContain("portfolio-30d-stage");
+    expect(html).toContain("12,000");
+    expect(html).toContain("USDT");
+  });
+
+  it("updates value on hover", () => {
+    const now = Date.now();
+    const market = sampleMarket();
+    document.body.innerHTML = `<div id="acct-portfolio-30d">${portfolioEquityChart30d(
+      [
+        { ts: now - 5 * 864e5, equityUsdt: 15_000 },
+        { ts: now - 3 * 864e5, equityUsdt: 14_200 },
+        { ts: now, equityUsdt: 12_000 },
+      ],
+      { market, denom: "USDT" },
+    )}</div>`;
+    wirePortfolioEquityChart(document.body);
+    const stage = document.getElementById("portfolio-30d-stage")!;
+    const svg = stage.querySelector("svg")!;
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 360, height: 96, right: 360, bottom: 96, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    stage.dispatchEvent(new PointerEvent("pointermove", { clientX: 0, bubbles: true }));
+    expect(document.getElementById("portfolio-30d-val")?.textContent).toContain("15,000");
+    expect(formatChartDayLabel(now - 5 * 864e5)).not.toBe("Today");
   });
 });
