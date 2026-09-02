@@ -1,7 +1,9 @@
 import { CONVERT_ASSETS, CONVERT_ROUTES, type ConvertRoute } from "./convert";
-import { assetBadge, assetBadgeLg } from "./icons";
+import { Ico, assetBadge, assetBadgeLg } from "./icons";
 import { escapeHtml } from "./sanitize";
 import type { Wallet } from "./types";
+
+let convertMenuDismissWired = false;
 
 const QUICK_ROUTE_IDS: ConvertRoute[] = [
   "HMC_USDT",
@@ -18,10 +20,26 @@ export function convertAssetName(key: keyof Wallet): string {
   return CONVERT_ASSETS.find((a) => a.key === key)?.name ?? String(key).toUpperCase();
 }
 
+function convertAssetByKey(key: keyof Wallet) {
+  return CONVERT_ASSETS.find((a) => a.key === key)!;
+}
+
 export function renderConvertAssetOptions(selected: keyof Wallet): string {
   return CONVERT_ASSETS.map(
     (a) => `<option value="${a.key}" ${a.key === selected ? "selected" : ""}>${a.symbol}</option>`,
   ).join("");
+}
+
+function renderConvertDropdownTrigger(selected: keyof Wallet): string {
+  const a = convertAssetByKey(selected);
+  return `<span class="cv-dd-selected">
+    ${assetBadgeLg(a.symbol)}
+    <span class="cv-dd-text">
+      <strong>${escapeHtml(a.symbol)}</strong>
+      <span class="muted small">${escapeHtml(a.name)}</span>
+    </span>
+  </span>
+  <span class="cv-dd-caret" aria-hidden="true">${Ico.chevronDown()}</span>`;
 }
 
 export function renderConvertAssetPicker(
@@ -30,23 +48,30 @@ export function renderConvertAssetPicker(
   other?: keyof Wallet,
 ): string {
   const label = leg === "from" ? "Pay with" : "Receive";
-  return `<div class="cv-asset-picker" data-cv-leg="${leg}" role="listbox" aria-label="${label}">
-    ${CONVERT_ASSETS.map((a) => {
-      const disabled = leg === "to" && a.key === other;
-      const active = a.key === selected;
-      return `<button type="button" class="cv-asset-opt${active ? " active" : ""}${disabled ? " disabled" : ""}"
-        data-cv-asset="${a.key}" data-cv-leg="${leg}" role="option" aria-selected="${active}"
-        ${disabled ? "disabled" : ""}>
-        <span class="cv-asset-opt-main">
-          ${assetBadgeLg(a.symbol)}
-          <span class="cv-asset-opt-text">
-            <strong>${escapeHtml(a.symbol)}</strong>
-            <span class="muted small">${escapeHtml(a.name)}</span>
+  const triggerId = leg === "from" ? "cv-from-trigger" : "cv-to-trigger";
+  const menuId = leg === "from" ? "cv-from-menu" : "cv-to-menu";
+  return `<div class="cv-asset-dd" data-cv-leg="${leg}">
+    <button type="button" class="cv-dd-trigger" id="${triggerId}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" aria-label="${label}">
+      ${renderConvertDropdownTrigger(selected)}
+    </button>
+    <div class="cv-dd-menu glass" id="${menuId}" role="listbox" aria-label="${label}" hidden>
+      ${CONVERT_ASSETS.map((a) => {
+        const disabled = leg === "to" && a.key === other;
+        const active = a.key === selected;
+        return `<button type="button" class="cv-dd-opt${active ? " active" : ""}${disabled ? " disabled" : ""}"
+          data-cv-asset="${a.key}" data-cv-leg="${leg}" role="option" aria-selected="${active}"
+          ${disabled ? "disabled" : ""}>
+          <span class="cv-dd-opt-main">
+            ${assetBadgeLg(a.symbol)}
+            <span class="cv-dd-opt-text">
+              <strong>${escapeHtml(a.symbol)}</strong>
+              <span class="muted small">${escapeHtml(a.name)}</span>
+            </span>
           </span>
-        </span>
-        <span class="cv-asset-opt-bal mono muted small" data-cv-bal-key="${a.key}">—</span>
-      </button>`;
-    }).join("")}
+          <span class="cv-dd-opt-bal mono muted small" data-cv-bal-key="${a.key}">—</span>
+        </button>`;
+      }).join("")}
+    </div>
   </div>`;
 }
 
@@ -104,12 +129,45 @@ export function patchConvertPickerBalances(
   });
 }
 
+export function closeConvertAssetMenus(except?: HTMLElement): void {
+  document.querySelectorAll<HTMLElement>(".cv-asset-dd").forEach((dd) => {
+    if (except && dd === except) return;
+    const menu = dd.querySelector<HTMLElement>(".cv-dd-menu");
+    const trigger = dd.querySelector<HTMLElement>(".cv-dd-trigger");
+    menu?.setAttribute("hidden", "");
+    trigger?.setAttribute("aria-expanded", "false");
+    dd.classList.remove("open");
+  });
+}
+
+function openConvertAssetMenu(dd: HTMLElement): void {
+  const menu = dd.querySelector<HTMLElement>(".cv-dd-menu");
+  const trigger = dd.querySelector<HTMLElement>(".cv-dd-trigger");
+  if (!menu || !trigger) return;
+  dd.classList.add("open");
+  menu.removeAttribute("hidden");
+  trigger.setAttribute("aria-expanded", "true");
+}
+
+function toggleConvertAssetMenu(dd: HTMLElement): void {
+  if (dd.classList.contains("open")) {
+    closeConvertAssetMenus();
+    return;
+  }
+  closeConvertAssetMenus();
+  openConvertAssetMenu(dd);
+}
+
 export function syncConvertPickerUi(from: keyof Wallet, to: keyof Wallet): void {
-  document.querySelectorAll<HTMLElement>(".cv-asset-picker").forEach((picker) => {
-    const leg = picker.dataset.cvLeg as "from" | "to" | undefined;
+  closeConvertAssetMenus();
+  (["from", "to"] as const).forEach((leg) => {
     const sel = leg === "from" ? from : to;
     const other = leg === "from" ? to : from;
-    picker.querySelectorAll<HTMLButtonElement>("[data-cv-asset]").forEach((btn) => {
+    const dd = document.querySelector<HTMLElement>(`.cv-asset-dd[data-cv-leg="${leg}"]`);
+    if (!dd) return;
+    const trigger = dd.querySelector<HTMLElement>(".cv-dd-trigger");
+    if (trigger) trigger.innerHTML = renderConvertDropdownTrigger(sel);
+    dd.querySelectorAll<HTMLButtonElement>(".cv-dd-opt").forEach((btn) => {
       const key = btn.dataset.cvAsset as keyof Wallet;
       const on = key === sel;
       const disabled = leg === "to" && key === other;
@@ -130,15 +188,42 @@ export function wireConvertAssetPickers(
   toSel: HTMLSelectElement,
   onChange: () => void,
 ): void {
-  document.querySelectorAll<HTMLButtonElement>("[data-cv-asset]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      const leg = btn.dataset.cvLeg;
-      const key = btn.dataset.cvAsset;
-      if (!leg || !key) return;
-      if (leg === "from") fromSel.value = key;
-      else toSel.value = key;
-      onChange();
+  document.querySelectorAll<HTMLElement>(".cv-asset-dd").forEach((dd) => {
+    const leg = dd.dataset.cvLeg as "from" | "to" | undefined;
+    const trigger = dd.querySelector<HTMLButtonElement>(".cv-dd-trigger");
+    const menu = dd.querySelector<HTMLElement>(".cv-dd-menu");
+    if (!leg || !trigger || !menu) return;
+
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleConvertAssetMenu(dd);
+    });
+
+    menu.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+
+    menu.querySelectorAll<HTMLButtonElement>(".cv-dd-opt").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (btn.disabled) return;
+        const key = btn.dataset.cvAsset;
+        if (!key) return;
+        if (leg === "from") fromSel.value = key;
+        else toSel.value = key;
+        closeConvertAssetMenus();
+        onChange();
+      });
     });
   });
+
+  if (!convertMenuDismissWired) {
+    convertMenuDismissWired = true;
+    document.addEventListener("click", () => {
+      closeConvertAssetMenus();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeConvertAssetMenus();
+    });
+  }
 }
