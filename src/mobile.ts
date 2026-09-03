@@ -114,7 +114,9 @@ export function mobileChartFooterOverlapPx(host?: HTMLElement | null): number {
   const chartHost = host ?? document.getElementById("chart-host");
   if (!chartHost) return 0;
   const overlap = chartHost.getBoundingClientRect().bottom - footer.getBoundingClientRect().top;
-  return overlap > 2 ? Math.ceil(overlap) : 0;
+  if (overlap <= 2) return 0;
+  // Snap to 4px — 1px layout thrash was re-firing ResizeObserver and shaking the chart.
+  return Math.max(4, Math.round(overlap / 4) * 4);
 }
 
 /** Keep CSS + JS on the same breakpoint (not only @media). */

@@ -167,7 +167,7 @@ describe("latency: oracle / pool ping", () => {
         console.log(`[oracle-latency] fallback ${ms.toFixed(0)}ms — not counted as live SLA`);
       }
     },
-    10_000,
+    25_000,
   );
 
   it(
@@ -181,6 +181,6 @@ describe("latency: oracle / pool ping", () => {
         console.log(`[pool-live] skipped — ${err instanceof Error ? err.message : "network"}`);
       }
     },
-    20_000,
+    25_000,
   );
 });

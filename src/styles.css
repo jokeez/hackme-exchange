@@ -4857,12 +4857,27 @@ html.mobile-layout .bottom-empty.act-empty {
 .act-actions .link {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--sell);
   cursor: pointer;
-  font-size: 0.68rem;
-  padding: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  /* Mobile: real hit target — tiny text links looked "stuck" / untappable. */
+  padding: 0.45rem 0.55rem;
+  margin: -0.35rem -0.25rem -0.35rem 0;
+  min-height: 2rem;
+  min-width: 4.2rem;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 6px;
 }
-.act-actions .link:hover { color: var(--sell); }
+.act-actions .link:hover { color: #ff8a80; }
+.act-actions .link.is-busy,
+.act-actions .link:disabled {
+  color: var(--muted);
+  cursor: wait;
+  opacity: 0.75;
+  pointer-events: none;
+}
 #activity-body .data-table th,
 #activity-body .data-table td {
   padding: 0.28rem 0.35rem;

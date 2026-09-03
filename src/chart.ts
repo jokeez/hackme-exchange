@@ -64,6 +64,12 @@ let mounted = false;
 let hostResizeObs: ResizeObserver | null = null;
 let resizeRaf = 0;
 let healRaf = 0;
+/** Skip no-op resize / barSpacing thrash (mobile chart "shake"). */
+let lastResizeW = 0;
+let lastResizeH = 0;
+let lastAppliedBarSpacing = -1;
+/** Skip recreating price lines when open orders/alerts unchanged. */
+let lastOrderOverlayKey = "";
 let currentMode: ChartMode = "candles";
 let currentSettings: ChartSettings | null = null;
 let currentCandles: Candle[] = [];
@@ -611,6 +617,28 @@ function renderOrderLines(
     });
     priceLines.push(previewPriceLine);
   }
+  lastOrderOverlayKey = orderOverlayFingerprint(orders, overlays, yday, alerts);
+}
+
+/** Stable key for open order / alert overlays (excludes live mid — tip updates via applyOptions). */
+export function orderOverlayFingerprint(
+  orders: Order[],
+  overlays: { showOrderLines?: boolean; showLastPrice?: boolean },
+  yday?: number,
+  alerts?: { price: number; fired: boolean }[],
+): string {
+  const orderPart = orders
+    .filter((x) => x.status === "open" || x.status === "triggered")
+    .map((o) => `${o.id}:${o.price}:${o.stopPrice ?? ""}:${o.side}:${o.kind}`)
+    .join("|");
+  const alertPart = (alerts ?? []).map((a) => `${a.price}:${a.fired ? 1 : 0}`).join("|");
+  return [
+    overlays.showOrderLines ? 1 : 0,
+    overlays.showLastPrice !== false ? 1 : 0,
+    orderPart,
+    alertPart,
+    yday && yday > 0 ? yday : 0,
+  ].join(";");
 }
 
 /** Ghost limit line before order confirmation (Binance-style order preview). */
@@ -2430,6 +2458,14 @@ export function refreshOrderLines(
   if (!lastOpts) return;
   if (alerts) lastOpts = { ...lastOpts, alerts };
   lastOpts = { ...lastOpts, orders };
+  const key = orderOverlayFingerprint(
+    orders,
+    lastOpts.overlays,
+    lastOpts.yesterdayClose,
+    lastOpts.alerts,
+  );
+  // Tip ticks used to clear+recreate every price line ~700ms → mobile chart "shake".
+  if (key === lastOrderOverlayKey && priceLines.length > 0) return;
   renderOrderLines(
     orders,
     lastOpts.overlays,
@@ -3149,18 +3185,28 @@ export function resizeChart(): void {
   const footerOverlap = mobileChartFooterOverlapPx(hostEl);
   const rawH = inner?.clientHeight ?? hostEl.clientHeight;
   const h = Math.floor(rawH - footerOverlap);
-  if (w > 2 && h > 2) chart.resize(w, h);
+  const sizeChanged = Math.abs(w - lastResizeW) > 1 || Math.abs(h - lastResizeH) > 1;
+  if (w > 2 && h > 2 && sizeChanged) {
+    lastResizeW = w;
+    lastResizeH = h;
+    chart.resize(w, h);
+  }
   if (lastOpts && w > 2) {
     const spacing = barSpacingForWidth(w, lastOpts.tf);
-    try {
-      chart.timeScale().applyOptions({
-        barSpacing: spacing,
-        minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
-      });
-    } catch {
-      /* ignore */
+    // Re-applying barSpacing every ResizeObserver tick reflows the time scale → shake.
+    if (spacing !== lastAppliedBarSpacing && (sizeChanged || lastAppliedBarSpacing < 0)) {
+      lastAppliedBarSpacing = spacing;
+      try {
+        chart.timeScale().applyOptions({
+          barSpacing: spacing,
+          minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
+        });
+      } catch {
+        /* ignore */
+      }
     }
   }
+  if (!sizeChanged) return;
   if (healRaf) cancelAnimationFrame(healRaf);
   healRaf = requestAnimationFrame(() => {
     healRaf = 0;
@@ -3292,6 +3338,10 @@ export function destroyChart(): void {
   }
   hostResizeObs?.disconnect();
   hostResizeObs = null;
+  lastResizeW = 0;
+  lastResizeH = 0;
+  lastAppliedBarSpacing = -1;
+  lastOrderOverlayKey = "";
   priceWheelCleanup?.();
   mobilePanCleanup?.();
   chartPricePickCleanup?.();
