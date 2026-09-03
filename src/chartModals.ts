@@ -85,7 +85,7 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
       <button type="button" data-tab="background" role="tab" aria-selected="false">Background</button>
     </nav>
     <div class="modal-pane" id="pane-symbol" role="tabpanel">
-      <label>Chart type
+      <label>Color scheme
         <select id="cs-scheme" class="inp mono">
           ${(["classic", "blue", "neon", "mono"] as const).map((x) => `<option value="${x}" ${s.candleScheme === x ? "selected" : ""}>${x}</option>`).join("")}
         </select>
@@ -105,7 +105,7 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
       }" /></label>
       <label><input type="checkbox" id="cs-grad" ${s.bgGradient ? "checked" : ""} /> Gradient background</label>
     </div>
-    <p class="muted small modal-note">Custom colors override scheme presets until Reset. Changing Chart type reloads preset colors.</p>
+    <p class="muted small modal-note">Custom colors override scheme presets until Reset. Changing Color scheme reloads preset colors.</p>
     <div class="modal-actions">
       <button type="button" class="btn-sm" id="modal-reset">Reset</button>
       <button type="button" class="btn-sm" id="modal-close">Cancel</button>
@@ -139,6 +139,7 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
 
   bd.querySelector("#modal-close")?.addEventListener("click", dismiss);
   bd.querySelector("#modal-reset")?.addEventListener("click", () => {
+    if (!confirm("Reset chart colors, grid, and scale to defaults? Indicators stay.")) return;
     onSave({
       chartSettings: sanitizeChartSettings({
         ...structuredClone(DEFAULT_CHART_SETTINGS),
