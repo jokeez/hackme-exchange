@@ -1,7 +1,7 @@
 /**
  * @vitest-environment happy-dom
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { showChartStyleModal, showIndicatorModal, showGoToDateModal } from "./chartModals";
@@ -156,12 +156,34 @@ describe("chart style / indicator modals", () => {
     showChartStyleModal(s, (patch) => {
       saved = patch;
     });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     (document.querySelector("#modal-reset") as HTMLButtonElement).click();
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
     expect(saved?.chartSettings?.candleScheme).toBe("classic");
     expect(saved?.chartSettings?.logScale).toBe(false);
     expect(saved?.chartSettings?.bgGradient).toBe(true);
     expect(saved?.chartSettings?.indicators.ema20).toBe(true);
     expect(saved?.chartSettings?.indicators.rsi).toBe(true);
+  });
+
+  it("Chart Style Reset cancel leaves settings unchanged", () => {
+    const s = baseState({
+      chartSettings: {
+        ...structuredClone(DEFAULT_CHART_SETTINGS),
+        candleScheme: "neon",
+        logScale: true,
+      },
+    });
+    let saved: Partial<typeof s> | null = null;
+    showChartStyleModal(s, (patch) => {
+      saved = patch;
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    (document.querySelector("#modal-reset") as HTMLButtonElement).click();
+    confirmSpy.mockRestore();
+    expect(saved).toBeNull();
+    expect(document.querySelector(".modal-backdrop")).toBeTruthy();
   });
 
   it("duplicate Chart Style opens replace previous backdrop", () => {

@@ -23,6 +23,12 @@ import { STORAGE_KEY } from "./theme";
 import { uid } from "./id";
 import { sanitizeImportedCandles, sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
 import { MAX_DRAWINGS, sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
+import {
+  applyChartPrefsToState,
+  chartPrefsFromState,
+  clearChartPrefs,
+  saveChartPrefs,
+} from "./chartPrefs";
 
 /** Persist 1m base only — higher TFs re-derived (+ padded) on load. */
 const STORAGE_BASE_CAP = 800;
@@ -174,11 +180,11 @@ export function sanitizeMultiPanePairs(raw: unknown): MultiPanePairs {
 export function loadState(): DemoState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return freshState();
+    if (!raw) return applyChartPrefsToState(freshState());
     if (raw.length > 4_500_000) {
       console.warn("[hackme-exchange] state blob too large — resetting candles/history");
       localStorage.removeItem(STORAGE_KEY);
-      return freshState();
+      return applyChartPrefsToState(freshState());
     }
     const parsed = stripPollutionKeys(JSON.parse(raw)) as DemoState;
     const s: DemoState = {
@@ -289,9 +295,10 @@ export function loadState(): DemoState {
       s.candles = {};
       s.stateVersion = STATE_VERSION;
     }
-    return s;
+    // Sidecar prefs survive main-blob wipe / quota / reseed — restore appearance.
+    return applyChartPrefsToState(s);
   } catch {
-    return freshState();
+    return applyChartPrefsToState(freshState());
   }
 }
 
@@ -328,6 +335,8 @@ export function healStorage(): void {
 }
 
 export function saveState(state: DemoState): boolean {
+  // Always try to persist appearance prefs first — small blob, survives demo wipe.
+  saveChartPrefs(chartPrefsFromState(state));
   const compact = compactForStorage(state);
   let raw = JSON.stringify(compact);
   if (tryPersist(raw)) return true;
@@ -347,6 +356,7 @@ export function saveState(state: DemoState): boolean {
 }
 
 export function resetDemo(): DemoState {
+  clearChartPrefs();
   const s = freshState();
   saveState(s);
   return s;
@@ -520,14 +530,14 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
       healed = prependOlderCandles(healed, p.id, CANDLE_BASE_TF, need - healed.length);
     }
     healed = sanitizeCandlesForChart(healed, p.id, CANDLE_BASE_TF);
-    // Snap tip toward live mid without inventing a cliff body.
+    // Snap tip toward live mid without inventing a cliff body — keep CEX OHLC wicks.
     if (healed.length) {
       const tip = { ...healed[healed.length - 1]! };
       const maxBody = maxBodyFracForTf(CANDLE_BASE_TF);
       const safe = clampTickMid(mid, tip.close, maxBody);
       tip.close = safe;
-      tip.high = Math.max(tip.open, safe);
-      tip.low = Math.min(tip.open, safe);
+      tip.high = Math.max(tip.high, tip.open, safe);
+      tip.low = Math.min(tip.low, tip.open, safe);
       healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id, CANDLE_BASE_TF)[0] ?? tip;
     }
     const all = deriveAllTimeframes(healed, p.id, state.candles[p.id]);
