@@ -4827,43 +4827,78 @@ function wireOrderAmendButtons(): void {
   });
 }
 
-function wireCancelButtons(): void {
-  document.querySelectorAll("[data-cancel]").forEach((b) => {
-    b.addEventListener("click", () => {
-      const id = (b as HTMLElement).dataset.cancel!;
-      if (useLabMatching()) {
-        void (async () => {
-          const local = state.orders.find((o) => o.id === id);
-          const lab = await cancelLabOrder(state, id);
-          if (lab.ok) {
-            refreshAfterLabTrade();
-            toast(lab.note, "info");
-            return;
-          }
-          const reason = lab.reason.toLowerCase();
-          const notOnServer =
-            reason.includes("not_found") ||
-            reason.includes("order_not_found") ||
-            local?.source === "paper";
-          // Never cancel locally on CORS/network/unreachable — that desyncs the ledger.
-          if (!notOnServer) {
-            toast(`Lab cancel failed: ${lab.reason}`, "warn");
-            return;
-          }
-          cancelOrder(state, id);
-          refreshOpenOrderChartLines();
-          refreshActivityPanel();
-          toast(
-            local?.source === "paper" ? "Order cancelled (paper)" : `Lab cancel: ${lab.reason} · cancelled locally`,
-            "info",
-          );
-        })();
+/** Prevent double-taps / stacked listeners from freezing Cancel on mobile. */
+const cancelInFlight = new Set<string>();
+
+async function handleCancelOrderClick(btn: HTMLElement): Promise<void> {
+  const id = btn.dataset.cancel;
+  if (!id || cancelInFlight.has(id)) return;
+  cancelInFlight.add(id);
+  const prevLabel = btn.textContent ?? "Cancel";
+  const asBtn = btn as HTMLButtonElement;
+  asBtn.disabled = true;
+  btn.setAttribute("aria-busy", "true");
+  btn.classList.add("is-busy");
+  btn.textContent = "Cancelling…";
+  try {
+    if (useLabMatching()) {
+      const local = state.orders.find((o) => o.id === id);
+      const lab = await cancelLabOrder(state, id);
+      if (lab.ok) {
+        refreshAfterLabTrade();
+        toast(lab.note, "info");
+        // Background ledger sync — never block the Cancel button on this.
+        if (lab.syncPending) {
+          void syncLabBalancesAndBook(state, market).then((sync) => {
+            if (sync.ok) {
+              refreshAfterLabTrade();
+            }
+          });
+        }
+        return;
+      }
+      const reason = lab.reason.toLowerCase();
+      const notOnServer =
+        reason.includes("not_found") ||
+        reason.includes("order_not_found") ||
+        local?.source === "paper";
+      // Never cancel locally on CORS/network/unreachable — that desyncs the ledger.
+      if (!notOnServer) {
+        toast(`Lab cancel failed: ${lab.reason}`, "warn");
+        asBtn.disabled = false;
+        btn.removeAttribute("aria-busy");
+        btn.classList.remove("is-busy");
+        btn.textContent = prevLabel;
         return;
       }
       cancelOrder(state, id);
       refreshOpenOrderChartLines();
       refreshActivityPanel();
-      toast("Order cancelled", "info");
+      toast(
+        local?.source === "paper" ? "Order cancelled (paper)" : `Lab cancel: ${lab.reason} · cancelled locally`,
+        "info",
+      );
+      return;
+    }
+    cancelOrder(state, id);
+    refreshOpenOrderChartLines();
+    refreshActivityPanel();
+    toast("Order cancelled", "info");
+  } finally {
+    cancelInFlight.delete(id);
+  }
+}
+
+function wireCancelButtons(): void {
+  document.querySelectorAll("[data-cancel]").forEach((b) => {
+    const el = b as HTMLElement;
+    // Clone strips stacked listeners if wireCancelButtons runs without innerHTML replace.
+    const next = el.cloneNode(true) as HTMLElement;
+    el.replaceWith(next);
+    next.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void handleCancelOrderClick(next);
     });
   });
 }

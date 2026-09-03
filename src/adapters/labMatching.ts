@@ -28,6 +28,7 @@ import {
 } from "./exchangeApi";
 import { activeVipTier } from "../fees";
 import { recordTradeLedger } from "../ledger";
+import { cancelOrder } from "../store";
 
 /** True when loopback API is opted in and fixture/session is connected. */
 export function useLabMatching(): boolean {
@@ -360,15 +361,18 @@ export async function placeLabOrder(
 export async function cancelLabOrder(
   state: DemoState,
   orderId: string,
-): Promise<{ ok: true; note: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; note: string; syncPending?: boolean } | { ok: false; reason: string }> {
   if (!useLabMatching()) return { ok: false, reason: "Lab session required" };
-  const res = await cancelExchangeOrder(orderId);
+  // Short timeout — cancel UI must never wait on a hung DELETE.
+  const res = await cancelExchangeOrder(orderId, 4_000);
   if (!res.ok) {
     // Fall back: may be a local paper order id
     return { ok: false, reason: res.message };
   }
-  await syncLabBalancesAndBook(state);
-  return { ok: true, note: "Lab order cancelled · balances synced" };
+  // Mark local row cancelled immediately (incl. OCO siblings). Full ledger sync is
+  // slow and used to freeze the Cancel button for many seconds — run it in background.
+  cancelOrder(state, orderId);
+  return { ok: true, note: "Lab order cancelled", syncPending: true };
 }
 
 /**

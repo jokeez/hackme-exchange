@@ -120,9 +120,24 @@ describe("mobile layout helpers", () => {
       value: () => ({ top: 0, bottom: 400, left: 0, right: 320, width: 320, height: 400, x: 0, y: 0, toJSON: () => ({}) }),
     });
     const footer = document.getElementById("mobile-footer-stack")!;
+    let footerTop = 300;
     Object.defineProperty(footer, "getBoundingClientRect", {
-      value: () => ({ top: 300, bottom: 420, left: 0, right: 320, width: 320, height: 120, x: 0, y: 300, toJSON: () => ({}) }),
+      configurable: true,
+      value: () => ({
+        top: footerTop,
+        bottom: footerTop + 120,
+        left: 0,
+        right: 320,
+        width: 320,
+        height: 120,
+        x: 0,
+        y: footerTop,
+        toJSON: () => ({}),
+      }),
     });
+    expect(mobileChartFooterOverlapPx(host)).toBe(100);
+    // 1px thrash snaps to same 4px bucket (avoids ResizeObserver shake).
+    footerTop = 299;
     expect(mobileChartFooterOverlapPx(host)).toBe(100);
     document.documentElement.removeAttribute("data-mobile-panel");
     document.documentElement.classList.remove("mobile-layout");
@@ -200,6 +215,8 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain("safe-area-inset");
     expect(css).toContain("touch-action: manipulation");
     expect(css).toContain("min-height: 2.75rem");
+    expect(css).toMatch(/\.act-actions \.link[\s\S]*?min-height:\s*2rem/);
+    expect(css).toContain(".act-actions .link.is-busy");
     expect(MOBILE_LAYOUT_MAX_PX).toBe(1024);
   });
 

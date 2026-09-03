@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, plotWheelAnchorShift, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth, buildCandlestickStyle } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, orderOverlayFingerprint, panLogicalRangeByWheel, plotWheelAnchorShift, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth, buildCandlestickStyle } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -263,5 +263,33 @@ describe("candlestick rendering style", () => {
     expect(style.downColor).toBe("#445566");
     expect(style.wickUpColor).toBe("#778899");
     expect(style.wickDownColor).toBe("#aabbcc");
+  });
+});
+
+describe("order overlay fingerprint", () => {
+  it("stays stable across tip ticks and changes when order price amends", () => {
+    const orders = [
+      {
+        id: "o1",
+        pairId: "HMC_USDT" as const,
+        side: "buy" as const,
+        kind: "limit" as const,
+        price: 0.05,
+        amountBase: 1000,
+        status: "open" as const,
+        createdAt: 1,
+      },
+    ];
+    const overlays = { showOrderLines: true, showLastPrice: true };
+    const a = orderOverlayFingerprint(orders, overlays, 0.04, [{ price: 0.06, fired: false }]);
+    const b = orderOverlayFingerprint(orders, overlays, 0.04, [{ price: 0.06, fired: false }]);
+    expect(a).toBe(b);
+    const c = orderOverlayFingerprint(
+      [{ ...orders[0]!, price: 0.051 }],
+      overlays,
+      0.04,
+      [{ price: 0.06, fired: false }],
+    );
+    expect(c).not.toBe(a);
   });
 });
