@@ -4,12 +4,18 @@ import type { Candle, Timeframe } from "./types";
  * TradingView / LWC practice: never let a single wick or corrupt print
  * dominate the Y-axis. Clip bar highs/lows relative to the body, then
  * optionally tighten absolute outliers vs a robust mid of the series.
+ *
+ * Exchange OHLC rules (Binance / CME-style):
+ * - Open = first print in the bucket
+ * - High = max print in the bucket (upper wick tip)
+ * - Low  = min print in the bucket (lower wick tip)
+ * - Close = last print in the bucket
+ * Wicks are real traded extremes — not decoration. Higher TFs aggregate
+ * child highs/lows; they must NOT be body-collapsed.
  */
 
-/** Max wick beyond body as fraction of body mid.
- * Paper desk: keep near-zero so candles look “closed” (body fills OHLC) like CEX 1D —
- * long decorative wicks on 5m/15m read as unfinished spikes. */
-export const MAX_WICK_FRAC = 0;
+/** Soft default wick-beyond-body cap (± of body mid). Prefer {@link maxWickFracForTf}. */
+export const MAX_WICK_FRAC = 0.012;
 
 /**
  * Legacy default jump — prefer {@link maxJumpFracForTf}.
@@ -52,9 +58,36 @@ export function maxJumpFracForTf(tf: Timeframe | string): number {
  * Max |close−open|/open inside one bar.
  * Stops multi-tick walks (esp. 1D) from painting −30% bodies that squash the pane.
  */
-/** Visible wick cap per TF — paper candles stay body-closed on every resolution. */
-export function maxWickFracForTf(_tf: Timeframe | string): number {
-  return MAX_WICK_FRAC;
+/**
+ * Max wick BEYOND the body as a fraction of body mid.
+ * Calibrated so calm liquid spot looks CEX-like: wicks exist, but do not dwarf
+ * the body into a “spike forest” on every bar.
+ */
+export function maxWickFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.0035;
+    case "1m":
+      return 0.0045;
+    case "3m":
+      return 0.006;
+    case "5m":
+      return 0.008;
+    case "15m":
+      return 0.01;
+    case "1H":
+      return 0.014;
+    case "2H":
+      return 0.018;
+    case "4H":
+      return 0.022;
+    case "1D":
+      return 0.03;
+    case "1W":
+      return 0.045;
+    default:
+      return MAX_WICK_FRAC;
+  }
 }
 
 export function maxBodyFracForTf(tf: Timeframe | string): number {
@@ -121,19 +154,10 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05, maxWick = MAX_WICK
   if (!finitePos(c.open)) return clipBarWicks(c, maxWick);
   const open = c.open;
   const close = clampTickMid(finitePos(c.close) ? c.close : open, open, maxBody);
-  if (!(maxWick > 0)) {
-    return {
-      ...c,
-      open,
-      close,
-      high: Math.max(open, close),
-      low: Math.min(open, close),
-    };
-  }
-  // Wick pad tracks body cap but stays tighter than the body itself (no barcode tape).
-  const wickPad = Math.min(maxBody * 0.65, maxWick * 1.35);
-  const hiCap = open * (1 + wickPad);
-  const loCap = open * Math.max(1e-6, 1 - wickPad);
+  // Absolute pad around open so body + modest wick can exist without barcode spikes.
+  const pad = Math.max(maxBody, maxWick) * 1.15;
+  const hiCap = open * (1 + pad);
+  const loCap = open * Math.max(1e-6, 1 - pad);
   let high = Math.max(open, close, finitePos(c.high) ? c.high : close);
   let low = Math.min(open, close, finitePos(c.low) ? c.low : close);
   high = Math.min(high, hiCap);
@@ -143,28 +167,24 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05, maxWick = MAX_WICK
   return clipBarWicks({ ...c, open, high, low, close }, maxWick);
 }
 
-/** Clip one bar's high/low to a sane wick around the body. */
+/**
+ * Clip wick length beyond the body (exchange high/low still ≥ body).
+ * Cap is ± maxWickFrac of body mid — does not force a minimum wick.
+ */
 export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
   if (!finitePos(c.open) || !finitePos(c.close)) return c;
   const open = c.open;
   const close = c.close;
-  if (!(maxWickFrac > 0)) {
-    return {
-      ...c,
-      open,
-      close,
-      high: Math.max(open, close),
-      low: Math.min(open, close),
-    };
-  }
+  const bodyHigh = Math.max(open, close);
+  const bodyLow = Math.min(open, close);
   const bodyMid = (open + close) / 2;
-  const wick = Math.max(bodyMid * maxWickFrac, Math.abs(close - open) * 0.5);
-  let high = Math.max(open, close, finitePos(c.high) ? c.high : bodyMid);
-  let low = Math.min(open, close, finitePos(c.low) ? c.low : bodyMid);
-  high = Math.min(high, bodyMid + wick);
-  low = Math.max(low, Math.max(bodyMid * 1e-6, bodyMid - wick));
-  if (high < Math.max(open, close)) high = Math.max(open, close);
-  if (low > Math.min(open, close)) low = Math.min(open, close);
+  const cap = Math.max(bodyMid * Math.max(0, maxWickFrac), 0);
+  let high = Math.max(bodyHigh, finitePos(c.high) ? c.high : bodyHigh);
+  let low = Math.min(bodyLow, finitePos(c.low) ? c.low : bodyLow);
+  high = Math.min(high, bodyHigh + cap);
+  low = Math.max(low, Math.max(bodyMid * 1e-6, bodyLow - cap));
+  if (high < bodyHigh) high = bodyHigh;
+  if (low > bodyLow) low = bodyLow;
   return { ...c, open, high, low, close };
 }
 

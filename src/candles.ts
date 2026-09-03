@@ -122,16 +122,46 @@ function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
   return base * tfScale * jitter;
 }
 
-/** Paper OHLC is body-closed (high/low = open/close) — no decorative wick spikes. */
-function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Timeframe): Candle {
+/**
+ * Exchange-like intra-bar extremes for paper seed bars.
+ * Wicks track the body (CEX look) + tiny mid-relative micro-noise —
+ * never a fixed ±bps forest that dwarfs small bodies.
+ */
+function wickSpread(
+  open: number,
+  close: number,
+  pairId: PairId,
+  tf: Timeframe,
+  t: number,
+): { high: number; low: number } {
   const bodyHigh = Math.max(open, close);
   const bodyLow = Math.min(open, close);
+  const body = bodyHigh - bodyLow;
+  const mid = (open + close) / 2 || bodyHigh || 1;
+  // ~0.6–1.4 bps micro tape noise; BTC pairs slightly wider.
+  const microBps = pairId.includes("BTC") ? 1.4 : pairId === "SUP_USDT" ? 1.1 : 0.85;
+  const micro = mid * (microBps / 10_000);
+  const hiSeed = stableUnit([tf, t, "wick-high"]);
+  const loSeed = stableUnit([tf, t, "wick-low"]);
+  // Body-relative: often 5–70% of body beyond the close/open (some bars nearly closed).
+  const hiBeyond = micro * (0.25 + hiSeed * 0.9) + body * (0.04 + hiSeed * 0.55);
+  const loBeyond = micro * (0.25 + loSeed * 0.9) + body * (0.04 + loSeed * 0.55);
+  const cap = mid * maxWickFracForTf(tf);
+  return {
+    high: bodyHigh + Math.min(hiBeyond, cap),
+    low: bodyLow - Math.min(loBeyond, cap),
+  };
+}
+
+/** Seed one paper bar with CEX-valid OHLC (wicks = intra-bar extremes). */
+function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Timeframe): Candle {
+  const wick = wickSpread(open, close, pairId, tf, t);
   return constrainBarToOpen(
     {
       time: t,
       open,
-      high: bodyHigh,
-      low: bodyLow,
+      high: Math.max(open, close, wick.high),
+      low: Math.min(open, close, wick.low),
       close,
       volume: candleVolume(pairId, tf, t),
     },
@@ -142,6 +172,7 @@ function makeBar(pairId: PairId, t: number, open: number, close: number, tf: Tim
 
 /**
  * Aggregate finer candles into a coarser TF (exchange-correct OHLC).
+ * High = max(child.high), Low = min(child.low) — never body-collapse.
  * `sourceTf` must be strictly finer than `targetTf`.
  */
 export function aggregateCandles(
@@ -173,11 +204,15 @@ export function aggregateCandles(
       prev.volume += c.volume;
     }
   }
-  const bodyCap = maxBodyFracForTf(targetTf);
   const wickCap = maxWickFracForTf(targetTf);
   return [...map.values()]
     .sort((a, b) => a.time - b.time)
-    .map((c) => constrainBarToOpen(c, bodyCap, wickCap))
+    .map((c) => {
+      const high = Math.max(c.high, c.open, c.close);
+      const low = Math.min(c.low, c.open, c.close);
+      // Soft clip only — do not rewrite close vs open (aggregation fidelity).
+      return clipBarWicks({ ...c, high, low }, wickCap);
+    })
     .slice(-MAX_CANDLES);
 }
 
@@ -198,13 +233,16 @@ export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf:
       const close = i === ratio - 1 ? c.close : c.open + step * (i + 1);
       const bodyCap = maxBodyFracForTf(targetTf);
       const wickCap = maxWickFracForTf(targetTf);
+      // First slice may inherit parent extremes; later slices only own body range.
+      const high = i === 0 ? Math.max(open, close, c.high) : Math.max(open, close);
+      const low = i === 0 ? Math.min(open, close, c.low) : Math.min(open, close);
       out.push(
         constrainBarToOpen(
           {
             time: t,
             open,
-            high: Math.max(open, close),
-            low: Math.min(open, close),
+            high,
+            low,
             close,
             volume: c.volume / ratio,
           },
@@ -251,8 +289,9 @@ export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: 
       last.close = mid;
     } else {
       last.close = clampTickMid(mid, last.open, maxBody);
-      last.high = Math.max(last.open, last.close);
-      last.low = Math.min(last.open, last.close);
+      const w = wickSpread(last.open, last.close, pairId, tf, last.time);
+      last.high = Math.max(last.open, last.close, w.high);
+      last.low = Math.min(last.open, last.close, w.low);
       Object.assign(last, constrainBarToOpen(last, maxBody, maxWickFracForTf(tf)));
     }
   }
