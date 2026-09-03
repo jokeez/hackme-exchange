@@ -246,4 +246,22 @@ describe("candlestick rendering style", () => {
     expect(style.wickUpColor).toBe(style.upColor);
     expect(style.wickDownColor).toBe(style.downColor);
   });
+
+  it("buildCandlestickStyle follows custom candleStyle colors", () => {
+    const s = baseState();
+    s.chartSettings.candleScheme = "neon";
+    s.chartSettings.candleStyle = {
+      bullBody: "#112233",
+      bearBody: "#445566",
+      bullWick: "#778899",
+      bearWick: "#aabbcc",
+      bullBorder: "#112233",
+      bearBorder: "#445566",
+    };
+    const style = buildCandlestickStyle(s.chartSettings);
+    expect(style.upColor).toBe("#112233");
+    expect(style.downColor).toBe("#445566");
+    expect(style.wickUpColor).toBe("#778899");
+    expect(style.wickDownColor).toBe("#aabbcc");
+  });
 });

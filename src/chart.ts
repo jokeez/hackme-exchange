@@ -24,7 +24,7 @@ import type {
   Trade,
   Timeframe,
 } from "./types";
-import { DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
+import { CANDLE_SCHEME_PRESETS, DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { getPair } from "./registry";
@@ -41,12 +41,7 @@ import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceR
 import { clearChartViewport, loadChartViewport, saveChartViewport } from "./chartViewport";
 import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
 
-const SCHEMES = {
-  classic: { up: "#00e676", down: "#ff5252" },
-  blue: { up: "#42a5f5", down: "#ff9800" },
-  neon: { up: "#39ff14", down: "#ff00ff" },
-  mono: { up: "#e0e0e0", down: "#757575" },
-};
+const SCHEMES = CANDLE_SCHEME_PRESETS;
 
 let chart: IChartApi | null = null;
 let candleSeries: ISeriesApi<"Candlestick"> | null = null;
@@ -1935,6 +1930,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   currentSettings = opts.settings;
   onOrderDrag = opts.onOrderPriceDrag;
   activeTool = "cursor";
+  syncChartHostAppearance(opts.settings);
 
   const colors = schemeColors(opts.settings);
   const candleStyle = candlestickSeriesOptions(opts.settings);
@@ -2258,6 +2254,11 @@ export function getLiveDrawings(): Drawing[] {
   return liveDrawings.map((d) => ({ ...d, points: d.points.map((p) => ({ ...p })) }));
 }
 
+function syncChartHostAppearance(settings: ChartSettings): void {
+  if (!hostEl) return;
+  hostEl.classList.toggle("chart-bg-grad", !!settings.bgGradient);
+}
+
 export function applyChartSettings(settings: ChartSettings, candles: Candle[], opts: ChartMountOpts): void {
   if (!chart || !candleSeries) return;
   currentSettings = settings;
@@ -2265,12 +2266,16 @@ export function applyChartSettings(settings: ChartSettings, candles: Candle[], o
   candleSeries.applyOptions(candlestickSeriesOptions(settings));
   barSeries?.applyOptions({ upColor: colors.up, downColor: colors.down });
   chart.applyOptions({
+    layout: {
+      background: { color: settings.bgGradient ? "transparent" : "#05070d" },
+    },
     grid: {
       vertLines: { visible: settings.gridVisible, color: `rgba(255,255,255,${settings.gridOpacity})` },
       horzLines: { visible: settings.gridVisible, color: `rgba(255,255,255,${settings.gridOpacity})` },
     },
     rightPriceScale: { mode: settings.logScale ? 1 : 0 },
   });
+  syncChartHostAppearance(settings);
   setCandleData(candles, { ...opts, settings }, { preserveLogicalRange: true });
 }
 
