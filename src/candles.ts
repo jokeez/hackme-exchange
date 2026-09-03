@@ -307,15 +307,23 @@ export function deriveAllTimeframes(
   pairId?: PairId,
   prev?: Partial<Record<Timeframe, Candle[]>>,
 ): Partial<Record<Timeframe, Candle[]>> {
+  let base = base1m.slice(-MAX_CANDLES);
+  // Max out 1m history first so higher TFs aggregate the widest real window (CEX desk).
+  if (pairId) {
+    const target1m = barCountForTf(CANDLE_BASE_TF);
+    if (base.length < target1m) {
+      base = prependOlderCandles(base, pairId, CANDLE_BASE_TF, target1m - base.length);
+    }
+  }
   const out: Partial<Record<Timeframe, Candle[]>> = {
-    [CANDLE_BASE_TF]: base1m.slice(-MAX_CANDLES),
+    [CANDLE_BASE_TF]: base,
   };
   for (const tf of TIMEFRAMES) {
     if (tf === CANDLE_BASE_TF) continue;
     let series: Candle[] =
       TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]
-        ? aggregateCandles(base1m, CANDLE_BASE_TF, tf)
-        : expandToFinerTf(base1m, CANDLE_BASE_TF, tf);
+        ? aggregateCandles(base, CANDLE_BASE_TF, tf)
+        : expandToFinerTf(base, CANDLE_BASE_TF, tf);
     const firstT = series[0]?.time;
     if (prev?.[tf]?.length && firstT != null) {
       const older = prev[tf]!.filter((c) => c.time < firstT);
@@ -341,12 +349,11 @@ export function seedAllTimeframes(
     CANDLE_BASE_TF,
   );
   const all = deriveAllTimeframes(base, pairId);
+  reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? base);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
     if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
   }
-  const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
-  if (tipClose != null) alignDerivedTips(all, tipClose);
   return all;
 }
 
@@ -536,27 +543,35 @@ export function upsertTick(
 }
 
 /**
- * Live mid update: tick the 1m base, then refresh every TF from it.
- * Guarantees 5m/1D tips match 1m — no independent cliffs per TF.
+ * In-progress higher-TF bars must match 1m child extremes (CEX forming candle).
+ * Replaces the live bucket on each coarser TF with aggregation from base 1m.
  */
-function alignDerivedTips(
+export function reaggregateLiveBarsFromBase(
   all: Partial<Record<Timeframe, Candle[]>>,
-  tipClose: number,
+  base1m: Candle[],
 ): void {
-  if (!(tipClose > 0) || !Number.isFinite(tipClose)) return;
-  for (const tf of Object.keys(all) as Timeframe[]) {
+  if (!base1m.length) return;
+  for (const tf of TIMEFRAMES) {
     if (tf === CANDLE_BASE_TF) continue;
     const series = all[tf];
     if (!series?.length) continue;
-    const tip = { ...series[series.length - 1]! };
-    tip.close = tipClose;
-    tip.high = Math.max(tip.high, tip.open, tipClose);
-    tip.low = Math.min(tip.low, tip.open, tipClose);
-    series[series.length - 1] = constrainBarToOpen(
-      tip,
-      maxBodyFracForTf(tf),
-      maxWickFracForTf(tf),
-    );
+    const dstSec = TF_SEC[tf];
+    const lastT = series[series.length - 1]!.time;
+    if (TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]) {
+      const children = base1m.filter((c) => Math.floor(c.time / dstSec) * dstSec === lastT);
+      if (!children.length) continue;
+      const agg = aggregateCandles(children, CANDLE_BASE_TF, tf);
+      const live = agg.find((b) => b.time === lastT);
+      if (live) series[series.length - 1] = live;
+    } else if (tf === "30s") {
+      const parentT = Math.floor(lastT / TF_SEC[CANDLE_BASE_TF]) * TF_SEC[CANDLE_BASE_TF];
+      const parent = base1m.find((c) => c.time === parentT);
+      if (!parent) continue;
+      const expanded = expandToFinerTf([parent], CANDLE_BASE_TF, "30s");
+      if (!expanded.length) continue;
+      const keep = series.filter((c) => c.time < parentT);
+      all[tf] = [...keep, ...expanded].slice(-MAX_CANDLES);
+    }
   }
 }
 
@@ -573,12 +588,11 @@ export function applyMidToPairCandles(
     CANDLE_BASE_TF,
   );
   const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
     if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
   }
-  const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
-  if (tipClose != null) alignDerivedTips(all, tipClose);
   return all;
 }
 
