@@ -25,6 +25,7 @@ import {
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 import { sanitizeFeeConfig } from "./fees";
 import { defaultDemoState, sanitizeMultiPanePairs } from "./store";
+import { chartPrefsFromState, saveChartPrefs } from "./chartPrefs";
 import { uid } from "./id";
 import {
   MAX_IMPORT_TRADE_QUOTE,
@@ -239,6 +240,7 @@ export function parseDemoImport(raw: string): DemoState {
     typeof incoming.equityBaselineV === "number" && Number.isFinite(incoming.equityBaselineV)
       ? incoming.equityBaselineV
       : state.equityBaselineV;
+  saveChartPrefs(chartPrefsFromState(state));
   return state;
 }
 
