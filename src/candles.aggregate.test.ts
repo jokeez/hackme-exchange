@@ -21,7 +21,7 @@ describe("multi-TF aggregation (one market)", () => {
     }
   });
 
-  it("5m OHLC matches 1m range for the same bucket", () => {
+  it("5m OHLC matches 1m open/close; high/low stay body-closed", () => {
     const mid = 0.00055;
     const base = seedCandles("HMC_USDT", "1m", mid, 120);
     const m5 = aggregateCandles(base, "1m", "5m");
@@ -31,8 +31,9 @@ describe("multi-TF aggregation (one market)", () => {
       expect(children.length).toBeGreaterThan(0);
       expect(bar.open).toBeCloseTo(children[0]!.open, 12);
       expect(bar.close).toBeCloseTo(children[children.length - 1]!.close, 12);
-      expect(bar.high).toBeCloseTo(Math.max(...children.map((c) => c.high)), 12);
-      expect(bar.low).toBeCloseTo(Math.min(...children.map((c) => c.low)), 12);
+      // Paper desk: no wick fringe from child highs/lows — body fills the candle.
+      expect(bar.high).toBeCloseTo(Math.max(bar.open, bar.close), 12);
+      expect(bar.low).toBeCloseTo(Math.min(bar.open, bar.close), 12);
     }
   });
 
@@ -78,32 +79,14 @@ describe("multi-TF aggregation (one market)", () => {
   it("aggregated intraday bars clip wicks (no 1m fringe stacked on 5m/15m)", () => {
     const mid = 0.050063;
     const all = seedAllTimeframes("HMC_USDT", mid);
-    for (const tf of ["30s", "5m", "15m", "1H"] as const) {
+    for (const tf of ["30s", "5m", "15m", "1H", "1D", "1W"] as const) {
       const candles = all[tf]!;
       expect(candles.length).toBeGreaterThan(10);
-      let maxWick = 0;
       for (const c of candles.slice(-80)) {
-        const bodyMid = (c.open + c.close) / 2;
-        if (!(bodyMid > 0)) continue;
-        const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
-        const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
-        maxWick = Math.max(maxWick, up, dn);
+        // Body-closed: no wick spikes beyond open/close (matches 1D look).
+        expect(c.high).toBeCloseTo(Math.max(c.open, c.close), 12);
+        expect(c.low).toBeCloseTo(Math.min(c.open, c.close), 12);
       }
-      // Screenshot bug: uniform ~40bps wicks on every bar while bodies stayed flat.
-      expect(maxWick).toBeLessThan(0.006);
-    }
-    // 1D/1W stay usable with slightly wider bodies — still capped.
-    for (const tf of ["1D", "1W"] as const) {
-      const candles = all[tf]!;
-      let maxWick = 0;
-      for (const c of candles.slice(-40)) {
-        const bodyMid = (c.open + c.close) / 2;
-        if (!(bodyMid > 0)) continue;
-        const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
-        const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
-        maxWick = Math.max(maxWick, up, dn);
-      }
-      expect(maxWick).toBeLessThan(0.02);
     }
   });
 

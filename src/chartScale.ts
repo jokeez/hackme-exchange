@@ -6,9 +6,10 @@ import type { Candle, Timeframe } from "./types";
  * optionally tighten absolute outliers vs a robust mid of the series.
  */
 
-/** Max wick beyond body as fraction of body mid (e.g. 0.012 = ±1.2%).
- * Was 6% — every bar painted a “barcode” of mile-long wicks while EMAs stayed flat. */
-export const MAX_WICK_FRAC = 0.012;
+/** Max wick beyond body as fraction of body mid.
+ * Paper desk: keep near-zero so candles look “closed” (body fills OHLC) like CEX 1D —
+ * long decorative wicks on 5m/15m read as unfinished spikes. */
+export const MAX_WICK_FRAC = 0;
 
 /**
  * Legacy default jump — prefer {@link maxJumpFracForTf}.
@@ -51,22 +52,9 @@ export function maxJumpFracForTf(tf: Timeframe | string): number {
  * Max |close−open|/open inside one bar.
  * Stops multi-tick walks (esp. 1D) from painting −30% bodies that squash the pane.
  */
-/** Visible wick cap per TF — small TFs need slightly tighter wicks, not barcode spikes. */
-export function maxWickFracForTf(tf: Timeframe | string): number {
-  switch (tf) {
-    case "30s":
-      return 0.0055;
-    case "1m":
-      return 0.0065;
-    case "3m":
-      return 0.008;
-    case "5m":
-      return 0.009;
-    case "15m":
-      return 0.01;
-    default:
-      return MAX_WICK_FRAC;
-  }
+/** Visible wick cap per TF — paper candles stay body-closed on every resolution. */
+export function maxWickFracForTf(_tf: Timeframe | string): number {
+  return MAX_WICK_FRAC;
 }
 
 export function maxBodyFracForTf(tf: Timeframe | string): number {
@@ -133,6 +121,15 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05, maxWick = MAX_WICK
   if (!finitePos(c.open)) return clipBarWicks(c, maxWick);
   const open = c.open;
   const close = clampTickMid(finitePos(c.close) ? c.close : open, open, maxBody);
+  if (!(maxWick > 0)) {
+    return {
+      ...c,
+      open,
+      close,
+      high: Math.max(open, close),
+      low: Math.min(open, close),
+    };
+  }
   // Wick pad tracks body cap but stays tighter than the body itself (no barcode tape).
   const wickPad = Math.min(maxBody * 0.65, maxWick * 1.35);
   const hiCap = open * (1 + wickPad);
@@ -149,8 +146,17 @@ export function constrainBarToOpen(c: Candle, maxBody = 0.05, maxWick = MAX_WICK
 /** Clip one bar's high/low to a sane wick around the body. */
 export function clipBarWicks(c: Candle, maxWickFrac = MAX_WICK_FRAC): Candle {
   if (!finitePos(c.open) || !finitePos(c.close)) return c;
-  let open = c.open;
-  let close = c.close;
+  const open = c.open;
+  const close = c.close;
+  if (!(maxWickFrac > 0)) {
+    return {
+      ...c,
+      open,
+      close,
+      high: Math.max(open, close),
+      low: Math.min(open, close),
+    };
+  }
   const bodyMid = (open + close) / 2;
   const wick = Math.max(bodyMid * maxWickFrac, Math.abs(close - open) * 0.5);
   let high = Math.max(open, close, finitePos(c.high) ? c.high : bodyMid);

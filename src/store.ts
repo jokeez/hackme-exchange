@@ -518,22 +518,24 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
     });
     if (healed.length < need) {
       healed = prependOlderCandles(healed, p.id, CANDLE_BASE_TF, need - healed.length);
-    } else {
-      healed = sanitizeCandlesForChart(healed, p.id);
     }
+    healed = sanitizeCandlesForChart(healed, p.id, CANDLE_BASE_TF);
     // Snap tip toward live mid without inventing a cliff body.
     if (healed.length) {
       const tip = { ...healed[healed.length - 1]! };
       const maxBody = maxBodyFracForTf(CANDLE_BASE_TF);
       const safe = clampTickMid(mid, tip.close, maxBody);
       tip.close = safe;
-      tip.high = Math.max(tip.high, tip.open, safe);
-      tip.low = Math.min(tip.low, tip.open, safe);
-      healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id)[0] ?? tip;
+      tip.high = Math.max(tip.open, safe);
+      tip.low = Math.min(tip.open, safe);
+      healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id, CANDLE_BASE_TF)[0] ?? tip;
     }
     const all = deriveAllTimeframes(healed, p.id, state.candles[p.id]);
     for (const tf of TIMEFRAMES) {
-      state.candles[p.id]![tf] = all[tf] ?? [];
+      const series = all[tf] ?? [];
+      state.candles[p.id]![tf] = series.length
+        ? sanitizeCandlesForChart(series, p.id, tf)
+        : series;
     }
   }
 }
