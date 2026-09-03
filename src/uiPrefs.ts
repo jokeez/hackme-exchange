@@ -1,6 +1,18 @@
 import type { Wallet } from "./types";
+import type { OrderKind, TimeInForce } from "./types";
 
 const WALLET_KEYS = new Set<keyof Wallet>(["hmc", "sup", "usdt", "btc"]);
+
+const ORDER_KINDS = new Set<OrderKind>([
+  "limit",
+  "market",
+  "stop_limit",
+  "stop_market",
+  "trailing_stop",
+  "oco",
+]);
+
+const ORDER_TIFS = new Set<TimeInForce>(["GTC", "IOC", "FOK"]);
 
 export type ActivityTabId = "tape" | "orders" | "history" | "alerts";
 export type AcctWalletTab = "assets" | "account";
@@ -13,6 +25,9 @@ const KEYS = {
   activityTab: "hackme.ui.activityTab",
   acctTab: "hackme.ui.acctTab",
   acctHideSmall: "hackme.ui.acctHideSmall",
+  orderKind: "hackme.ui.orderKind",
+  orderTif: "hackme.ui.orderTif",
+  orderPostOnly: "hackme.ui.orderPostOnly",
 } as const;
 
 export const DEFAULT_CONVERT_SLIPPAGE_BPS = 50;
@@ -96,4 +111,22 @@ export function loadConvertSlippageBps(): number {
 export function saveConvertSlippageBps(bps: number): void {
   const clamped = Math.max(0, Math.min(500, Math.round(bps)));
   writeStorage(() => localStorage.setItem(KEYS.convertSlippageBps, String(clamped)));
+}
+
+export function loadOrderDesk(): { kind: OrderKind; tif: TimeInForce; postOnly: boolean } {
+  const kindRaw = readStorage(() => localStorage.getItem(KEYS.orderKind));
+  const tifRaw = readStorage(() => localStorage.getItem(KEYS.orderTif));
+  const postRaw = readStorage(() => localStorage.getItem(KEYS.orderPostOnly));
+  const kind = kindRaw && ORDER_KINDS.has(kindRaw as OrderKind) ? (kindRaw as OrderKind) : "limit";
+  const tif = tifRaw && ORDER_TIFS.has(tifRaw as TimeInForce) ? (tifRaw as TimeInForce) : "GTC";
+  const postOnly = postRaw === "1";
+  return { kind, tif, postOnly };
+}
+
+export function saveOrderDesk(kind: OrderKind, tif: TimeInForce, postOnly: boolean): void {
+  writeStorage(() => {
+    localStorage.setItem(KEYS.orderKind, kind);
+    localStorage.setItem(KEYS.orderTif, tif);
+    localStorage.setItem(KEYS.orderPostOnly, postOnly ? "1" : "0");
+  });
 }

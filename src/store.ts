@@ -24,9 +24,9 @@ import { uid } from "./id";
 import { sanitizeImportedCandles, sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
 import { MAX_DRAWINGS, sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 import {
-  applyChartPrefsToState,
   chartPrefsFromState,
   clearChartPrefs,
+  mergeChartPrefsOnLoad,
   saveChartPrefs,
 } from "./chartPrefs";
 
@@ -180,11 +180,11 @@ export function sanitizeMultiPanePairs(raw: unknown): MultiPanePairs {
 export function loadState(): DemoState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return applyChartPrefsToState(freshState());
+    if (!raw) return mergeChartPrefsOnLoad(freshState());
     if (raw.length > 4_500_000) {
       console.warn("[hackme-exchange] state blob too large — resetting candles/history");
       localStorage.removeItem(STORAGE_KEY);
-      return applyChartPrefsToState(freshState());
+      return mergeChartPrefsOnLoad(freshState());
     }
     const parsed = stripPollutionKeys(JSON.parse(raw)) as DemoState;
     const s: DemoState = {
@@ -295,10 +295,9 @@ export function loadState(): DemoState {
       s.candles = {};
       s.stateVersion = STATE_VERSION;
     }
-    // Sidecar prefs survive main-blob wipe / quota / reseed — restore appearance.
-    return applyChartPrefsToState(s);
+    return mergeChartPrefsOnLoad(s);
   } catch {
-    return applyChartPrefsToState(freshState());
+    return mergeChartPrefsOnLoad(freshState());
   }
 }
 
@@ -493,6 +492,21 @@ export function toggleFavorite(state: DemoState, pairId: PairId): void {
   if (i >= 0) state.favoritePairs.splice(i, 1);
   else state.favoritePairs.unshift(pairId);
   saveState(state);
+}
+
+/** True when live oracle mid is on a different scale than stored candles (needs reseed, not every boot). */
+export function needsCandleReseedForMarket(state: DemoState, market: MarketSnapshot): boolean {
+  for (const p of PAIRS) {
+    const existingBase = state.candles[p.id]?.[CANDLE_BASE_TF];
+    if (!existingBase?.length) return true;
+    const tipClose = existingBase[existingBase.length - 1]?.close ?? 0;
+    const mid = midForPair(market, p.id);
+    if (tipClose > 0 && mid > 0) {
+      const ratio = mid / tipClose;
+      if (ratio > 1.25 || ratio < 0.8) return true;
+    }
+  }
+  return false;
 }
 
 export function ensureCandles(state: DemoState, market: MarketSnapshot): void {

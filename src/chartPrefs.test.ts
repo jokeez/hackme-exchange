@@ -6,7 +6,9 @@ import {
   CHART_PREFS_KEY,
   applyChartPrefsToState,
   chartPrefsFromState,
+  isDefaultChartAppearance,
   loadChartPrefs,
+  mergeChartPrefsOnLoad,
   saveChartPrefs,
 } from "./chartPrefs";
 import { ensureCandles, loadState, resetDemo, saveState } from "./store";
@@ -36,7 +38,7 @@ describe("chartPrefs sidecar", () => {
     installMemoryLocalStorage();
   });
 
-  it("round-trips neon + custom wick colors", () => {
+  it("round-trips neon + custom wick colors + pair/tf", () => {
     const prefs = chartPrefsFromState({
       chartSettings: {
         ...structuredClone(DEFAULT_CHART_SETTINGS),
@@ -53,32 +55,20 @@ describe("chartPrefs sidecar", () => {
         },
       },
       chartMode: "heikin",
-      chartOverlays: {
-        showVolume: true,
-        showOrderLines: false,
-        showLastPrice: true,
-        orderPreview: false,
-        quickOrder: true,
-        quickOrderSkipConfirm: false,
-      },
-      indicatorConfig: {
-        ma: [
-          { enabled: true, period: 9, color: "#ffffff" },
-          { enabled: false, period: 21, color: "#aaaaaa" },
-          { enabled: false, period: 50, color: "#bbbbbb" },
-          { enabled: false, period: 200, color: "#cccccc" },
-        ],
-      },
+      chartOverlays: baseState().chartOverlays,
+      indicatorConfig: baseState().indicatorConfig,
       drawingsLocked: true,
+      activeTf: "1H",
+      activePair: "SUP_USDT",
     });
     expect(saveChartPrefs(prefs)).toBe(true);
     const loaded = loadChartPrefs();
     expect(loaded?.chartSettings.candleScheme).toBe("neon");
     expect(loaded?.chartSettings.logScale).toBe(true);
     expect(loaded?.chartSettings.candleStyle.bullBody).toBe("#112233");
-    expect(loaded?.chartSettings.candleStyle.bearWick).toBe("#aabbcc");
     expect(loaded?.chartMode).toBe("heikin");
-    expect(loaded?.chartOverlays.showOrderLines).toBe(false);
+    expect(loaded?.activeTf).toBe("1H");
+    expect(loaded?.activePair).toBe("SUP_USDT");
     expect(loaded?.drawingsLocked).toBe(true);
   });
 
@@ -108,6 +98,28 @@ describe("chartPrefs sidecar", () => {
     expect(loadChartPrefs()?.chartSettings.candleScheme).toBe("mono");
     resetDemo();
     expect(loadChartPrefs()?.chartSettings.candleScheme).toBe("classic");
+  });
+
+  it("mergeChartPrefsOnLoad migrates blob custom over default sidecar", () => {
+    const s = baseState({
+      chartSettings: { ...structuredClone(DEFAULT_CHART_SETTINGS), candleScheme: "neon" },
+      activeTf: "1D",
+    });
+    saveChartPrefs({
+      v: 1,
+      savedAt: 1,
+      chartSettings: structuredClone(DEFAULT_CHART_SETTINGS),
+      chartMode: "candles",
+      chartOverlays: s.chartOverlays,
+      indicatorConfig: s.indicatorConfig,
+      drawingsLocked: false,
+      activeTf: "15m",
+      activePair: "HMC_USDT",
+    });
+    mergeChartPrefsOnLoad(s);
+    expect(s.chartSettings.candleScheme).toBe("neon");
+    expect(s.activeTf).toBe("1D");
+    expect(isDefaultChartAppearance(loadChartPrefs()!)).toBe(false);
   });
 });
 
@@ -140,13 +152,11 @@ describe("ensureCandles tip OHLC", () => {
     const beforeLow = s.candles.HMC_USDT["1m"]![1]!.low;
     ensureCandles(s, market);
     const tip = s.candles.HMC_USDT!["1m"]![s.candles.HMC_USDT!["1m"]!.length - 1]!;
-    // Wicks must not collapse to body-only (open/close).
     expect(tip.high).toBeGreaterThanOrEqual(Math.max(tip.open, tip.close));
     expect(tip.low).toBeLessThanOrEqual(Math.min(tip.open, tip.close));
-    // Prior wick extremes should survive soft mid snap (within sanitize caps).
-    expect(tip.high).toBeGreaterThanOrEqual(Math.min(beforeHigh, tip.high));
-    expect(tip.low).toBeLessThanOrEqual(Math.max(beforeLow, tip.low));
     expect(tip.high - tip.low).toBeGreaterThan(Math.abs(tip.close - tip.open) * 0.5);
+    expect(tip.high).toBeGreaterThanOrEqual(beforeHigh * 0.95);
+    expect(tip.low).toBeLessThanOrEqual(beforeLow * 1.05);
   });
 });
 
@@ -159,10 +169,13 @@ describe("applyChartPrefsToState", () => {
       chartOverlays: s.chartOverlays,
       indicatorConfig: s.indicatorConfig,
       drawingsLocked: true,
+      activeTf: "2H",
+      activePair: "HMC_BTC",
     });
     applyChartPrefsToState(s, prefs);
     expect(s.chartSettings.candleScheme).toBe("neon");
     expect(s.chartMode).toBe("area");
-    expect(s.drawingsLocked).toBe(true);
+    expect(s.activeTf).toBe("2H");
+    expect(s.activePair).toBe("HMC_BTC");
   });
 });

@@ -156,7 +156,7 @@ import {
   wireConvertAssetPickers,
 } from "./convertUi";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
-import { loadConvertDesk, loadActivityTab, loadConvertSlippageBps, saveActivityTab, saveConvertDesk, saveConvertSlippageBps } from "./uiPrefs";
+import { loadConvertDesk, loadActivityTab, loadConvertSlippageBps, loadOrderDesk, saveActivityTab, saveConvertDesk, saveConvertSlippageBps, saveOrderDesk } from "./uiPrefs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { exportFillsCsv, exportOrdersCsv, exportOrdersFilename } from "./product/exportOrders";
 import { renderSpotEmptyState } from "./product/emptyStates";
@@ -230,6 +230,7 @@ import {
   cancelOrder,
   ensureCandles,
   loadState,
+  needsCandleReseedForMarket,
   pnlPct,
   reseedCandlesFromMarket,
   resetDemo,
@@ -273,9 +274,10 @@ let poolLive: PoolLive | null = null;
 let tickers: Record<PairId, Ticker> = {} as Record<PairId, Ticker>;
 let pollTimer: number | undefined;
 /** Default Limit so price fields are visible (Market still one click away). */
-let uiType: OrderKind = "limit";
-let uiTif: TimeInForce = "GTC";
-let uiPostOnly = false;
+const orderDeskInit = loadOrderDesk();
+let uiType: OrderKind = orderDeskInit.kind;
+let uiTif: TimeInForce = orderDeskInit.tif;
+let uiPostOnly = orderDeskInit.postOnly;
 let activityTab: "tape" | "orders" | "history" | "alerts" = loadActivityTab();
 let lastConvertPreviewNet = 0;
 let cachedNodeWallet: { hmc: number; sup: number } | null = null;
@@ -1029,6 +1031,7 @@ function wireOrderPanelEvents(): void {
       const prev = uiType;
       uiType = next;
       syncOrderTypeTabs(uiType);
+      saveOrderDesk(uiType, uiTif, uiPostOnly);
       toggleOrderFields();
       if ((next === "limit" || next === "stop_limit") && prev !== next) {
         applyRestingLimitPrices(spotTradeMid(), state.activePair);
@@ -1042,6 +1045,7 @@ function wireOrderPanelEvents(): void {
     const prev = uiType;
     uiType = v;
     syncOrderTypeTabs(uiType);
+    saveOrderDesk(uiType, uiTif, uiPostOnly);
     toggleOrderFields();
     if ((v === "limit" || v === "stop_limit") && prev !== v) {
       applyRestingLimitPrices(spotTradeMid(), state.activePair);
@@ -5826,11 +5830,13 @@ function wireEvents(): void {
 
   document.getElementById("order-tif")?.addEventListener("change", (e) => {
     uiTif = (e.target as HTMLSelectElement).value as TimeInForce;
+    saveOrderDesk(uiType, uiTif, uiPostOnly);
     updatePreview();
   });
 
   document.getElementById("post-only")?.addEventListener("change", (e) => {
     uiPostOnly = (e.target as HTMLInputElement).checked;
+    saveOrderDesk(uiType, uiTif, uiPostOnly);
     updatePreview();
   });
 
@@ -6302,13 +6308,11 @@ async function refresh(): Promise<void> {
   }
   // else keep previous live telemetry on a slow tick
 
-  const firstLiveAfterBoot =
-    warming && source === "live" && (oracleMeta.fetchedAt === 0 || oracleMeta.source === "fallback");
-
   market = m!;
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
-  if (firstLiveAfterBoot) {
+  // Only reseed when oracle scale actually diverges — never wipe history on every page load.
+  if (needsCandleReseedForMarket(state, market)) {
     reseedCandlesFromMarket(state, market);
     chartNeedsFullReplace = true;
   } else {
@@ -6345,11 +6349,9 @@ async function refresh(): Promise<void> {
       tickers[p.id] = tk;
     }
     const mid = displayMid;
-    const prev = firstLiveAfterBoot ? undefined : prevMids[p.id];
-    if (!firstLiveAfterBoot) {
-      if (!state.candles[p.id]) state.candles[p.id] = {};
-      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
-    }
+    const prev = prevMids[p.id];
+    if (!state.candles[p.id]) state.candles[p.id] = {};
+    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
     prevMids[p.id] = mid;
   }
   settleOpenOrdersFromTickers(true);
