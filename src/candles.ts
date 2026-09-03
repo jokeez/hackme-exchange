@@ -196,7 +196,12 @@ export function aggregateCandles(
       prev.volume += c.volume;
     }
   }
-  return [...map.values()].sort((a, b) => a.time - b.time).slice(-MAX_CANDLES);
+  const bodyCap = maxBodyFracForTf(targetTf);
+  const wickCap = maxWickFracForTf(targetTf);
+  return [...map.values()]
+    .sort((a, b) => a.time - b.time)
+    .map((c) => constrainBarToOpen(c, bodyCap, wickCap))
+    .slice(-MAX_CANDLES);
 }
 
 /** Build 30s from 1m by splitting each bar (demo-only finer resolution). */
@@ -214,14 +219,22 @@ export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf:
       if (t < CHART_GENESIS_UNIX) continue;
       const open = c.open + step * i;
       const close = i === ratio - 1 ? c.close : c.open + step * (i + 1);
-      out.push({
-        time: t,
-        open,
-        high: Math.max(open, close, i === 0 ? c.high : Math.max(open, close)),
-        low: Math.min(open, close, i === 0 ? c.low : Math.min(open, close)),
-        close,
-        volume: c.volume / ratio,
-      });
+      const bodyCap = maxBodyFracForTf(targetTf);
+      const wickCap = maxWickFracForTf(targetTf);
+      out.push(
+        constrainBarToOpen(
+          {
+            time: t,
+            open,
+            high: Math.max(open, close),
+            low: Math.min(open, close),
+            close,
+            volume: c.volume / ratio,
+          },
+          bodyCap,
+          wickCap,
+        ),
+      );
     }
   }
   return out.slice(-MAX_CANDLES);
@@ -310,11 +323,12 @@ export function seedAllTimeframes(
   const base = sanitizeCandlesForChart(
     seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF)),
     pairId,
+    CANDLE_BASE_TF,
   );
   const all = deriveAllTimeframes(base, pairId);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
-    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId);
+    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
   }
   const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
   if (tipClose != null) alignDerivedTips(all, tipClose);
@@ -411,9 +425,9 @@ export function upsertTick(
     safeMid = clampTickMid(safeMid, openRef, maxBody);
   }
   const tickVol = 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200;
-  const w = disc ? { high: safeMid, low: safeMid } : wickSpread(safeMid, pairId, tf, t);
+  const wickCap = maxWickFracForTf(tf);
 
-  const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar), maxBody);
+  const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar, wickCap), maxBody, wickCap);
 
   const applyTip = (tip: Candle): Candle => {
     if (disc) {
@@ -428,8 +442,8 @@ export function upsertTick(
       });
     }
     tip.close = safeMid;
-    tip.high = Math.max(tip.high, w.high, safeMid);
-    tip.low = Math.min(tip.low, w.low, safeMid);
+    tip.high = Math.max(tip.high, safeMid);
+    tip.low = Math.min(tip.low, safeMid);
     tip.volume += tickVol;
     return finish(tip);
   };
@@ -454,8 +468,8 @@ export function upsertTick(
       finish({
         time: t,
         open,
-        high: Math.max(open, close, disc ? close : w.high),
-        low: Math.min(open, close, disc ? close : w.low),
+        high: Math.max(open, close),
+        low: Math.min(open, close),
         close,
         volume: tickVol,
       }),
@@ -479,8 +493,8 @@ export function upsertTick(
       finish({
         time: t,
         open: safeMid,
-        high: Math.max(safeMid, w.high),
-        low: Math.min(safeMid, w.low),
+        high: safeMid,
+        low: safeMid,
         close: safeMid,
         volume: tickVol,
       }),
@@ -497,8 +511,8 @@ export function upsertTick(
     finish({
       time: t,
       open,
-      high: Math.max(open, close, disc ? close : w.high),
-      low: Math.min(open, close, disc ? close : w.low),
+      high: Math.max(open, close),
+      low: Math.min(open, close),
       close,
       volume: tickVol,
     }),
@@ -523,7 +537,11 @@ function alignDerivedTips(
     tip.close = tipClose;
     tip.high = Math.max(tip.high, tip.open, tipClose);
     tip.low = Math.min(tip.low, tip.open, tipClose);
-    series[series.length - 1] = clipBarWicks(tip);
+    series[series.length - 1] = constrainBarToOpen(
+      tip,
+      maxBodyFracForTf(tf),
+      maxWickFracForTf(tf),
+    );
   }
 }
 
@@ -537,11 +555,12 @@ export function applyMidToPairCandles(
   const nextBase = sanitizeCandlesForChart(
     upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid),
     pairId,
+    CANDLE_BASE_TF,
   );
   const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
-    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId);
+    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
   }
   const tipClose = all[CANDLE_BASE_TF]?.[all[CANDLE_BASE_TF]!.length - 1]?.close;
   if (tipClose != null) alignDerivedTips(all, tipClose);
@@ -697,6 +716,12 @@ export function sanitizeCandleVolumes(candles: Candle[], pairId: PairId): Candle
 }
 
 /** Heal OHLC spikes after load / before chart paint (does not rewrite volumes). */
-export function sanitizeCandlesForChart(candles: Candle[], pairId: PairId): Candle[] {
-  return sanitizeCandleExtremes(sanitizeCandleVolumes(candles, pairId), maxBodyFracForTf(CANDLE_BASE_TF));
+export function sanitizeCandlesForChart(
+  candles: Candle[],
+  pairId: PairId,
+  tf: Timeframe = CANDLE_BASE_TF,
+): Candle[] {
+  const bodyCap = maxBodyFracForTf(tf);
+  const wickCap = maxWickFracForTf(tf);
+  return sanitizeCandleExtremes(sanitizeCandleVolumes(candles, pairId), bodyCap, { maxWick: wickCap });
 }
