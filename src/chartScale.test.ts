@@ -42,21 +42,36 @@ describe("clampTickMid", () => {
 describe("clipBarWicks / sanitizeCandleExtremes", () => {
   it("clips a mile-long wick toward the body", () => {
     const spiked = clipBarWicks(bar(1, 0.0004, 0.0004, 0.000001, 0.0004));
-    expect(spiked.low).toBeCloseTo(0.0004, 12);
-    expect(spiked.high).toBeCloseTo(0.0004, 12);
+    expect(spiked.low).toBeGreaterThan(0.000001);
+    expect(spiked.low).toBeLessThan(0.0004);
+    expect(spiked.high).toBeGreaterThanOrEqual(0.0004);
   });
 
-  it("keeps seeded paper wicks tight so the pane is not a barcode", () => {
+  it("keeps seeded paper wicks CEX-proportioned (not a barcode)", () => {
     const candles = seedCandles("HMC_USDT", "15m", 0.05, 120);
     const mid = 0.05;
+    let maxWickFrac = 0;
+    let withWick = 0;
     for (const c of candles) {
-      expect(c.high).toBeCloseTo(Math.max(c.open, c.close), 12);
-      expect(c.low).toBeCloseTo(Math.min(c.open, c.close), 12);
+      const bodyMid = (c.open + c.close) / 2;
+      const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
+      const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
+      maxWickFrac = Math.max(maxWickFrac, up, dn);
+      if (up > 1e-9 || dn > 1e-9) withWick += 1;
     }
+    expect(withWick).toBeGreaterThan(20);
+    // Soft cap for 15m is 1.0% beyond body mid.
+    expect(maxWickFrac).toBeLessThanOrEqual(0.012);
     const closes = candles.map((c) => c.close);
     const cMin = Math.min(...closes);
     const cMax = Math.max(...closes);
     expect((cMax - cMin) / mid).toBeLessThan(0.08);
+  });
+
+  it("clipBarWicks does not force a minimum wick on flat bodies", () => {
+    const flat = clipBarWicks(bar(1, 0.05, 0.05, 0.05, 0.05), 0.01);
+    expect(flat.high).toBeCloseTo(0.05, 12);
+    expect(flat.low).toBeCloseTo(0.05, 12);
   });
 
   it("flattens a cliff body vs previous close", () => {

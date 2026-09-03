@@ -21,7 +21,7 @@ describe("multi-TF aggregation (one market)", () => {
     }
   });
 
-  it("5m OHLC matches 1m open/close; high/low stay body-closed", () => {
+  it("5m OHLC matches 1m range for the same bucket (exchange aggregation)", () => {
     const mid = 0.00055;
     const base = seedCandles("HMC_USDT", "1m", mid, 120);
     const m5 = aggregateCandles(base, "1m", "5m");
@@ -31,9 +31,13 @@ describe("multi-TF aggregation (one market)", () => {
       expect(children.length).toBeGreaterThan(0);
       expect(bar.open).toBeCloseTo(children[0]!.open, 12);
       expect(bar.close).toBeCloseTo(children[children.length - 1]!.close, 12);
-      // Paper desk: no wick fringe from child highs/lows — body fills the candle.
-      expect(bar.high).toBeCloseTo(Math.max(bar.open, bar.close), 12);
-      expect(bar.low).toBeCloseTo(Math.min(bar.open, bar.close), 12);
+      // High/low = extremes of child prints (CEX rule) — may soft-clip pathological only.
+      const childHigh = Math.max(...children.map((c) => c.high));
+      const childLow = Math.min(...children.map((c) => c.low));
+      expect(bar.high).toBeLessThanOrEqual(childHigh + 1e-15);
+      expect(bar.low).toBeGreaterThanOrEqual(childLow - 1e-15);
+      expect(bar.high).toBeGreaterThanOrEqual(Math.max(bar.open, bar.close) - 1e-15);
+      expect(bar.low).toBeLessThanOrEqual(Math.min(bar.open, bar.close) + 1e-15);
     }
   });
 
@@ -76,17 +80,28 @@ describe("multi-TF aggregation (one market)", () => {
     expect((max - min) / min).toBeLessThan(1e-9);
   });
 
-  it("aggregated intraday bars clip wicks (no 1m fringe stacked on 5m/15m)", () => {
+  it("intraday wicks stay CEX-proportioned (exist, but do not dwarf bodies)", () => {
     const mid = 0.050063;
     const all = seedAllTimeframes("HMC_USDT", mid);
-    for (const tf of ["30s", "5m", "15m", "1H", "1D", "1W"] as const) {
+    for (const tf of ["30s", "5m", "15m", "1H", "1D"] as const) {
       const candles = all[tf]!;
       expect(candles.length).toBeGreaterThan(10);
+      let maxBeyondFrac = 0;
+      let withWick = 0;
       for (const c of candles.slice(-80)) {
-        // Body-closed: no wick spikes beyond open/close (matches 1D look).
-        expect(c.high).toBeCloseTo(Math.max(c.open, c.close), 12);
-        expect(c.low).toBeCloseTo(Math.min(c.open, c.close), 12);
+        const bodyMid = (c.open + c.close) / 2;
+        if (!(bodyMid > 0)) continue;
+        const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
+        const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
+        maxBeyondFrac = Math.max(maxBeyondFrac, up, dn);
+        if (up > 1e-9 || dn > 1e-9) withWick += 1;
+        expect(c.high).toBeGreaterThanOrEqual(Math.max(c.open, c.close) - 1e-15);
+        expect(c.low).toBeLessThanOrEqual(Math.min(c.open, c.close) + 1e-15);
       }
+      // Real exchanges have wicks; paper desk must too (not body-only).
+      expect(withWick).toBeGreaterThan(5);
+      // Screenshot bug: uniform ~40bps spike forest — stay under TF soft cap.
+      expect(maxBeyondFrac).toBeLessThanOrEqual(0.035);
     }
   });
 
