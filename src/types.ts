@@ -90,6 +90,14 @@ export type ChartMode = "candles" | "bars" | "line" | "area" | "heikin";
 
 export type CandleScheme = "classic" | "blue" | "neon" | "mono";
 
+/** Preset body/wick colors for each chart scheme (CEX-style picker). */
+export const CANDLE_SCHEME_PRESETS: Record<CandleScheme, { up: string; down: string }> = {
+  classic: { up: "#00e676", down: "#ff5252" },
+  blue: { up: "#42a5f5", down: "#ff9800" },
+  neon: { up: "#39ff14", down: "#ff00ff" },
+  mono: { up: "#e0e0e0", down: "#757575" },
+};
+
 export type CandleStyle = {
   bullBody: string;
   bearBody: string;
@@ -107,6 +115,19 @@ export const DEFAULT_CANDLE_STYLE: CandleStyle = {
   bullBorder: "#00e676",
   bearBorder: "#ff5252",
 };
+
+/** Build full candleStyle from a named scheme (used by Chart Style modal). */
+export function candleStyleFromScheme(scheme: CandleScheme): CandleStyle {
+  const p = CANDLE_SCHEME_PRESETS[scheme] ?? CANDLE_SCHEME_PRESETS.classic;
+  return {
+    bullBody: p.up,
+    bearBody: p.down,
+    bullWick: p.up,
+    bearWick: p.down,
+    bullBorder: p.up,
+    bearBorder: p.down,
+  };
+}
 
 export type ChartOverlaySettings = {
   showVolume: boolean;

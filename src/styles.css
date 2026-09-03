@@ -2063,6 +2063,12 @@ html.mobile-layout .market-search {
   width: 100%;
   height: auto;
   overflow: hidden;
+  background: #05070d;
+}
+.chart-host.chart-bg-grad {
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -10%, rgba(77, 228, 255, 0.1), transparent 58%),
+    linear-gradient(180deg, #0a1224 0%, #05070d 72%);
 }
 .chart-shell { position: relative; width: 100%; height: 100%; min-height: 0; }
 .chart-host,

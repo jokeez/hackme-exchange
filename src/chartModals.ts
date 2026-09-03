@@ -1,5 +1,14 @@
 import type { ChartSettings, DemoState, IndicatorConfig, MultiChartLayout, Timeframe } from "./types";
-import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_INDICATOR_CONFIG, TIMEFRAMES, type ChartOverlaySettings, normalizeChartOverlays } from "./types";
+import {
+  DEFAULT_CHART_OVERLAYS,
+  DEFAULT_CHART_SETTINGS,
+  DEFAULT_INDICATOR_CONFIG,
+  TIMEFRAMES,
+  candleStyleFromScheme,
+  type ChartOverlaySettings,
+  type CandleScheme,
+  normalizeChartOverlays,
+} from "./types";
 import { sanitizeCandleStyle, sanitizeChartSettings, sanitizeCssColor, sanitizeIndicatorConfig } from "./sanitize";
 
 type SaveCb = (patch: Partial<DemoState>) => void;
@@ -54,6 +63,17 @@ function backdrop(html: string): HTMLElement {
   return bd;
 }
 
+function fillColorInputs(root: ParentNode, style: ReturnType<typeof candleStyleFromScheme>): void {
+  const set = (id: string, v: string) => {
+    const el = root.querySelector(id) as HTMLInputElement | null;
+    if (el) el.value = sanitizeCssColor(v, el.value || "#00e676");
+  };
+  set("#cs-bull", style.bullBody);
+  set("#cs-bear", style.bearBody);
+  set("#cs-bull-w", style.bullWick);
+  set("#cs-bear-w", style.bearWick);
+}
+
 export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
   const s = state.chartSettings;
   const cs = s.candleStyle;
@@ -85,7 +105,7 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
       }" /></label>
       <label><input type="checkbox" id="cs-grad" ${s.bgGradient ? "checked" : ""} /> Gradient background</label>
     </div>
-    <p class="muted small modal-note">Custom colors override scheme presets until Reset.</p>
+    <p class="muted small modal-note">Custom colors override scheme presets until Reset. Changing Chart type reloads preset colors.</p>
     <div class="modal-actions">
       <button type="button" class="btn-sm" id="modal-reset">Reset</button>
       <button type="button" class="btn-sm" id="modal-close">Cancel</button>
@@ -110,6 +130,13 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
     });
   });
 
+  // Scheme change must refresh color pickers — otherwise Save keeps old custom colors and “does nothing”.
+  const schemeSel = bd.querySelector("#cs-scheme") as HTMLSelectElement | null;
+  schemeSel?.addEventListener("change", () => {
+    const scheme = schemeSel.value as CandleScheme;
+    fillColorInputs(bd, candleStyleFromScheme(scheme));
+  });
+
   bd.querySelector("#modal-close")?.addEventListener("click", dismiss);
   bd.querySelector("#modal-reset")?.addEventListener("click", () => {
     onSave({
@@ -121,10 +148,11 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
     dismiss();
   });
   bd.querySelector("#modal-save")?.addEventListener("click", () => {
+    const scheme = (bd.querySelector("#cs-scheme") as HTMLSelectElement).value as CandleScheme;
     onSave({
       chartSettings: sanitizeChartSettings({
         ...s,
-        candleScheme: (bd.querySelector("#cs-scheme") as HTMLSelectElement).value as ChartSettings["candleScheme"],
+        candleScheme: scheme,
         logScale: (bd.querySelector("#cs-log") as HTMLInputElement).checked,
         gridVisible: (bd.querySelector("#cs-grid") as HTMLInputElement).checked,
         gridOpacity: Number((bd.querySelector("#cs-grid-op") as HTMLInputElement).value),
@@ -141,7 +169,7 @@ export function showChartStyleModal(state: DemoState, onSave: SaveCb): void {
     });
     dismiss();
   });
-  (bd.querySelector("#cs-scheme") as HTMLSelectElement | null)?.focus();
+  schemeSel?.focus();
 }
 
 export function showIndicatorModal(state: DemoState, onSave: SaveCb): void {

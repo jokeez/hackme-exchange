@@ -72,10 +72,75 @@ describe("chart style / indicator modals", () => {
 
     (bd!.querySelector("#cs-log") as HTMLInputElement).checked = true;
     (bd!.querySelector("#cs-scheme") as HTMLSelectElement).value = "neon";
+    (bd!.querySelector("#cs-scheme") as HTMLSelectElement).dispatchEvent(new Event("change"));
     (bd!.querySelector("#modal-save") as HTMLButtonElement).click();
     expect(document.querySelector(".modal-backdrop")).toBeNull();
     expect(saved?.chartSettings?.logScale).toBe(true);
     expect(saved?.chartSettings?.candleScheme).toBe("neon");
+    expect(saved?.chartSettings?.candleStyle.bullBody).toBe("#39ff14");
+    expect(saved?.chartSettings?.candleStyle.bearBody).toBe("#ff00ff");
+  });
+
+  it("Chart Style scheme change syncs color pickers before Save", () => {
+    const s = baseState();
+    showChartStyleModal(s, () => {});
+    const scheme = document.querySelector("#cs-scheme") as HTMLSelectElement;
+    scheme.value = "blue";
+    scheme.dispatchEvent(new Event("change"));
+    expect((document.querySelector("#cs-bull") as HTMLInputElement).value).toBe("#42a5f5");
+    expect((document.querySelector("#cs-bear") as HTMLInputElement).value).toBe("#ff9800");
+    expect((document.querySelector("#cs-bull-w") as HTMLInputElement).value).toBe("#42a5f5");
+    expect((document.querySelector("#cs-bear-w") as HTMLInputElement).value).toBe("#ff9800");
+  });
+
+  it("Chart Style Background tab Save applies grid + gradient", () => {
+    const s = baseState();
+    let saved: Partial<typeof s> | null = null;
+    showChartStyleModal(s, (patch) => {
+      saved = patch;
+    });
+    (document.querySelector('[data-tab="background"]') as HTMLButtonElement).click();
+    (document.querySelector("#cs-grid") as HTMLInputElement).checked = false;
+    (document.querySelector("#cs-grad") as HTMLInputElement).checked = false;
+    (document.querySelector("#cs-grid-op") as HTMLInputElement).value = "0.15";
+    (document.querySelector("#modal-save") as HTMLButtonElement).click();
+    expect(saved?.chartSettings?.gridVisible).toBe(false);
+    expect(saved?.chartSettings?.bgGradient).toBe(false);
+    expect(saved?.chartSettings?.gridOpacity).toBeCloseTo(0.15, 5);
+  });
+
+  it("Chart Style Cancel and Escape dismiss without saving", () => {
+    const s = baseState();
+    let saved = false;
+    showChartStyleModal(s, () => {
+      saved = true;
+    });
+    (document.querySelector("#cs-log") as HTMLInputElement).checked = true;
+    (document.querySelector("#modal-close") as HTMLButtonElement).click();
+    expect(document.querySelector(".modal-backdrop")).toBeNull();
+    expect(saved).toBe(false);
+
+    showChartStyleModal(s, () => {
+      saved = true;
+    });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector(".modal-backdrop")).toBeNull();
+    expect(saved).toBe(false);
+  });
+
+  it("Chart Style custom colors save independently of scheme", () => {
+    const s = baseState();
+    let saved: Partial<typeof s> | null = null;
+    showChartStyleModal(s, (patch) => {
+      saved = patch;
+    });
+    (document.querySelector("#cs-bull") as HTMLInputElement).value = "#112233";
+    (document.querySelector("#cs-bear") as HTMLInputElement).value = "#aabbcc";
+    (document.querySelector("#cs-bull-w") as HTMLInputElement).value = "#445566";
+    (document.querySelector("#cs-bear-w") as HTMLInputElement).value = "#ddeeff";
+    (document.querySelector("#modal-save") as HTMLButtonElement).click();
+    expect(saved?.chartSettings?.candleStyle.bullBody.toLowerCase()).toBe("#112233");
+    expect(saved?.chartSettings?.candleStyle.bearWick.toLowerCase()).toBe("#ddeeff");
   });
 
   it("Chart Style Reset restores classic defaults without wiping indicator toggles", () => {
@@ -94,6 +159,7 @@ describe("chart style / indicator modals", () => {
     (document.querySelector("#modal-reset") as HTMLButtonElement).click();
     expect(saved?.chartSettings?.candleScheme).toBe("classic");
     expect(saved?.chartSettings?.logScale).toBe(false);
+    expect(saved?.chartSettings?.bgGradient).toBe(true);
     expect(saved?.chartSettings?.indicators.ema20).toBe(true);
     expect(saved?.chartSettings?.indicators.rsi).toBe(true);
   });
