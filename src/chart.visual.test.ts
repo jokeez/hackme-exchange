@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, plotWheelAnchorShift, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth } from "./chart";
+import { clampVisiblePriceRange, getChartMountOpts, isOverPriceScale, panLogicalRangeByWheel, plotWheelAnchorShift, priceRangeNeedsHeal, smoothPlotBarSpacing, smoothPriceSpan, applyPriceWheelZoom, visibleBarBudget, wheelZoomStep, zoomBarSpacing, zoomPriceRange, barSpacingForWidth, buildCandlestickStyle } from "./chart";
 import { destroySecondaryChart, secondaryChartCount } from "./chartSecondary";
 import { formatPct, pctTone, chartPriceFormatter } from "./format";
 import { ema, sma } from "./indicators";
@@ -235,5 +235,15 @@ describe("secondary multi-chart slots", () => {
     expect(secondaryChartCount()).toBe(0);
     destroySecondaryChart();
     expect(secondaryChartCount()).toBe(0);
+  });
+});
+
+describe("candlestick rendering style", () => {
+  it("uses solid Binance-style bodies (border off so thin bars still fill)", () => {
+    const style = buildCandlestickStyle(baseState().chartSettings);
+    expect(style.borderVisible).toBe(false);
+    expect(style.wickVisible).toBe(true);
+    expect(style.wickUpColor).toBe(style.upColor);
+    expect(style.wickDownColor).toBe(style.downColor);
   });
 });

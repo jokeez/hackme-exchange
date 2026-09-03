@@ -75,6 +75,38 @@ describe("multi-TF aggregation (one market)", () => {
     expect((max - min) / min).toBeLessThan(1e-9);
   });
 
+  it("aggregated intraday bars clip wicks (no 1m fringe stacked on 5m/15m)", () => {
+    const mid = 0.050063;
+    const all = seedAllTimeframes("HMC_USDT", mid);
+    for (const tf of ["30s", "5m", "15m", "1H"] as const) {
+      const candles = all[tf]!;
+      expect(candles.length).toBeGreaterThan(10);
+      let maxWick = 0;
+      for (const c of candles.slice(-80)) {
+        const bodyMid = (c.open + c.close) / 2;
+        if (!(bodyMid > 0)) continue;
+        const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
+        const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
+        maxWick = Math.max(maxWick, up, dn);
+      }
+      // Screenshot bug: uniform ~40bps wicks on every bar while bodies stayed flat.
+      expect(maxWick).toBeLessThan(0.006);
+    }
+    // 1D/1W stay usable with slightly wider bodies — still capped.
+    for (const tf of ["1D", "1W"] as const) {
+      const candles = all[tf]!;
+      let maxWick = 0;
+      for (const c of candles.slice(-40)) {
+        const bodyMid = (c.open + c.close) / 2;
+        if (!(bodyMid > 0)) continue;
+        const up = (c.high - Math.max(c.open, c.close)) / bodyMid;
+        const dn = (Math.min(c.open, c.close) - c.low) / bodyMid;
+        maxWick = Math.max(maxWick, up, dn);
+      }
+      expect(maxWick).toBeLessThan(0.02);
+    }
+  });
+
   it("prepend on 1m then derive keeps higher-TF history + tip", () => {
     const mid = 0.0005;
     let all = seedAllTimeframes("HMC_USDT", mid);

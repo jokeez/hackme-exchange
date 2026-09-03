@@ -331,10 +331,22 @@ function schemeColors(s: ChartSettings) {
   return { up: cs.bullBody || base.up, down: cs.bearBody || base.down };
 }
 
-function wickColors(s: ChartSettings) {
-  const cs = s.candleStyle;
-  const base = schemeColors(s);
-  return { up: cs?.bullWick || base.up, down: cs?.bearWick || base.down };
+/** Binance-style solid bodies: border off so LWC always fills the candle (thin bars skip bodies when bordered). */
+function candlestickSeriesOptions(s: ChartSettings) {
+  const colors = schemeColors(s);
+  return {
+    upColor: colors.up,
+    downColor: colors.down,
+    borderVisible: false as const,
+    wickVisible: true as const,
+    wickUpColor: s.candleStyle?.bullWick || colors.up,
+    wickDownColor: s.candleStyle?.bearWick || colors.down,
+  };
+}
+
+/** @internal exported for tests */
+export function buildCandlestickStyle(s: ChartSettings) {
+  return candlestickSeriesOptions(s);
 }
 
 function hidePriceSeries(): void {
@@ -1925,7 +1937,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   activeTool = "cursor";
 
   const colors = schemeColors(opts.settings);
-  const wicks = wickColors(opts.settings);
+  const candleStyle = candlestickSeriesOptions(opts.settings);
   const hostW = Math.max(320, shell.clientWidth || el.clientWidth || 800);
   const spacing = barSpacingForWidth(hostW, opts.tf);
   chart = createChart(shell, {
@@ -1964,12 +1976,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   });
 
   candleSeries = chart.addSeries(CandlestickSeries, {
-    upColor: colors.up,
-    downColor: colors.down,
-    borderUpColor: colors.up,
-    borderDownColor: colors.down,
-    wickUpColor: wicks.up,
-    wickDownColor: wicks.down,
+    ...candleStyle,
     priceFormat: priceFormatOptions(),
     lastValueVisible: false,
     priceLineVisible: false,
@@ -2255,14 +2262,7 @@ export function applyChartSettings(settings: ChartSettings, candles: Candle[], o
   if (!chart || !candleSeries) return;
   currentSettings = settings;
   const colors = schemeColors(settings);
-  candleSeries.applyOptions({
-    upColor: colors.up,
-    downColor: colors.down,
-    borderUpColor: colors.up,
-    borderDownColor: colors.down,
-    wickUpColor: colors.up,
-    wickDownColor: colors.down,
-  });
+  candleSeries.applyOptions(candlestickSeriesOptions(settings));
   barSeries?.applyOptions({ upColor: colors.up, downColor: colors.down });
   chart.applyOptions({
     grid: {
