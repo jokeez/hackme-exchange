@@ -46,9 +46,21 @@ describe("validateLabWithdrawDestination (API-aligned)", () => {
     }
   });
 
-  it("rejects empty / unknown asset", () => {
-    expect(validateLabWithdrawDestination("HMC", "  ").ok).toBe(false);
-    expect(validateLabWithdrawDestination("ETH", "paper-usdt-ops-wallet-01").ok).toBe(false);
+  it("rejects self-destination when session address provided", () => {
+    const self = "HMC-ffffffffffffffff";
+    expect(validateLabWithdrawDestination("HMC", self, self).ok).toBe(false);
+    expect(validateLabWithdrawDestination("HMC", self, self.toLowerCase()).ok).toBe(false);
+    expect(validateLabWithdrawDestination("HMC", "HMC-0123456789abcdef", self).ok).toBe(true);
+  });
+});
+
+describe("validateLabWithdrawAmount", () => {
+  it("enforces soft min 0.01", async () => {
+    const { validateLabWithdrawAmount } = await import("./labCustody");
+    expect(validateLabWithdrawAmount(0).ok).toBe(false);
+    expect(validateLabWithdrawAmount(0.009).ok).toBe(false);
+    expect(validateLabWithdrawAmount(0.01).ok).toBe(true);
+    expect(validateLabWithdrawAmount(1).ok).toBe(true);
   });
 });
 

@@ -30,8 +30,13 @@ export type WithdrawDestCheck = { ok: true } | { ok: false; hint: string };
 /**
  * Client-side withdraw destination gate (mirrors API).
  * HMC → on-chain address. SUP/USDT/BTC → paper ops stubs (not HMC- / not deposit stubs).
+ * Optional `selfAddress` rejects withdrawing to the session account (API ErrWithdrawSelfDest).
  */
-export function validateLabWithdrawDestination(asset: string, destination: string): WithdrawDestCheck {
+export function validateLabWithdrawDestination(
+  asset: string,
+  destination: string,
+  selfAddress?: string,
+): WithdrawDestCheck {
   const a = asset.trim().toUpperCase();
   const dest = destination.trim();
   if (!dest) {
@@ -39,6 +44,10 @@ export function validateLabWithdrawDestination(asset: string, destination: strin
   }
   if (dest.length > 128) {
     return { ok: false, hint: "Destination too long (max 128)" };
+  }
+  const self = (selfAddress || "").trim();
+  if (self && dest.toLowerCase() === self.toLowerCase()) {
+    return { ok: false, hint: "Cannot withdraw to your own account address" };
   }
   if (a === "HMC") {
     if (!HMC_DEST_RE.test(dest)) {
@@ -59,4 +68,17 @@ export function validateLabWithdrawDestination(asset: string, destination: strin
     return { ok: true };
   }
   return { ok: false, hint: `Unsupported asset ${a || "(empty)"}` };
+}
+
+/** Soft min for UI — matches API default EXCHANGE_WITHDRAW_MIN (1e6 minor = 0.01). */
+export const LAB_WITHDRAW_MIN_DISPLAY = 0.01;
+
+export function validateLabWithdrawAmount(displayAmount: number): WithdrawDestCheck {
+  if (!(displayAmount > 0) || !Number.isFinite(displayAmount)) {
+    return { ok: false, hint: "Amount and destination required" };
+  }
+  if (displayAmount < LAB_WITHDRAW_MIN_DISPLAY) {
+    return { ok: false, hint: `Minimum withdraw is ${LAB_WITHDRAW_MIN_DISPLAY}` };
+  }
+  return { ok: true };
 }
