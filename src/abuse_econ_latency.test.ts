@@ -132,6 +132,23 @@ describe("security / mode boundaries", () => {
     expect("adminToken" in mod ? (mod as { adminToken?: string }).adminToken : "").toBeFalsy();
   });
 
+  it("D0 prepare script strips known lab fixture seed from paper bundles", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const script = readFileSync(resolve(process.cwd(), "scripts/prepare_d0_static.sh"), "utf8");
+    expect(script).toMatch(/0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20/);
+    expect(script).toMatch(/force-clear lab Vite env|fixture seed must not ship/i);
+  });
+
+  it("lab fixture seed constant is gated behind DEV / VITE_LAB_API", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const src = readFileSync(resolve(process.cwd(), "src/adapters/labFixture.ts"), "utf8");
+    expect(src).toMatch(/import\.meta\.env\.DEV/);
+    expect(src).toMatch(/VITE_LAB_API/);
+    expect(src).toMatch(/LAB_FIXTURE_SEED_HEX/);
+  });
+
   it("resetDemo restores positive paper balances", () => {
     // happy-dom localStorage
     const s = resetDemo();
