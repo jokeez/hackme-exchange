@@ -1,6 +1,6 @@
 import "./styles.css";
 import { patchAccountFundsDom, renderAccountPage, wireAccountFunding } from "./account";
-import { validateLabWithdrawDestination } from "./labCustody";
+import { validateLabWithdrawDestination, validateLabWithdrawAmount } from "./labCustody";
 import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
 import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
@@ -390,6 +390,8 @@ let tradingGuards: TradingGuards = { ...DEFAULT_TRADING_GUARDS };
 /** Lab fee-collection address from /health `fee_wallet` (null → hide UI). */
 let labFeeWallet: string | null = null;
 let labUser2faEnabled = false;
+let labDepositEnabled = true;
+let labWithdrawEnabled = true;
 const cvDeskInit = loadConvertDesk();
 /** Convert desk selection — survives re-render without form wipe. */
 let convertFrom: keyof Wallet = cvDeskInit.from;
@@ -3116,6 +3118,10 @@ async function labMintHmcUi(displayAmt = 100): Promise<void> {
     toast("Connect DEMO/LAB fixture first", "warn");
     return;
   }
+  if (!labDepositEnabled) {
+    toast("Deposits paused — check runbook hint", "warn");
+    return;
+  }
   if (custodyInFlight) {
     toast("Custody request already in flight", "info");
     return;
@@ -3151,6 +3157,10 @@ async function labBridgeCreditUi(asset: "USDT" | "BTC", displayAmt: number): Pro
   const msg = document.getElementById("lab-deposit-msg");
   if (!useLabMatching()) {
     toast("Connect DEMO/LAB fixture first", "warn");
+    return;
+  }
+  if (!labDepositEnabled) {
+    toast("Deposits paused — check runbook hint", "warn");
     return;
   }
   if (custodyInFlight) {
@@ -3211,6 +3221,10 @@ async function labWithdrawRequestUi(): Promise<void> {
     toast("Connect DEMO/LAB fixture first", "warn");
     return;
   }
+  if (!labWithdrawEnabled) {
+    toast("Withdrawals paused — check runbook hint above", "warn");
+    return;
+  }
   if (custodyInFlight) {
     toast("Custody request already in flight", "info");
     return;
@@ -3220,15 +3234,26 @@ async function labWithdrawRequestUi(): Promise<void> {
   const destination = ((document.getElementById("lab-wd-dest") as HTMLInputElement | null)?.value || "").trim();
   const totp = ((document.getElementById("lab-wd-2fa") as HTMLInputElement | null)?.value || "").trim();
   const amount = displayToMinor(amtDisp);
-  if (!(amount > 0) || !destination) {
+  const amtCheck = validateLabWithdrawAmount(amtDisp);
+  if (!amtCheck.ok) {
+    if (msg) msg.textContent = amtCheck.hint;
+    toast(amtCheck.hint, "warn");
+    return;
+  }
+  if (!destination) {
     toast("Amount and destination required", "warn");
     return;
   }
-  if (labUser2faEnabled && !totp) {
-    toast("2FA code required — enable in Security below or enter code", "warn");
-    return;
+  if (!totp) {
+    // Edge always requires enrolled 2FA; lab may too once user enrolls.
+    if (labUser2faEnabled) {
+      toast("2FA code required — enter code from authenticator", "warn");
+      document.getElementById("lab-wd-2fa")?.focus();
+      return;
+    }
   }
-  const destCheck = validateLabWithdrawDestination(asset, destination);
+  const selfAddr = getLabSessionMeta().address || "";
+  const destCheck = validateLabWithdrawDestination(asset, destination, selfAddr);
   if (!destCheck.ok) {
     if (msg) msg.textContent = destCheck.hint;
     toast(destCheck.hint, "warn");
@@ -3244,10 +3269,19 @@ async function labWithdrawRequestUi(): Promise<void> {
     if (totp) body.totp_code = totp;
     const res = await requestWithdraw(body);
     if (!res.ok) {
+      const lower = res.message.toLowerCase();
+      if (lower.includes("2fa") || lower.includes("totp")) {
+        document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (msg) msg.textContent = `${res.message} — enroll 2FA below if needed`;
+        toast(res.message, "warn");
+        return;
+      }
       if (msg) msg.textContent = res.message;
       toast(res.message, "warn");
       return;
     }
+    const totpEl = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
+    if (totpEl) totpEl.value = "";
     if (msg) msg.textContent = `Requested ${res.withdraw.id} · ${res.withdraw.status}${
       res.fee_quote && res.fee_quote.fee > 0
         ? ` · fee ${minorToDisplay(res.fee_quote.fee)} ${res.withdraw.asset} (debit ${minorToDisplay(res.fee_quote.debit_total)})`
@@ -3292,6 +3326,9 @@ async function labWithdrawQuoteUi(): Promise<void> {
     pause.hidden = bits.length === 0;
     pause.textContent = bits.length ? `Runbook: ${bits.join(" · ")}` : "";
   }
+  labDepositEnabled = res.deposit_enabled !== false;
+  labWithdrawEnabled = res.withdraw_enabled !== false;
+  applyLabCustodyPauseUi();
   const q = res.quote;
   if (!q) return;
   quoteEl2.textContent = q.paused
@@ -3464,6 +3501,27 @@ async function lab2faDisableUi(): Promise<void> {
   await lab2faRefreshUi();
 }
 
+function applyLabCustodyPauseUi(): void {
+  const live = useLabMatching();
+  const gate = (
+    id: string,
+    allow: boolean,
+    pausedTitle: string,
+    offlineTitle = "Connect fixture first",
+  ) => {
+    const el = document.getElementById(id) as HTMLButtonElement | null;
+    if (!el) return;
+    el.disabled = !live || !allow;
+    if (!live) el.title = offlineTitle;
+    else if (!allow) el.title = pausedTitle;
+    else el.removeAttribute("title");
+  };
+  gate("btn-lab-wd-request", labWithdrawEnabled, "Withdrawals paused");
+  gate("btn-lab-mint-hmc", labDepositEnabled, "Deposits paused");
+  gate("btn-lab-bridge-usdt", labDepositEnabled, "Deposits paused");
+  gate("btn-lab-bridge-btc", labDepositEnabled, "Deposits paused");
+}
+
 function wireLabApiButtons(): void {
   const click = (id: string, fn: () => void) => {
     const el = document.getElementById(id);
@@ -3491,6 +3549,7 @@ function wireLabApiButtons(): void {
   click("btn-lab-2fa-confirm", () => void lab2faConfirmUi());
   click("btn-lab-2fa-disable", () => void lab2faDisableUi());
   void lab2faRefreshUi();
+  void labWithdrawQuoteUi();
   click("btn-lab-fee-wallet-copy", () => {
     const addr =
       labFeeWallet ||
