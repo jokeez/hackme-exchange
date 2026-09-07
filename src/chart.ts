@@ -37,7 +37,7 @@ import {
   resolvePaintDrawings,
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
-import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { clearChartViewport, loadChartViewport, saveChartViewport } from "./chartViewport";
 import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
 
@@ -425,19 +425,13 @@ function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
     if (last && last.time === c.time) deduped[deduped.length - 1] = c;
     else deduped.push(c);
   }
-  const resolvedTf = tf ?? lastOpts?.tf ?? "15m";
-  // Derived / expanded TFs already carry CEX aggregation — only fix NaN / high-low vs body.
-  // Aggressive body/wick caps would crush real child extremes on 5m/1D/30s.
-  const cleaned =
-    resolvedTf === "1m"
-      ? sanitizeCandleExtremes(deduped, maxBodyFracForTf(resolvedTf), {
-          maxWick: maxWickFracForTf(resolvedTf),
-        })
-      : deduped.map((c) => ({
-          ...c,
-          high: Math.max(c.high, c.open, c.close),
-          low: Math.min(c.low, c.open, c.close),
-        }));
+  // Paper clock / aggregate series are already finalized — only heal NaN / high-low vs body.
+  // Re-running body/wick caps here would crush tip extremes and fork painted vs state OHLC.
+  const cleaned = deduped.map((c) => ({
+    ...c,
+    high: Math.max(c.high, c.open, c.close),
+    low: Math.min(c.low, c.open, c.close),
+  }));
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 

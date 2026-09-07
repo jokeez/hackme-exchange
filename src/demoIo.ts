@@ -19,7 +19,6 @@ import {
   sanitizeMainView,
   sanitizeMultiChartLayout,
   sanitizeOracleAnchor,
-  migrateOracleAnchor,
   sanitizePlainNote,
 } from "./sanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
@@ -27,6 +26,7 @@ import { sanitizeFeeConfig } from "./fees";
 import { defaultDemoState, sanitizeMultiPanePairs } from "./store";
 import { chartPrefsFromState, saveChartPrefs } from "./chartPrefs";
 import { uid } from "./id";
+import { DEFAULT_REFERENCE_MID } from "./market";
 import {
   MAX_IMPORT_TRADE_QUOTE,
   sanitizeImportedCandles,
@@ -37,11 +37,13 @@ import {
 export { MAX_IMPORT_TRADE_QUOTE, sanitizeImportedOrder, sanitizeImportedTrade, sanitizeImportedCandles } from "./stateSanitize";
 
 export function exportDemoJson(state: DemoState): string {
+  // Never export OHLC — paper clock rebuilds identical candles; shipping them forks devices.
+  const safe = { ...state, candles: {} as DemoState["candles"] };
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
       app: "hackme-exchange-demo",
-      state,
+      state: safe,
     },
     null,
     2,
@@ -188,7 +190,8 @@ export function parseDemoImport(raw: string): DemoState {
     state.priceAlerts = [];
   }
   state.drawings = sanitizeDrawings(incoming.drawings);
-  state.candles = sanitizeImportedCandles(incoming.candles);
+  // Shared paper clock only — imported OHLC would fork charts across devices.
+  state.candles = {};
   state.equitySnapshots = Array.isArray(incoming.equitySnapshots)
     ? incoming.equitySnapshots.slice(0, 200).filter(
         (e) =>
@@ -204,7 +207,7 @@ export function parseDemoImport(raw: string): DemoState {
   state.secondaryTf = sanitizeTf(incoming.secondaryTf, "4H");
   state.multiPaneTfs = sanitizeImportedMultiPaneTfs(incoming.multiPaneTfs, state.secondaryTf);
   state.multiPanePairs = sanitizeMultiPanePairs(incoming.multiPanePairs);
-  state.oracleAnchor = migrateOracleAnchor(incoming.oracleAnchor);
+  state.oracleAnchor = DEFAULT_REFERENCE_MID;
   state.mainView = sanitizeMainView(incoming.mainView);
   state.chartMode = sanitizeChartMode(incoming.chartMode);
   state.multiChartLayout = sanitizeMultiChartLayout(

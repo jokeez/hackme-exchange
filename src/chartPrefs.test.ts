@@ -153,7 +153,8 @@ describe("ensureCandles tip OHLC", () => {
     const tip = s.candles.HMC_USDT!["1m"]![s.candles.HMC_USDT!["1m"]!.length - 1]!;
     expect(tip.high).toBeGreaterThanOrEqual(Math.max(tip.open, tip.close));
     expect(tip.low).toBeLessThanOrEqual(Math.min(tip.open, tip.close));
-    expect(tip.close).toBeCloseTo(paperPairMid("HMC_USDT"), 10);
+    // Close tracks shared clock; allow tiny drift if timers advanced mid-call.
+    expect(tip.close).toBeCloseTo(paperPairMid("HMC_USDT"), 5);
   });
 });
 

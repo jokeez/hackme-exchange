@@ -217,13 +217,18 @@ export function aggregateCandles(
 }
 
 /** Build 30s from 1m by splitting each bar (demo-only finer resolution). */
-export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf: Timeframe): Candle[] {
+export function expandToFinerTf(
+  source: Candle[],
+  sourceTf: Timeframe,
+  targetTf: Timeframe,
+  nowMs = Date.now(),
+): Candle[] {
   const srcSec = TF_SEC[sourceTf];
   const dstSec = TF_SEC[targetTf];
   if (!(dstSec < srcSec) || !source.length) return [];
   const ratio = Math.round(srcSec / dstSec);
   if (ratio < 2) return [];
-  const nowBucket = Math.floor(Date.now() / 1000 / dstSec) * dstSec;
+  const nowBucket = Math.floor(nowMs / 1000 / dstSec) * dstSec;
   const out: Candle[] = [];
   for (const c of source) {
     const step = (c.close - c.open) / ratio;
@@ -284,9 +289,14 @@ export function seedCandles(
     const t = now - i * sec;
     if (t < genesis) continue;
     const isTip = i === 0;
+    if (isTip) {
+      // Same tip builder as live paper clock — identical H/L across seed vs micro-tick.
+      out.push(tipBarFromPaperClock(pairId, tf, t, nowMs, mid));
+      continue;
+    }
     const open = paperPairMid(pairId, t * 1000) * scale;
     // Closed bars: close == next bucket open so series stay CEX-continuous across devices.
-    const close = isTip ? mid : paperPairMid(pairId, (t + sec) * 1000) * scale;
+    const close = paperPairMid(pairId, (t + sec) * 1000) * scale;
     out.push(makeBar(pairId, t, open, close, tf));
   }
   return out;
@@ -295,18 +305,22 @@ export function seedCandles(
 /** Recompute all TFs from a 1m base series.
  * Higher TFs only cover the 1m window (~1–2 days) — pad left with synthetic
  * history (and keep prior older bars) so 1D/1W look like a real CEX desk, not 2–4 mega-candles.
+ * Pass `opts.retainPrev=false` (paper clock) so devices never reattach forked left pads.
  */
 export function deriveAllTimeframes(
   base1m: Candle[],
   pairId?: PairId,
   prev?: Partial<Record<Timeframe, Candle[]>>,
+  opts?: { nowMs?: number; retainPrev?: boolean },
 ): Partial<Record<Timeframe, Candle[]>> {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const retainPrev = opts?.retainPrev !== false;
   let base = base1m.slice(-MAX_CANDLES);
   // Max out 1m history first so higher TFs aggregate the widest real window (CEX desk).
   if (pairId) {
-    const target1m = barCountForTf(CANDLE_BASE_TF);
+    const target1m = barCountForTf(CANDLE_BASE_TF, nowMs);
     if (base.length < target1m) {
-      base = prependOlderCandles(base, pairId, CANDLE_BASE_TF, target1m - base.length);
+      base = prependOlderCandles(base, pairId, CANDLE_BASE_TF, target1m - base.length, nowMs);
     }
   }
   const out: Partial<Record<Timeframe, Candle[]>> = {
@@ -317,15 +331,15 @@ export function deriveAllTimeframes(
     let series: Candle[] =
       TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]
         ? aggregateCandles(base, CANDLE_BASE_TF, tf)
-        : expandToFinerTf(base, CANDLE_BASE_TF, tf);
+        : expandToFinerTf(base, CANDLE_BASE_TF, tf, nowMs);
     const firstT = series[0]?.time;
-    if (prev?.[tf]?.length && firstT != null) {
+    if (retainPrev && prev?.[tf]?.length && firstT != null) {
       const older = prev[tf]!.filter((c) => c.time < firstT);
       if (older.length) series = [...older, ...series];
     }
-    const need = barCountForTf(tf);
+    const need = barCountForTf(tf, nowMs);
     if (pairId && series.length > 0 && series.length < need) {
-      series = prependOlderCandles(series, pairId, tf, need - series.length);
+      series = prependOlderCandles(series, pairId, tf, need - series.length, nowMs);
     }
     out[tf] = series.slice(-MAX_CANDLES);
   }
@@ -343,18 +357,79 @@ export function seedAllTimeframes(
     pairId,
     CANDLE_BASE_TF,
   );
-  const all = deriveAllTimeframes(base, pairId);
+  if (base.length) {
+    const tip = base[base.length - 1]!;
+    tip.close = mid;
+    tip.high = Math.max(tip.high, tip.open, mid);
+    tip.low = Math.min(tip.low, tip.open, mid);
+  }
+  const all = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? base);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
     if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
   }
+  // Re-pin tip close after finalize/reagg so every TF prints the live mid.
+  for (const tf of Object.keys(all) as Timeframe[]) {
+    const series = all[tf];
+    if (!series?.length) continue;
+    const tip = series[series.length - 1]!;
+    tip.close = mid;
+    tip.high = Math.max(tip.high, tip.open, mid);
+    tip.low = Math.min(tip.low, tip.open, mid);
+  }
   return all;
 }
 
 /**
+ * Forming tip OHLC from shared clock only — never accumulate path-dependent H/L.
+ * Samples paperPairMid on a fixed 700ms grid inside the open bucket.
+ * `tipMid` scales the native path so tip close prints exactly `tipMid`.
+ */
+export function tipBarFromPaperClock(
+  pairId: PairId,
+  tf: Timeframe,
+  bucketT: number,
+  nowMs: number,
+  tipMid: number,
+): Candle {
+  const nativeTip = paperPairMid(pairId, nowMs);
+  const scale = nativeTip > 0 && Number.isFinite(nativeTip) ? tipMid / nativeTip : 1;
+  const open = paperPairMid(pairId, bucketT * 1000) * scale;
+  const sec = TF_SEC[tf];
+  const endMs = Math.min(nowMs, (bucketT + sec) * 1000 - 1);
+  let high = Math.max(open, tipMid);
+  let low = Math.min(open, tipMid);
+  // Fixed grid — identical extremes for every client at the same nowMs.
+  for (let ms = bucketT * 1000; ms <= endMs; ms += 700) {
+    const px = paperPairMid(pairId, ms) * scale;
+    high = Math.max(high, px);
+    low = Math.min(low, px);
+  }
+  const tipSample = paperPairMid(pairId, endMs) * scale;
+  high = Math.max(high, tipSample, tipMid);
+  low = Math.min(low, tipSample, tipMid);
+  const bar = constrainBarToOpen(
+    {
+      time: bucketT,
+      open,
+      high,
+      low,
+      close: tipMid,
+      volume: candleVolume(pairId, tf, bucketT),
+    },
+    maxBodyFracForTf(tf),
+    maxWickFracForTf(tf),
+  );
+  bar.close = tipMid;
+  bar.high = Math.max(bar.high, bar.open, tipMid);
+  bar.low = Math.min(bar.low, bar.open, tipMid);
+  return bar;
+}
+
+/**
  * Paper desk: rebuild / tip-sync candles from the shared clock.
- * Full reseed on empty history or bucket rollover; within-bucket tip is pure `paperPairMid`.
+ * Full reseed on empty history or bucket rollover; within-bucket tip is pure clock OHLC.
  */
 export function applyPaperClockToPairCandles(
   candlesByTf: Partial<Record<Timeframe, Candle[]>>,
@@ -371,19 +446,10 @@ export function applyPaperClockToPairCandles(
   if (!prevBase.length || tipTime !== t || !scaleOk) {
     return seedAllTimeframes(pairId, mid, nowMs);
   }
-  const open = paperPairMid(pairId, t * 1000);
-  const tip = makeBar(pairId, t, open, mid, CANDLE_BASE_TF);
-  const nextBase = sanitizeCandlesForChart([...prevBase.slice(0, -1), tip], pairId, CANDLE_BASE_TF);
-  if (nextBase.length) {
-    nextBase[nextBase.length - 1] = {
-      ...nextBase[nextBase.length - 1]!,
-      high: Math.max(nextBase[nextBase.length - 1]!.high, tip.high, open, mid),
-      low: Math.min(nextBase[nextBase.length - 1]!.low, tip.low, open, mid),
-      close: mid,
-      open,
-    };
-  }
-  const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
+  // Replace tip wholesale — do not Math.max with stale in-memory extremes.
+  const nextBase = [...prevBase.slice(0, -1), tip];
+  const all = deriveAllTimeframes(nextBase, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
     if (tf === CANDLE_BASE_TF) {
@@ -402,11 +468,12 @@ export function prependOlderCandles(
   pairId: PairId,
   tf: Timeframe,
   count: number,
+  nowMs = Date.now(),
 ): Candle[] {
   if (count <= 0) return existing;
   if (!existing.length) {
-    const seedMid = paperPairMid(pairId);
-    return seedCandles(pairId, tf, seedMid, Math.min(count, MAX_CANDLES));
+    const seedMid = paperPairMid(pairId, nowMs);
+    return seedCandles(pairId, tf, seedMid, Math.min(count, MAX_CANDLES), nowMs);
   }
   const room = MAX_CANDLES - existing.length;
   if (room <= 0) return existing;
@@ -762,7 +829,14 @@ export function stats24h(
 ): { changePct: number; high: number; low: number; vol: number; refOpen: number; refClose: number } {
   if (candles.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0, refOpen: 0, refClose: 0 };
   const bars24 = Math.min(candles.length, Math.max(2, Math.ceil(86_400 / TF_SEC[tf])));
-  const slice = sanitizeCandleExtremes(candles.slice(-bars24), maxBodyFracForTf(tf));
+  // Soft-heal cliffs for HUD stats only — does not mutate the chart series.
+  const slice = sanitizeCandleExtremes(candles.slice(-bars24), maxBodyFracForTf(tf), {
+    maxWick: maxWickFracForTf(tf),
+  }).map((c) => ({
+    ...c,
+    high: Math.max(c.high, c.open, c.close),
+    low: Math.min(c.low, c.open, c.close),
+  }));
   if (slice.length < 2) return { changePct: 0, high: 0, low: 0, vol: 0, refOpen: 0, refClose: 0 };
   const first = slice[0]!.open;
   const last = slice[slice.length - 1]!.close;
