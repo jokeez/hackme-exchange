@@ -1,13 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   aggregateCandles,
   applyMidToPairCandles,
+  applyPaperClockToPairCandles,
   CANDLE_BASE_TF,
   deriveAllTimeframes,
   expandToFinerTf,
   reaggregateLiveBarsFromBase,
   seedAllTimeframes,
+  tipBarFromPaperClock,
 } from "./candles";
+import { paperPairMid } from "./market";
 import { TF_SEC, TIMEFRAMES, type Timeframe } from "./types";
 
 const COARSER_TFS = TIMEFRAMES.filter((tf) => TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]);
@@ -205,5 +208,58 @@ describe("multi-TF CEX audit (all timeframes)", () => {
     }
     expect(tip.high).toBeGreaterThanOrEqual(Math.max(tip.open, tip.close) - 1e-12);
     expect(tip.low).toBeLessThanOrEqual(Math.min(tip.open, tip.close) + 1e-12);
+  });
+
+  it("tip OHLC is identical for late-joining clients (no path-dependent H/L)", () => {
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-09-07T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    const early = applyPaperClockToPairCandles({}, "HMC_USDT", t0);
+    // Simulate early client ticking through the minute
+    for (let i = 1; i <= 40; i++) {
+      vi.setSystemTime(t0 + i * 700);
+      Object.assign(early, applyPaperClockToPairCandles(early, "HMC_USDT", t0 + i * 700));
+    }
+    const lateJoinMs = t0 + 40 * 700;
+    const late = applyPaperClockToPairCandles({}, "HMC_USDT", lateJoinMs);
+    const tipA = early[CANDLE_BASE_TF]![early[CANDLE_BASE_TF]!.length - 1]!;
+    const tipB = late[CANDLE_BASE_TF]![late[CANDLE_BASE_TF]!.length - 1]!;
+    expect(tipB).toEqual(tipA);
+    expect(tipA.close).toBe(paperPairMid("HMC_USDT", lateJoinMs));
+    // Coarser tips also match
+    expect(late["15m"]![late["15m"]!.length - 1]).toEqual(early["15m"]![early["15m"]!.length - 1]);
+    vi.useRealTimers();
+  });
+
+  it("tipBarFromPaperClock is pure for fixed nowMs", () => {
+    const nowMs = Date.parse("2026-09-07T12:00:33.000Z");
+    const t = Math.floor(nowMs / 1000 / 60) * 60;
+    const mid = paperPairMid("SUP_USDT", nowMs);
+    const a = tipBarFromPaperClock("SUP_USDT", "1m", t, nowMs, mid);
+    const b = tipBarFromPaperClock("SUP_USDT", "1m", t, nowMs, mid);
+    expect(b).toEqual(a);
+    expect(a.close).toBe(mid);
+    expect(a.high).toBeGreaterThanOrEqual(Math.max(a.open, a.close));
+    expect(a.low).toBeLessThanOrEqual(Math.min(a.open, a.close));
+  });
+
+  it("expandToFinerTf respects injected nowMs (no future half-bar)", () => {
+    const parentT = Math.floor(Date.parse("2026-09-07T12:00:00.000Z") / 1000);
+    const parent = {
+      time: parentT,
+      open: 0.05,
+      high: 0.051,
+      low: 0.049,
+      close: 0.0502,
+      volume: 100,
+    };
+    // Mid-minute: only first 30s half should exist
+    const midMinute = parentT * 1000 + 20_000;
+    const halves = expandToFinerTf([parent], "1m", "30s", midMinute);
+    expect(halves).toHaveLength(1);
+    expect(halves[0]!.time).toBe(parentT);
+    const endMinute = parentT * 1000 + 59_000;
+    const both = expandToFinerTf([parent], "1m", "30s", endMinute);
+    expect(both).toHaveLength(2);
   });
 });

@@ -11,6 +11,31 @@ describe("demoIo", () => {
     expect(parsed.orders).toEqual([]);
   });
 
+  it("never exports or imports candle OHLC (shared clock only)", () => {
+    const state = baseState({
+      candles: {
+        HMC_USDT: {
+          "1m": [{ time: 1_700_000_000, open: 9, high: 9, low: 9, close: 9, volume: 1 }],
+        },
+      },
+    });
+    const raw = exportDemoJson(state);
+    expect(JSON.parse(raw).state.candles).toEqual({});
+    const parsed = parseDemoImport(
+      JSON.stringify({
+        state: {
+          ...state,
+          candles: {
+            HMC_USDT: {
+              "1m": [{ time: 1_700_000_000, open: 9, high: 9, low: 9, close: 9, volume: 1 }],
+            },
+          },
+        },
+      }),
+    );
+    expect(parsed.candles).toEqual({});
+  });
+
   it("rejects garbage", () => {
     expect(() => parseDemoImport("{}")).toThrow(/wallet/);
     expect(() => parseDemoImport("not-json")).toThrow();

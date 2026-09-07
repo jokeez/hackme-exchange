@@ -68,11 +68,11 @@ export function renderUnifiedSettingsModal(
 
     <div class="modal-pane" id="pane-oracle" role="tabpanel" hidden>
       <label for="set-anchor">Reference mid (USDT per HMC)
-        <input class="inp mono" id="set-anchor" type="number" step="0.001" value="${anchor}" />
+        <input class="inp mono" id="set-anchor" type="number" step="0.001" value="${anchor}" readonly disabled />
       </label>
-      <p class="muted small">D0 shared paper mid is locked at 0.05 USDT/HMC so every device/embed sees the same chart. Custom anchors are stored but do not fork the live paper book.</p>
+      <p class="muted small">Shared D0 paper mid is locked at 0.05 USDT/HMC on every device. This field is display-only.</p>
       <div class="modal-actions">
-        <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Apply oracle anchor">Apply anchor</button>
+        <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Reset oracle anchor to D0 default" disabled title="Locked for cross-device sync">Locked at 0.05</button>
       </div>
     </div>
 
