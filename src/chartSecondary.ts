@@ -11,7 +11,7 @@ import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
-import { logicalRangeToIndices, maxBodyFracForTf, maxWickFracForTf, robustPriceRange, sanitizeCandleExtremes } from "./chartScale";
+import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
@@ -296,7 +296,11 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
       to: ((slot.savedRange.to as number) + prepended) as LogicalRange["to"],
     };
   }
-  const cleaned = sanitizeCandleExtremes(candles, maxBodyFracForTf(slot.tf), { maxWick: maxWickFracForTf(slot.tf) });
+  const cleaned = candles.map((c) => ({
+    ...c,
+    high: Math.max(c.high, c.open, c.close),
+    low: Math.min(c.low, c.open, c.close),
+  }));
   slot.candles = cleaned;
   slot.series.setData(candlePoints(cleaned));
   if (fit) {

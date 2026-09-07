@@ -6213,12 +6213,16 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 function upsertAllCandles(mid: number): void {
+  // Paper desk: tip is shared-clock only — never fork OHLC from fill prints.
+  if (!useLabMatching()) return;
   if (!state.candles[state.activePair]) return;
   const prev = prevMids[state.activePair];
   const next = applyMidToPairCandles(state.candles[state.activePair]!, state.activePair, mid, prev);
   state.candles[state.activePair] = next;
   prevMids[state.activePair] = mid;
 }
+
+let wasLabMatching = false;
 
 function microTickPrices(): void {
   if (!market || state.mainView !== "spot") return;
@@ -6228,6 +6232,15 @@ function microTickPrices(): void {
   // Shared paper clock — canonical D0 refs (not per-device Settings anchor / EMA).
   market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
   const labLive = useLabMatching();
+  // Lab → paper: hard reseed so lab tip extremes / path never stick.
+  if (wasLabMatching && !labLive) {
+    for (const p of PAIRS) {
+      state.candles[p.id] = applyPaperClockToPairCandles({}, p.id);
+      prevMids[p.id] = midForPair(market, p.id);
+    }
+    chartNeedsFullReplace = true;
+  }
+  wasLabMatching = labLive;
   for (const p of PAIRS) {
     const oracleTarget = midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;

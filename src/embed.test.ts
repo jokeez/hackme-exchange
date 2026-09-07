@@ -43,4 +43,14 @@ describe("hub embed helpers", () => {
     );
     expect(hubParentPostMessageOrigin("https://evil.example/phish")).toBeNull();
   });
+
+  it("empty referrer on exchange.hackme.tech falls back to prod hub", () => {
+    const prev = window.location.hostname;
+    Object.defineProperty(window.location, "hostname", {
+      value: "exchange.hackme.tech",
+      configurable: true,
+    });
+    expect(hubParentPostMessageOrigin("")).toBe("https://hackme.tech");
+    Object.defineProperty(window.location, "hostname", { value: prev, configurable: true });
+  });
 });

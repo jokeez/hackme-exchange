@@ -22,9 +22,19 @@ export function applyHubEmbedChrome(): void {
 
 /** Parent hub origins allowed for postMessage (loopback lab + production hackme.tech). */
 export function hubParentPostMessageOrigin(referrer?: string): string | null {
-  const fallback = "http://127.0.0.1:8080";
+  const prodFallback = "https://hackme.tech";
   const ref = (referrer ?? "").trim();
-  if (!ref) return fallback;
+  if (!ref) {
+    // Empty referrer on production embed must not target loopback.
+    try {
+      if (typeof location !== "undefined" && /hackme\.tech$/i.test(location.hostname)) {
+        return prodFallback;
+      }
+    } catch {
+      /* ignore */
+    }
+    return "http://127.0.0.1:8080";
+  }
   try {
     const origin = new URL(ref).origin;
     if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(origin)) return origin;
