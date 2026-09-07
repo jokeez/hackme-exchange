@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_BTC_USD,
   DEFAULT_REFERENCE_MID,
   DEFAULT_SUP_REFERENCE_MID,
   PAPER_MID_BAND,
@@ -9,6 +10,7 @@ import {
   liveReferenceMid,
   localFallbackMarket,
   midForPair,
+  paperPairMid,
   resyncCrossMids,
   tickerFromMarket,
 } from "./market";
@@ -105,11 +107,11 @@ describe("buildMarket", () => {
     const { market, source } = await fetchMarket(DEFAULT_REFERENCE_MID);
     expect(source).toBe("live");
     expect(market.poolGh).toBeCloseTo(88, 5);
-    expect(market.btcUsd).toBeCloseTo(97_500.12, 2);
+    expect(market.btcUsd).toBe(DEFAULT_BTC_USD);
     expect(market.hmcUsdt).toBeGreaterThan(DEFAULT_REFERENCE_MID * (1 - PAPER_MID_BAND - 1e-9));
     expect(market.hmcUsdt).toBeLessThan(DEFAULT_REFERENCE_MID * (1 + PAPER_MID_BAND + 1e-9));
-    expect(market.hmcBtc).toBeCloseTo(market.hmcUsdt / market.btcUsd, 14);
-    expect(market.supBtc).toBeCloseTo(market.supUsdt / market.btcUsd, 14);
+    expect(market.hmcBtc).toBeCloseTo(market.hmcUsdt / DEFAULT_BTC_USD, 14);
+    expect(market.supBtc).toBeCloseTo(market.supUsdt / DEFAULT_BTC_USD, 14);
   });
 });
 
@@ -123,14 +125,22 @@ describe("liveReferenceMid / applyLivePaperMids", () => {
     expect(Math.abs(a - 0.05) / 0.05).toBeLessThanOrEqual(PAPER_MID_BAND + 1e-12);
   });
 
-  it("keeps HMC/SUP/BTC legs synchronized", () => {
+  it("keeps HMC/SUP legs synchronized and pins shared paper BTC", () => {
     const base = buildMarket({}, {}, {}, 0.05, 90_000);
     const live = applyLivePaperMids(base, 0.05, DEFAULT_SUP_REFERENCE_MID, 1_700_000_123_000);
     expect(live.hmcSup).toBeCloseTo(live.hmcUsdt / live.supUsdt, 12);
-    expect(live.hmcBtc).toBeCloseTo(live.hmcUsdt / 90_000, 14);
-    expect(live.supBtc).toBeCloseTo(live.supUsdt / 90_000, 14);
+    expect(live.btcUsd).toBe(DEFAULT_BTC_USD);
+    expect(live.hmcBtc).toBeCloseTo(live.hmcUsdt / DEFAULT_BTC_USD, 14);
+    expect(live.supBtc).toBeCloseTo(live.supUsdt / DEFAULT_BTC_USD, 14);
     expect(midForPair(live, "HMC_BTC")).toBe(live.hmcBtc);
     expect(midForPair(live, "SUP_BTC")).toBe(live.supBtc);
+  });
+
+  it("paperPairMid is identical for the same wall clock on every client", () => {
+    const t = 1_700_000_123_000;
+    expect(paperPairMid("HMC_USDT", t)).toBe(paperPairMid("HMC_USDT", t));
+    expect(paperPairMid("SUP_USDT", t)).toBe(liveReferenceMid(DEFAULT_SUP_REFERENCE_MID, "sup", t));
+    expect(paperPairMid("HMC_BTC", t)).toBeCloseTo(paperPairMid("HMC_USDT", t) / DEFAULT_BTC_USD, 14);
   });
 });
 

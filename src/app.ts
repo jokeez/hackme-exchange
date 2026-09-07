@@ -6,6 +6,7 @@ import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
 import {
   applyMidToPairCandles,
+  applyPaperClockToPairCandles,
   CANDLE_BASE_TF,
   deriveAllTimeframes,
   prependOlderCandles,
@@ -201,6 +202,7 @@ import {
 import { recordConvert } from "./ledger";
 import { buildPairQuote, quoteToneClass, type PairQuote } from "./quote";
 import {
+  DEFAULT_REFERENCE_MID,
   DEFAULT_SUP_REFERENCE_MID,
   applyLivePaperMids,
   fetchMarket,
@@ -6223,18 +6225,20 @@ function microTickPrices(): void {
   let changed = false;
   bookPhase += 0.38;
   liveTickN += 1;
-  // Breathe around operator refs; keep HMC/SUP/BTC crosses coherent every tick.
-  market = applyLivePaperMids(market, state.oracleAnchor, DEFAULT_SUP_REFERENCE_MID);
+  // Shared paper clock — canonical D0 refs (not per-device Settings anchor / EMA).
+  market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
   const labLive = useLabMatching();
   for (const p of PAIRS) {
     const oracleTarget = midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
-    const target = labMid > 0 ? labMid : oracleTarget;
-    const prev = prevMids[p.id] ?? target;
-    // Lab: raw book mid. Paper: soft blend so candle tip does not teleport every 700ms.
-    const displayMid = labMid > 0 ? labMid : prev * 0.72 + target * 0.28;
+    const displayMid = labMid > 0 ? labMid : oracleTarget;
     if (!state.candles[p.id]) state.candles[p.id] = {};
-    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, displayMid, prev);
+    if (labMid > 0) {
+      const prev = prevMids[p.id] ?? displayMid;
+      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, displayMid, prev);
+    } else {
+      state.candles[p.id] = applyPaperClockToPairCandles(state.candles[p.id]!, p.id);
+    }
     prevMids[p.id] = displayMid;
     if (tickers[p.id]) {
       if (labLive && labMid > 0) {
@@ -6330,7 +6334,7 @@ async function refresh(): Promise<void> {
     prevLive.status === "pending" ||
     (prevLive.status === "offline" && prevLive.poolGh === 0 && prevLive.blockHeight === 0);
 
-  const marketP = fetchMarket(state.oracleAnchor);
+  const marketP = fetchMarket(DEFAULT_REFERENCE_MID);
   const liveP = fetchPoolLive();
   const [mRes, liveRes] = warming
     ? await Promise.all([marketP, liveP])
@@ -6349,7 +6353,7 @@ async function refresh(): Promise<void> {
       source = "live";
     }
   } else if (!m) {
-    m = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
+    m = applyLivePaperMids(localFallbackMarket(DEFAULT_REFERENCE_MID), DEFAULT_REFERENCE_MID);
     source = "fallback";
   } else if (warming) {
     source = "fallback";
@@ -6410,7 +6414,11 @@ async function refresh(): Promise<void> {
     const mid = displayMid;
     const prev = prevMids[p.id];
     if (!state.candles[p.id]) state.candles[p.id] = {};
-    state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
+    if (labMid > 0) {
+      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
+    } else {
+      state.candles[p.id] = applyPaperClockToPairCandles(state.candles[p.id]!, p.id);
+    }
     prevMids[p.id] = mid;
   }
   settleOpenOrdersFromTickers(true);
@@ -6444,7 +6452,7 @@ export async function boot(): Promise<void> {
   saveState(state);
   // Instant desk — never block first paint on oracle RTT / VPN / CORS.
   if (!market || !poolLive) {
-    market = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
+    market = applyLivePaperMids(localFallbackMarket(DEFAULT_REFERENCE_MID), DEFAULT_REFERENCE_MID);
     poolLive = pendingPoolLive();
     oracleMeta = { source: "fallback", fetchedAt: 0, poolStatus: "pending" };
     ensureCandles(state, market);
@@ -6465,7 +6473,7 @@ export async function boot(): Promise<void> {
   } catch (err) {
     console.warn("[hackme-exchange] initial oracle sync failed — using fallback", err);
     if (!market || !poolLive || poolLive.status === "pending") {
-      market = applyLivePaperMids(localFallbackMarket(state.oracleAnchor), state.oracleAnchor);
+      market = applyLivePaperMids(localFallbackMarket(DEFAULT_REFERENCE_MID), DEFAULT_REFERENCE_MID);
       poolLive = offlinePoolLive();
       oracleMeta = { source: "fallback", fetchedAt: Date.now(), poolStatus: "offline" };
       ensureCandles(state, market);

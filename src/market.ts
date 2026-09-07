@@ -84,20 +84,47 @@ export function resyncCrossMids(m: Omit<MarketSnapshot, "assetUsd">): MarketSnap
 }
 
 /**
- * Apply live paper drift to HMC/SUP around operator refs, then re-sync BTC crosses.
- * Call on each micro-tick and after oracle refresh so the desk breathes.
+ * Shared paper mid for a pair at wall-clock `nowMs`.
+ * Same inputs → same price on every device (no localStorage / EMA / Binance fork).
+ * BTC crosses use DEFAULT_BTC_USD so HMC_BTC / SUP_BTC match across clients.
+ */
+export function paperPairMid(pairId: PairId, nowMs = Date.now()): number {
+  const hmc = liveReferenceMid(DEFAULT_REFERENCE_MID, "hmc", nowMs);
+  const sup = liveReferenceMid(DEFAULT_SUP_REFERENCE_MID, "sup", nowMs);
+  const btc = DEFAULT_BTC_USD;
+  switch (pairId) {
+    case "HMC_USDT":
+      return hmc;
+    case "SUP_USDT":
+      return sup;
+    case "HMC_SUP":
+      return hmc / sup;
+    case "HMC_BTC":
+      return hmc / btc;
+    case "SUP_BTC":
+      return sup / btc;
+    default:
+      return hmc;
+  }
+}
+
+/**
+ * Apply live paper drift around **canonical** D0 refs (not per-device Settings anchor).
+ * Pins BTC to DEFAULT_BTC_USD so every embed / phone / desktop sees one paper book.
  */
 export function applyLivePaperMids(
   m: MarketSnapshot,
-  hmcRef: number,
-  supRef: number = DEFAULT_SUP_REFERENCE_MID,
+  _hmcRef: number = DEFAULT_REFERENCE_MID,
+  _supRef: number = DEFAULT_SUP_REFERENCE_MID,
   nowMs = Date.now(),
 ): MarketSnapshot {
+  void _hmcRef;
+  void _supRef;
   return resyncCrossMids({
     ...m,
-    hmcUsdt: liveReferenceMid(hmcRef, "hmc", nowMs),
-    supUsdt: liveReferenceMid(supRef, "sup", nowMs),
-    btcUsd: Math.max(m.btcUsd, 1),
+    hmcUsdt: liveReferenceMid(DEFAULT_REFERENCE_MID, "hmc", nowMs),
+    supUsdt: liveReferenceMid(DEFAULT_SUP_REFERENCE_MID, "sup", nowMs),
+    btcUsd: DEFAULT_BTC_USD,
   });
 }
 

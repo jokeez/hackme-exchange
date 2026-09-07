@@ -6,6 +6,7 @@ import {
   ensureCandles,
   loadState,
   placeLimitOrder,
+  saveState,
   toggleFavorite,
   updateOrderPrice,
   walletEquityFromMarket,
@@ -181,6 +182,36 @@ describe("store order mutations", () => {
     const loaded = loadState();
     expect(loaded.stateVersion).toBe(STATE_VERSION);
     expect(loaded.candles).toEqual({});
+  });
+
+  it("never persists candles — two saves leave storage without OHLC", () => {
+    const map = installMemoryLocalStorage();
+    const s = baseState();
+    ensureCandles(s, sampleMarket());
+    expect(s.candles.HMC_USDT?.["1m"]?.length).toBeGreaterThan(10);
+    expect(saveState(s)).toBe(true);
+    const raw = JSON.parse(map.get(STORAGE_KEY)!);
+    expect(raw.candles).toEqual({});
+    const loaded = loadState();
+    expect(loaded.candles).toEqual({});
+  });
+
+  it("ensureCandles matches on two clients with divergent prior local history", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"));
+    const market = sampleMarket();
+    const a = baseState();
+    const b = baseState();
+    a.candles = {
+      HMC_USDT: {
+        "1m": [{ time: 1_700_000_000, open: 9, high: 9, low: 9, close: 9, volume: 1 }],
+      },
+    };
+    ensureCandles(a, market);
+    ensureCandles(b, market);
+    expect(b.candles.HMC_USDT?.["1m"]).toEqual(a.candles.HMC_USDT?.["1m"]);
+    expect(b.candles.HMC_USDT?.["15m"]).toEqual(a.candles.HMC_USDT?.["15m"]);
+    vi.useRealTimers();
   });
 
   it("clears legacy orderPreview when quick order is off", () => {

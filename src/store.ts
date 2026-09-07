@@ -1,8 +1,7 @@
 import type { Candle, DemoState, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES, normalizeChartOverlays } from "./types";
-import { barCountForTf, ensureContiguousCandles, prependOlderCandles, reaggregateLiveBarsFromBase, sanitizeCandlesForChart, sanitizeDerivedCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
-import { maxBodyFracForTf, clampTickMid } from "./chartScale";
-import { midForPair } from "./market";
+import { applyPaperClockToPairCandles, CANDLE_BASE_TF } from "./candles";
+import { DEFAULT_REFERENCE_MID, midForPair } from "./market";
 import { PAIRS } from "./pairs";
 import {
   finiteNonNegCapped,
@@ -15,13 +14,12 @@ import {
   sanitizeLedgerKind,
   sanitizeMainView,
   sanitizeMultiChartLayout,
-  migrateOracleAnchor,
   sanitizePlainNote,
 } from "./sanitize";
 import { sanitizeFeeConfig } from "./fees";
 import { STORAGE_KEY } from "./theme";
 import { uid } from "./id";
-import { sanitizeImportedCandles, sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
+import { sanitizeImportedOrder, sanitizeImportedTrade } from "./stateSanitize";
 import { MAX_DRAWINGS, sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 import {
   chartPrefsFromState,
@@ -30,8 +28,7 @@ import {
   saveChartPrefs,
 } from "./chartPrefs";
 
-/** Persist 1m base only — higher TFs re-derived (+ padded) on load. */
-const STORAGE_BASE_CAP = 800;
+/** Candles are not persisted — rebuilt from shared paper clock. */
 const STORAGE_TRADES_CAP = 120;
 const STORAGE_LEDGER_CAP = 80;
 const STORAGE_EQUITY_CAP = 72;
@@ -44,18 +41,8 @@ function compactForStorage(state: DemoState, aggressive = false): DemoState {
   s.ledger = s.ledger.slice(0, aggressive ? 40 : STORAGE_LEDGER_CAP);
   s.equitySnapshots = s.equitySnapshots.slice(0, aggressive ? 24 : STORAGE_EQUITY_CAP);
   s.drawings = sanitizeDrawings(s.drawings, aggressive ? 40 : Math.min(120, MAX_DRAWINGS));
-  if (aggressive) {
-    s.candles = {};
-    return s;
-  }
-  for (const pid of Object.keys(s.candles)) {
-    const byTf = s.candles[pid as PairId];
-    if (!byTf) continue;
-    const base = byTf[CANDLE_BASE_TF];
-    const next: Partial<Record<Timeframe, Candle[]>> = {};
-    if (base?.length) next[CANDLE_BASE_TF] = base.slice(-STORAGE_BASE_CAP);
-    s.candles[pid as PairId] = next;
-  }
+  // Never persist OHLC — paper clock rebuilds identical candles on every device.
+  s.candles = {};
   return s;
 }
 
@@ -242,7 +229,8 @@ export function loadState(): DemoState {
             )
         : [],
       drawings: sanitizeDrawings(parsed.drawings ?? [], MAX_DRAWINGS),
-      candles: sanitizeImportedCandles(parsed.candles),
+      // Drop any persisted OHLC — shared paper clock is the only candle source.
+      candles: {},
       bookGrouping:
         typeof parsed.bookGrouping === "number" && Number.isFinite(parsed.bookGrouping)
           ? Math.max(0, parsed.bookGrouping)
@@ -260,7 +248,7 @@ export function loadState(): DemoState {
       ),
       multiChartLinked: !!parsed.multiChartLinked,
       drawingsLocked: parsed.drawingsLocked ?? false,
-      oracleAnchor: migrateOracleAnchor(parsed.oracleAnchor, DEFAULT.oracleAnchor),
+      oracleAnchor: DEFAULT_REFERENCE_MID,
       mainView: sanitizeMainView(parsed.mainView),
       orders: Array.isArray(parsed.orders)
         ? parsed.orders
@@ -509,76 +497,18 @@ export function needsCandleReseedForMarket(state: DemoState, market: MarketSnaps
   return false;
 }
 
-export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
+export function ensureCandles(state: DemoState, _market: MarketSnapshot): void {
   for (const p of PAIRS) {
     if (!state.candles[p.id]) state.candles[p.id] = {};
-    const mid = midForPair(market, p.id);
-    const existingBase = state.candles[p.id]![CANDLE_BASE_TF];
-    if (!existingBase?.length) {
-      const all = seedAllTimeframes(p.id, mid);
-      for (const tf of TIMEFRAMES) {
-        state.candles[p.id]![tf] = all[tf] ?? [];
-      }
-      continue;
-    }
-    // Mid scale jump (e.g. 0.00064 → 0.05) — snap tip alone paints a fake cliff candle.
-    const tipClose = existingBase[existingBase.length - 1]?.close ?? 0;
-    if (tipClose > 0 && mid > 0) {
-      const ratio = mid / tipClose;
-      if (ratio > 1.25 || ratio < 0.8) {
-        const all = seedAllTimeframes(p.id, mid);
-        for (const tf of TIMEFRAMES) {
-          state.candles[p.id]![tf] = all[tf] ?? [];
-        }
-        continue;
-      }
-    }
-    // Heal / extend base, then re-derive every TF so resolutions stay aligned.
-    const need = barCountForTf(CANDLE_BASE_TF);
-    const trimmed = trimCandlesToGenesis(existingBase, CANDLE_BASE_TF);
-    let healed = ensureContiguousCandles(trimmed, CANDLE_BASE_TF, {
-      pairId: p.id,
-      fillToNow: true,
-    });
-    if (healed.length < need) {
-      healed = prependOlderCandles(healed, p.id, CANDLE_BASE_TF, need - healed.length);
-    }
-    healed = sanitizeCandlesForChart(healed, p.id, CANDLE_BASE_TF);
-    // Snap tip toward live mid without inventing a cliff body — keep CEX OHLC wicks.
-    if (healed.length) {
-      const tip = { ...healed[healed.length - 1]! };
-      const maxBody = maxBodyFracForTf(CANDLE_BASE_TF);
-      const safe = clampTickMid(mid, tip.close, maxBody);
-      tip.close = safe;
-      tip.high = Math.max(tip.high, tip.open, safe);
-      tip.low = Math.min(tip.low, tip.open, safe);
-      healed[healed.length - 1] = sanitizeCandlesForChart([tip], p.id, CANDLE_BASE_TF)[0] ?? tip;
-    }
-    const all = deriveAllTimeframes(healed, p.id, state.candles[p.id]);
-    reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? healed);
-    for (const tf of TIMEFRAMES) {
-      const series = all[tf] ?? [];
-      if (!series.length) {
-        state.candles[p.id]![tf] = series;
-        continue;
-      }
-      state.candles[p.id]![tf] =
-        tf === CANDLE_BASE_TF
-          ? sanitizeCandlesForChart(series, p.id, tf)
-          : sanitizeDerivedCandlesForChart(series, p.id);
-    }
+    // Shared paper clock only — market snapshot mid must not fork a second path.
+    state.candles[p.id] = applyPaperClockToPairCandles(state.candles[p.id]!, p.id);
   }
 }
 
 /** Drop boot-fallback history and reseed around live mid — avoids fake cliff candle. */
-export function reseedCandlesFromMarket(state: DemoState, market: MarketSnapshot): void {
+export function reseedCandlesFromMarket(state: DemoState, _market: MarketSnapshot): void {
   for (const p of PAIRS) {
-    if (!state.candles[p.id]) state.candles[p.id] = {};
-    const mid = midForPair(market, p.id);
-    const all = seedAllTimeframes(p.id, mid);
-    for (const tf of TIMEFRAMES) {
-      state.candles[p.id]![tf] = all[tf] ?? [];
-    }
+    state.candles[p.id] = applyPaperClockToPairCandles({}, p.id);
   }
 }
 
