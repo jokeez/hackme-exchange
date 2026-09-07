@@ -179,9 +179,10 @@ describe("upsertTick", () => {
   });
 
   it("keeps open continuous with previous close on oracle jump", () => {
-    const seeded = seedCandles("HMC_USDT", "1m", 0.0006, 8);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"));
+    const seeded = seedCandles("HMC_USDT", "1m", 0.05, 8);
     const prev = seeded[seeded.length - 1]!.close;
-    // Force a multi-step walk with a large target (discontinuity path).
     let series = seeded;
     let mid = prev;
     for (const step of [0.92, 0.9, 0.88]) {
@@ -189,9 +190,9 @@ describe("upsertTick", () => {
       series = upsertTick(series, "1m", mid, "HMC_USDT", series[series.length - 1]!.close);
     }
     for (let i = 1; i < series.length; i++) {
-      // Body/wick caps can nudge open by a few ULPs vs prior close.
       expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 7);
     }
+    vi.useRealTimers();
   });
 });
 

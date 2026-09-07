@@ -234,7 +234,7 @@ export async function fetchMarket(
     const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
     const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
     const supP = fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, poolT).catch(() => null);
-    const btcP = fetchBtcUsd();
+    // Paper BTC pin — do not fork HMC_BTC/SUP_BTC across devices via Binance reachability.
     const poolRes = await poolP;
     if (!poolRes.ok) throw new Error("pool");
     const pool = (await poolRes.json()) as PoolStats;
@@ -256,8 +256,7 @@ export async function fetchMarket(
         sup = {};
       }
     }
-    const btcUsd = await btcP;
-    const base = buildMarket(pool, work, sup, referenceMid, btcUsd);
+    const base = buildMarket(pool, work, sup, referenceMid, DEFAULT_BTC_USD);
     return {
       market: applyLivePaperMids(base, referenceMid, DEFAULT_SUP_REFERENCE_MID),
       source: "live",
