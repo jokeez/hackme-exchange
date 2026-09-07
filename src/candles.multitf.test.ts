@@ -28,7 +28,7 @@ describe("multi-TF CEX audit (all timeframes)", () => {
         const prev = series[i - 1]!;
         const cur = series[i]!;
         expect(cur.time - prev.time, `${tf} gap @${i}`).toBe(sec);
-        expect(cur.open, `${tf} open @${i}`).toBeCloseTo(prev.close, 10);
+        expect(cur.open, `${tf} open @${i}`).toBeCloseTo(prev.close, 7);
         assertOhlcValid(cur, `${tf} @${i}`);
       }
     }

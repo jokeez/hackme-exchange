@@ -12,6 +12,7 @@ import {
   saveChartPrefs,
 } from "./chartPrefs";
 import { ensureCandles, loadState, resetDemo, saveState } from "./store";
+import { paperPairMid } from "./market";
 import { baseState, sampleMarket } from "./testFixtures";
 import { STORAGE_KEY } from "./theme";
 import { DEFAULT_CHART_SETTINGS } from "./types";
@@ -124,7 +125,7 @@ describe("chartPrefs sidecar", () => {
 });
 
 describe("ensureCandles tip OHLC", () => {
-  it("preserves tip wicks when snapping close to live mid", () => {
+  it("rebuilds tip from shared paper clock (valid OHLC, close ≈ mid)", () => {
     const s = baseState();
     const market = sampleMarket();
     const mid = market.hmcUsdt;
@@ -148,15 +149,11 @@ describe("ensureCandles tip OHLC", () => {
         },
       ],
     };
-    const beforeHigh = s.candles.HMC_USDT["1m"]![1]!.high;
-    const beforeLow = s.candles.HMC_USDT["1m"]![1]!.low;
     ensureCandles(s, market);
     const tip = s.candles.HMC_USDT!["1m"]![s.candles.HMC_USDT!["1m"]!.length - 1]!;
     expect(tip.high).toBeGreaterThanOrEqual(Math.max(tip.open, tip.close));
     expect(tip.low).toBeLessThanOrEqual(Math.min(tip.open, tip.close));
-    expect(tip.high - tip.low).toBeGreaterThan(Math.abs(tip.close - tip.open) * 0.5);
-    expect(tip.high).toBeGreaterThanOrEqual(beforeHigh * 0.95);
-    expect(tip.low).toBeLessThanOrEqual(beforeLow * 1.05);
+    expect(tip.close).toBeCloseTo(paperPairMid("HMC_USDT"), 10);
   });
 });
 

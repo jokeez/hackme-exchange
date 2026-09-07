@@ -10,6 +10,7 @@ import {
   maxWickFracForTf,
   sanitizeCandleExtremes,
 } from "./chartScale";
+import { paperPairMid } from "./market";
 
 /** Soft cap — allows deep left-pan without unbounded growth. */
 export const MAX_CANDLES = 5000;
@@ -258,45 +259,35 @@ export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf:
   return out.slice(-MAX_CANDLES);
 }
 
-export function seedCandles(pairId: PairId, tf: Timeframe, mid: number, count?: number): Candle[] {
+/**
+ * Seed OHLC from the shared paper clock (`paperPairMid` at each bucket).
+ * Same wall-clock + tip mid → identical series on every device (no local path fork).
+ * `mid` scales the native clock path so tip close prints exactly `mid`.
+ */
+export function seedCandles(
+  pairId: PairId,
+  tf: Timeframe,
+  mid: number,
+  count?: number,
+  nowMs = Date.now(),
+): Candle[] {
   const sec = TF_SEC[tf];
-  const now = bucket(Date.now(), tf);
-  const genesis = genesisBucket(tf);
+  const now = bucket(nowMs, tf);
+  const genesis = genesisBucket(tf, Math.floor(nowMs / 1000));
   const maxN = Math.max(1, Math.floor((now - genesis) / sec) + 1);
-  const n = Math.min(count ?? barCountForTf(tf), maxN, MAX_CANDLES);
+  const n = Math.min(count ?? barCountForTf(tf, nowMs), maxN, MAX_CANDLES);
   const out: Candle[] = [];
-  const maxBody = maxBodyFracForTf(tf);
-  // Mild OU noise around mid — shared market path (no pairId) so all pairs share one silhouette.
-  const noiseAmp = 2.0 * Math.sqrt(sec / 60);
-  const reversion = 0.48;
-  let price = mid * (0.9995 + stableUnit([tf, now, n, "seed-start"]) * 0.001);
+  const nativeTip = paperPairMid(pairId, nowMs);
+  const scale = nativeTip > 0 && Number.isFinite(nativeTip) ? mid / nativeTip : 1;
 
   for (let i = n - 1; i >= 0; i--) {
     const t = now - i * sec;
     if (t < genesis) continue;
-    const shockBps = stableSigned([tf, t, "seed-drift"], 0.48) * noiseAmp;
-    const open = price;
-    const meanPull = (mid - open) * reversion;
-    const rawClose = open + meanPull + open * (shockBps / 10_000);
-    const close = clampTickMid(rawClose, open, maxBody);
+    const isTip = i === 0;
+    const open = paperPairMid(pairId, t * 1000) * scale;
+    // Closed bars: close == next bucket open so series stay CEX-continuous across devices.
+    const close = isTip ? mid : paperPairMid(pairId, (t + sec) * 1000) * scale;
     out.push(makeBar(pairId, t, open, close, tf));
-    price = close;
-  }
-  if (out.length) {
-    const last = out[out.length - 1]!;
-    // Tip prints live mid, but NEVER expand past body/wick caps (screenshot spike).
-    if (Math.abs(mid - last.open) / Math.max(last.open, 1e-18) > maxBody) {
-      last.open = mid;
-      last.high = mid;
-      last.low = mid;
-      last.close = mid;
-    } else {
-      last.close = clampTickMid(mid, last.open, maxBody);
-      const w = wickSpread(last.open, last.close, pairId, tf, last.time);
-      last.high = Math.max(last.open, last.close, w.high);
-      last.low = Math.min(last.open, last.close, w.low);
-      Object.assign(last, constrainBarToOpen(last, maxBody, maxWickFracForTf(tf)));
-    }
   }
   return out;
 }
@@ -345,15 +336,60 @@ export function deriveAllTimeframes(
 export function seedAllTimeframes(
   pairId: PairId,
   mid: number,
+  nowMs = Date.now(),
 ): Partial<Record<Timeframe, Candle[]>> {
   const base = sanitizeCandlesForChart(
-    seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF)),
+    seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF, nowMs), nowMs),
     pairId,
     CANDLE_BASE_TF,
   );
   const all = deriveAllTimeframes(base, pairId);
   reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? base);
   for (const tf of Object.keys(all) as Timeframe[]) {
+    const series = all[tf];
+    if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
+  }
+  return all;
+}
+
+/**
+ * Paper desk: rebuild / tip-sync candles from the shared clock.
+ * Full reseed on empty history or bucket rollover; within-bucket tip is pure `paperPairMid`.
+ */
+export function applyPaperClockToPairCandles(
+  candlesByTf: Partial<Record<Timeframe, Candle[]>>,
+  pairId: PairId,
+  nowMs = Date.now(),
+): Partial<Record<Timeframe, Candle[]>> {
+  const mid = paperPairMid(pairId, nowMs);
+  const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
+  const t = bucket(nowMs, CANDLE_BASE_TF);
+  const tipTime = prevBase[prevBase.length - 1]?.time ?? 0;
+  const tipClose = prevBase[prevBase.length - 1]?.close ?? 0;
+  const scaleOk =
+    tipClose > 0 && mid > 0 && mid / tipClose <= 1.25 && mid / tipClose >= 0.8;
+  if (!prevBase.length || tipTime !== t || !scaleOk) {
+    return seedAllTimeframes(pairId, mid, nowMs);
+  }
+  const open = paperPairMid(pairId, t * 1000);
+  const tip = makeBar(pairId, t, open, mid, CANDLE_BASE_TF);
+  const nextBase = sanitizeCandlesForChart([...prevBase.slice(0, -1), tip], pairId, CANDLE_BASE_TF);
+  if (nextBase.length) {
+    nextBase[nextBase.length - 1] = {
+      ...nextBase[nextBase.length - 1]!,
+      high: Math.max(nextBase[nextBase.length - 1]!.high, tip.high, open, mid),
+      low: Math.min(nextBase[nextBase.length - 1]!.low, tip.low, open, mid),
+      close: mid,
+      open,
+    };
+  }
+  const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  reaggregateLiveBarsFromBase(all, nextBase);
+  for (const tf of Object.keys(all) as Timeframe[]) {
+    if (tf === CANDLE_BASE_TF) {
+      all[tf] = nextBase;
+      continue;
+    }
     const series = all[tf];
     if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
   }
@@ -369,18 +405,7 @@ export function prependOlderCandles(
 ): Candle[] {
   if (count <= 0) return existing;
   if (!existing.length) {
-    const seedMid =
-      pairId === "HMC_USDT"
-        ? 0.05
-        : pairId === "SUP_USDT"
-          ? 0.01
-          : pairId === "HMC_SUP"
-            ? 5
-            : pairId === "HMC_BTC"
-              ? 0.05 / 67_500
-              : pairId === "SUP_BTC"
-                ? 0.01 / 67_500
-                : 0.05;
+    const seedMid = paperPairMid(pairId);
     return seedCandles(pairId, tf, seedMid, Math.min(count, MAX_CANDLES));
   }
   const room = MAX_CANDLES - existing.length;
@@ -396,36 +421,18 @@ export function prependOlderCandles(
   const n = Math.min(count, room, maxAdd);
   if (n <= 0) return existing;
 
-  const maxBody = maxBodyFracForTf(tf);
-  const noiseAmp = 2.0 * Math.sqrt(sec / 60);
-  const reversion = 0.48;
+  const nativeFirst = paperPairMid(pairId, first.time * 1000);
+  const scale = nativeFirst > 0 ? first.open / nativeFirst : 1;
   const older: Candle[] = [];
-  let price = first.open;
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const shockBps = stableSigned([tf, t, "prepend-open"], 0.5) * noiseAmp;
-    const close = price;
-    const meanPull = (first.open - close) * reversion;
-    const rawOpen = close - meanPull - close * (shockBps / 10_000);
-    const open = clampTickMid(rawOpen, close, maxBody);
+    const open = paperPairMid(pairId, t * 1000) * scale;
+    const close =
+      i === 1 ? first.open : paperPairMid(pairId, (t + sec) * 1000) * scale;
     older.push(makeBar(pairId, t, open, close, tf));
-    price = open;
   }
   if (!older.length) return existing;
-
-  let p = older[0]!.open;
-  for (let i = 0; i < older.length; i++) {
-    const shockBps = stableSigned([tf, older[i]!.time, "prepend-close"], 0.48) * noiseAmp;
-    const open = p;
-    const meanPull = (first.open - open) * reversion;
-    const close =
-      i === older.length - 1
-        ? first.open
-        : clampTickMid(open + meanPull + open * (shockBps / 10_000), open, maxBody);
-    older[i] = makeBar(pairId, older[i]!.time, open, close, tf);
-    p = close;
-  }
   return [...older, ...existing];
 }
 

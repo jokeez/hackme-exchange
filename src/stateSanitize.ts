@@ -3,13 +3,12 @@ import type { Candle, DemoState, Order, OrderKind, OrderSide, PairId, Timeframe,
 import { TIMEFRAMES } from "./types";
 import { sanitizeDomId } from "./sanitize";
 import { uid } from "./id";
-import { MAX_CANDLES } from "./candles";
 
 /** Cap per-trade notional on import — blocks VIP tier farming via fake history. */
 export const MAX_IMPORT_TRADE_QUOTE = 1_000_000;
 
-/** Per-series candle cap on import/load (matches chart soft cap). */
-export const MAX_IMPORT_CANDLES_PER_SERIES = MAX_CANDLES;
+/** Per-series candle cap on import/load (matches chart soft cap / candles.MAX_CANDLES). */
+export const MAX_IMPORT_CANDLES_PER_SERIES = 5000;
 
 /** Hard total across all pairs×TFs — stops nested candle bombs inside 2MB JSON. */
 export const MAX_IMPORT_CANDLE_TOTAL = 12_000;
