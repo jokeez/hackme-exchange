@@ -425,9 +425,19 @@ function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
     if (last && last.time === c.time) deduped[deduped.length - 1] = c;
     else deduped.push(c);
   }
-  const bodyCap = maxBodyFracForTf(tf ?? lastOpts?.tf ?? "15m");
-  const wickCap = maxWickFracForTf(tf ?? lastOpts?.tf ?? "15m");
-  const cleaned = sanitizeCandleExtremes(deduped, bodyCap, { maxWick: wickCap });
+  const resolvedTf = tf ?? lastOpts?.tf ?? "15m";
+  // Derived / expanded TFs already carry CEX aggregation — only fix NaN / high-low vs body.
+  // Aggressive body/wick caps would crush real child extremes on 5m/1D/30s.
+  const cleaned =
+    resolvedTf === "1m"
+      ? sanitizeCandleExtremes(deduped, maxBodyFracForTf(resolvedTf), {
+          maxWick: maxWickFracForTf(resolvedTf),
+        })
+      : deduped.map((c) => ({
+          ...c,
+          high: Math.max(c.high, c.open, c.close),
+          low: Math.min(c.low, c.open, c.close),
+        }));
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 
@@ -3304,6 +3314,13 @@ function bindChartViewportPersistence(pairId: string, tf: Timeframe): void {
 export function switchChartTimeframe(candles: Candle[], opts: ChartMountOpts): boolean {
   if (!mounted || !chart) return false;
   saveCurrentChartViewport();
+  // Fresh TF must not inherit a dragged Y-scale from the previous resolution.
+  priceScaleManual = false;
+  try {
+    chart.priceScale("right").setAutoScale(true);
+  } catch {
+    /* ignore */
+  }
   setCandleData(candles, opts, { scrollToLive: false });
   bindChartViewportPersistence(opts.pairId, opts.tf);
   if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
@@ -3316,6 +3333,12 @@ export function switchChartTimeframe(candles: Candle[], opts: ChartMountOpts): b
 export function switchChartPair(candles: Candle[], opts: ChartMountOpts): boolean {
   if (!mounted || !chart) return false;
   saveCurrentChartViewport();
+  priceScaleManual = false;
+  try {
+    chart.priceScale("right").setAutoScale(true);
+  } catch {
+    /* ignore */
+  }
   setCandleData(candles, opts, { scrollToLive: false });
   bindChartViewportPersistence(opts.pairId, opts.tf);
   if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {

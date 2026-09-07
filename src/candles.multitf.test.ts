@@ -4,6 +4,7 @@ import {
   applyMidToPairCandles,
   CANDLE_BASE_TF,
   deriveAllTimeframes,
+  expandToFinerTf,
   reaggregateLiveBarsFromBase,
   seedAllTimeframes,
 } from "./candles";
@@ -109,10 +110,100 @@ describe("multi-TF CEX audit (all timeframes)", () => {
     for (const pairId of pairs) {
       const mid = pairId === "HMC_SUP" ? 5 : pairId.includes("BTC") ? 0.01 / 67_500 : 0.05;
       const all = seedAllTimeframes(pairId, mid);
-      const closes = TIMEFRAMES.map((tf) => all[tf]![all[tf]!.length - 1]!.close);
-      const max = Math.max(...closes);
-      const min = Math.min(...closes);
-      expect((max - min) / Math.max(min, 1e-18), pairId).toBeLessThan(1e-8);
+      const tip1m = all[CANDLE_BASE_TF]![all[CANDLE_BASE_TF]!.length - 1]!.close;
+      for (const tf of COARSER_TFS) {
+        expect(all[tf]![all[tf]!.length - 1]!.close, `${pairId} ${tf}`).toBeCloseTo(tip1m, 8);
+      }
+      // 30s forming half may trail 1m tip mid-minute — still inside the 1m bar.
+      const tip30 = all["30s"]![all["30s"]!.length - 1]!;
+      const bar1m = all[CANDLE_BASE_TF]![all[CANDLE_BASE_TF]!.length - 1]!;
+      expect(tip30.close).toBeGreaterThanOrEqual(Math.min(bar1m.open, bar1m.close) - 1e-12);
+      expect(tip30.close).toBeLessThanOrEqual(Math.max(bar1m.open, bar1m.close, tip1m) + 1e-12);
     }
+  });
+
+  it("aggregateCandles preserves ±1.5% child wick extremes exactly", () => {
+    const mid = 0.05;
+    const t0 = Math.floor(Date.now() / 1000 / 300) * 300; // align to 5m bucket
+    const kids = Array.from({ length: 5 }, (_, i) => {
+      const o = mid * (1 + (i - 2) * 0.001);
+      const c = mid * (1 + (i - 1.5) * 0.001);
+      return {
+        time: t0 + i * 60,
+        open: o,
+        high: Math.max(o, c) * 1.015,
+        low: Math.min(o, c) * 0.985,
+        close: c,
+        volume: 10,
+      };
+    });
+    const m5 = aggregateCandles(kids, "1m", "5m");
+    expect(m5.length).toBe(1);
+    const bar = m5[0]!;
+    const childHigh = Math.max(...kids.map((k) => k.high));
+    const childLow = Math.min(...kids.map((k) => k.low));
+    expect(bar.high).toBeCloseTo(childHigh, 12);
+    expect(bar.low).toBeCloseTo(childLow, 12);
+    expect(bar.open).toBeCloseTo(kids[0]!.open, 12);
+    expect(bar.close).toBeCloseTo(kids[kids.length - 1]!.close, 12);
+  });
+
+  it("reaggregate + finalize keeps tip H/L ≥ spiked 1m children", () => {
+    const all = seedAllTimeframes("HMC_USDT", 0.0006);
+    const base = all[CANDLE_BASE_TF]!;
+    const tip1m = { ...base[base.length - 1]! };
+    tip1m.high = tip1m.close * 1.02;
+    tip1m.low = tip1m.close * 0.98;
+    base[base.length - 1] = tip1m;
+    reaggregateLiveBarsFromBase(all, base);
+    for (const tf of ["5m", "15m", "1H", "1D"] as const) {
+      const tip = all[tf]![all[tf]!.length - 1]!;
+      expect(tip.high).toBeGreaterThanOrEqual(tip1m.high - 1e-12);
+      expect(tip.low).toBeLessThanOrEqual(tip1m.low + 1e-12);
+      expect(tip.close).toBeCloseTo(tip1m.close, 10);
+    }
+  });
+
+  it("30s halves recover parent 1m high/low", () => {
+    const mid = 0.05;
+    const t0 = Math.floor(Date.now() / 1000 / 60) * 60 - 60;
+    const parent = {
+      time: t0,
+      open: mid,
+      high: mid * 1.02,
+      low: mid * 0.98,
+      close: mid * 1.005,
+      volume: 100,
+    };
+    const halves = expandToFinerTf([parent], "1m", "30s");
+    expect(halves.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...halves.map((h) => h.high))).toBeCloseTo(parent.high, 12);
+    expect(Math.min(...halves.map((h) => h.low))).toBeCloseTo(parent.low, 12);
+  });
+
+  it("upsert tip does not shrink established high after flat close", () => {
+    const mid = 0.05;
+    const t0 = Math.floor(Date.now() / 1000 / 60) * 60;
+    // Within 1m wick pad (0.45%) — must survive mean-revert close.
+    const hi = mid * 1.004;
+    const lo = mid * 0.996;
+    const base = [
+      {
+        time: t0,
+        open: mid,
+        high: hi,
+        low: lo,
+        close: mid * 1.001,
+        volume: 10,
+      },
+    ];
+    const next = applyMidToPairCandles({ "1m": base }, "HMC_USDT", mid, mid * 1.001);
+    const tip = next["1m"]!.find((c) => c.time === t0) ?? next["1m"]![next["1m"]!.length - 1]!;
+    if (tip.time === t0) {
+      expect(tip.high).toBeGreaterThanOrEqual(hi - 1e-12);
+      expect(tip.low).toBeLessThanOrEqual(lo + 1e-12);
+    }
+    expect(tip.high).toBeGreaterThanOrEqual(Math.max(tip.open, tip.close) - 1e-12);
+    expect(tip.low).toBeLessThanOrEqual(Math.min(tip.open, tip.close) + 1e-12);
   });
 });

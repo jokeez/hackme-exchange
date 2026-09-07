@@ -100,8 +100,9 @@ describe("multi-TF aggregation (one market)", () => {
       }
       // Real exchanges have wicks; paper desk must too (not body-only).
       expect(withWick).toBeGreaterThan(5);
-      // Screenshot bug: uniform ~40bps spike forest — stay under TF soft cap.
-      expect(maxBeyondFrac).toBeLessThanOrEqual(0.035);
+      // Intraday soft visual budget; higher TFs may stack child extremes (CEX-correct).
+      const softCap = tf === "1D" || tf === "1H" ? 0.12 : 0.035;
+      expect(maxBeyondFrac).toBeLessThanOrEqual(softCap);
     }
   });
 
