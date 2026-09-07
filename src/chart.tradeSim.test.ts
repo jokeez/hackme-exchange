@@ -4,6 +4,7 @@ import {
   constrainBarToOpen,
   maxBodyFracForTf,
   maxJumpFracForTf,
+  maxWickFracForTf,
   robustPriceRange,
   sanitizeCandleExtremes,
 } from "./chartScale";
@@ -43,9 +44,12 @@ describe("body vs open — all timeframes", () => {
       const tip = walkTip(tf, openPx, dump, 40);
       const bodyFrac = Math.abs(tip.close - tip.open) / tip.open;
       const maxBody = maxBodyFracForTf(tf);
+      const maxWick = maxWickFracForTf(tf);
       expect(bodyFrac).toBeLessThanOrEqual(maxBody + 1e-9);
-      expect(tip.low / tip.open).toBeGreaterThanOrEqual(1 - maxBody * 1.3);
-      expect(tip.high / tip.open).toBeLessThanOrEqual(1 + maxBody * 1.3);
+      // Wick pad may extend slightly beyond the body cap (CEX intrabar extremes).
+      const span = maxBody + maxWick + 1e-9;
+      expect(tip.low / tip.open).toBeGreaterThanOrEqual(1 - span);
+      expect(tip.high / tip.open).toBeLessThanOrEqual(1 + span);
     });
 
     it(`${tf}: multi-tick pump stays within body cap`, () => {

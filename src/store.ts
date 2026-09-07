@@ -1,6 +1,6 @@
 import type { Candle, DemoState, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES, normalizeChartOverlays } from "./types";
-import { barCountForTf, ensureContiguousCandles, prependOlderCandles, reaggregateLiveBarsFromBase, sanitizeCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
+import { barCountForTf, ensureContiguousCandles, prependOlderCandles, reaggregateLiveBarsFromBase, sanitizeCandlesForChart, sanitizeDerivedCandlesForChart, seedAllTimeframes, trimCandlesToGenesis, CANDLE_BASE_TF, deriveAllTimeframes } from "./candles";
 import { maxBodyFracForTf, clampTickMid } from "./chartScale";
 import { midForPair } from "./market";
 import { PAIRS } from "./pairs";
@@ -558,9 +558,14 @@ export function ensureCandles(state: DemoState, market: MarketSnapshot): void {
     reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? healed);
     for (const tf of TIMEFRAMES) {
       const series = all[tf] ?? [];
-      state.candles[p.id]![tf] = series.length
-        ? sanitizeCandlesForChart(series, p.id, tf)
-        : series;
+      if (!series.length) {
+        state.candles[p.id]![tf] = series;
+        continue;
+      }
+      state.candles[p.id]![tf] =
+        tf === CANDLE_BASE_TF
+          ? sanitizeCandlesForChart(series, p.id, tf)
+          : sanitizeDerivedCandlesForChart(series, p.id);
     }
   }
 }

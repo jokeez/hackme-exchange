@@ -204,14 +204,13 @@ export function aggregateCandles(
       prev.volume += c.volume;
     }
   }
-  const wickCap = maxWickFracForTf(targetTf);
   return [...map.values()]
     .sort((a, b) => a.time - b.time)
     .map((c) => {
+      // Sacred OHLC from children — do NOT clipBarWicks (destroys CEX aggregation fidelity).
       const high = Math.max(c.high, c.open, c.close);
       const low = Math.min(c.low, c.open, c.close);
-      // Soft clip only — do not rewrite close vs open (aggregation fidelity).
-      return clipBarWicks({ ...c, high, low }, wickCap);
+      return { ...c, high, low };
     })
     .slice(-MAX_CANDLES);
 }
@@ -223,34 +222,38 @@ export function expandToFinerTf(source: Candle[], sourceTf: Timeframe, targetTf:
   if (!(dstSec < srcSec) || !source.length) return [];
   const ratio = Math.round(srcSec / dstSec);
   if (ratio < 2) return [];
+  const nowBucket = Math.floor(Date.now() / 1000 / dstSec) * dstSec;
   const out: Candle[] = [];
   for (const c of source) {
     const step = (c.close - c.open) / ratio;
+    const slices: Candle[] = [];
     for (let i = 0; i < ratio; i++) {
       const t = c.time + i * dstSec;
       if (t < CHART_GENESIS_UNIX) continue;
+      // Do not invent a future half-bar beyond the live 30s bucket.
+      if (t > nowBucket) continue;
       const open = c.open + step * i;
       const close = i === ratio - 1 ? c.close : c.open + step * (i + 1);
-      const bodyCap = maxBodyFracForTf(targetTf);
-      const wickCap = maxWickFracForTf(targetTf);
-      // First slice may inherit parent extremes; later slices only own body range.
-      const high = i === 0 ? Math.max(open, close, c.high) : Math.max(open, close);
-      const low = i === 0 ? Math.min(open, close, c.low) : Math.min(open, close);
-      out.push(
-        constrainBarToOpen(
-          {
-            time: t,
-            open,
-            high,
-            low,
-            close,
-            volume: c.volume / ratio,
-          },
-          bodyCap,
-          wickCap,
-        ),
-      );
+      // Both slices inherit parent extremes so 30s→1m high/low roundtrip holds.
+      const high = Math.max(open, close, c.high);
+      const low = Math.min(open, close, c.low);
+      slices.push({
+        time: t,
+        open,
+        high,
+        low,
+        close,
+        volume: c.volume / ratio,
+      });
     }
+    // Forming minute: last emitted half prints live parent close (CEX tip continuity).
+    if (slices.length && slices.length < ratio) {
+      const last = slices[slices.length - 1]!;
+      last.close = c.close;
+      last.high = Math.max(last.high, last.open, c.close, c.high);
+      last.low = Math.min(last.low, last.open, c.close, c.low);
+    }
+    out.push(...slices);
   }
   return out.slice(-MAX_CANDLES);
 }
@@ -352,7 +355,7 @@ export function seedAllTimeframes(
   reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? base);
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
-    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
+    if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
   }
   return all;
 }
@@ -449,7 +452,23 @@ export function upsertTick(
   const tickVol = 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200;
   const wickCap = maxWickFracForTf(tf);
 
-  const finish = (bar: Candle): Candle => constrainBarToOpen(clipBarWicks(bar, wickCap), maxBody, wickCap);
+  const finish = (bar: Candle): Candle => {
+    // Cap body vs open; keep wicks within TF pad — never unbounded tip.low from mid walks,
+    // but also never shrink a legitimate wick when close mean-reverts inside the body.
+    const open = bar.open;
+    const close = clampTickMid(bar.close, open, maxBody);
+    const bodyHigh = Math.max(open, close);
+    const bodyLow = Math.min(open, close);
+    const midBody = (open + close) / 2 || open;
+    const wickPad = midBody * wickCap;
+    let high = Math.max(bodyHigh, Number.isFinite(bar.high) ? bar.high : bodyHigh);
+    let low = Math.min(bodyLow, Number.isFinite(bar.low) ? bar.low : bodyLow);
+    high = Math.min(high, bodyHigh + wickPad);
+    low = Math.max(low, Math.max(midBody * 1e-6, bodyLow - wickPad));
+    high = Math.max(high, bodyHigh);
+    low = Math.min(low, bodyLow);
+    return { ...bar, open, high, low, close, volume: bar.volume };
+  };
 
   const applyTip = (tip: Candle): Candle => {
     if (disc) {
@@ -551,20 +570,32 @@ export function reaggregateLiveBarsFromBase(
   base1m: Candle[],
 ): void {
   if (!base1m.length) return;
+  const baseTip = base1m[base1m.length - 1]!;
   for (const tf of TIMEFRAMES) {
     if (tf === CANDLE_BASE_TF) continue;
     const series = all[tf];
     if (!series?.length) continue;
     const dstSec = TF_SEC[tf];
-    const lastT = series[series.length - 1]!.time;
     if (TF_SEC[tf] > TF_SEC[CANDLE_BASE_TF]) {
-      const children = base1m.filter((c) => Math.floor(c.time / dstSec) * dstSec === lastT);
+      const tipT = Math.floor(baseTip.time / dstSec) * dstSec;
+      const children = base1m.filter((c) => Math.floor(c.time / dstSec) * dstSec === tipT);
       if (!children.length) continue;
       const agg = aggregateCandles(children, CANDLE_BASE_TF, tf);
-      const live = agg.find((b) => b.time === lastT);
-      if (live) series[series.length - 1] = live;
+      const live = agg.find((b) => b.time === tipT);
+      if (!live) continue;
+      const lastT = series[series.length - 1]!.time;
+      if (lastT === tipT) {
+        series[series.length - 1] = live;
+      } else if (lastT < tipT) {
+        series.push(live);
+        all[tf] = series.slice(-MAX_CANDLES);
+      } else {
+        // Orphan / future tip with no children — replace with current base bucket.
+        const keep = series.filter((c) => c.time < tipT);
+        all[tf] = [...keep, live].slice(-MAX_CANDLES);
+      }
     } else if (tf === "30s") {
-      const parentT = Math.floor(lastT / TF_SEC[CANDLE_BASE_TF]) * TF_SEC[CANDLE_BASE_TF];
+      const parentT = Math.floor(baseTip.time / TF_SEC[CANDLE_BASE_TF]) * TF_SEC[CANDLE_BASE_TF];
       const parent = base1m.find((c) => c.time === parentT);
       if (!parent) continue;
       const expanded = expandToFinerTf([parent], CANDLE_BASE_TF, "30s");
@@ -582,16 +613,26 @@ export function applyMidToPairCandles(
   prevMid?: number,
 ): Partial<Record<Timeframe, Candle[]>> {
   const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
-  const nextBase = sanitizeCandlesForChart(
-    upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid),
-    pairId,
-    CANDLE_BASE_TF,
-  );
+  const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid);
+  const tipRaw = nextRaw[nextRaw.length - 1];
+  const nextBase = sanitizeCandlesForChart(nextRaw, pairId, CANDLE_BASE_TF);
+  // Preserve tip intrabar extremes through sanitize (forming candle must not shrink).
+  if (tipRaw && nextBase.length) {
+    const tip = { ...nextBase[nextBase.length - 1]! };
+    tip.high = Math.max(tip.high, tipRaw.high, tip.open, tip.close);
+    tip.low = Math.min(tip.low, tipRaw.low, tip.open, tip.close);
+    nextBase[nextBase.length - 1] = tip;
+  }
   const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
+    if (tf === CANDLE_BASE_TF) {
+      // Already sanitized + tip extrema preserved — do not crush again.
+      all[tf] = nextBase;
+      continue;
+    }
     const series = all[tf];
-    if (series?.length) all[tf] = sanitizeCandlesForChart(series, pairId, tf);
+    if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
   }
   return all;
 }
@@ -753,4 +794,30 @@ export function sanitizeCandlesForChart(
   const bodyCap = maxBodyFracForTf(tf);
   const wickCap = maxWickFracForTf(tf);
   return sanitizeCandleExtremes(sanitizeCandleVolumes(candles, pairId), bodyCap, { maxWick: wickCap });
+}
+
+/**
+ * Light heal for bars derived from 1m aggregation — volume + OHLC invariants only.
+ * Does NOT constrain body/wicks (would destroy CEX child extremes on 5m/1D).
+ */
+export function sanitizeDerivedCandlesForChart(candles: Candle[], pairId: PairId): Candle[] {
+  return sanitizeCandleVolumes(candles, pairId).map((c) => {
+    let open = c.open;
+    let close = c.close;
+    if (!(open > 0) || !Number.isFinite(open)) open = close > 0 ? close : 0;
+    if (!(close > 0) || !Number.isFinite(close)) close = open;
+    const high = Math.max(c.high, open, close);
+    const low = Math.min(c.low, open, close);
+    return { ...c, open, high, low, close };
+  });
+}
+
+function finalizeTfSeries(
+  tf: Timeframe,
+  series: Candle[],
+  pairId: PairId,
+): Candle[] {
+  if (!series.length) return series;
+  if (tf === CANDLE_BASE_TF) return sanitizeCandlesForChart(series, pairId, tf);
+  return sanitizeDerivedCandlesForChart(series, pairId);
 }
