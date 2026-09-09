@@ -63,6 +63,7 @@ async function bootPage(browser, vp) {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
       sessionStorage.setItem("hackme-ex-mobile-panel-v1", "chart");
       localStorage.setItem("hackme-ex-chart-hint-v1", "1");
+      localStorage.setItem("hackme.tour.v2.done", "1");
       localStorage.removeItem("hackme-exchange-demo-v5-layout-v3");
       localStorage.removeItem("hackme-ex-layout-v3");
       if (!sessionStorage.getItem("e2e-demo-reset")) {

@@ -26,7 +26,15 @@ async function sleep(ms) {
 }
 
 async function dismissOverlays(page) {
-  for (const sel of ["#tour-skip", "#tour-next", "[data-dismiss]", ".tour-backdrop button"]) {
+  for (const sel of [
+    "#tour-skip",
+    "#tour-next",
+    "#tour-v2-skip",
+    "#tour-v2-next",
+    "[data-dismiss]",
+    ".tour-backdrop button",
+    ".tour-v2-backdrop button",
+  ]) {
     const el = page.locator(sel).first();
     if (await el.count()) {
       try {
@@ -37,23 +45,35 @@ async function dismissOverlays(page) {
       }
     }
   }
+  // Nuke leftover tour DOM if click raced.
+  await page.evaluate(() => {
+    document.querySelector(".tour-backdrop")?.remove();
+    document.querySelector("#tour-v2-backdrop")?.remove();
+    try {
+      sessionStorage.setItem("hackme-ex-tour-v1", "1");
+      localStorage.setItem("hackme.tour.v2.done", "1");
+    } catch {
+      /* ignore */
+    }
+  }).catch(() => {});
   await page.keyboard.press("Escape").catch(() => {});
 }
 
 async function gotoView(page, name) {
   // Prefer hash routes — mobile may hide #main-nav.
   await page.goto(`${BASE.replace(/\/?$/, "/")}#${name}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-  await sleep(700);
+  await sleep(900);
   await dismissOverlays(page);
   const nav = page.locator(`#main-nav .nav-btn[data-view="${name}"]`);
   if ((await nav.count()) > 0 && (await nav.first().isVisible().catch(() => false))) {
     try {
-      await nav.first().click({ timeout: 2000 });
-      await sleep(300);
+      await nav.first().click({ timeout: 2000, force: true });
+      await sleep(400);
     } catch {
       /* hash already applied */
     }
   }
+  await dismissOverlays(page);
 }
 
 async function shot(page, name) {
@@ -65,15 +85,14 @@ async function shot(page, name) {
 }
 
 async function passDesktop(page) {
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.addInitScript(() => {
     try {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
+      localStorage.setItem("hackme.tour.v2.done", "1");
     } catch {
       /* ignore */
     }
   });
-  // reload so init script applies if first nav raced
   await page.goto(BASE, { waitUntil: "networkidle", timeout: 30000 }).catch(async () => {
     await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
   });

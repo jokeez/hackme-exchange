@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-08-31 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10
+**Updated:** 2026-09-09 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** 2026-09-10 **→ GO (gates green)**
 
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
@@ -54,7 +54,7 @@ No ROI promises. No fake “Tier-1 tomorrow.”
 | HMC/USDT | **0.05** | Mild ±0.35% paper drift; **not** scaled by pool GH |
 | SUP/USDT | **0.01** | Same |
 | HMC/SUP | **5.0** | Cross = HMC÷SUP |
-| HMC/BTC · SUP/BTC | `usdt / btcUsd` | Live BTCUSDT when available |
+| HMC/BTC · SUP/BTC | `usdt / DEFAULT_BTC_USD` | Shared paper pin (no Binance fork across devices) |
 
 Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
@@ -76,16 +76,16 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 - Not live matching / custody on `exchange.hackme.tech` until post-D0 gates  
 - Not a promise of foreign CEX listing  
 
-## QA snapshot (2026-08-31)
+## QA snapshot (2026-09-09)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **701** pass |
+| `npm test` | **810** pass |
+| `npm run test:ui-smoke` | **46** pass |
+| `npm run test:e2e` (G10) | **P0=0 P1=0** |
 | `npm run d0:static` | **ok** — paper dist, `frame-ancestors` hackme.tech |
-| `npm run smoke:lab` | **32/32** (loopback API) |
-| Full UI/UX · G10 · B-chart | **P0=0** |
 | API `go test ./...` | **ok** |
-| PRE_PUBLIC dry-run | **ok** · public still **HOLD** |
+| Public matching / custody | **HOLD** |
 
 Setup: [README.md](README.md) · Scripts: [scripts/README.md](scripts/README.md)
 

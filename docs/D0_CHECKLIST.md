@@ -22,21 +22,21 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit / UI suite | `npm test` | ✅ **701** (2026-08-31) |
-| G2 | UI smoke | `npm run test:ui-smoke` | ✅ |
+| G1 | Unit / UI suite | `npm test` | ✅ **810** (2026-09-09) |
+| G2 | UI smoke | `npm run test:ui-smoke` | ✅ **46** |
 | G3 | Production build | `npm run build` / `prepare_d0_static.sh` | ✅ |
 | G4 | XSS / sanitize / redteam | vitest sanitize + stress_redteam | ✅ |
 | G5 | Paper / abuse / econ | `abuse_econ_latency` | ✅ |
 | G6 | STATUS disclaimer | root `STATUS.md` + in-app PAPER badges | ✅ |
 | G7 | Live mode blocked | `isLiveMode()` false | ✅ |
-| G8 | Lab API (optional) | `go test ./...` + custody e2e | ✅ |
+| G8 | Lab API (optional) | `go test ./...` + custody e2e | ✅ `go test` 2026-09-09 |
 | G9 | Mirror restore drill | hub ops | ✅ |
-| G10 | Visual pass | `npm run test:e2e` (`g10_visual_pass.mjs`) | ✅ P0=0 P1=0 |
+| G10 | Visual pass | `npm run test:e2e` (`g10_visual_pass.mjs`) | ✅ **P0=0 P1=0** (2026-09-09) |
 | G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` · **no DNS** | ✅ |
 | G12 | Comms draft | ops channel (not in repo) | ✅ |
 | G13 | PRE_PUBLIC API smoke | API `bash scripts/pre_public_dry_run.sh` | ✅ · **HOLD** |
 | G14 | Full UI/UX | `npm run test:e2e` (G10) · `npm run test:e2e:full` (mega) | ✅ P0=0 |
-| G15 | Reference mids | HMC **0.05** · SUP **0.01** · no GH price scale | ✅ |
+| G15 | Reference mids | HMC **0.05** · SUP **0.01** · no GH price scale | ✅ shared paper clock |
 | G16 | WebSocket book/fills (`/ws/market`, `health.streams`) | ✅ (private lab) |
 | G17 | Session reconnect (`GET /auth/session`) | SPA `labSessionRestore.ts` + API | ✅ |
 | G18 | Hub embed postMessage | `embed.ts` allows `hackme.tech` parent | ✅ |

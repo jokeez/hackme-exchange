@@ -13,7 +13,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
     id: "welcome",
     title: "Welcome to HackMe Exchange",
     body: "Paper trading with live pool oracle — balances, convert, and mining in one hub.",
-    view: "spot",
+    // No view — do not yank deep-links (#convert / #account) back to Spot on first paint.
   },
   {
     id: "chart",
