@@ -177,6 +177,24 @@ describe("processOpenOrders", () => {
     expect(s.orders.filter((o) => o.status === "open" || o.status === "triggered")).toHaveLength(0);
   });
 
+  it("does not double-fill OCO when SL is processed before TP", () => {
+    // Overlapping buy geometry: SL fill mid also marketable for TP — sibling must stay cancelled.
+    const m0 = sampleMarket({ hmcUsdt: 0.048 });
+    const s = baseState({ wallet: { usdt: 10_000, hmc: 0, sup: 0, btc: 0 } });
+    const placed = placeOco(s, "HMC_USDT", "buy", 1000, 0.055, 0.05, 0.05, m0);
+    expect("tp" in placed).toBe(true);
+    if (!("tp" in placed)) return;
+    // Import / reorder can put SL ahead of TP in the open-orders array.
+    s.orders = [placed.sl, placed.tp];
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    processOpenOrders(s, m, tickersFor(m));
+    const filled = [placed.sl, placed.tp].filter((o) => o.status === "filled");
+    expect(filled).toHaveLength(1);
+    expect(s.trades).toHaveLength(1);
+    expect(s.wallet.hmc).toBe(1000);
+    expect([placed.sl.status, placed.tp.status].sort()).toEqual(["cancelled", "filled"]);
+  });
+
   it("uses ticker mid over market mid for fills", () => {
     const s = baseState();
     placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0004);

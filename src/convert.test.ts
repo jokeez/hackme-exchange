@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, convertSlippageDriftBps, feeQuoteFromLabConvert, flipRoute, formatConvertFeeToast, formatLabConvertFeeToast, isConvertPreviewError, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
+import { placeOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("convert", () => {
@@ -46,6 +47,17 @@ describe("convert", () => {
     const res = convert(s, market, "HMC_USDT", 100);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toContain("Insufficient");
+  });
+
+  it("rejects convert that would spend quote reserved by open buy", () => {
+    const s = baseState({ wallet: { usdt: 100, hmc: 0, sup: 0, btc: 0 } });
+    const o = placeOrder(s, "HMC_USDT", "buy", "limit", 1000, 0.04, undefined, undefined, "GTC", false, market);
+    expect("id" in o).toBe(true);
+    const res = convert(s, market, "USDT_HMC", 80);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/reserved|Insufficient/i);
+    expect(s.wallet.usdt).toBe(100);
+    expect(s.orders.filter((x) => x.status === "open")).toHaveLength(1);
   });
 
   it("HMC → USDT credits quote at mid minus taker fee", () => {

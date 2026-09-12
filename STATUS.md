@@ -80,12 +80,15 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **808** pass (live lab custody opt-in via `EX_LIVE_LAB=1`) |
+| `npm test` | **810** pass (live lab custody opt-in via `EX_LIVE_LAB=1`) |
 | `npm run test:ui-smoke` | **46** pass |
 | `npm run test:e2e` (G10) | **P0=0 P1=0** |
+| `npm run test:e2e:full` (mega) | **P0=0** (P1 onboarding default only) |
 | `npm run d0:static` | **ok** — paper dist, `frame-ancestors` hackme.tech |
 | API `go test ./...` | **ok** |
 | Public matching / custody | **HOLD** |
+
+Independent audit 2026-09-12: OCO cancel mid-tick, convert vs reserved, TP/SL resting, tour view lock, stop-market buy pad.
 
 Setup: [README.md](README.md) · Scripts: [scripts/README.md](scripts/README.md)
 

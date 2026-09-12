@@ -24,17 +24,27 @@ export function fundsImmediateFill(
   return false;
 }
 
+/** Worst-case quote pad for buy stop-market / trailing (fills at ask VWAP, not limit). */
+const MARKETABLE_BUY_RESERVE_PAD = 1.02;
+
 function quoteNeedForLeg(
   state: DemoState,
   m: MarketSnapshot | undefined,
   o: Order,
   remaining: number,
 ): number {
-  let need = o.price * remaining;
+  let px = o.price;
+  // Buy stop-market / trailing fill via matchMarket VWAP — pad above trigger/limit price.
+  if (o.side === "buy" && (o.kind === "stop_market" || o.kind === "trailing_stop")) {
+    px = Math.max(px, o.stopPrice ?? 0) * MARKETABLE_BUY_RESERVE_PAD;
+  }
+  let need = px * remaining;
   if (m) {
     // Stop-limit always fills as taker once triggered — reserve taker fees upfront.
     const role =
-      o.kind === "stop_limit" ? "taker" : liquidityRole(o.kind, o.status === "triggered");
+      o.kind === "stop_limit" || o.kind === "stop_market" || o.kind === "trailing_stop"
+        ? "taker"
+        : liquidityRole(o.kind, o.status === "triggered");
     const fee = calcFee(state, m, o.pairId, need, role);
     if (!fee.paidInHmc) need += fee.feeQuote;
   }
@@ -199,7 +209,9 @@ export function assertOrderFunds(
   }
   const pair = PAIRS.find((p) => p.id === pairId)!;
   const role =
-    kind === "stop_limit" ? "taker" : liquidityRole(kind, false, immediateFill);
+    kind === "stop_limit" || kind === "stop_market" || kind === "trailing_stop"
+      ? "taker"
+      : liquidityRole(kind, false, immediateFill);
   if (side === "sell") {
     const baseK = balKey(pair.base);
     const free = freeBalance(state, baseK, m, excludeOrderId);
@@ -221,7 +233,12 @@ export function assertOrderFunds(
     return { ok: true };
   }
   const quoteK = balKey(pair.quote);
-  const quoteGross = price * amountBase;
+  let px = price;
+  // Align with reservedBalances pad — stop-market buy fills at ask VWAP.
+  if (side === "buy" && (kind === "stop_market" || kind === "trailing_stop")) {
+    px = price * MARKETABLE_BUY_RESERVE_PAD;
+  }
+  const quoteGross = px * amountBase;
   const fee = calcFee(state, m, pairId, quoteGross, role);
   const quoteNeed = quoteGross + (fee.paidInHmc ? 0 : fee.feeQuote);
   const free = freeBalance(state, quoteK, m, excludeOrderId);

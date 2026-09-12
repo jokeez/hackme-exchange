@@ -22,7 +22,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit / UI suite | `npm test` | ✅ **808** (2026-09-12; live lab opt-in) |
+| G1 | Unit / UI suite | `npm test` | ✅ **810** (2026-09-12; live lab opt-in) |
 | G2 | UI smoke | `npm run test:ui-smoke` | ✅ **46** |
 | G3 | Production build | `npm run build` / `prepare_d0_static.sh` | ✅ |
 | G4 | XSS / sanitize / redteam | vitest sanitize + stress_redteam | ✅ |
@@ -31,7 +31,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 | G7 | Live mode blocked | `isLiveMode()` false | ✅ |
 | G8 | Lab API (optional) | `go test ./...` + custody e2e | ✅ `go test` 2026-09-09 |
 | G9 | Mirror restore drill | hub ops | ✅ |
-| G10 | Visual pass | `npm run test:e2e` (`g10_visual_pass.mjs`) | ✅ **P0=0 P1=0** (2026-09-09) |
+| G10 | Visual pass | `npm run test:e2e` (`g10_visual_pass.mjs`) | ✅ **P0=0 P1=0** (2026-09-12) |
 | G11 | Static publish dry-run | `scripts/prepare_d0_static.sh` · **no DNS** | ✅ |
 | G12 | Comms draft | ops channel (not in repo) | ✅ |
 | G13 | PRE_PUBLIC API smoke | API `bash scripts/pre_public_dry_run.sh` | ✅ · **HOLD** |
