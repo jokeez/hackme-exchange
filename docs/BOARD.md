@@ -6,7 +6,7 @@ Lightweight issue board until GitHub projects exist. Update status in place.
 
 | ID | Item | Owner track | Status |
 |----|------|-------------|--------|
-| B1 | Paper SPA QA green + STATUS | demo | ✅ 701 tests · P0=0 |
+| B1 | Paper SPA QA green + STATUS | demo | ✅ 808 tests · G10 P0=0 |
 | B2 | Lab matching smoke (orders/cancel/fill/convert) | api+demo | ✅ |
 | B3 | Soft-mid convert smoke size | demo script | ✅ mid **0.05** |
 | B4 | D0 static tarball script | demo | ✅ `npm run d0:static` |

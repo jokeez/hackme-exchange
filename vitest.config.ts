@@ -12,6 +12,16 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Live loopback custody — opt-in only (EX_LIVE_LAB=1). Must not flake D0 `npm test` gate.
+    // Keep vitest defaults when overriding `exclude`.
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*",
+      ...(process.env.EX_LIVE_LAB === "1" ? [] : ["src/labCustody.live.test.ts"]),
+    ],
     setupFiles: ["src/testSetup.ts"],
     env: {
       VITE_LAB_API: "1",

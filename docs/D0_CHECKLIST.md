@@ -22,7 +22,7 @@ Related: [STATUS.md](../STATUS.md) · [HackMe hub](https://github.com/jokeez/hac
 
 | # | Gate | How | Status |
 |---|------|-----|--------|
-| G1 | Unit / UI suite | `npm test` | ✅ **810** (2026-09-09) |
+| G1 | Unit / UI suite | `npm test` | ✅ **808** (2026-09-12; live lab opt-in) |
 | G2 | UI smoke | `npm run test:ui-smoke` | ✅ **46** |
 | G3 | Production build | `npm run build` / `prepare_d0_static.sh` | ✅ |
 | G4 | XSS / sanitize / redteam | vitest sanitize + stress_redteam | ✅ |
