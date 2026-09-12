@@ -1,5 +1,6 @@
 /** Convert desk helpers — routes, flip, asset labels for swap UX. */
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
+import { freeBalance } from "./balance";
 import { midForPair } from "./market";
 import type { PairId } from "./types";
 import { applyFeeToWallet, calcFee, formatBps, type FeeQuote } from "./fees";
@@ -199,13 +200,16 @@ export function convert(
   const prev = previewConvert(state, market, route, amountFrom);
   if (isConvertPreviewError(prev)) return prev;
   const p = prev as ConvertPreview;
-  if (state.wallet[p.from] < amountFrom) {
-    return { ok: false, reason: "Insufficient balance" };
+  // Respect open-order reservations (same as spot desk freeBalance).
+  const freeFrom = freeBalance(state, p.from, market);
+  if (freeFrom < amountFrom) {
+    return { ok: false, reason: "Insufficient balance (reserved in open orders)" };
   }
   // Pre-check fee so we don't leave a half-applied convert.
   if (p.fee.paidInHmc) {
     const need = p.fee.feeHmc + (p.from === "hmc" ? amountFrom : 0);
-    if (state.wallet.hmc < need) {
+    const freeHmc = p.from === "hmc" ? freeFrom : freeBalance(state, "hmc", market);
+    if (freeHmc < need) {
       return { ok: false, reason: "Insufficient HMC for fee" };
     }
   }

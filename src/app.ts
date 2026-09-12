@@ -1881,6 +1881,10 @@ async function runConvertDesk(): Promise<void> {
     return;
   }
   const avail = freeBalance(state, convertFrom, market ?? undefined);
+  if (amt > avail) {
+    toast("Insufficient free balance (reserved in open orders)", "warn");
+    return;
+  }
   if (convertConfirmLarge && amt > avail * 0.5) {
     if (!confirm(`Convert ${formatNum(amt, 4)} ${assetSymbol(convertFrom)} (>50% of balance)?`)) return;
   }
@@ -4461,19 +4465,24 @@ function updatePreview(): void {
   updatePreviewForSide("sell");
 }
 
-function placeAttachedTpsl(side: "buy" | "sell", amountBase: number, exitSide: "buy" | "sell"): void {
+/** Returns true if TP/SL exits were placed (or none requested). */
+function placeAttachedTpsl(side: "buy" | "sell", amountBase: number, exitSide: "buy" | "sell"): boolean {
   const form = readOrderForm(side);
-  if (!form.tpslEnabled) return;
+  if (!form.tpslEnabled) return true;
   if (form.takeProfit > 0 && form.stopLoss > 0) {
-    placeOcoOrWarn(state.activePair, exitSide, amountBase, form.takeProfit, form.stopLoss, form.stopLoss);
-    return;
+    return placeOcoOrWarn(state.activePair, exitSide, amountBase, form.takeProfit, form.stopLoss, form.stopLoss);
   }
+  let ok = true;
   if (form.takeProfit > 0) {
-    placeOrderOrWarn(state.activePair, exitSide, "limit", amountBase, form.takeProfit);
+    ok =
+      placeOrderOrWarn(state.activePair, exitSide, "limit", amountBase, form.takeProfit) && ok;
   }
   if (form.stopLoss > 0) {
-    placeOrderOrWarn(state.activePair, exitSide, "stop_limit", amountBase, form.stopLoss, form.stopLoss);
+    ok =
+      placeOrderOrWarn(state.activePair, exitSide, "stop_limit", amountBase, form.stopLoss, form.stopLoss) &&
+      ok;
   }
+  return ok;
 }
 
 function submitOrder(side: "buy" | "sell"): void {
@@ -4540,8 +4549,9 @@ function submitOrder(side: "buy" | "sell"): void {
     }
     const res = executeFill(state, market!, state.activePair, side, m.avgPrice, form.amt, m.quote, "market");
     if (!res.ok) { setOrderMsg(side, res.reason, "err"); toast(res.reason, "warn"); return; }
-    placeAttachedTpsl(side, form.amt, exitSide);
-    setOrderMsg(side, `Filled @ ${formatPrice(m.avgPrice)} · ${res.fee.role} ${formatBps(res.fee.bps)}${form.tpslEnabled ? " · TP/SL" : ""}`, "ok");
+    const tpslOk = placeAttachedTpsl(side, form.amt, exitSide);
+    const tpslNote = form.tpslEnabled ? (tpslOk ? " · TP/SL" : " · TP/SL failed") : "";
+    setOrderMsg(side, `Filled @ ${formatPrice(m.avgPrice)} · ${res.fee.role} ${formatBps(res.fee.bps)}${tpslNote}`, tpslOk ? "ok" : "err");
     feeFillToast(side, form.amt, pair.base, res.fee, pair.quote);
     upsertAllCandles(m.avgPrice);
     saveState(state);
@@ -4596,25 +4606,29 @@ function submitOrder(side: "buy" | "sell"): void {
       const quote = form.price * form.amt;
       const res = executeFill(state, market!, state.activePair, side, form.price, form.amt, quote, "limit", false, true);
       if (!res.ok) { setOrderMsg(side, res.reason, "err"); return; }
-      placeAttachedTpsl(side, form.amt, exitSide);
+      const tpslOk = placeAttachedTpsl(side, form.amt, exitSide);
+      const tpslNote = form.tpslEnabled ? (tpslOk ? " · TP/SL" : " · TP/SL failed") : "";
       setOrderMsg(
         side,
-        `Filled @ limit (crossed mid) · ${res.fee.role} ${formatBps(res.fee.bps)}${form.tpslEnabled ? " · TP/SL" : ""}`,
-        "ok",
+        `Filled @ limit (crossed mid) · ${res.fee.role} ${formatBps(res.fee.bps)}${tpslNote}`,
+        tpslOk ? "ok" : "err",
       );
       feeFillToast(side, form.amt, pair.base, res.fee, pair.quote);
       upsertAllCandles(form.price);
       saveState(state);
       patchLive();
       activityTab = "history";
-      toast("Filled instantly — see Fills tab", "info");
+      toast(tpslOk ? "Filled instantly — see Fills tab" : "Filled — TP/SL attach failed", tpslOk ? "info" : "warn");
       refreshActivityPanel();
       return;
     }
     if (!placeOrderOrWarn(state.activePair, side, "limit", form.amt, form.price, undefined, undefined, uiTif, uiPostOnly)) return;
-    placeAttachedTpsl(side, form.amt, exitSide);
+    // Resting entry: do not lock exit inventory before fill — use Advanced OCO after fill.
+    if (form.tpslEnabled) {
+      toast("TP/SL attaches after fill — resting entry only for now (use OCO)", "info");
+    }
     saveState(state);
-    setOrderMsg(side, `Limit · ${uiTif}${form.tpslEnabled ? " · TP/SL" : ""}`, "ok");
+    setOrderMsg(side, `Limit · ${uiTif}`, "ok");
     toast("Limit placed — Open orders", "ok");
     activityTab = "orders";
     refreshOpenOrderChartLines();
@@ -6225,12 +6239,14 @@ function upsertAllCandles(mid: number): void {
 let wasLabMatching = false;
 
 function microTickPrices(): void {
-  if (!market || state.mainView !== "spot") return;
+  if (!market) return;
+  // Shared paper mids always — Convert/Account must not lag Spot ticker.
+  market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
+  if (state.mainView !== "spot") return;
   let changed = false;
   bookPhase += 0.38;
   liveTickN += 1;
   // Shared paper clock — canonical D0 refs (not per-device Settings anchor / EMA).
-  market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
   const labLive = useLabMatching();
   // Lab → paper: hard reseed so lab tip extremes / path never stick.
   if (wasLabMatching && !labLive) {
@@ -6680,28 +6696,29 @@ function maybeShowTourV2(): void {
   const paint = () => {
     const step = TOUR_V2_STEPS[i]!;
     document.getElementById("tour-v2-backdrop")?.remove();
-    if (step.view && step.view !== state.mainView) {
-      state.mainView = step.view;
-      saveState(state);
-      syncRouteHash();
-      chartMounted = false;
-      render();
-    }
-    if (step.selector) {
+    // Never mutate mainView — deep-links (#convert / #account) must stay put.
+    if (step.selector && state.mainView === "spot") {
       document.querySelector(step.selector)?.scrollIntoView({ block: "nearest" });
     }
     const wrap = document.createElement("div");
     wrap.innerHTML = renderTourV2Overlay(step, i, TOUR_V2_STEPS.length);
     const bd = wrap.firstElementChild as HTMLElement;
     document.body.appendChild(bd);
-    bd.querySelector("#tour-v2-skip")?.addEventListener("click", () => {
+    const dismiss = () => {
       markTourV2Done();
       bd.remove();
-    });
+      window.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        dismiss();
+      }
+    };
+    bd.querySelector("#tour-v2-skip")?.addEventListener("click", dismiss);
     bd.querySelector("#tour-v2-next")?.addEventListener("click", () => {
       if (i + 1 >= TOUR_V2_STEPS.length) {
-        markTourV2Done();
-        bd.remove();
+        dismiss();
         toast("Tour complete — explore Account, Convert & Pool", "ok");
         return;
       }
@@ -6709,11 +6726,9 @@ function maybeShowTourV2(): void {
       paint();
     });
     bd.addEventListener("click", (e) => {
-      if (e.target === bd) {
-        markTourV2Done();
-        bd.remove();
-      }
+      if (e.target === bd) dismiss();
     });
+    window.addEventListener("keydown", onKey);
   };
   window.setTimeout(paint, 800);
 }

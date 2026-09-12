@@ -138,34 +138,31 @@ async function testOracleSettingsApply(page) {
   const applyAria = await applyBtn.getAttribute("aria-label").catch(() => "");
   if (!cancelAria?.includes("Close")) note("P1", "oracle-cancel-aria", `aria=${cancelAria}`);
   else ok("oracle cancel aria-label");
-  if (!applyAria?.includes("Apply")) note("P1", "oracle-apply-aria", `aria=${applyAria}`);
-  else ok("oracle apply aria-label");
+  // D0: shared paper mid locked — button is Reset/Locked, not Apply.
+  if (!/Reset|Locked/i.test(applyAria || "")) note("P1", "oracle-apply-aria", `aria=${applyAria}`);
+  else ok("oracle lock aria-label");
 
   const desc = await page.locator('#pane-oracle .muted.small').count();
   if (!desc) note("P1", "oracle-desc", "oracle pane hint missing");
   else ok("oracle settings describedby");
 
   const inp = page.locator("#set-anchor");
-  await inp.fill("0.061");
-  await applyBtn.click();
-  await sleep(600);
-  if (await page.locator(".modal-backdrop").count()) {
-    note("P0", "oracle-apply-close", "modal stayed open after Apply");
-    await page.keyboard.press("Escape").catch(() => {});
-  } else ok("oracle Apply closes modal");
-
-  const toast = await page.locator(".toast").first().textContent().catch(() => "");
-  const anchorOk = await page.evaluate(() => {
-    try {
-      const raw = localStorage.getItem("hackme-exchange-demo-v5");
-      if (!raw) return false;
-      return raw.includes("0.061");
-    } catch {
-      return false;
-    }
-  });
-  if (!anchorOk && !/0\.061|Anchor/i.test(toast || "")) note("P1", "oracle-toast", `toast=${toast}`);
-  else ok("oracle anchor persisted");
+  const locked =
+    (await inp.isDisabled().catch(() => false)) ||
+    (await inp.getAttribute("readonly").catch(() => null)) != null;
+  const saveDisabled = await applyBtn.isDisabled().catch(() => false);
+  if (!locked || !saveDisabled) {
+    note("P0", "oracle-anchor-unlocked", "D0 reference mid must stay readonly/disabled");
+  } else {
+    ok("oracle anchor locked for shared paper clock");
+  }
+  // Escape closes settings (do not attempt fill on disabled input).
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(200);
+  if (await page.locator(".modal-backdrop[data-settings-modal]").count()) {
+    note("P1", "oracle-escape-close", "settings modal stayed open after Escape");
+    await closeBtn.click().catch(() => {});
+  } else ok("oracle settings Escape closes");
 }
 
 async function testBookObAmt(page) {

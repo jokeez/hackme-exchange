@@ -214,7 +214,11 @@ function stopTriggered(order: Order, mid: number): boolean {
 
 export function processOpenOrders(state: DemoState, m: MarketSnapshot, tickers: Record<PairId, Ticker>): string[] {
   const notes: string[] = [];
+  // Snapshot open/triggered at tick start — sibling cancel can flip status mid-loop.
   for (const order of state.orders.filter((o) => o.status === "open" || o.status === "triggered")) {
+    // OCO cancel (or any mid-tick cancel) must not still fill from the snapshot.
+    if (order.status !== "open" && order.status !== "triggered") continue;
+
     const tk = tickers[order.pairId];
     const mid = tk?.mid && tk.mid > 0 ? tk.mid : midForPair(m, order.pairId);
 
@@ -242,11 +246,13 @@ export function processOpenOrders(state: DemoState, m: MarketSnapshot, tickers: 
       notes.push(`Trailing stop hit ${order.id.slice(0, 6)}`);
     }
 
+    const live = order.status === "open" || order.status === "triggered";
     const readyLimit =
-      order.kind === "limit" ||
-      (order.kind === "oco" && order.ocoRole === "tp") ||
-      (order.kind === "oco" && order.ocoRole === "sl" && order.status === "triggered") ||
-      (order.status === "triggered" && order.kind === "stop_limit");
+      live &&
+      (order.kind === "limit" ||
+        (order.kind === "oco" && order.ocoRole === "tp") ||
+        (order.kind === "oco" && order.ocoRole === "sl" && order.status === "triggered") ||
+        (order.status === "triggered" && order.kind === "stop_limit"));
 
     if (readyLimit && limitShouldFill(order, mid)) {
       // Resting book hits are always maker. Placement-time crosses already
