@@ -32,7 +32,7 @@ Paper / private-lab UI docs. Canonical **API** security & hosting live in the si
 | Doc | Purpose |
 |-----|---------|
 | [ECONOMICS.md](ECONOMICS.md) | Fees · VIP · **0.05 / 0.01** reference mids |
-| [WALLET_ASSETS.md](WALLET_ASSETS.md) | Asset registry notes |
+| [archive/WALLET_ASSETS.md](archive/WALLET_ASSETS.md) | Asset registry notes (post-D0 roadmap) |
 | [HUB_TAB.md](HUB_TAB.md) | Hub `#exchange` embed |
 
 ## Engineering

@@ -4,8 +4,10 @@ dist-d0/
 hackme-exchange-d0-*.tar.gz
 *.tar.gz
 *.tgz
-*.tgz
 *.local
+
+# Dependencies
+node_modules/
 
 # Env / secrets — never commit tokens
 .env

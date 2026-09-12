@@ -14,7 +14,9 @@ Nine scripts — build, D0 gate, API smoke, and two Playwright tiers (G10 + mega
 | `g10_visual_pass.mjs` | `npm run test:e2e` — desktop + mobile visual gate |
 | `mega_ui_audit.mjs` | `npm run test:e2e:full` — deep Playwright audit (pre-release) |
 
-**Prereq for Playwright:** `npm run preview -- --port 5199` in another terminal (or set `EX_UI_BASE`).
+**Prereq for Playwright:** Vite on `:5199` (`npm run dev` or `npm run preview -- --port 5199`) or set `EX_UI_BASE`.
+
+**Live lab custody vitest:** skipped by default. Opt-in with `EX_LIVE_LAB=1 npm test`.
 
 Evidence from audits → `docs/.local/` (gitignored). Static output → `dist-d0/` (gitignored).
 
