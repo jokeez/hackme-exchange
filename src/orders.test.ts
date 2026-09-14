@@ -195,6 +195,41 @@ describe("processOpenOrders", () => {
     expect([placed.sl.status, placed.tp.status].sort()).toEqual(["cancelled", "filled"]);
   });
 
+  it("cancels OCO sibling when one leg fails to fill", () => {
+    const s = baseState({ wallet: { usdt: 10_000, hmc: 50, sup: 0, btc: 0 } });
+    const placed = placeOco(s, "HMC_USDT", "sell", 50, 0.06, 0.04, 0.039, market);
+    expect("tp" in placed).toBe(true);
+    if (!("tp" in placed)) return;
+    // Drain base so sell fill fails funds check.
+    s.wallet.hmc = 0;
+    const m = sampleMarket({ hmcUsdt: 0.061 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(placed.tp.status).toBe("cancelled");
+    expect(placed.sl.status).toBe("cancelled");
+    expect(s.trades).toHaveLength(0);
+  });
+
+  it("buy stop-market cancels when VWAP exceeds ceiling", () => {
+    const m0 = sampleMarket({ hmcUsdt: 0.05 });
+    const s = baseState({ wallet: { usdt: 10_000, hmc: 0, sup: 0, btc: 0 } });
+    const o = placeOrder(s, "HMC_USDT", "buy", "stop_market", 1000, 0.0501, 0.05, undefined, "GTC", false, m0);
+    expect("id" in o).toBe(true);
+    if (!("id" in o)) return;
+    // Wide ask ladder relative to tight ceiling.
+    const m = sampleMarket({ hmcUsdt: 0.052 });
+    const ticks = tickersFor(m);
+    ticks.HMC_USDT = {
+      ...ticks.HMC_USDT,
+      mid: 0.052,
+      bid: 0.051,
+      ask: 0.055,
+    };
+    const notes = processOpenOrders(s, m, ticks);
+    expect(notes.some((n) => /ceiling/i.test(n))).toBe(true);
+    expect(o.status).toBe("cancelled");
+    expect(s.trades).toHaveLength(0);
+  });
+
   it("uses ticker mid over market mid for fills", () => {
     const s = baseState();
     placeOrder(s, "HMC_USDT", "buy", "limit", 100, 0.0004);

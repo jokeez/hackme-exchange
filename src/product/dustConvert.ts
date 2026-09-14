@@ -1,8 +1,9 @@
 import { CONVERT_ASSETS, routeForAssets, type ConvertRoute } from "../convert";
+import { freeBalance } from "../balance";
 import { formatConvertPairHash } from "../routeHash";
 import { escapeHtml } from "../sanitize";
 import { formatNum } from "../market";
-import type { MarketSnapshot, Wallet } from "../types";
+import type { DemoState, MarketSnapshot, Wallet } from "../types";
 
 export const DUST_USD_THRESHOLD = 1;
 
@@ -21,11 +22,16 @@ const PRICE: Record<keyof Wallet, (m: MarketSnapshot) => number> = {
   btc: (m) => m.btcUsd,
 };
 
-export function findDustBalances(wallet: Wallet, market: MarketSnapshot, to: keyof Wallet = "usdt"): DustBalance[] {
+export function findDustBalances(
+  wallet: Wallet,
+  market: MarketSnapshot,
+  to: keyof Wallet = "usdt",
+  state?: DemoState,
+): DustBalance[] {
   const out: DustBalance[] = [];
   for (const a of CONVERT_ASSETS) {
     if (a.key === to) continue;
-    const amount = wallet[a.key];
+    const amount = state ? freeBalance(state, a.key, market) : wallet[a.key];
     if (!(amount > 0)) continue;
     const usd = amount * PRICE[a.key](market);
     if (usd >= DUST_USD_THRESHOLD) continue;
@@ -46,8 +52,13 @@ export function dustConvertDeepLink(dust: DustBalance, to: keyof Wallet): string
   return formatConvertPairHash(fromKey, to);
 }
 
-export function renderDustPanel(wallet: Wallet, market: MarketSnapshot, to: keyof Wallet = "usdt"): string {
-  const dust = findDustBalances(wallet, market, to);
+export function renderDustPanel(
+  wallet: Wallet,
+  market: MarketSnapshot,
+  to: keyof Wallet = "usdt",
+  state?: DemoState,
+): string {
+  const dust = findDustBalances(wallet, market, to, state);
   if (!dust.length) {
     return `<section class="acct-dust glass-inset" id="acct-dust">
       <header class="acct-block-head"><h3>Dust converter</h3><p class="muted small">No dust balances (&lt; ${DUST_USD_THRESHOLD} USD)</p></header>

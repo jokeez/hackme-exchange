@@ -203,6 +203,8 @@ export function assertOrderFunds(
   kind: Order["kind"] = "limit",
   immediateFill = false,
   excludeOrderId?: string,
+  /** Placement-only: stop trigger for stop_market / trailing sizing. */
+  stopPrice?: number,
 ): { ok: true } | { ok: false; reason: string } {
   if (!Number.isFinite(amountBase) || amountBase <= 0) {
     return { ok: false, reason: "Amount must be > 0" };
@@ -234,9 +236,13 @@ export function assertOrderFunds(
   }
   const quoteK = balKey(pair.quote);
   let px = price;
-  // Align with reservedBalances pad — stop-market buy fills at ask VWAP.
-  if (side === "buy" && (kind === "stop_market" || kind === "trailing_stop")) {
-    px = price * MARKETABLE_BUY_RESERVE_PAD;
+  // Pad only at placement — fill path passes excludeOrderId with actual VWAP/ceiling.
+  if (
+    !excludeOrderId &&
+    side === "buy" &&
+    (kind === "stop_market" || kind === "trailing_stop")
+  ) {
+    px = Math.max(price, stopPrice ?? 0) * MARKETABLE_BUY_RESERVE_PAD;
   }
   const quoteGross = px * amountBase;
   const fee = calcFee(state, m, pairId, quoteGross, role);

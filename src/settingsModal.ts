@@ -72,7 +72,7 @@ export function renderUnifiedSettingsModal(
       </label>
       <p class="muted small">Shared D0 paper mid is locked at 0.05 USDT/HMC on every device. This field is display-only.</p>
       <div class="modal-actions">
-        <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Reset oracle anchor to D0 default" disabled title="Locked for cross-device sync">Locked at 0.05</button>
+        <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Oracle reference mid locked at 0.05" disabled title="Locked for cross-device sync">Locked at 0.05</button>
       </div>
     </div>
 

@@ -1779,7 +1779,10 @@ async function refreshConvertPreviewAsync(): Promise<void> {
             ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
             : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · server seed mid`;
       }
-      if (go) go.disabled = avail < amt;
+      if (go) {
+        const maxOk = maxConvertibleFrom();
+        go.disabled = avail < amt || amt > maxOk + 1e-12;
+      }
       document.querySelectorAll("#cv-quick .cv-chip").forEach((btn) => {
         btn.classList.toggle("active", (btn as HTMLElement).dataset.cvRoute === route);
       });
@@ -1831,11 +1834,16 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     hint.textContent =
       avail < amt
         ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
-        : `You receive ≈ ${formatPrice(net)} ${assetSymbol(convertTo)} net${
-            p.fee.paidInHmc ? " · fee in HMC" : p.fee.feeQuote > 0 ? " · fee from quote" : ""
-          }`;
+        : amt > maxConvertibleFrom() + 1e-12
+          ? `Leave fee buffer — Max uses ≈ ${formatPrice(maxConvertibleFrom())}`
+          : `You receive ≈ ${formatPrice(net)} ${assetSymbol(convertTo)} net${
+              p.fee.paidInHmc ? " · fee in HMC" : p.fee.feeQuote > 0 ? " · fee from quote" : ""
+            }`;
   }
-  if (go) go.disabled = avail < amt;
+  if (go) {
+    const maxOk = maxConvertibleFrom();
+    go.disabled = avail < amt || amt > maxOk + 1e-12;
+  }
 
   document.querySelectorAll("#cv-quick .cv-chip").forEach((btn) => {
     btn.classList.toggle("active", (btn as HTMLElement).dataset.cvRoute === route);
@@ -1883,6 +1891,11 @@ async function runConvertDesk(): Promise<void> {
   const avail = freeBalance(state, convertFrom, market ?? undefined);
   if (amt > avail) {
     toast("Insufficient free balance (reserved in open orders)", "warn");
+    return;
+  }
+  const maxOk = maxConvertibleFrom();
+  if (amt > maxOk + 1e-12) {
+    toast("Amount leaves no room for convert fee — use Max or lower", "warn");
     return;
   }
   if (convertConfirmLarge && amt > avail * 0.5) {
@@ -3914,7 +3927,18 @@ function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: str
         return;
       }
       if (o.source !== "lab") {
-        const funds = assertOrderFunds(state, market, o.pairId, o.side, o.amountBase, n, o.kind, check.immediate);
+        const funds = assertOrderFunds(
+          state,
+          market,
+          o.pairId,
+          o.side,
+          o.amountBase,
+          n,
+          o.kind,
+          check.immediate,
+          o.id,
+          o.stopPrice,
+        );
         if (!funds.ok) {
           toast(funds.reason, "warn");
           return;
@@ -3928,7 +3952,7 @@ function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: str
     toast(`Order price → ${formatPrice(n)}`, "ok");
   } else {
     if (market && o.source !== "lab") {
-      const funds = assertOrderFunds(state, market, o.pairId, o.side, n, o.price, o.kind, false);
+      const funds = assertOrderFunds(state, market, o.pairId, o.side, n, o.price, o.kind, false, o.id, o.stopPrice);
       if (!funds.ok) {
         toast(funds.reason, "warn");
         return;
@@ -6242,7 +6266,19 @@ function microTickPrices(): void {
   if (!market) return;
   // Shared paper mids always — Convert/Account must not lag Spot ticker.
   market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
-  if (state.mainView !== "spot") return;
+  // Alerts + order settle off Spot too (mids already updated).
+  if (state.mainView !== "spot") {
+    for (const p of PAIRS) {
+      if (tickers[p.id]) {
+        const mid = midForPair(market, p.id);
+        tickers[p.id] = { ...tickers[p.id]!, mid, bid: mid * 0.9995, ask: mid * 1.0005 };
+      }
+    }
+    liveTickN += 1;
+    if (liveTickN % 2 === 0) settleOpenOrdersFromTickers(true);
+    evaluatePriceAlerts(midForPair(market, state.activePair));
+    return;
+  }
   let changed = false;
   bookPhase += 0.38;
   liveTickN += 1;

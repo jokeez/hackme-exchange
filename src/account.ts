@@ -612,7 +612,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
 
     ${renderMultiWalletCard(buildMultiWalletSlices(state, opts), market)}
 
-    ${renderDustPanel(w, market)}
+    ${renderDustPanel(w, market, "usdt", state)}
 
     ${renderFeesBlock(state, market, vip, vol)}
 
@@ -989,7 +989,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
   const dustEl = document.getElementById("acct-dust");
   if (dustEl) {
     const wrap = document.createElement("div");
-    wrap.innerHTML = renderDustPanel(w, market);
+    wrap.innerHTML = renderDustPanel(w, market, "usdt", state);
     const next = wrap.firstElementChild;
     if (next) dustEl.replaceWith(next);
   }
