@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-09-12 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** **GO** (gates green 2026-09-12)
+**Updated:** 2026-09-14 · **Public:** NO · **D0 Paper:** 2026-09-15 · **Go/no-go:** **GO** (gates green 2026-09-14)
 
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
@@ -76,19 +76,19 @@ Lab MM soft mids match the refs (exact). See [`docs/ECONOMICS.md`](docs/ECONOMIC
 - Not live matching / custody on `exchange.hackme.tech` until post-D0 gates  
 - Not a promise of foreign CEX listing  
 
-## QA snapshot (2026-09-12)
+## QA snapshot (2026-09-14)
 
 | Gate | Result |
 |------|--------|
-| `npm test` | **810** pass (live lab custody opt-in via `EX_LIVE_LAB=1`) |
+| `npm test` | **812** pass (live lab custody opt-in via `EX_LIVE_LAB=1`) |
 | `npm run test:ui-smoke` | **46** pass |
 | `npm run test:e2e` (G10) | **P0=0 P1=0** |
-| `npm run test:e2e:full` (mega) | **P0=0** (P1 onboarding default only) |
+| `npm run test:e2e:full` (mega) | **P0=0 P1=0 P2=0** |
 | `npm run d0:static` | **ok** — paper dist, `frame-ancestors` hackme.tech |
 | API `go test ./...` | **ok** |
 | Public matching / custody | **HOLD** |
 
-Independent audit 2026-09-12: OCO cancel mid-tick, convert vs reserved, TP/SL resting, tour view lock, stop-market buy pad.
+Independent audit 2026-09-14: stop-market ceiling, OCO fill-fail cancel group, amend excludeId, convert fee buffer, off-spot alerts, dust freeBalance, tour/oracle a11y.
 
 Setup: [README.md](README.md) · Scripts: [scripts/README.md](scripts/README.md)
 

@@ -139,7 +139,7 @@ async function testOracleSettingsApply(page) {
   if (!cancelAria?.includes("Close")) note("P1", "oracle-cancel-aria", `aria=${cancelAria}`);
   else ok("oracle cancel aria-label");
   // D0: shared paper mid locked — button is Reset/Locked, not Apply.
-  if (!/Reset|Locked/i.test(applyAria || "")) note("P1", "oracle-apply-aria", `aria=${applyAria}`);
+  if (!/locked|Reset|Locked/i.test(applyAria || "")) note("P1", "oracle-apply-aria", `aria=${applyAria}`);
   else ok("oracle lock aria-label");
 
   const desc = await page.locator('#pane-oracle .muted.small').count();

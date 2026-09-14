@@ -471,6 +471,18 @@ export function updateOrderAmount(state: DemoState, id: string, amountBase: numb
   if (!o || (o.status !== "open" && o.status !== "triggered")) return false;
   if (!(amountBase > 0)) return false;
   o.amountBase = amountBase;
+  // Keep OCO legs symmetric — TP/SL must share size.
+  if (o.ocoGroupId) {
+    for (const leg of state.orders) {
+      if (
+        leg.ocoGroupId === o.ocoGroupId &&
+        leg.id !== o.id &&
+        (leg.status === "open" || leg.status === "triggered")
+      ) {
+        leg.amountBase = amountBase;
+      }
+    }
+  }
   saveState(state);
   return true;
 }

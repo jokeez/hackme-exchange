@@ -20,25 +20,21 @@ export const TOUR_V2_STEPS: TourStep[] = [
     title: "Spot chart",
     body: "Right-click for alerts. Denom and pair persist across refresh.",
     selector: "#chart-wrap",
-    view: "spot",
   },
   {
     id: "convert",
     title: "Convert desk",
-    body: "Swap dust and alt balances with route preview and slippage guard.",
-    view: "convert",
+    body: "Open Convert from the top nav to swap dust and alts with route preview and slippage guard.",
   },
   {
     id: "pool",
     title: "Mining pool",
-    body: "Live hashrate, worker lookup by payout address, and oracle transparency.",
-    view: "pool",
+    body: "Open Pool for live hashrate, worker lookup by payout address, and oracle transparency.",
   },
   {
     id: "account",
     title: "Account & PnL",
-    body: "Equity in USDT, BTC, HMC, or ₽ — 30d snapshots and VIP fees.",
-    view: "account",
+    body: "Open Account for equity in USDT, BTC, HMC, or ₽ — 30d snapshots and VIP fees.",
   },
   {
     id: "pwa",

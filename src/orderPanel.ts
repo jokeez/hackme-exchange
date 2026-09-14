@@ -89,13 +89,17 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       uiType === "trailing_stop" ||
       (uiType === "stop_market" && !isBuy);
     const hideStop = uiType !== "stop_limit" && uiType !== "oco" && uiType !== "stop_market";
+    const priceLabel =
+      uiType === "stop_market" && isBuy
+        ? `Ceiling (${pair.quote})`
+        : `Price (${pair.quote})`;
     return `<div class="order-col ${side}">
       <div class="order-col-head">
         <h4 class="${side}">${isBuy ? "Buy" : "Sell"} ${pair.base}</h4>
         <button type="button" class="avail-chip mono" data-avail-side="${side}" title="Use 100%">Avbl <b>${formatNum(avail, isBuy ? 4 : 2)} ${availAsset}</b></button>
       </div>
       ${fld(
-        `Price (${pair.quote})`,
+        priceLabel,
         "",
         `<span class="price-row"><input id="${side}-price" class="inp mono" type="text" inputmode="decimal" value="${
           uiType === "limit" ? (isBuy ? buyLimitTick : sellLimitTick) : midTick

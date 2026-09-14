@@ -78,7 +78,7 @@ export function placeOrder(
     }
   }
   if (m && (kind === "limit" || kind === "stop_limit" || kind === "stop_market" || kind === "oco" || kind === "trailing_stop")) {
-    const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind);
+    const funds = assertOrderFunds(state, m, pairId, side, amountBase, price, kind, false, undefined, stopPrice);
     if (!funds.ok) return funds;
   }
   const order: Order = {
@@ -184,6 +184,8 @@ function fillOrder(
   );
   if (!res.ok) {
     order.status = "cancelled";
+    // Never leave an OCO sibling open after one leg fails to fill.
+    if (order.ocoGroupId) cancelOcoGroup(state, order.ocoGroupId);
     return false;
   }
   order.status = "filled";
@@ -267,7 +269,17 @@ export function processOpenOrders(state: DemoState, m: MarketSnapshot, tickers: 
     if ((order.kind === "trailing_stop" || order.kind === "stop_market") && order.status === "triggered") {
       const bookTk = tk ?? tickerStub(order.pairId, mid);
       const mm = matchMarket(bookTk, order.side, order.amountBase);
-      if (fillOrder(state, m, order, mm.avgPrice, true)) notes.push(`${order.kind} filled`);
+      let fillPx = mm.avgPrice;
+      // Buy stop-market: UI price is a ceiling — never pay above it on paper.
+      if (order.kind === "stop_market" && order.side === "buy" && order.price > 0) {
+        if (mm.avgPrice > order.price) {
+          order.status = "cancelled";
+          notes.push(`stop_market cancelled — VWAP above ceiling`);
+          continue;
+        }
+        fillPx = mm.avgPrice;
+      }
+      if (fillOrder(state, m, order, fillPx, true)) notes.push(`${order.kind} filled`);
     }
   }
   return notes;
