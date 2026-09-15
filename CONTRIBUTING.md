@@ -16,31 +16,32 @@ Copy `.env.example` → `.env` for local overrides. **Never commit `.env`.**
 | Repo | Role |
 |------|------|
 | [hackme](https://github.com/jokeez/hackme) | Hub · pool · node |
-| [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) | Private lab matching |
-| **This repo** | Paper / lab Spot SPA |
+| **This repo** | Open-source paper Spot SPA |
+| Matching API | Private sibling (optional loopback lab) |
 
 ## Pull requests
 
-- Keep changes focused (UI, docs, or lab wiring — not mixed with public-edge work).
-- Soft **D0** ships static paper UI only — do not enable a public matching API in the same change set.
-- Author identity should match the project’s existing GitHub account.
-- Do **not** commit dry-run dumps, tarballs (`hackme-exchange-d0-*.tar.gz`), `dist/`, `dist-d0/`, `.cache/`, or `docs/.local/`.
+- Keep changes focused (UI, docs, or lab wiring).
+- Do not enable a public matching API or custody path in the SPA without an explicit product decision.
+- Do **not** commit `.env`, tarballs (`hackme-exchange-d0-*.tar.gz`), `dist/`, `dist-d0/`, `.cache/`, or `docs/.local/`.
 
 ## QA before merge
 
 ```bash
 npm test
-npm run d0:static          # paper build gate
-npm run smoke:lab          # optional — needs API on :18443
+npm run build
+# optional
+npm run d0:static
+npm run test:e2e   # needs Vite on :5199
 ```
 
-See [scripts/README.md](scripts/README.md) for the full script catalog.
+See [scripts/README.md](scripts/README.md) for maintainer extras.
 
 ## Secrets
 
 - Do not put admin tokens in `VITE_*` (inlined into the browser bundle).
 - Lab fixture seeds are for localhost only.
-- Prefer `X-Admin-Token` via CLI against loopback — never embed in SPA source.
+- Prefer CLI admin headers against loopback — never embed in SPA source.
 
 ## License
 
@@ -48,4 +49,4 @@ Contributions are under **[AGPL-3.0](LICENSE)** (same as [HackMe](https://github
 
 ## Reference mids
 
-Paper / soft defaults: **0.05** USDT/HMC · **0.01** USDT/SUP. Do not reintroduce GH-based mid multipliers without an ops decision.
+Paper defaults: **0.05** USDT/HMC · **0.01** USDT/SUP. Do not reintroduce GH-based mid multipliers without a product decision.

@@ -1,7 +1,8 @@
 # Archived docs
 
-Material kept for D1+ planning — not part of the D0 paper soft-launch surface.
+Material kept for history / later planning — not part of the public paper surface.
 
 | Doc | Notes |
 |-----|--------|
-| [WALLET_ASSETS.md](WALLET_ASSETS.md) | Phase 2–3 asset registry notes |
+| [WALLET_ASSETS.md](WALLET_ASSETS.md) | Asset registry notes (post-paper) |
+| [BOARD.md](BOARD.md) | Internal matching / deposits board (historical) |

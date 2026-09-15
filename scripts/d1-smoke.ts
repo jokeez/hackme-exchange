@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const demoRoot = resolve(here, "..");
 const apiRoots = [
+  process.env.HACKME_EXCHANGE_API,
   resolve(demoRoot, "../hackme-exchange-api"),
-  "/home/kapa/Desktop/hackme-exchange-api",
-];
+].filter(Boolean) as string[];
 
 function loadAdminFromApiEnv(): void {
   if (process.env.EXCHANGE_ADMIN_TOKEN) return;
@@ -28,10 +28,13 @@ function loadAdminFromApiEnv(): void {
       return;
     }
   }
-  const legacy = resolve(apiRoots[0], ".env");
-  if (existsSync(legacy)) {
-    const m = readFileSync(legacy, "utf8").match(/^EXCHANGE_ADMIN_TOKEN=(.+)$/m);
-    if (m) process.env.EXCHANGE_ADMIN_TOKEN = m[1].trim();
+  const legacyRoot = apiRoots[0];
+  if (legacyRoot) {
+    const legacy = resolve(legacyRoot, ".env");
+    if (existsSync(legacy)) {
+      const m = readFileSync(legacy, "utf8").match(/^EXCHANGE_ADMIN_TOKEN=(.+)$/m);
+      if (m) process.env.EXCHANGE_ADMIN_TOKEN = m[1].trim();
+    }
   }
 }
 

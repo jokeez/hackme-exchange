@@ -45,4 +45,4 @@ fi
 tar -C "$(dirname "$OUT_DIR")" -czf "$TAR" "$(basename "$OUT_DIR")"
 echo "[d0-static] wrote $OUT_DIR"
 echo "[d0-static] wrote $TAR"
-echo "[d0-static] NEXT: copy tarball to mirror static path when D0 go — do not flip DNS tonight"
+echo "[d0-static] paper dist ready (gitignored) — publish with your own static host pipeline"

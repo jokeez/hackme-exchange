@@ -44,8 +44,8 @@ function loadAdminToken(): string {
   if (process.env.EXCHANGE_ADMIN_TOKEN) return process.env.EXCHANGE_ADMIN_TOKEN;
   const roots = [
     process.env.HACKME_EXCHANGE_API,
+    resolve(here, "../../hackme-exchange-api"),
     resolve(here, "../hackme-exchange-api"),
-    "/home/kapa/Desktop/hackme-exchange-api",
   ].filter(Boolean) as string[];
   const files = [".env.d1.local", ".env"];
   for (const root of roots) {

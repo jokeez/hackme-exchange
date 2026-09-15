@@ -1,9 +1,6 @@
 # Lab API wiring (SPA → loopback)
 
-Private-lab only. Connect this SPA to [hackme-exchange-api](https://github.com/jokeez/hackme-exchange-api) on `127.0.0.1:18443`.
-
-Canonical HTTP surface: [API LAB_API.md](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/LAB_API.md)  
-Operator rules: [PRIVATE_LAB](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRIVATE_LAB.md)
+**Optional** contributor path. Connect this SPA to a local matching API on `127.0.0.1:18443` (private sibling repo). Paper mode needs **no** API.
 
 ## Enable lab mode
 
