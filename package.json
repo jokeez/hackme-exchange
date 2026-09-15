@@ -13,6 +13,7 @@
     "test:ui-smoke": "vitest run src/ui.smoke.test.ts src/pro.features.test.ts",
     "test:e2e": "node scripts/g10_visual_pass.mjs",
     "test:e2e:full": "node scripts/mega_ui_audit.mjs",
+    "smoke:live": "node scripts/live_smoke.mjs",
     "dev:d1": "bash scripts/d1-local-dev.sh",
     "smoke:d1": "npx tsx scripts/d1-smoke.ts",
     "smoke:lab": "npx tsx scripts/lab-smoke.ts",
@@ -30,5 +31,6 @@
     "@noble/ed25519": "^2.2.3",
     "@noble/hashes": "^1.8.0",
     "lightweight-charts": "^5.2.0"
-  }
+  },
+  "license": "AGPL-3.0-or-later"
 }

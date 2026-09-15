@@ -12,34 +12,33 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to HackMe Exchange",
-    body: "Paper trading with live pool oracle — balances, convert, and mining in one hub.",
-    // No view — do not yank deep-links (#convert / #account) back to Spot on first paint.
+    body: "Open-source paper Spot — simulated balances, pool oracle mids. Not real money, not custody.",
   },
   {
     id: "chart",
     title: "Spot chart",
-    body: "Right-click for alerts. Denom and pair persist across refresh.",
+    body: "Tap or click the chart for quick order. Right-click to set a price alert. Pair and timeframe persist.",
     selector: "#chart-wrap",
   },
   {
     id: "convert",
     title: "Convert desk",
-    body: "Open Convert from the top nav to swap dust and alts with route preview and slippage guard.",
+    body: "Open Convert in the top nav to swap paper balances at mid with a fee preview.",
   },
   {
     id: "pool",
     title: "Mining pool",
-    body: "Open Pool for live hashrate, worker lookup by payout address, and oracle transparency.",
+    body: "Open Pool for live hashrate and oracle telemetry from hackme.tech.",
   },
   {
     id: "account",
     title: "Account & PnL",
-    body: "Open Account for equity in USDT, BTC, HMC, or ₽ — 30d snapshots and VIP fees.",
+    body: "Open Account for paper equity, VIP fee tier, and dust convert shortcuts.",
   },
   {
     id: "pwa",
     title: "Install PWA",
-    body: "Add to home screen for mobile alerts without an app store.",
+    body: "Add to home screen for a mobile desk without an app store.",
     selector: "#pwa-install-banner",
   },
 ];

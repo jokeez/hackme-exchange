@@ -106,6 +106,7 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 | Unit + security | `npm test` |
 | UI smoke | `npm run test:ui-smoke` |
 | Visual (G10) | `npm run test:e2e` (needs Vite on `:5199`) |
+| Live paper smoke | `npm run smoke:live` |
 | Paper static build | `npm run d0:static` → gitignored `dist-d0/` |
 
 Maintainer extras (`test:e2e:full`, `audit:full`, lab smokes): [`scripts/README.md`](scripts/README.md).
