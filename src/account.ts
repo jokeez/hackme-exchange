@@ -654,10 +654,16 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
         </div>
         <div id="lab-2fa-enabled-panel" hidden>
-          <label class="lab-field">Code to disable
-            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          <p class="muted small" id="lab-2fa-recovery-left"></p>
+          <pre class="mono small lab-2fa-recovery" id="lab-2fa-recovery-codes" hidden></pre>
+          <label class="lab-field">Code to disable (TOTP or recovery)
+            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or XXXX-XXXX-…" />
           </label>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
+          <label class="lab-field">Rotate recovery (current TOTP)
+            <input id="lab-2fa-rotate-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          </label>
+          <button type="button" class="btn-lab" id="btn-lab-2fa-rotate">Rotate recovery codes</button>
         </div>
         <div id="lab-2fa-idle-panel">
           <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${labLive ? "" : " disabled"}>Enable 2FA</button>

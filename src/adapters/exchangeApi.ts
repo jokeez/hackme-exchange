@@ -600,7 +600,7 @@ export async function authSessionRestore(
 }
 
 export type TwoFAStatusResponse =
-  | { ok: true; enabled: boolean; pending: boolean; note?: string }
+  | { ok: true; enabled: boolean; pending: boolean; recovery_left?: number; note?: string }
   | ExchangeApiError;
 
 export type TwoFASetupResponse =
@@ -611,6 +611,10 @@ export type TwoFASetupResponse =
       pending: boolean;
       note?: string;
     }
+  | ExchangeApiError;
+
+export type TwoFAConfirmResponse =
+  | { ok: true; enabled: boolean; recovery_codes?: string[]; note?: string }
   | ExchangeApiError;
 
 /** GET /auth/2fa/status */
@@ -660,7 +664,7 @@ export async function auth2faConfirm(
   code: string,
   timeoutMs = 8_000,
   baseOverride?: string,
-): Promise<{ ok: true; enabled: boolean; note?: string } | ExchangeApiError> {
+): Promise<TwoFAConfirmResponse> {
   const url = apiUrl("/auth/2fa/confirm", baseOverride);
   if (!url) return disabled();
   try {
@@ -677,7 +681,35 @@ export async function auth2faConfirm(
     );
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "2fa confirm failed");
-    return body as { ok: true; enabled: boolean; note?: string };
+    return body as TwoFAConfirmResponse;
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** POST /auth/2fa/recovery/rotate */
+export async function auth2faRecoveryRotate(
+  code: string,
+  timeoutMs = 8_000,
+  baseOverride?: string,
+): Promise<TwoFAConfirmResponse> {
+  const url = apiUrl("/auth/2fa/recovery/rotate", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        mode: "cors",
+        credentials: "include",
+        headers: csrfHeaders(true),
+        body: JSON.stringify({ code: code.trim() }),
+      },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "2fa recovery rotate failed");
+    return body as TwoFAConfirmResponse;
   } catch (e) {
     return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
   }

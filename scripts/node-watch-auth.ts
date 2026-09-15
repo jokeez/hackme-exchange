@@ -1,7 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Helper for d1_node_watch_e2e.sh — auth + deposit address (no lab mint).
- * Env: EXCHANGE_API_ORIGIN, EXCHANGE_ADMIN_TOKEN (unused here).
+ * Helper for d1_node_watch_e2e.sh — auth + HMC/SUP deposit addresses (no lab mint).
  */
 import * as ed from "@noble/ed25519";
 import { sha256 } from "@noble/hashes/sha256";
@@ -54,9 +53,12 @@ note(r);
 j = await r.json();
 r = await fetch(`${API}/deposit/address?asset=HMC`, { headers: { Cookie: cookie() } });
 note(r);
-const dep = await r.json();
-if (!dep.deposit_address?.startsWith("HMC-")) {
-  console.error(JSON.stringify(dep));
+const depH = await r.json();
+r = await fetch(`${API}/deposit/address?asset=SUP`, { headers: { Cookie: cookie() } });
+note(r);
+const depS = await r.json();
+if (!depH.deposit_address?.startsWith("HMC-") || !depS.deposit_address?.startsWith("HMC-")) {
+  console.error(JSON.stringify({ depH, depS }));
   process.exit(1);
 }
 console.log(
@@ -64,7 +66,9 @@ console.log(
     addr,
     csrf: j.csrf_token,
     cookie: cookie(),
-    deposit: dep.deposit_address,
-    kind: dep.kind,
+    deposit: depH.deposit_address,
+    deposit_sup: depS.deposit_address,
+    kind: depH.kind,
+    kind_sup: depS.kind,
   }),
 );
