@@ -70,7 +70,7 @@ function showChartTapCoach(anchor: HTMLElement): void {
   coach.innerHTML = `
     <div class="chart-tap-coach-card glass">
       <p class="chart-tap-coach-title">${isMobileLayout() ? "Tap the chart" : "Click the chart"}</p>
-      <p class="muted small">Quick order is on — tap a price level to buy or sell.</p>
+      <p class="muted small">Quick order is on — pick a price to place a paper buy or sell.</p>
       <button type="button" class="btn-primary btn-sm" id="chart-tap-coach-ok">Got it</button>
     </div>`;
 

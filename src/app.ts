@@ -581,7 +581,7 @@ function renderAnnounce(): string {
     ? "Live mode blocked — exchange-api not connected"
     : lab
       ? "Private lab matching — not production custody or real money"
-      : "Paper / synthetic demo — not real money or a real exchange";
+      : "Paper desk — simulated balances, not real money or a licensed exchange";
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
     · ${label}
@@ -1525,8 +1525,8 @@ function renderActivityBody(): string {
     return `${renderSpotEmptyState("orders")}
       <p class="muted small act-empty-hint">${
         fills
-          ? `Fills are under the Fills tab · Limit rests off mid by default`
-          : `Use Buy/Sell under the chart · Limit rests on the book; Market fills instantly`
+          ? `Past fills are under Fills · resting limits stay here until hit or cancel`
+          : `Use Buy/Sell under the chart · Limit rests on the book; Market fills instantly (paper)`
       }</p>`;
   }
   return `<div class="act-list">${rows
@@ -1598,9 +1598,9 @@ function renderConvert(): string {
   <section class="convert-page glass">
     <div class="convert-shell">
       <header class="convert-hero">
-        <p class="kicker">Instant swap · demo</p>
+        <p class="kicker">Instant swap · paper</p>
         <h2>Convert</h2>
-        <p class="muted convert-lead">Swap at mid · ${feeNote}. No book, no futures.</p>
+        <p class="muted convert-lead">Swap paper balances at mid · ${feeNote}. No book, no futures.</p>
         <p class="muted small convert-fee-mode mono">${hmcPay}</p>
       </header>
       <div class="convert-desk-wrap">

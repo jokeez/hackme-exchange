@@ -6,23 +6,23 @@ export function renderSpotEmptyState(ctx: EmptySpotContext): string {
   const map: Record<EmptySpotContext, { title: string; body: string; cta?: string; href?: string }> = {
     orders: {
       title: "No open orders",
-      body: "Place a limit or market order from the book — it will show here.",
+      body: "Paper desk — place a limit (rests on the book) or market (fills now). Open orders show here.",
       cta: "Focus order form",
       href: "#spot",
     },
     positions: {
-      title: "No positions",
-      body: "Spot fills update your balances instantly in this demo.",
+      title: "No positions yet",
+      body: "Spot fills update paper balances instantly. Track equity on Account.",
       cta: "View Account",
       href: "#account",
     },
     history: {
       title: "No fills yet",
-      body: "Your trade history and CSV export appear after the first fill.",
+      body: "After your first paper fill, history and CSV export appear here.",
     },
     alerts: {
       title: "No price alerts",
-      body: "Right-click the chart or use Alert at mid to arm push notifications.",
+      body: "Right-click the chart (or Alert at mid) to arm a paper price alert.",
       cta: "Alert at mid",
     },
   };
