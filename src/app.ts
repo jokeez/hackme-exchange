@@ -77,6 +77,7 @@ import { showUnifiedSettingsModal } from "./settingsModal";
 import {
   auth2faConfirm,
   auth2faDisable,
+  auth2faRecoveryRotate,
   auth2faSetup,
   auth2faStatus,
   authLogout,
@@ -3428,20 +3429,41 @@ async function labCounterpartyUi(): Promise<void> {
   refreshAfterLabTrade();
 }
 
-function applyLab2faPanels(enabled: boolean, pending: boolean): void {
+function applyLab2faPanels(enabled: boolean, pending: boolean, recoveryLeft = 0): void {
   const status = document.getElementById("lab-2fa-status");
   const setupPanel = document.getElementById("lab-2fa-setup-panel");
   const enabledPanel = document.getElementById("lab-2fa-enabled-panel");
   const idlePanel = document.getElementById("lab-2fa-idle-panel");
   const wd2fa = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
   if (status) {
-    status.textContent = enabled ? "Status: enabled" : pending ? "Status: pending — confirm below" : "Status: off";
+    status.textContent = enabled
+      ? `Status: enabled · recovery left ${recoveryLeft}`
+      : pending
+        ? "Status: pending — confirm below"
+        : "Status: off";
   }
   if (setupPanel) setupPanel.hidden = !pending;
   if (enabledPanel) enabledPanel.hidden = !enabled;
   if (idlePanel) idlePanel.hidden = enabled || pending;
-  if (wd2fa) wd2fa.placeholder = enabled ? "required" : "if enabled";
+  const leftEl = document.getElementById("lab-2fa-recovery-left");
+  if (leftEl) leftEl.textContent = enabled ? `Recovery codes remaining: ${recoveryLeft}` : "";
+  if (wd2fa) {
+    wd2fa.placeholder = enabled ? "TOTP or recovery code" : "if enabled";
+    wd2fa.inputMode = "text";
+  }
   labUser2faEnabled = enabled;
+}
+
+function showRecoveryCodesOnce(codes: string[] | undefined): void {
+  const box = document.getElementById("lab-2fa-recovery-codes");
+  if (!box) return;
+  if (!codes?.length) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  box.hidden = false;
+  box.textContent = "Store offline (shown once):\n" + codes.join("\n");
 }
 
 async function lab2faRefreshUi(): Promise<void> {
@@ -3456,7 +3478,7 @@ async function lab2faRefreshUi(): Promise<void> {
     if (msg) msg.textContent = res.message;
     return;
   }
-  applyLab2faPanels(res.enabled, res.pending);
+  applyLab2faPanels(res.enabled, res.pending, res.recovery_left ?? 0);
   if (msg) msg.textContent = res.note || "";
 }
 
@@ -3497,8 +3519,9 @@ async function lab2faConfirmUi(): Promise<void> {
     toast(res.message, "warn");
     return;
   }
-  if (msg) msg.textContent = res.note || "2FA enabled";
-  toast("2FA enabled", "ok");
+  showRecoveryCodesOnce(res.recovery_codes);
+  if (msg) msg.textContent = res.note || "2FA enabled — save recovery codes now";
+  toast(res.recovery_codes?.length ? "2FA enabled — save recovery codes" : "2FA enabled", "ok");
   await lab2faRefreshUi();
 }
 
@@ -3506,7 +3529,7 @@ async function lab2faDisableUi(): Promise<void> {
   const msg = document.getElementById("lab-2fa-msg");
   const code = ((document.getElementById("lab-2fa-disable-code") as HTMLInputElement | null)?.value || "").trim();
   if (!code) {
-    toast("Enter 6-digit code to disable", "warn");
+    toast("Enter TOTP or recovery code to disable", "warn");
     return;
   }
   const res = await auth2faDisable(code);
@@ -3515,8 +3538,28 @@ async function lab2faDisableUi(): Promise<void> {
     toast(res.message, "warn");
     return;
   }
+  showRecoveryCodesOnce(undefined);
   if (msg) msg.textContent = res.note || "2FA disabled";
   toast("2FA disabled", "ok");
+  await lab2faRefreshUi();
+}
+
+async function lab2faRotateUi(): Promise<void> {
+  const msg = document.getElementById("lab-2fa-msg");
+  const code = ((document.getElementById("lab-2fa-rotate-code") as HTMLInputElement | null)?.value || "").trim();
+  if (!code) {
+    toast("Enter current TOTP to rotate recovery codes", "warn");
+    return;
+  }
+  const res = await auth2faRecoveryRotate(code);
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    toast(res.message, "warn");
+    return;
+  }
+  showRecoveryCodesOnce(res.recovery_codes);
+  if (msg) msg.textContent = res.note || "Recovery codes rotated";
+  toast("New recovery codes — store offline", "ok");
   await lab2faRefreshUi();
 }
 
@@ -3567,6 +3610,7 @@ function wireLabApiButtons(): void {
   click("btn-lab-2fa-setup", () => void lab2faSetupUi());
   click("btn-lab-2fa-confirm", () => void lab2faConfirmUi());
   click("btn-lab-2fa-disable", () => void lab2faDisableUi());
+  click("btn-lab-2fa-rotate", () => void lab2faRotateUi());
   void lab2faRefreshUi();
   void labWithdrawQuoteUi();
   click("btn-lab-fee-wallet-copy", () => {
