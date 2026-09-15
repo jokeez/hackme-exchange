@@ -47,4 +47,4 @@ Allowed overrides: `https://exchange.hackme.tech`, `http://127.0.0.1:5199`, `htt
 
 ## Verdict
 
-**GO** for hub paper embed (D0). **HOLD** for public matching API / real USDT custody.
+**GO** for hub paper embed. **HOLD** for public matching API / real custody.
