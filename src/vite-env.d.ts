@@ -11,7 +11,6 @@ interface ImportMetaEnv {
   readonly VITE_HUB_ORIGIN?: string;
   readonly VITE_EXCHANGE_ORIGIN?: string;
   readonly VITE_POOL_ORIGIN?: string;
-  readonly VITE_HACKME_ADMIN_TOKEN?: string;
 }
 
 interface ImportMeta {

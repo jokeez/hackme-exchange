@@ -127,6 +127,10 @@ function cookieHeader(): string {
   return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
 async function api(
   path: string,
   init: RequestInit & { json?: unknown; csrf?: string; admin?: boolean; totp?: string } = {},
@@ -146,20 +150,27 @@ async function api(
   }
   const cookie = cookieHeader();
   if (cookie) headers["Cookie"] = cookie;
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers,
-    body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
-  });
-  noteCookies(res);
-  const text = await res.text();
-  let body: any = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = { raw: text };
+  let last: { status: number; body: any; res: Response } | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await fetch(`${API}${path}`, {
+      ...init,
+      headers,
+      body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
+    });
+    noteCookies(res);
+    const text = await res.text();
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = { raw: text };
+    }
+    last = { status: res.status, body, res };
+    if (res.status !== 429) return last;
+    // Lab re-runs share IP buckets — back off and retry (D1 calibration).
+    await sleep(400 * (attempt + 1) * (attempt + 1));
   }
-  return { status: res.status, body, res };
+  return last!;
 }
 
 function record(name: string, ok: boolean, detail?: string): void {

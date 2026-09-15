@@ -429,7 +429,7 @@ export async function syncLabBalancesAndBook(
   };
 }
 
-/** Light sync — open orders + recent fills + book (no balance fetch). */
+/** Light sync — open orders + recent fills + book; refreshes balances when fills land. */
 export async function syncLabOrdersFillsLight(
   state: DemoState,
   market?: MarketSnapshot | null,
@@ -450,6 +450,13 @@ export async function syncLabOrdersFillsLight(
   const fills = await listExchangeFills(30);
   let added = 0;
   if (fills.ok) added = mergeServerFills(state, fills.fills, account, market ?? null);
+
+  if (added > 0) {
+    const bal = await fetchExchangeBalances();
+    if (bal.ok) {
+      state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+    }
+  }
 
   const bookRes = await refreshLabBook(state.activePair);
   const ordersAfter = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;

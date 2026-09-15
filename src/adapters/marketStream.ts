@@ -6,7 +6,7 @@
 import type { PairId } from "../types";
 import { INTEGRATION } from "../config/integration";
 import { exchangeHealth, type HealthResponse } from "./exchangeApi";
-import { getLabSessionMeta, listExchangeFills, listExchangeOrders, pairIdToApi } from "./exchangeApi";
+import { getLabSessionMeta, listExchangeFills, listExchangeOrders, pairIdToApi, fetchExchangeBalances, mergeApiBalancesIntoWallet } from "./exchangeApi";
 import { mergeServerFills, mergeServerOpenOrders, refreshLabBook } from "./labMatching";
 import type { DemoState, MarketSnapshot } from "../types";
 
@@ -269,13 +269,18 @@ export class MarketStream {
     if (fills.ok) {
       const account = getLabSessionMeta().address;
       const added = mergeServerFills(state, fills.fills, account, this.opts.getMarket?.() ?? null);
-      if (added > 0) changed = true;
+      if (added > 0) {
+        changed = true;
+        const bal = await fetchExchangeBalances();
+        if (bal.ok) {
+          state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+        }
+      }
     }
     if (changed) this.opts.saveState?.();
     return changed;
   }
 }
-
 export function createMarketStream(handlers: MarketStreamHandlers, opts: MarketStreamOptions): MarketStream {
   return new MarketStream(handlers, opts);
 }
