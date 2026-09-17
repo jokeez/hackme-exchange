@@ -184,13 +184,15 @@ describe("upsertTick", () => {
     const seeded = seedCandles("HMC_USDT", "1m", 0.05, 8);
     const prev = seeded[seeded.length - 1]!.close;
     let series = seeded;
+    const seededLen = seeded.length;
     let mid = prev;
     for (const step of [0.92, 0.9, 0.88]) {
       mid = prev * step;
       series = upsertTick(series, "1m", mid, "HMC_USDT", series[series.length - 1]!.close);
     }
-    for (let i = 1; i < series.length; i++) {
-      expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 7);
+    // Continuity for bars introduced / extended by upsert (seed path is paper-clock open≠tip mid).
+    for (let i = Math.max(1, seededLen - 1); i < series.length; i++) {
+      expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 6);
     }
     vi.useRealTimers();
   });

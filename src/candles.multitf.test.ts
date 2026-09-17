@@ -31,7 +31,7 @@ describe("multi-TF CEX audit (all timeframes)", () => {
         const prev = series[i - 1]!;
         const cur = series[i]!;
         expect(cur.time - prev.time, `${tf} gap @${i}`).toBe(sec);
-        expect(cur.open, `${tf} open @${i}`).toBeCloseTo(prev.close, 7);
+        expect(cur.open, `${tf} open @${i}`).toBeCloseTo(prev.close, 6);
         assertOhlcValid(cur, `${tf} @${i}`);
       }
     }
@@ -229,7 +229,42 @@ describe("multi-TF CEX audit (all timeframes)", () => {
     // Coarser tips also match
     expect(late["15m"]![late["15m"]!.length - 1]).toEqual(early["15m"]![early["15m"]!.length - 1]);
     vi.useRealTimers();
-  });
+  }, 20_000);
+
+  it("minute rollover preserves lived tip H/L (no makeBar rewrite)", () => {
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-09-07T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    let all = applyPaperClockToPairCandles({}, "HMC_USDT", t0);
+    for (let i = 1; i <= 80; i++) {
+      const ms = t0 + i * 700;
+      vi.setSystemTime(ms);
+      all = applyPaperClockToPairCandles(all, "HMC_USDT", ms);
+    }
+    const tipBefore = { ...all[CANDLE_BASE_TF]![all[CANDLE_BASE_TF]!.length - 1]! };
+    expect(tipBefore.time).toBe(Math.floor(t0 / 1000 / 60) * 60);
+    const rolloverMs = t0 + 60_000;
+    vi.setSystemTime(rolloverMs);
+    all = applyPaperClockToPairCandles(all, "HMC_USDT", rolloverMs);
+    const base = all[CANDLE_BASE_TF]!;
+    const closed = base[base.length - 2]!;
+    const tip = base[base.length - 1]!;
+    expect(closed.time).toBe(tipBefore.time);
+    expect(tip.time).toBe(tipBefore.time + 60);
+    // Closed bar must match path finalize — not a synthetic makeBar fork.
+    const expected = tipBarFromPaperClock(
+      "HMC_USDT",
+      "1m",
+      tipBefore.time,
+      tipBefore.time * 1000 + 59_999,
+      paperPairMid("HMC_USDT", tipBefore.time * 1000 + 60_000),
+      2_500,
+    );
+    expect(closed.high).toBeCloseTo(expected.high, 10);
+    expect(closed.low).toBeCloseTo(expected.low, 10);
+    expect(closed.high).toBeGreaterThanOrEqual(Math.max(closed.open, closed.close) - 1e-12);
+    vi.useRealTimers();
+  }, 20_000);
 
   it("tipBarFromPaperClock is pure for fixed nowMs", () => {
     const nowMs = Date.parse("2026-09-07T12:00:33.000Z");

@@ -80,7 +80,8 @@ export function barCountForTf(tf: Timeframe, nowMs = Date.now()): number {
       want = 1200;
       break;
     case "1m":
-      want = 1000;
+      // ≥1 calendar day so forming 1D tip has full 1m children.
+      want = 1600;
       break;
     case "3m":
       want = 800;
@@ -238,11 +239,14 @@ export function expandToFinerTf(
       if (t < CHART_GENESIS_UNIX) continue;
       // Do not invent a future half-bar beyond the live 30s bucket.
       if (t > nowBucket) continue;
-      const open = c.open + step * i;
+      const open = i === 0 ? c.open : slices[i - 1]!.close;
       const close = i === ratio - 1 ? c.close : c.open + step * (i + 1);
-      // Both slices inherit parent extremes so 30s→1m high/low roundtrip holds.
-      const high = Math.max(open, close, c.high);
-      const low = Math.min(open, close, c.low);
+      // Per-half body extremes — do not stamp full parent H/L on every slice.
+      let high = Math.max(open, close);
+      let low = Math.min(open, close);
+      // Parent wick beyond body: attribute high to last half, low to first (CEX-ish).
+      if (i === ratio - 1 && c.high > Math.max(c.open, c.close)) high = Math.max(high, c.high);
+      if (i === 0 && c.low < Math.min(c.open, c.close)) low = Math.min(low, c.low);
       slices.push({
         time: t,
         open,
@@ -256,8 +260,8 @@ export function expandToFinerTf(
     if (slices.length && slices.length < ratio) {
       const last = slices[slices.length - 1]!;
       last.close = c.close;
-      last.high = Math.max(last.high, last.open, c.close, c.high);
-      last.low = Math.min(last.low, last.open, c.close, c.low);
+      last.high = Math.max(last.high, last.open, c.close);
+      last.low = Math.min(last.low, last.open, c.close);
     }
     out.push(...slices);
   }
@@ -294,10 +298,8 @@ export function seedCandles(
       out.push(tipBarFromPaperClock(pairId, tf, t, nowMs, mid));
       continue;
     }
-    const open = paperPairMid(pairId, t * 1000) * scale;
-    // Closed bars: close == next bucket open so series stay CEX-continuous across devices.
-    const close = paperPairMid(pairId, (t + sec) * 1000) * scale;
-    out.push(makeBar(pairId, t, open, close, tf));
+    // Closed bars: same path sampler as live tips (finalized at bucket end).
+    out.push(closedBarFromPaperClock(pairId, tf, t, scale));
   }
   return out;
 }
@@ -383,7 +385,7 @@ export function seedAllTimeframes(
 
 /**
  * Forming tip OHLC from shared clock only — never accumulate path-dependent H/L.
- * Samples paperPairMid on a fixed 700ms grid inside the open bucket.
+ * Samples paperPairMid on a fixed grid inside the open bucket (step scales with TF).
  * `tipMid` scales the native path so tip close prints exactly `tipMid`.
  */
 export function tipBarFromPaperClock(
@@ -392,6 +394,7 @@ export function tipBarFromPaperClock(
   bucketT: number,
   nowMs: number,
   tipMid: number,
+  sampleStepMs?: number,
 ): Candle {
   const nativeTip = paperPairMid(pairId, nowMs);
   const scale = nativeTip > 0 && Number.isFinite(nativeTip) ? tipMid / nativeTip : 1;
@@ -400,8 +403,11 @@ export function tipBarFromPaperClock(
   const endMs = Math.min(nowMs, (bucketT + sec) * 1000 - 1);
   let high = Math.max(open, tipMid);
   let low = Math.min(open, tipMid);
-  // Fixed grid — identical extremes for every client at the same nowMs.
-  for (let ms = bucketT * 1000; ms <= endMs; ms += 700) {
+  // Live tip: dense 700ms. Seed/closed: coarser so 1m×1600 seed stays fast.
+  const stepMs =
+    sampleStepMs ??
+    (sec <= 60 ? 700 : sec <= 900 ? 5_000 : sec <= 3_600 ? 30_000 : sec <= 14_400 ? 120_000 : 600_000);
+  for (let ms = bucketT * 1000; ms <= endMs; ms += stepMs) {
     const px = paperPairMid(pairId, ms) * scale;
     high = Math.max(high, px);
     low = Math.min(low, px);
@@ -422,14 +428,33 @@ export function tipBarFromPaperClock(
     maxWickFracForTf(tf),
   );
   bar.close = tipMid;
+  bar.open = open;
   bar.high = Math.max(bar.high, bar.open, tipMid);
   bar.low = Math.min(bar.low, bar.open, tipMid);
   return bar;
 }
 
+/** Closed paper bar = full-bucket tip sample (same path as live tip, finalized). */
+function closedBarFromPaperClock(
+  pairId: PairId,
+  tf: Timeframe,
+  bucketT: number,
+  scale: number,
+): Candle {
+  const sec = TF_SEC[tf];
+  // Close at next-bucket open so series stay CEX-contiguous across devices.
+  const boundaryMs = (bucketT + sec) * 1000;
+  const close = paperPairMid(pairId, boundaryMs) * scale;
+  const endMs = boundaryMs - 1;
+  const seedStep =
+    sec <= 60 ? 2_500 : sec <= 900 ? 15_000 : sec <= 3_600 ? 60_000 : sec <= 14_400 ? 240_000 : 900_000;
+  return tipBarFromPaperClock(pairId, tf, bucketT, endMs, close, seedStep);
+}
+
 /**
  * Paper desk: rebuild / tip-sync candles from the shared clock.
- * Full reseed on empty history or bucket rollover; within-bucket tip is pure clock OHLC.
+ * Within-bucket tip is pure clock OHLC; on minute rollover finalize the prior tip
+ * (do not full-reseed — that forks lived H/L into synthetic makeBar).
  */
 export function applyPaperClockToPairCandles(
   candlesByTf: Partial<Record<Timeframe, Candle[]>>,
@@ -443,12 +468,24 @@ export function applyPaperClockToPairCandles(
   const tipClose = prevBase[prevBase.length - 1]?.close ?? 0;
   const scaleOk =
     tipClose > 0 && mid > 0 && mid / tipClose <= 1.25 && mid / tipClose >= 0.8;
-  if (!prevBase.length || tipTime !== t || !scaleOk) {
+  const baseSec = TF_SEC[CANDLE_BASE_TF];
+  const oneBucketAdvance = tipTime > 0 && t === tipTime + baseSec;
+
+  if (!prevBase.length || !scaleOk || (tipTime !== t && !oneBucketAdvance)) {
     return seedAllTimeframes(pairId, mid, nowMs);
   }
-  const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
-  // Replace tip wholesale — do not Math.max with stale in-memory extremes.
-  const nextBase = [...prevBase.slice(0, -1), tip];
+
+  let nextBase: Candle[];
+  if (tipTime === t) {
+    const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
+    nextBase = [...prevBase.slice(0, -1), tip];
+  } else {
+    // Rollover: finalize prior tip at bucket end, then open new tip at live mid.
+    const closed = closedBarFromPaperClock(pairId, CANDLE_BASE_TF, tipTime, 1);
+    const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
+    nextBase = [...prevBase.slice(0, -1), closed, tip].slice(-MAX_CANDLES);
+  }
+
   const all = deriveAllTimeframes(nextBase, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
@@ -494,10 +531,7 @@ export function prependOlderCandles(
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    const open = paperPairMid(pairId, t * 1000) * scale;
-    const close =
-      i === 1 ? first.open : paperPairMid(pairId, (t + sec) * 1000) * scale;
-    older.push(makeBar(pairId, t, open, close, tf));
+    older.push(closedBarFromPaperClock(pairId, tf, t, scale));
   }
   if (!older.length) return existing;
   return [...older, ...existing];
@@ -657,6 +691,13 @@ export function reaggregateLiveBarsFromBase(
       const agg = aggregateCandles(children, CANDLE_BASE_TF, tf);
       const live = agg.find((b) => b.time === tipT);
       if (!live) continue;
+      // Incomplete child window: keep children's open (first available), never invent mid-day doji spikes.
+      const expectedChildren = Math.max(1, Math.floor(dstSec / TF_SEC[CANDLE_BASE_TF]));
+      if (children.length < expectedChildren * 0.9) {
+        live.open = children[0]!.open;
+        live.high = Math.max(live.high, live.open, live.close);
+        live.low = Math.min(live.low, live.open, live.close);
+      }
       const lastT = series[series.length - 1]!.time;
       if (lastT === tipT) {
         series[series.length - 1] = live;
@@ -664,7 +705,6 @@ export function reaggregateLiveBarsFromBase(
         series.push(live);
         all[tf] = series.slice(-MAX_CANDLES);
       } else {
-        // Orphan / future tip with no children — replace with current base bucket.
         const keep = series.filter((c) => c.time < tipT);
         all[tf] = [...keep, live].slice(-MAX_CANDLES);
       }
