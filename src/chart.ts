@@ -2423,6 +2423,8 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   const tfSec = TF_SEC[tf] ?? 900;
   // Gap / multi-bar advance — caller must full-replace series (bridge bars would be dropped).
   if (lastRaw && c.time > lastRaw.time + tfSec) return false;
+  // New bucket: full replace so the just-closed bar paints finalized OHLC from state.
+  if (lastRaw && c.time > lastRaw.time) return false;
 
   if (lastRaw && lastRaw.time === c.time) rawCandlesCache[rawCandlesCache.length - 1] = c;
   else if (!lastRaw || c.time > lastRaw.time) {

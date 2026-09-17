@@ -4185,7 +4185,10 @@ function mountChartPanel(): void {
       const nextBase = prependOlderCandles(base, pair, CANDLE_BASE_TF, baseBars);
       const addedBase = nextBase.length - base.length;
       if (addedBase <= 0) return 0;
-      const all = deriveAllTimeframes(nextBase, pair, state.candles[pair]);
+      const all = deriveAllTimeframes(nextBase, pair, state.candles[pair], {
+        retainPrev: false,
+        nowMs: Date.now(),
+      });
       state.candles[pair] = all;
       saveState(state);
       const next = all[tf] ?? [];

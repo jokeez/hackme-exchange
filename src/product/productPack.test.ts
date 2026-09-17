@@ -1,7 +1,7 @@
 /**
  * @vitest-environment happy-dom
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { findDustBalances, DUST_USD_THRESHOLD } from "./dustConvert";
 import { exportFillsCsv, exportOrdersCsv } from "./exportOrders";
 import {
@@ -44,6 +44,8 @@ describe("portfolioChart", () => {
   });
 
   it("aggregates daily equity points", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-15T12:00:00.000Z"));
     const now = Date.now();
     const day = 86_400_000;
     const snaps = [
@@ -56,6 +58,7 @@ describe("portfolioChart", () => {
     expect(daily).toHaveLength(3);
     expect(daily[0]!.equityUsdt).toBe(10_200);
     expect(daily.at(-1)!.equityUsdt).toBe(11_500);
+    vi.useRealTimers();
   });
 
   it("renders interactive chart markup", () => {
