@@ -2,7 +2,7 @@
 
 > **Canonical for Phase 2 backend design.** Demo numbers live in code (`src/fees.ts`, `src/market.ts`, `src/book.ts`); this doc states what is **demo**, what is **Phase 2 target**, and how exchange fees relate to **HackMe chain / pool / fuzz** economics (must not contradict).
 
-**Status:** Phase 1 demo · paper settlement · read-only oracle  
+**Status:** D0 Paper · paper settlement · shared reference mids (±drift)  
 **Cross-check:** HackMe `internal/chain/economics.go`, `docs/FUZZ_ESCROW_20_80.md`, `docs/ORDER_ECONOMICS.md`, `docs/EXCHANGE_LISTING_MEMO.md`
 
 ---
@@ -88,7 +88,7 @@ Demo paper mode (no lab API) **burns nothing** — fees vanish from the paper wa
 hmcUsdt = liveReferenceMid(oracleAnchor)   // ~0.05 ±0.35% paper drift
 supUsdt = liveReferenceMid(0.01)           // ~0.01 ±0.35%
 hmcSup  = hmcUsdt / supUsdt
-hmcBtc  = hmcUsdt / btcUsd                 // btcUsd from Binance BTCUSDT (fallback 67500)
+hmcBtc  = hmcUsdt / btcUsd                 // btcUsd pinned DEFAULT_BTC_USD = 67500 (shared paper)
 supBtc  = supUsdt / btcUsd
 spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)   // cosmetic book only
 ```

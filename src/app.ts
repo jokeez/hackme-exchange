@@ -1717,10 +1717,10 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     if (go) go.disabled = true;
     return;
   }
-  if (go) go.disabled = false;
   routeEl.textContent = CONVERT_ROUTES.find((r) => r.id === route)?.label ?? route;
 
   const amt = Number(convertAmtStr);
+  if (go) go.disabled = !(amt > 0);
   if (!market || !(amt > 0)) {
     gotEl.textContent = "—";
     rateEl.textContent = "—";
@@ -6700,14 +6700,23 @@ export async function boot(): Promise<void> {
 
 function maybeShowTour(): void {
   if (isHubEmbed()) return;
-  if (sessionStorage.getItem("hackme-ex-tour-v1") === "1") return;
+  if (localStorage.getItem("hackme-ex-tour-v1") === "1" || sessionStorage.getItem("hackme-ex-tour-v1") === "1") {
+    // Migrate session → local so the welcome tour does not reappear every tab.
+    try {
+      localStorage.setItem("hackme-ex-tour-v1", "1");
+    } catch {
+      /* ignore */
+    }
+    maybeShowTourV2();
+    return;
+  }
   const labOn = isLabApiEnabled();
   const steps = [
     {
       t: "Welcome · 60s tour",
       d: labOn
         ? "HackMe Spot can run as paper or private DEMO/LAB matching. Connect a fixture on Account for live L2 — still not production custody."
-        : "HackMe Spot is a paper demo. Prices follow the live pool oracle — not a live CEX matching engine.",
+        : "HackMe Spot is a paper demo. Spot mids are shared paper references (±drift) — not a live CEX matching engine.",
     },
     { t: "Chart · quick order", d: isMobileLayout()
         ? "Quick order is on — tap the chart to buy or sell at a price. Pinch to zoom; double-tap resets the view."
@@ -6722,15 +6731,19 @@ function maybeShowTour(): void {
     {
       t: "Convert & Pool",
       d: labOn
-        ? "Convert uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate feeding the oracle."
-        : "Convert both ways (HMC/SUP/USDT/BTC). Pool page shows live hashrate feeding the oracle.",
+        ? "Convert uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
+        : "Convert both ways (HMC/SUP/USDT/BTC). Pool page shows live hashrate as telemetry — it does not feed spot mids.",
     },
   ];
   let i = 0;
   const bd = document.createElement("div");
   bd.className = "tour-backdrop";
   const dismiss = (doneToast = false) => {
-    sessionStorage.setItem("hackme-ex-tour-v1", "1");
+    try {
+      localStorage.setItem("hackme-ex-tour-v1", "1");
+    } catch {
+      sessionStorage.setItem("hackme-ex-tour-v1", "1");
+    }
     window.removeEventListener("keydown", onKey);
     bd.remove();
     if (doneToast) toast("You're set — try a market buy", "ok");
@@ -6773,10 +6786,34 @@ function maybeShowTour(): void {
 function maybeShowTourV2(): void {
   if (isHubEmbed()) return;
   if (tourV2Done()) return;
-  if (sessionStorage.getItem("hackme-ex-tour-v1") !== "1") return;
+  if (localStorage.getItem("hackme-ex-tour-v1") !== "1" && sessionStorage.getItem("hackme-ex-tour-v1") !== "1") return;
 
   let i = 0;
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      dismiss();
+    }
+  };
+  const dismiss = () => {
+    markTourV2Done();
+    document.getElementById("tour-v2-backdrop")?.remove();
+    window.removeEventListener("keydown", onKey);
+  };
   const paint = () => {
+    // Skip PWA step when the install banner is not on screen.
+    while (i < TOUR_V2_STEPS.length) {
+      const step = TOUR_V2_STEPS[i]!;
+      if (step.selector === "#pwa-install-banner" && !document.querySelector(step.selector)) {
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    if (i >= TOUR_V2_STEPS.length) {
+      dismiss();
+      return;
+    }
     const step = TOUR_V2_STEPS[i]!;
     document.getElementById("tour-v2-backdrop")?.remove();
     // Never mutate mainView — deep-links (#convert / #account) must stay put.
@@ -6787,17 +6824,6 @@ function maybeShowTourV2(): void {
     wrap.innerHTML = renderTourV2Overlay(step, i, TOUR_V2_STEPS.length);
     const bd = wrap.firstElementChild as HTMLElement;
     document.body.appendChild(bd);
-    const dismiss = () => {
-      markTourV2Done();
-      bd.remove();
-      window.removeEventListener("keydown", onKey);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        dismiss();
-      }
-    };
     bd.querySelector("#tour-v2-skip")?.addEventListener("click", dismiss);
     bd.querySelector("#tour-v2-next")?.addEventListener("click", () => {
       if (i + 1 >= TOUR_V2_STEPS.length) {
@@ -6811,8 +6837,8 @@ function maybeShowTourV2(): void {
     bd.addEventListener("click", (e) => {
       if (e.target === bd) dismiss();
     });
-    window.addEventListener("keydown", onKey);
   };
+  window.addEventListener("keydown", onKey);
   window.setTimeout(paint, 800);
 }
 

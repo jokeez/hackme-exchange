@@ -440,15 +440,19 @@ function closedBarFromPaperClock(
   tf: Timeframe,
   bucketT: number,
   scale: number,
+  /** Override sample grid; default is coarse (fast seed). Live rollover passes 700. */
+  sampleStepMs?: number,
 ): Candle {
   const sec = TF_SEC[tf];
   // Close at next-bucket open so series stay CEX-contiguous across devices.
   const boundaryMs = (bucketT + sec) * 1000;
   const close = paperPairMid(pairId, boundaryMs) * scale;
   const endMs = boundaryMs - 1;
-  const seedStep =
-    sec <= 60 ? 2_500 : sec <= 900 ? 15_000 : sec <= 3_600 ? 60_000 : sec <= 14_400 ? 240_000 : 900_000;
-  return tipBarFromPaperClock(pairId, tf, bucketT, endMs, close, seedStep);
+  // Seed/history: coarser so 1m×1600 stays fast. Live rollover should pass 700.
+  const step =
+    sampleStepMs ??
+    (sec <= 60 ? 2_500 : sec <= 900 ? 15_000 : sec <= 3_600 ? 60_000 : sec <= 14_400 ? 240_000 : 900_000);
+  return tipBarFromPaperClock(pairId, tf, bucketT, endMs, close, step);
 }
 
 /**
@@ -469,9 +473,11 @@ export function applyPaperClockToPairCandles(
   const scaleOk =
     tipClose > 0 && mid > 0 && mid / tipClose <= 1.25 && mid / tipClose >= 0.8;
   const baseSec = TF_SEC[CANDLE_BASE_TF];
-  const oneBucketAdvance = tipTime > 0 && t === tipTime + baseSec;
+  const bucketsAhead = tipTime > 0 && t > tipTime ? Math.round((t - tipTime) / baseSec) : 0;
+  // Gap > ~2h of 1m bars → full reseed (sleep / wiped tab). Smaller gaps walk forward.
+  const maxWalkBuckets = 120;
 
-  if (!prevBase.length || !scaleOk || (tipTime !== t && !oneBucketAdvance)) {
+  if (!prevBase.length || !scaleOk || (tipTime !== t && (bucketsAhead < 1 || bucketsAhead > maxWalkBuckets))) {
     return seedAllTimeframes(pairId, mid, nowMs);
   }
 
@@ -480,10 +486,26 @@ export function applyPaperClockToPairCandles(
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
     nextBase = [...prevBase.slice(0, -1), tip];
   } else {
-    // Rollover: finalize prior tip at bucket end, then open new tip at live mid.
-    const closed = closedBarFromPaperClock(pairId, CANDLE_BASE_TF, tipTime, 1);
+    // Multi-bucket walk: keep lived tip H/L (path samples), only finalize close at boundary.
+    nextBase = prevBase.slice(0, -1);
+    for (let bt = tipTime; bt < t; bt += baseSec) {
+      const prior = prevBase.find((c) => c.time === bt) ?? nextBase[nextBase.length - 1];
+      const boundaryMs = (bt + baseSec) * 1000;
+      const close = paperPairMid(pairId, boundaryMs);
+      if (prior && prior.time === bt) {
+        nextBase.push({
+          ...prior,
+          close,
+          high: Math.max(prior.high, prior.open, close),
+          low: Math.min(prior.low, prior.open, close),
+          volume: candleVolume(pairId, CANDLE_BASE_TF, bt),
+        });
+      } else {
+        nextBase.push(closedBarFromPaperClock(pairId, CANDLE_BASE_TF, bt, 1, 700));
+      }
+    }
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
-    nextBase = [...prevBase.slice(0, -1), closed, tip].slice(-MAX_CANDLES);
+    nextBase = [...nextBase, tip].slice(-MAX_CANDLES);
   }
 
   const all = deriveAllTimeframes(nextBase, pairId, undefined, { nowMs, retainPrev: false });
