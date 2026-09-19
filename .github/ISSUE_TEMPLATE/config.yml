@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://hackme.tech/contacts.html
+    about: Private report only — see SECURITY.md
+  - name: Live paper desk
+    url: https://exchange.hackme.tech
+    about: Official HackMe Spot (paper)
+  - name: Network core (hackme)
+    url: https://github.com/jokeez/hackme
+    about: Pool, node, Dig/Hunt

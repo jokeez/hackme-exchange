@@ -1,0 +1,11 @@
+name: Question
+description: How-to for paper Spot — not a bug
+title: "[question] "
+labels: ["question"]
+body:
+  - type: textarea
+    id: q
+    attributes:
+      label: Question
+    validations:
+      required: true
