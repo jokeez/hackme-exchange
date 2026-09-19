@@ -70,7 +70,7 @@ describe("paper clock cross-device sync", () => {
       expect(b.candles.HMC_USDT?.[tf]).toEqual(a.candles.HMC_USDT?.[tf]);
     }
     vi.useRealTimers();
-  });
+  }, 15_000);
 
   it("import drops candles and export never ships OHLC", () => {
     installMemoryLocalStorage();

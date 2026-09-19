@@ -251,17 +251,12 @@ describe("multi-TF CEX audit (all timeframes)", () => {
     const tip = base[base.length - 1]!;
     expect(closed.time).toBe(tipBefore.time);
     expect(tip.time).toBe(tipBefore.time + 60);
-    // Closed bar must match path finalize — not a synthetic makeBar fork.
-    const expected = tipBarFromPaperClock(
-      "HMC_USDT",
-      "1m",
-      tipBefore.time,
-      tipBefore.time * 1000 + 59_999,
-      paperPairMid("HMC_USDT", tipBefore.time * 1000 + 60_000),
-      2_500,
-    );
-    expect(closed.high).toBeCloseTo(expected.high, 10);
-    expect(closed.low).toBeCloseTo(expected.low, 10);
+    // Lived tip H/L must survive rollover — only close is finalized at the boundary.
+    const boundaryClose = paperPairMid("HMC_USDT", tipBefore.time * 1000 + 60_000);
+    expect(closed.open).toBe(tipBefore.open);
+    expect(closed.high).toBe(Math.max(tipBefore.high, tipBefore.open, boundaryClose));
+    expect(closed.low).toBe(Math.min(tipBefore.low, tipBefore.open, boundaryClose));
+    expect(closed.close).toBe(boundaryClose);
     expect(closed.high).toBeGreaterThanOrEqual(Math.max(closed.open, closed.close) - 1e-12);
     vi.useRealTimers();
   }, 20_000);

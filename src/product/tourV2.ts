@@ -5,14 +5,13 @@ export type TourStep = {
   title: string;
   body: string;
   selector?: string;
-  view?: "spot" | "convert" | "pool" | "account";
 };
 
 export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to HackMe Exchange",
-    body: "Open-source paper Spot — simulated balances, pool oracle mids. Not real money, not custody.",
+    body: "Open-source paper Spot — simulated balances, shared reference mids (±drift). Pool stats are telemetry only. Not real money, not custody.",
   },
   {
     id: "chart",
@@ -28,7 +27,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "pool",
     title: "Mining pool",
-    body: "Open Pool for live hashrate and oracle telemetry from hackme.tech.",
+    body: "Open Pool for live hashrate telemetry from hackme.tech (does not drive spot mids).",
   },
   {
     id: "account",

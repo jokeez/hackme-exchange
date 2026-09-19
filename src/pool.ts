@@ -281,20 +281,20 @@ export function renderPoolPage(
           <h4>How mids are built</h4>
           <p class="formula mono">hmc = ref±drift · sup = ref±drift · ×BTC = usdt/btcUsd</p>
           <ul class="pool-list muted small pool-formula-notes">
-            <li><span>HMC ref</span><strong>0.05 USDT (Settings)</strong></li>
+            <li><span>HMC ref</span><strong>0.05 USDT (locked)</strong></li>
             <li><span>SUP ref</span><strong>0.01 USDT</strong></li>
-            <li><span>BTC crosses</span><strong>synced from live BTC/USD</strong></li>
+            <li><span>BTC crosses</span><strong>pinned $67,500 (shared paper)</strong></li>
             <li><span>Spread now</span><strong data-pool-mid="spread">${formatNum(spreadBps, 1)} bps</strong></li>
           </ul>
         </article>
         <article class="pool-card glass-inset">
           <h4>Exchange impact</h4>
           <ul class="pool-list muted small">
-            <li><span>Spot mid</span><strong>follows pool oracle</strong></li>
+            <li><span>Spot mid</span><strong>ref ± drift (not pool GH)</strong></li>
             <li><span>Convert</span><strong>same mids + VIP taker</strong></li>
             <li><span>Account equity</span><strong>marks HMC/SUP/BTC</strong></li>
           </ul>
-          <p class="muted small">Tune anchor: System → Oracle anchor</p>
+          <p class="muted small">Reference mid locked at 0.05 for cross-device sync.</p>
         </article>
       </div>
       ${opts?.oracleMeta ? renderOracleTransparencyPanel(opts.oracleMeta, market, live) : ""}
