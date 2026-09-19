@@ -1,5 +1,8 @@
 # Contributing — HackMe Exchange (SPA)
 
+By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Security reports: [SECURITY.md](SECURITY.md).
+
 ## Setup
 
 ```bash
