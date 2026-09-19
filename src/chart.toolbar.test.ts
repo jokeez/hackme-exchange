@@ -156,10 +156,12 @@ describe("chart style / indicator modals", () => {
     showChartStyleModal(s, (patch) => {
       saved = patch;
     });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // happy-dom / Vitest 4+: window.confirm may be missing — stubGlobal, not spyOn.
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmSpy);
     (document.querySelector("#modal-reset") as HTMLButtonElement).click();
     expect(confirmSpy).toHaveBeenCalled();
-    confirmSpy.mockRestore();
+    vi.unstubAllGlobals();
     expect(saved?.chartSettings?.candleScheme).toBe("classic");
     expect(saved?.chartSettings?.logScale).toBe(false);
     expect(saved?.chartSettings?.bgGradient).toBe(true);
@@ -179,9 +181,11 @@ describe("chart style / indicator modals", () => {
     showChartStyleModal(s, (patch) => {
       saved = patch;
     });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const confirmSpy = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmSpy);
     (document.querySelector("#modal-reset") as HTMLButtonElement).click();
-    confirmSpy.mockRestore();
+    vi.unstubAllGlobals();
+    expect(confirmSpy).toHaveBeenCalled();
     expect(saved).toBeNull();
     expect(document.querySelector(".modal-backdrop")).toBeTruthy();
   });
