@@ -108,15 +108,26 @@ function bindPane(pane: CrosshairPane): void {
       /* ignore */
     }
   }
-  const handler = (param: { time?: unknown; point?: { x: number; y: number } }) => {
-    if (syncing || !enabled) return;
-    const t = param.time as number | undefined;
-    if (!t) {
+  let syncRaf = 0;
+  let pending: { time: number | null } | null = null;
+  const flush = () => {
+    syncRaf = 0;
+    const p = pending;
+    pending = null;
+    if (!p) return;
+    if (p.time == null) {
       propagate(pane.id, null, null);
       return;
     }
-    const p = priceAtTime(pane, t);
-    propagate(pane.id, t, p);
+    if (p.time === lastSyncedTime) return;
+    propagate(pane.id, p.time, priceAtTime(pane, p.time));
+  };
+  const handler = (param: { time?: unknown; point?: { x: number; y: number } }) => {
+    if (syncing || !enabled) return;
+    const t = (param.time as number | undefined) ?? null;
+    if (t != null && t === lastSyncedTime) return;
+    pending = { time: t };
+    if (!syncRaf) syncRaf = requestAnimationFrame(flush);
   };
   paneMoveHandlers.set(pane.id, handler);
   pane.chart.subscribeCrosshairMove(handler);

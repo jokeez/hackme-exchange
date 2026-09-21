@@ -1735,6 +1735,8 @@ function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
   let ptrMy = 0;
   host.hostEl.onmousemove = (e) => {
     if (focusedPaneId !== host.id) return;
+    // Do not touch layout while scrubbing the crosshair with an empty draw layer.
+    if (activeTool === "cursor" && !selectedDrawingId && !dragDraw && !drawingsOf().length) return;
     const rect = host.hostEl.getBoundingClientRect();
     ptrMx = e.clientX - rect.left;
     ptrMy = e.clientY - rect.top;
@@ -2128,8 +2130,21 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   if (opts.onCrosshair) {
     let lastXhTime: number | null = null;
     let lastXhKey = "";
-    chart.subscribeCrosshairMove((param) => {
-      if (!param.time) {
+    let xhRaf = 0;
+    let xhPending: {
+      time: number | undefined;
+      open?: number;
+      high?: number;
+      low?: number;
+      close?: number;
+      value?: number;
+    } | null = null;
+
+    const flushCrosshair = () => {
+      xhRaf = 0;
+      const pending = xhPending;
+      xhPending = null;
+      if (!pending?.time) {
         if (lastXhTime !== null || lastXhKey) {
           lastXhTime = null;
           lastXhKey = "";
@@ -2137,14 +2152,10 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         }
         return;
       }
-      const t = param.time as number;
-      // Prefer series payload (already on the event); only index-lookup for volume / HA.
-      const hit =
-        param.seriesData.get(candleSeries!) ??
-        (barSeries ? param.seriesData.get(barSeries) : undefined) ??
-        (lineSeries ? param.seriesData.get(lineSeries) : undefined) ??
-        (areaSeries ? param.seriesData.get(areaSeries) : undefined);
-      const seriesHit = hit as { open?: number; high?: number; low?: number; close?: number; value?: number } | undefined;
+      const t = pending.time;
+      // Same candle — LWC already moved the hair; skip legend/index work.
+      if (t === lastXhTime && lastXhKey) return;
+
       const fromRaw = candleAtTime(rawCandlesCache, t);
       const bar =
         currentMode === "heikin"
@@ -2152,7 +2163,10 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
           : (fromRaw ?? candleAtTime(currentCandles, t));
       if (bar) {
         const key = `${t}|${bar.open}|${bar.high}|${bar.low}|${bar.close}|${bar.volume ?? 0}`;
-        if (key === lastXhKey) return;
+        if (key === lastXhKey) {
+          lastXhTime = t;
+          return;
+        }
         lastXhTime = t;
         lastXhKey = key;
         opts.onCrosshair?.({
@@ -2165,7 +2179,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         });
         return;
       }
-      const close = seriesHit?.close ?? seriesHit?.value;
+      const close = pending.close ?? pending.value;
       if (close == null || !Number.isFinite(close)) {
         if (lastXhKey) {
           lastXhTime = null;
@@ -2174,26 +2188,59 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         }
         return;
       }
-      const open = seriesHit?.open ?? close;
-      const high = seriesHit?.high ?? close;
-      const low = seriesHit?.low ?? close;
+      const open = pending.open ?? close;
+      const high = pending.high ?? close;
+      const low = pending.low ?? close;
       const key = `${t}|${open}|${high}|${low}|${close}|0`;
-      if (key === lastXhKey) return;
+      if (key === lastXhKey) {
+        lastXhTime = t;
+        return;
+      }
       lastXhTime = t;
       lastXhKey = key;
-      opts.onCrosshair?.({
-        time: t,
-        open,
-        high,
-        low,
-        close,
-        volume: 0,
-      });
+      opts.onCrosshair?.({ time: t, open, high, low, close, volume: 0 });
+    };
+
+    // Keep this callback near-empty so LWC can paint the hair at pointer rate.
+    chart.subscribeCrosshairMove((param) => {
+      const t = param.time as number | undefined;
+      if (t && t === lastXhTime && lastXhKey) return;
+      if (!t) {
+        xhPending = { time: undefined };
+      } else {
+        const seriesApi =
+          currentMode === "bars"
+            ? barSeries
+            : currentMode === "line"
+              ? lineSeries
+              : currentMode === "area"
+                ? areaSeries
+                : candleSeries;
+        const hit = (seriesApi ? param.seriesData.get(seriesApi) : undefined) as
+          | { open?: number; high?: number; low?: number; close?: number; value?: number }
+          | undefined;
+        xhPending = {
+          time: t,
+          open: hit?.open,
+          high: hit?.high,
+          low: hit?.low,
+          close: hit?.close,
+          value: hit?.value,
+        };
+      }
+      if (!xhRaf) xhRaf = requestAnimationFrame(flushCrosshair);
     });
   }
 
+  // Drawing overlays: coalesce paints so pan/zoom does not stall the crosshair.
+  let rangeRepaintRaf = 0;
   chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-    repaintAllPanes();
+    if (!rangeRepaintRaf) {
+      rangeRepaintRaf = requestAnimationFrame(() => {
+        rangeRepaintRaf = 0;
+        repaintAllPanes();
+      });
+    }
     if (!range) return;
     maybeLoadHistory(range);
   });

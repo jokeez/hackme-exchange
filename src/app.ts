@@ -949,18 +949,11 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
   }
 }
 
-let pendingOhlcLegend: Candle | null = null;
-let ohlcLegendRaf = 0;
 let lastOhlcLegendText = "";
 
 function updateOhlcDisplays(c: Candle | null): void {
-  // Coalesce crosshair spam to one DOM write per frame.
-  pendingOhlcLegend = c;
-  if (ohlcLegendRaf) return;
-  ohlcLegendRaf = requestAnimationFrame(() => {
-    ohlcLegendRaf = 0;
-    paintOhlcLegend(pendingOhlcLegend);
-  });
+  // Caller (chart crosshair) is already rAF-coalesced — paint sync to avoid +1 frame lag.
+  paintOhlcLegend(c);
 }
 
 function paintOhlcLegend(c: Candle | null): void {
