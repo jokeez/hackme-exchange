@@ -2088,6 +2088,14 @@ html.mobile-layout .market-search {
   overflow: hidden;
 }
 .free-crosshair[hidden] { display: none !important; }
+/* Capture plot hover so LWC never runs hitTestPane / cursorInvalidate on mousemove. */
+.free-crosshair.capturing {
+  pointer-events: auto;
+  cursor: crosshair;
+  /* right/bottom insets leave price + time scales to LWC */
+  right: 56px;
+  bottom: 26px;
+}
 .free-xh-v {
   position: absolute;
   top: 0;
@@ -2096,6 +2104,7 @@ html.mobile-layout .market-search {
   width: 0;
   border-left: 1px dashed rgba(149, 165, 186, 0.55);
   will-change: transform;
+  pointer-events: none;
 }
 .free-xh-h {
   position: absolute;
@@ -2105,6 +2114,7 @@ html.mobile-layout .market-search {
   height: 0;
   border-top: 1px dashed rgba(149, 165, 186, 0.55);
   will-change: transform;
+  pointer-events: none;
 }
 .chart-body {
   display: flex;

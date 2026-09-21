@@ -6329,6 +6329,25 @@ function microTickPrices(): void {
   if (!market) return;
   // Shared paper mids always — Convert/Account must not lag Spot ticker.
   market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
+
+  // Scrubbing: do NOT run applyPaperClock×all pairs / series.update / DOM.
+  // That 700ms spike was the remaining freeze under the free crosshair.
+  if (state.mainView === "spot" && isChartPointerBusy()) {
+    liveTickN += 1;
+    const mid = midForPair(market, state.activePair);
+    if (tickers[state.activePair]) {
+      tickers[state.activePair] = {
+        ...tickers[state.activePair]!,
+        mid,
+        bid: mid * 0.9995,
+        ask: mid * 1.0005,
+      };
+    }
+    evaluatePriceAlerts(mid);
+    updateLivePriceHud(mid, true, candleCountdown(state.activeTf));
+    return;
+  }
+
   // Alerts + order settle off Spot too (mids already updated).
   if (state.mainView !== "spot") {
     for (const p of PAIRS) {

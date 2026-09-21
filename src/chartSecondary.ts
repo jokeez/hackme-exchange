@@ -449,6 +449,8 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   bindResize(slot);
 
   const freeXh = mountFreeCrosshair(el);
+  freeXh.setCapturing(true);
+  freeXh.setPlotInsets(58, 28);
   const onXhMove = (e: PointerEvent) => freeXh.move(e.clientX, e.clientY);
   const onXhEnter = () => {
     freeXh.refreshRect();
@@ -460,12 +462,12 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   };
   el.addEventListener("pointerenter", onXhEnter);
   el.addEventListener("pointerleave", onXhLeave);
-  el.addEventListener("pointermove", onXhMove, { passive: true });
+  freeXh.el.addEventListener("pointermove", onXhMove, { passive: true });
   slot.freeXh = freeXh;
   slot.freeXhCleanup = () => {
     el.removeEventListener("pointerenter", onXhEnter);
     el.removeEventListener("pointerleave", onXhLeave);
-    el.removeEventListener("pointermove", onXhMove);
+    freeXh.el.removeEventListener("pointermove", onXhMove);
     freeXh.destroy();
     slot.freeXh = null;
     slot.freeXhCleanup = null;

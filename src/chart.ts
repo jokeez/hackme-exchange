@@ -230,31 +230,157 @@ export function flushChartLivePaint(): void {
   }
 }
 
+function syncFreeCrosshairCapture(): void {
+  if (!freeXh) return;
+  // Only capture when cursor tool + no draw interaction — otherwise draw-layer needs the pointer.
+  const capture =
+    activeTool === "cursor" &&
+    !selectedDrawingId &&
+    !dragDraw &&
+    !pendingDraw &&
+    !measurePreview;
+  freeXh.setCapturing(capture);
+  if (!chart) return;
+  try {
+    const right = chart.priceScale("right").width() || 56;
+    freeXh.setPlotInsets(right + 2, 28);
+  } catch {
+    freeXh.setPlotInsets(58, 28);
+  }
+}
+
 function bindFreeCrosshairTracking(host: HTMLElement): void {
   freeXhCleanup?.();
   freeXh?.destroy();
   freeXh = mountFreeCrosshair(host);
-  const onMove = (e: PointerEvent) => {
-    if (!freeXh) return;
-    freeXh.move(e.clientX, e.clientY);
+  syncFreeCrosshairCapture();
+
+  let panLastX = 0;
+  let panLastY = 0;
+  let panning = false;
+  let ohlcRaf = 0;
+  let ohlcX = 0;
+  let ohlcY = 0;
+
+  const flushOhlc = () => {
+    ohlcRaf = 0;
+    const cb = lastOpts?.onCrosshair;
+    if (!cb || !chart || !candleSeries) return;
+    try {
+      const t = chart.timeScale().coordinateToTime(ohlcX) as number | null;
+      if (t == null || !Number.isFinite(t)) {
+        cb(null);
+        return;
+      }
+      const fromRaw = candleAtTime(rawCandlesCache, t);
+      const bar =
+        currentMode === "heikin"
+          ? (candleAtTime(currentCandles, t) ?? fromRaw)
+          : (fromRaw ?? candleAtTime(currentCandles, t));
+      if (!bar) {
+        cb(null);
+        return;
+      }
+      cb({
+        time: t,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume ?? 0,
+      });
+    } catch {
+      /* ignore */
+    }
   };
+
+  const onMoveHair = (e: PointerEvent) => {
+    if (!freeXh) return;
+    const local = freeXh.move(e.clientX, e.clientY);
+    ohlcX = local.x;
+    ohlcY = local.y;
+    if (!ohlcRaf) ohlcRaf = requestAnimationFrame(flushOhlc);
+  };
+
+  const onMovePan = (e: PointerEvent) => {
+    if (!panning || !chart) return;
+    const dx = e.clientX - panLastX;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    if (Math.abs(dx) < 0.5) return;
+    try {
+      const ts = chart.timeScale();
+      const range = ts.getVisibleLogicalRange();
+      const spacing = ts.options().barSpacing || 8;
+      if (range) ts.setVisibleLogicalRange(shiftLogicalRangeByPx(range, dx, spacing));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const onEnter = () => {
     freeXh?.refreshRect();
+    syncFreeCrosshairCapture();
     setChartPointerBusy(true);
   };
   const onLeave = () => {
     freeXh?.hide();
+    panning = false;
     setChartPointerBusy(false);
+    lastOpts?.onCrosshair?.(null);
   };
-  const onResize = () => freeXh?.refreshRect();
+  const onDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    if (!freeXh?.el.classList.contains("capturing")) return;
+    panning = true;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    try {
+      freeXh.el.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+  const onUp = (e: PointerEvent) => {
+    panning = false;
+    try {
+      freeXh?.el.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+  const onWheel = (e: WheelEvent) => {
+    if (!freeXh?.el.classList.contains("capturing") || !chart || !hostEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dy = normalizeWheelDeltaY(e, hostEl.clientHeight || 400);
+    applyPlotWheelZoom(chart, hostEl, e.clientX, dy);
+  };
+  const onResize = () => {
+    freeXh?.refreshRect();
+    syncFreeCrosshairCapture();
+  };
+
+  freeXh.el.addEventListener("pointermove", onMovePan, { passive: true });
+  freeXh.el.addEventListener("pointerdown", onDown);
+  freeXh.el.addEventListener("pointerup", onUp);
+  freeXh.el.addEventListener("pointercancel", onUp);
+  freeXh.el.addEventListener("wheel", onWheel, { passive: false });
   host.addEventListener("pointerenter", onEnter);
   host.addEventListener("pointerleave", onLeave);
-  host.addEventListener("pointermove", onMove, { passive: true });
+  // Single hair listener on host — receives bubbled moves from overlay or LWC.
+  host.addEventListener("pointermove", onMoveHair, { passive: true });
   window.addEventListener("resize", onResize);
   freeXhCleanup = () => {
+    if (ohlcRaf) cancelAnimationFrame(ohlcRaf);
+    freeXh?.el.removeEventListener("pointermove", onMovePan);
+    freeXh?.el.removeEventListener("pointerdown", onDown);
+    freeXh?.el.removeEventListener("pointerup", onUp);
+    freeXh?.el.removeEventListener("pointercancel", onUp);
+    freeXh?.el.removeEventListener("wheel", onWheel);
     host.removeEventListener("pointerenter", onEnter);
     host.removeEventListener("pointerleave", onLeave);
-    host.removeEventListener("pointermove", onMove);
+    host.removeEventListener("pointermove", onMoveHair);
     window.removeEventListener("resize", onResize);
     freeXh?.destroy();
     freeXh = null;
@@ -2462,6 +2588,7 @@ export function setActiveDrawTool(tool: Drawing["tool"]): void {
   }
   syncDrawCanvasCursors();
   syncDrawLayerPresence();
+  syncFreeCrosshairCapture();
   if (drawCanvas?.hidden && !secondaryPaneHosts.size) return;
   repaintAllPanes();
 }
