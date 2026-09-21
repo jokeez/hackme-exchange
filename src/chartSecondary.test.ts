@@ -92,16 +92,16 @@ describe("chartSecondary multi-slot", () => {
     expect(applyOptions).toHaveBeenCalledWith(
       expect.objectContaining({
         crosshair: expect.objectContaining({
-          mode: 0,
-          vertLine: expect.objectContaining({ labelVisible: false }),
-          horzLine: expect.objectContaining({ labelVisible: false }),
+          mode: 2,
+          vertLine: expect.objectContaining({ labelVisible: false, visible: false }),
+          horzLine: expect.objectContaining({ labelVisible: false, visible: false }),
         }),
       }),
     );
     setSecondaryCrosshairMode(0);
     expect(applyOptions).toHaveBeenCalledWith(
       expect.objectContaining({
-        crosshair: expect.objectContaining({ mode: 0 }),
+        crosshair: expect.objectContaining({ mode: 2 }),
       }),
     );
     destroySecondaryChart();

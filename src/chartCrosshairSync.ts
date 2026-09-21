@@ -79,7 +79,7 @@ function propagate(fromId: string, time: number | null, price: number | null): v
     lastSyncedTime = time;
     for (const [id, pane] of panes) {
       if (id === fromId) continue;
-      const p = id === fromId ? price : priceAtTime(pane, time);
+      const p = price != null && Number.isFinite(price) ? price : priceAtTime(pane, time);
       if (p == null) {
         try {
           pane.chart.clearCrosshairPosition();
@@ -109,7 +109,7 @@ function bindPane(pane: CrosshairPane): void {
     }
   }
   let syncRaf = 0;
-  let pending: { time: number | null } | null = null;
+  let pending: { time: number | null; price: number | null } | null = null;
   const flush = () => {
     syncRaf = 0;
     const p = pending;
@@ -120,13 +120,24 @@ function bindPane(pane: CrosshairPane): void {
       return;
     }
     if (p.time === lastSyncedTime) return;
-    propagate(pane.id, p.time, priceAtTime(pane, p.time));
+    // Prefer free mouse Y price over bar.close so siblings don't Magnet-snap.
+    const price = p.price ?? priceAtTime(pane, p.time);
+    propagate(pane.id, p.time, price);
   };
   const handler = (param: { time?: unknown; point?: { x: number; y: number } }) => {
     if (syncing || !enabled) return;
     const t = (param.time as number | undefined) ?? null;
     if (t != null && t === lastSyncedTime) return;
-    pending = { time: t };
+    let price: number | null = null;
+    if (param.point && Number.isFinite(param.point.y)) {
+      try {
+        const pr = pane.series.coordinateToPrice(param.point.y);
+        if (pr != null && Number.isFinite(pr) && pr > 0) price = pr as number;
+      } catch {
+        /* ignore */
+      }
+    }
+    pending = { time: t, price };
     if (!syncRaf) syncRaf = requestAnimationFrame(flush);
   };
   paneMoveHandlers.set(pane.id, handler);

@@ -12,7 +12,8 @@ import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
-import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
+import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isChartPointerBusy, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, noteChartPointerBusy, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
+import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
@@ -53,6 +54,8 @@ type Slot = {
   orderPriceLines: IPriceLine[];
   previewPriceLine: IPriceLine | null;
   pricePickCleanup: (() => void) | null;
+  freeXh: FreeCrosshairHandle | null;
+  freeXhCleanup: (() => void) | null;
 };
 
 const slots = new Map<string, Slot>();
@@ -345,6 +348,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
 
   const drawCanvas = document.createElement("canvas");
   drawCanvas.className = "draw-layer";
+  drawCanvas.hidden = true;
   el.appendChild(drawCanvas);
 
   const hostW = Math.max(200, shell.clientWidth || el.clientWidth || 320);
@@ -437,10 +441,35 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     orderPriceLines: [],
     previewPriceLine: null,
     pricePickCleanup: null,
+    freeXh: null,
+    freeXhCleanup: null,
   };
   slots.set(key, slot);
   setSecondaryData(slot, candles, true);
   bindResize(slot);
+
+  const freeXh = mountFreeCrosshair(el);
+  const onXhMove = (e: PointerEvent) => freeXh.move(e.clientX, e.clientY);
+  const onXhEnter = () => {
+    freeXh.refreshRect();
+    noteChartPointerBusy(true);
+  };
+  const onXhLeave = () => {
+    freeXh.hide();
+    noteChartPointerBusy(false);
+  };
+  el.addEventListener("pointerenter", onXhEnter);
+  el.addEventListener("pointerleave", onXhLeave);
+  el.addEventListener("pointermove", onXhMove, { passive: true });
+  slot.freeXh = freeXh;
+  slot.freeXhCleanup = () => {
+    el.removeEventListener("pointerenter", onXhEnter);
+    el.removeEventListener("pointerleave", onXhLeave);
+    el.removeEventListener("pointermove", onXhMove);
+    freeXh.destroy();
+    slot.freeXh = null;
+    slot.freeXhCleanup = null;
+  };
 
   const healAxis = () => {
     const last = slot.candles[slot.candles.length - 1]?.close;
@@ -700,6 +729,7 @@ function destroySecondarySlot(key: string): void {
   const slot = slots.get(key);
   if (!slot) return;
   slot.pricePickCleanup?.();
+  slot.freeXhCleanup?.();
   slot.cleanup?.();
   clearSlotPriceLines(slot);
   slot.drawCleanup?.();
@@ -729,6 +759,10 @@ export function updateSecondaryChart(candles: Candle[], hostId?: string): void {
 
     // Same tip bucket — series.update only
     if (prev && last.time === prev.time && lenDelta === 0) {
+      if (isChartPointerBusy()) {
+        slot.candles = candles;
+        return;
+      }
       try {
         slot.series.update({
           time: last.time as UTCTimestamp,

@@ -11,6 +11,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { CHART_SHOT_BG, registerChartScreenshotHooks, runChartScreenshot, type ChartScreenshotResult } from "./chartScreenshot";
+import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
 import type {
   Candle,
   ChartMode,
@@ -158,26 +159,106 @@ let drawSurfOverride: PaneDrawHost | null = null;
 let interactionHost: PaneDrawHost | null = null;
 const secondaryPaneHosts = new Map<string, PaneDrawHost>();
 
-/** Fast crosshair: free move, no axis-label paint every pointer event (OHLC legend covers that). */
+/** Fast crosshair: LWC hair Hidden — free CSS overlay follows the pointer (no bar snap). */
 export function crosshairPaintOptions(_mode: 0 | 1 = 0) {
-  // Always Normal — Magnet / MagnetOHLC search nearest OHLC on every move and feel sticky/laggy.
   return {
-    mode: 0 as const, // CrosshairMode.Normal — numeric so tests/mocks need no enum export
+    mode: 2 as const, // CrosshairMode.Hidden — stock LWC snaps X to bars; we paint free hair ourselves
     doNotSnapToHiddenSeriesIndices: true,
     vertLine: {
-      visible: true,
+      visible: false,
       labelVisible: false,
       width: 1 as const,
       color: "rgba(149, 165, 186, 0.55)",
       style: 2 as const,
     },
     horzLine: {
-      visible: true,
+      visible: false,
       labelVisible: false,
       width: 1 as const,
       color: "rgba(149, 165, 186, 0.55)",
       style: 2 as const,
     },
+  };
+}
+
+/** True while pointer is over the chart — live tip/series updates must not fight the hair. */
+let chartPointerBusyDepth = 0;
+let freeXh: FreeCrosshairHandle | null = null;
+let freeXhCleanup: (() => void) | null = null;
+let pendingLiveTip: { c: Candle; opts: ChartMountOpts } | null = null;
+let pendingHud: { price: number; up: boolean; countdown: string | null } | null = null;
+
+export function isChartPointerBusy(): boolean {
+  return chartPointerBusyDepth > 0;
+}
+
+/** Secondary panes share the same scrub lock so tip ticks pause on any chart hover. */
+export function noteChartPointerBusy(on: boolean): void {
+  setChartPointerBusy(on);
+}
+
+function setChartPointerBusy(on: boolean): void {
+  const prev = chartPointerBusyDepth > 0;
+  if (on) chartPointerBusyDepth += 1;
+  else chartPointerBusyDepth = Math.max(0, chartPointerBusyDepth - 1);
+  const next = chartPointerBusyDepth > 0;
+  if (prev === next) return;
+  if (!chart) {
+    if (!next) flushChartLivePaint();
+    return;
+  }
+  try {
+    // Freeze autoscale while scrubbing so tip H/L ticks don't swim the pane under the hair.
+    if (!priceScaleManual) chart.priceScale("right").setAutoScale(!next);
+  } catch {
+    /* ignore */
+  }
+  if (!next) flushChartLivePaint();
+}
+
+/** Apply tip/HUD paints deferred while the pointer was over the chart. */
+export function flushChartLivePaint(): void {
+  const tip = pendingLiveTip;
+  pendingLiveTip = null;
+  if (tip) {
+    updateLastCandle(tip.c, tip.opts);
+  }
+  const hud = pendingHud;
+  pendingHud = null;
+  if (hud) {
+    updateLivePriceHud(hud.price, hud.up, hud.countdown);
+  }
+}
+
+function bindFreeCrosshairTracking(host: HTMLElement): void {
+  freeXhCleanup?.();
+  freeXh?.destroy();
+  freeXh = mountFreeCrosshair(host);
+  const onMove = (e: PointerEvent) => {
+    if (!freeXh) return;
+    freeXh.move(e.clientX, e.clientY);
+  };
+  const onEnter = () => {
+    freeXh?.refreshRect();
+    setChartPointerBusy(true);
+  };
+  const onLeave = () => {
+    freeXh?.hide();
+    setChartPointerBusy(false);
+  };
+  const onResize = () => freeXh?.refreshRect();
+  host.addEventListener("pointerenter", onEnter);
+  host.addEventListener("pointerleave", onLeave);
+  host.addEventListener("pointermove", onMove, { passive: true });
+  window.addEventListener("resize", onResize);
+  freeXhCleanup = () => {
+    host.removeEventListener("pointerenter", onEnter);
+    host.removeEventListener("pointerleave", onLeave);
+    host.removeEventListener("pointermove", onMove);
+    window.removeEventListener("resize", onResize);
+    freeXh?.destroy();
+    freeXh = null;
+    freeXhCleanup = null;
   };
 }
 
@@ -2156,6 +2237,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   ensureWatermark(opts.watermark ?? "");
   ensureHud();
   ensureTradeTip();
+  bindFreeCrosshairTracking(el);
   updateHud(opts.lastPrice ?? 0, opts.lastPriceUp ?? true, null);
   if (onAddDrawing) setupDrawInteraction(opts.drawings, opts.pairId, onAddDrawing);
   redrawDrawings(opts.drawings);
@@ -2595,6 +2677,13 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   currentCandles = prepCandles(rawCandlesCache, mode, tf);
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
+
+  // While scrubbing: keep in-memory tip fresh, defer series.update (LWC recalculate fights the hair).
+  if (isChartPointerBusy()) {
+    pendingLiveTip = { c, opts };
+    return true;
+  }
+
   const t = d.time as UTCTimestamp;
   // Only push tip into the visible series — updating 4 hidden series forced full LWC invalidation.
   if (mode === "bars") {
@@ -2649,6 +2738,12 @@ let lastHudUp: boolean | null = null;
 
 export function updateLivePriceHud(price: number, up: boolean, countdown: string | null): void {
   if (lastOpts) lastOpts = { ...lastOpts, lastPrice: price, lastPriceUp: up };
+  // Countdown / tone text is cheap; skip price-line applyOptions while scrubbing.
+  if (isChartPointerBusy()) {
+    pendingHud = { price, up, countdown };
+    updateHud(price, up, countdown);
+    return;
+  }
   const series = primarySeries();
   if (series && lastOpts?.overlays.showLastPrice !== false && price > 0) {
     if (lastPriceLine && lastHudUp === up) {
@@ -3527,6 +3622,10 @@ export function destroyChart(): void {
   priceWheelCleanup?.();
   mobilePanCleanup?.();
   chartPricePickCleanup?.();
+  freeXhCleanup?.();
+  pendingLiveTip = null;
+  pendingHud = null;
+  chartPointerBusyDepth = 0;
   clearDrawPointerListeners();
   // Drop any previous viewport — remounts (TF/pair) must re-anchor to the live candle.
   savedLogicalRange = null;

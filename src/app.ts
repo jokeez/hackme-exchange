@@ -47,6 +47,7 @@ import {
   softRefreshChart,
   updateLastCandle,
   updateLivePriceHud,
+  isChartPointerBusy,
 } from "./chart";
 import { MAX_DRAWINGS } from "./chartDraw";
 import { candleCountdown, fireBrowserAlert, yesterdayClose } from "./chartHud";
@@ -4396,15 +4397,18 @@ function patchLive(): void {
     const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
     const opts = chartOpts();
     const last = candles[candles.length - 1];
+    const scrubbing = isChartPointerBusy();
     if (chartNeedsFullReplace || !last) {
       setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
       chartNeedsFullReplace = false;
     } else if (!updateLastCandle(last, opts)) {
       setCandleData(candles, opts, { preserveLogicalRange: true });
     }
-    refreshOrderLines(opts.orders, opts.alerts);
+    if (!scrubbing) {
+      refreshOrderLines(opts.orders, opts.alerts);
+    }
     updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
-    if (state.multiChartLayout !== "1") {
+    if (!scrubbing && state.multiChartLayout !== "1") {
       const n = state.multiChartLayout === "4" ? 4 : 2;
       for (let i = 2; i <= n; i++) {
         const hostId = `chart-host-${i}`;
@@ -6388,13 +6392,16 @@ function microTickPrices(): void {
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
   const last = candles[candles.length - 1];
   const opts = chartOpts();
+  const scrubbing = isChartPointerBusy();
+  // Tip series.update is deferred inside updateLastCandle while scrubbing.
+  // Full replace (gap / new bucket) still paints — rare vs 700ms tip ticks.
   if (chartNeedsFullReplace || !last) {
     setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
     chartNeedsFullReplace = false;
   } else if (!updateLastCandle(last, opts)) {
     setCandleData(candles, opts, { preserveLogicalRange: true });
   }
-  if (state.multiChartLayout !== "1") {
+  if (!scrubbing && state.multiChartLayout !== "1") {
     const n = state.multiChartLayout === "4" ? 4 : 2;
     for (let i = 2; i <= n; i++) {
       const hostId = `chart-host-${i}`;
@@ -6407,6 +6414,7 @@ function microTickPrices(): void {
   const quote = activePairQuote();
   updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
   evaluatePriceAlerts(quote.mid);
+  if (scrubbing) return;
   patchTickerBar(quote);
   const tape = document.getElementById("tape");
   if (tape) tape.innerHTML = renderTape();

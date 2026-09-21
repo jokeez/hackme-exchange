@@ -2080,6 +2080,32 @@ html.mobile-layout .market-search {
 .draw-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .draw-layer[hidden] { display: none !important; }
 .draw-layer.active { pointer-events: auto; cursor: crosshair; }
+.free-crosshair {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.free-crosshair[hidden] { display: none !important; }
+.free-xh-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-left: 1px dashed rgba(149, 165, 186, 0.55);
+  will-change: transform;
+}
+.free-xh-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  border-top: 1px dashed rgba(149, 165, 186, 0.55);
+  will-change: transform;
+}
 .chart-body {
   display: flex;
   flex: 1 1 0;
