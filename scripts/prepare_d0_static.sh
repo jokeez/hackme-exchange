@@ -14,12 +14,8 @@ TAR="${TAR:-$ROOT/hackme-exchange-d0-${STAMP}.tar.gz}"
 echo "[d0-static] npm test (gate)"
 npm test
 
-echo "[d0-static] build (paper — force-clear lab Vite env so fixture seed is stripped)"
-# Shell env overrides .env (CRYPTO-001). Empty origin + LAB_API≠1 → no fixture in dist.
-VITE_INTEGRATION_MODE=paper \
-VITE_LAB_API=0 \
-VITE_EXCHANGE_API_ORIGIN= \
-  npm run build
+echo "[d0-static] build (paper — via npm run build / build_paper.sh)"
+npm run build
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"

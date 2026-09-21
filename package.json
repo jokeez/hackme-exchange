@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/cf_chunk_assets.mjs",
+    "build": "bash scripts/build_paper.sh",
+    "build:lab": "tsc && vite build && node scripts/cf_chunk_assets.mjs",
     "icons:gen": "python3 scripts/generate_pwa_icons.py",
     "preview": "vite preview",
     "test": "vitest run",
