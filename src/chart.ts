@@ -158,6 +158,43 @@ let drawSurfOverride: PaneDrawHost | null = null;
 let interactionHost: PaneDrawHost | null = null;
 const secondaryPaneHosts = new Map<string, PaneDrawHost>();
 
+/** Fast crosshair: free move, no axis-label paint every pointer event (OHLC legend covers that). */
+export function crosshairPaintOptions(_mode: 0 | 1 = 0) {
+  // Always Normal — Magnet / MagnetOHLC search nearest OHLC on every move and feel sticky/laggy.
+  return {
+    mode: 0 as const, // CrosshairMode.Normal — numeric so tests/mocks need no enum export
+    doNotSnapToHiddenSeriesIndices: true,
+    vertLine: {
+      visible: true,
+      labelVisible: false,
+      width: 1 as const,
+      color: "rgba(149, 165, 186, 0.55)",
+      style: 2 as const,
+    },
+    horzLine: {
+      visible: true,
+      labelVisible: false,
+      width: 1 as const,
+      color: "rgba(149, 165, 186, 0.55)",
+      style: 2 as const,
+    },
+  };
+}
+
+function syncDrawLayerPresence(): void {
+  if (!drawCanvas) return;
+  const need =
+    activeTool !== "cursor" ||
+    liveDrawings.length > 0 ||
+    !!selectedDrawingId ||
+    !!pendingDraw ||
+    !!measurePreview ||
+    !!dragDraw ||
+    tradeMarks.length > 0;
+  // Full-size transparent canvas over LWC forces extra compositing on every hair move.
+  drawCanvas.hidden = !need;
+}
+
 function mainPaneHost(): PaneDrawHost | null {
   if (!drawCanvas || !hostEl || !chart || !candleSeries) return null;
   return {
@@ -917,6 +954,8 @@ function paintFibLevels(
 
 function redrawDrawings(drawings: Drawing[]): void {
   syncDrawingsStore(drawings);
+  syncDrawLayerPresence();
+  if (drawCanvas?.hidden) return;
   repaintAllPanes(drawings);
 }
 
@@ -2001,6 +2040,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   el.appendChild(shell);
   drawCanvas = document.createElement("canvas");
   drawCanvas.className = "draw-layer";
+  drawCanvas.hidden = true;
   el.appendChild(drawCanvas);
 
   currentMode = opts.mode;
@@ -2044,7 +2084,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       barSpacing: spacing,
       rightBarStaysOnScroll: false,
     },
-    crosshair: { mode: isMobileLayout() ? 1 : 0 },
+    crosshair: crosshairPaintOptions(),
     localization: chartLocalization(),
   });
 
@@ -2205,29 +2245,8 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     chart.subscribeCrosshairMove((param) => {
       const t = param.time as number | undefined;
       if (t && t === lastXhTime && lastXhKey) return;
-      if (!t) {
-        xhPending = { time: undefined };
-      } else {
-        const seriesApi =
-          currentMode === "bars"
-            ? barSeries
-            : currentMode === "line"
-              ? lineSeries
-              : currentMode === "area"
-                ? areaSeries
-                : candleSeries;
-        const hit = (seriesApi ? param.seriesData.get(seriesApi) : undefined) as
-          | { open?: number; high?: number; low?: number; close?: number; value?: number }
-          | undefined;
-        xhPending = {
-          time: t,
-          open: hit?.open,
-          high: hit?.high,
-          low: hit?.low,
-          close: hit?.close,
-          value: hit?.value,
-        };
-      }
+      // Don't touch seriesData here — Map lookup stalls the hair under load.
+      xhPending = { time: t };
       if (!xhRaf) xhRaf = requestAnimationFrame(flushCrosshair);
     });
   }
@@ -2360,6 +2379,8 @@ export function setActiveDrawTool(tool: Drawing["tool"]): void {
     hoveredDrawingId = null;
   }
   syncDrawCanvasCursors();
+  syncDrawLayerPresence();
+  if (drawCanvas?.hidden && !secondaryPaneHosts.size) return;
   repaintAllPanes();
 }
 
@@ -2481,13 +2502,33 @@ export function setCandleData(
     color: c.close >= c.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
   }));
 
-  candleSeries.setData(candleData);
-  barSeries.setData(barData);
-  lineSeries.setData(lineData);
-  areaSeries.setData(lineData);
+  const mode = opts.mode ?? currentMode ?? "candles";
+  // Only feed the visible series — 4 full series made every hair move heavier in LWC.
+  if (mode === "bars") {
+    barSeries.setData(barData);
+    candleSeries.setData([]);
+    lineSeries.setData([]);
+    areaSeries.setData([]);
+  } else if (mode === "line") {
+    lineSeries.setData(lineData);
+    candleSeries.setData([]);
+    barSeries.setData([]);
+    areaSeries.setData([]);
+  } else if (mode === "area") {
+    areaSeries.setData(lineData);
+    candleSeries.setData([]);
+    barSeries.setData([]);
+    lineSeries.setData([]);
+  } else {
+    candleSeries.setData(candleData);
+    barSeries.setData([]);
+    lineSeries.setData([]);
+    areaSeries.setData([]);
+  }
   volumeSeries.setData(opts.overlays.showVolume ? volData : []);
   applyIndicators(currentCandles, opts.settings, opts.indicatorConfig);
   tradeMarks = opts.trades ?? [];
+  syncDrawLayerPresence();
   renderOrderLines(
     opts.orders,
     opts.overlays,
@@ -2555,15 +2596,23 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
   const t = d.time as UTCTimestamp;
-  candleSeries.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
-  barSeries?.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
-  lineSeries.update({ time: t, value: d.close });
-  areaSeries.update({ time: t, value: d.close });
-  volumeSeries.update({
-    time: t,
-    value: lastOpts?.overlays.showVolume === false ? 0 : d.volume,
-    color: d.close >= d.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
-  });
+  // Only push tip into the visible series — updating 4 hidden series forced full LWC invalidation.
+  if (mode === "bars") {
+    barSeries?.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
+  } else if (mode === "line") {
+    lineSeries?.update({ time: t, value: d.close });
+  } else if (mode === "area") {
+    areaSeries?.update({ time: t, value: d.close });
+  } else {
+    candleSeries.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
+  }
+  if (lastOpts?.overlays.showVolume !== false) {
+    volumeSeries?.update({
+      time: t,
+      value: d.volume,
+      color: d.close >= d.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
+    });
+  }
   return true;
 }
 
@@ -3639,7 +3688,7 @@ export function getMainCrosshairPane(): {
 export function setChartCrosshairMode(mode: 0 | 1): void {
   if (!chart) return;
   try {
-    chart.applyOptions({ crosshair: { mode } });
+    chart.applyOptions({ crosshair: crosshairPaintOptions(mode) });
   } catch {
     /* ignore */
   }

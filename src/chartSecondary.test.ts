@@ -77,7 +77,7 @@ describe("chartSecondary multi-slot", () => {
     b.remove();
   });
 
-  it("can toggle crosshair magnet via setSecondaryCrosshairMode", async () => {
+  it("keeps Normal crosshair (no Magnet) via setSecondaryCrosshairMode", async () => {
     const { mountSecondaryChart, destroySecondaryChart, setSecondaryCrosshairMode } = await import("./chartSecondary");
     const host = document.createElement("div");
     host.id = "chart-host-2";
@@ -89,9 +89,21 @@ describe("chartSecondary multi-slot", () => {
     mountSecondaryChart(host, candles, { pairId: "HMC_USDT", pairLabel: "HMC/USDT", tf: "15m" });
     applyOptions.mockClear();
     setSecondaryCrosshairMode(1);
-    expect(applyOptions).toHaveBeenCalledWith(expect.objectContaining({ crosshair: { mode: 1 } }));
+    expect(applyOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        crosshair: expect.objectContaining({
+          mode: 0,
+          vertLine: expect.objectContaining({ labelVisible: false }),
+          horzLine: expect.objectContaining({ labelVisible: false }),
+        }),
+      }),
+    );
     setSecondaryCrosshairMode(0);
-    expect(applyOptions).toHaveBeenCalledWith(expect.objectContaining({ crosshair: { mode: 0 } }));
+    expect(applyOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        crosshair: expect.objectContaining({ mode: 0 }),
+      }),
+    );
     destroySecondaryChart();
     host.remove();
   });

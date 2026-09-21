@@ -12,7 +12,7 @@ import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
-import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
+import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
@@ -163,9 +163,10 @@ export function refreshSecondaryPaneOrderLines(hostId: string, opts: SecondaryPa
 }
 
 export function setSecondaryCrosshairMode(mode: 0 | 1): void {
+  const paint = crosshairPaintOptions(mode);
   for (const slot of slots.values()) {
     try {
-      slot.chart.applyOptions({ crosshair: { mode } });
+      slot.chart.applyOptions({ crosshair: paint });
     } catch {
       /* ignore */
     }
@@ -391,7 +392,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       horzTouchDrag: chartInteractionOptions().handleScroll.horzTouchDrag,
       vertTouchDrag: chartInteractionOptions().handleScroll.vertTouchDrag,
     },
-    crosshair: { mode: 0 },
+    crosshair: crosshairPaintOptions(),
     localization: chartLocalization(),
   });
 
