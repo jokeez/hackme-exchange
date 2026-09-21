@@ -1,0 +1,24 @@
+import { describe, expect, it } from "vitest";
+import { candleAtTime, nearestCandle } from "./chartCandleIndex";
+import type { Candle } from "./types";
+
+const candles: Candle[] = [
+  { time: 100, open: 1, high: 1.1, low: 0.9, close: 1.05, volume: 10 },
+  { time: 200, open: 1.05, high: 1.2, low: 1, close: 1.15, volume: 12 },
+  { time: 300, open: 1.15, high: 1.25, low: 1.1, close: 1.2, volume: 8 },
+];
+
+describe("chartCandleIndex", () => {
+  it("candleAtTime finds exact bars", () => {
+    expect(candleAtTime(candles, 200)?.close).toBe(1.15);
+    expect(candleAtTime(candles, 150)).toBeUndefined();
+    expect(candleAtTime([], 100)).toBeUndefined();
+  });
+
+  it("nearestCandle picks closest bar by time", () => {
+    expect(nearestCandle(candles, 205)?.time).toBe(200);
+    expect(nearestCandle(candles, 290)?.time).toBe(300);
+    expect(nearestCandle(candles, 100)?.time).toBe(100);
+    expect(nearestCandle([], 100)).toBeNull();
+  });
+});

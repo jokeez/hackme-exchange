@@ -949,7 +949,21 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
   }
 }
 
+let pendingOhlcLegend: Candle | null = null;
+let ohlcLegendRaf = 0;
+let lastOhlcLegendText = "";
+
 function updateOhlcDisplays(c: Candle | null): void {
+  // Coalesce crosshair spam to one DOM write per frame.
+  pendingOhlcLegend = c;
+  if (ohlcLegendRaf) return;
+  ohlcLegendRaf = requestAnimationFrame(() => {
+    ohlcLegendRaf = 0;
+    paintOhlcLegend(pendingOhlcLegend);
+  });
+}
+
+function paintOhlcLegend(c: Candle | null): void {
   const ha = state.chartMode === "heikin" ? "HA " : "";
   const el = document.getElementById("ohlc-legend");
   const mob = document.getElementById("mobile-ohlc-bar");
@@ -959,6 +973,8 @@ function updateOhlcDisplays(c: Candle | null): void {
     return;
   }
   const text = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
+  if (text === lastOhlcLegendText) return;
+  lastOhlcLegendText = text;
   if (el) el.textContent = text;
   if (mob && isMobileLayout()) {
     mob.textContent = text;
@@ -4138,9 +4154,12 @@ function refreshOhlcLegendIdle(): void {
   } else {
     text = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
   }
-  if (el) el.textContent = text;
+  if (text !== lastOhlcLegendText) {
+    lastOhlcLegendText = text;
+    if (el) el.textContent = text;
+  }
   if (mob && isMobileLayout()) {
-    mob.textContent = text;
+    if (mob.textContent !== text) mob.textContent = text;
     mob.classList.remove("hidden", "live");
   }
 }

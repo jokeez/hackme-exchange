@@ -1,20 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { nearestCandle } from "./chartCandleIndex";
 import type { Candle } from "./types";
-
-// Test helpers duplicated from module (nearest candle logic)
-function nearestCandle(candles: Candle[], time: number): Candle | null {
-  if (!candles.length) return null;
-  let best: Candle | null = null;
-  let bestDist = Infinity;
-  for (const c of candles) {
-    const d = Math.abs(c.time - time);
-    if (d < bestDist) {
-      bestDist = d;
-      best = c;
-    }
-  }
-  return best;
-}
 
 describe("chartCrosshairSync helpers", () => {
   const candles: Candle[] = [

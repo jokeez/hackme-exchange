@@ -37,6 +37,7 @@ import {
   resolvePaintDrawings,
 } from "./chartDraw";
 import { MAX_CANDLES } from "./candles";
+import { candleAtTime } from "./chartCandleIndex";
 import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { clearChartViewport, loadChartViewport, saveChartViewport } from "./chartViewport";
 import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
@@ -725,14 +726,22 @@ function ensureTradeTip(): void {
   tradeTipEl = document.createElement("div");
   tradeTipEl.className = "trade-mark-tip hidden";
   hostEl.appendChild(tradeTipEl);
-  hostEl.addEventListener("mousemove", (e) => {
-    if (!chart || !candleSeries || !tradeTipEl || !tradeMarks.length) return;
-    const rect = hostEl!.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+  let tipRaf = 0;
+  let tipMx = 0;
+  let tipMy = 0;
+  const paintTip = () => {
+    tipRaf = 0;
+    if (!chart || !candleSeries || !tradeTipEl || !tradeMarks.length) {
+      tradeTipEl?.classList.add("hidden");
+      return;
+    }
+    const mx = tipMx;
+    const my = tipMy;
     const ts = chart.timeScale();
     let hit: Trade | null = null;
-    for (const t of tradeMarks.slice(0, 80)) {
+    const n = Math.min(tradeMarks.length, 80);
+    for (let i = 0; i < n; i++) {
+      const t = tradeMarks[i]!;
       const time = Math.floor(t.ts / 1000) as UTCTimestamp;
       const x = ts.timeToCoordinate(time);
       const y = candleSeries.priceToCoordinate(t.price);
@@ -749,10 +758,21 @@ function ensureTradeTip(): void {
     }
     const verb = hit.side === "buy" ? "Bought" : "Sold";
     const base = getPair(hit.pairId).base;
-    tradeTipEl.textContent = `${verb} ${hit.amountBase} ${base} @ ${chartPriceFormatter(hit.price)}`;
+    const next = `${verb} ${hit.amountBase} ${base} @ ${chartPriceFormatter(hit.price)}`;
+    if (tradeTipEl.textContent !== next) tradeTipEl.textContent = next;
     tradeTipEl.style.left = `${mx + 12}px`;
     tradeTipEl.style.top = `${my - 8}px`;
     tradeTipEl.classList.remove("hidden");
+  };
+  hostEl.addEventListener("mousemove", (e) => {
+    if (!tradeMarks.length) {
+      tradeTipEl?.classList.add("hidden");
+      return;
+    }
+    const rect = hostEl!.getBoundingClientRect();
+    tipMx = e.clientX - rect.left;
+    tipMy = e.clientY - rect.top;
+    if (!tipRaf) tipRaf = requestAnimationFrame(paintTip);
   });
   hostEl.addEventListener("mouseleave", () => tradeTipEl?.classList.add("hidden"));
 }
@@ -912,9 +932,13 @@ function paintDrawingsOnHost(
   if (!ctx) return;
   const w = hostElRef.clientWidth;
   const h = hostElRef.clientHeight;
-  canvas.width = w;
-  canvas.height = h;
-  ctx.clearRect(0, 0, w, h);
+  // Assigning canvas.width/height reallocates the GPU buffer — only when size changes.
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  } else {
+    ctx.clearRect(0, 0, w, h);
+  }
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
   ctx.globalAlpha = 1;
@@ -1683,23 +1707,42 @@ function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
       hoveredDrawingId = null;
       return;
     }
-    const hit = withSurf(host, () => hitTestDrawing(mx, my, drawingsOf()));
+    // Skip expensive hit-test when there is nothing to hover.
+    const drawings = drawingsOf();
+    if (!drawings.length && !selectedDrawingId && !dragDraw) {
+      if (hoveredDrawingId) {
+        hoveredDrawingId = null;
+        repaint();
+      }
+      if (canvas.classList.contains("active")) canvas.classList.remove("active");
+      if (canvas.style.cursor !== "default") canvas.style.cursor = "default";
+      return;
+    }
+    const hit = withSurf(host, () => hitTestDrawing(mx, my, drawings));
     const nextHover = hit?.id ?? null;
     if (nextHover !== hoveredDrawingId) {
       hoveredDrawingId = nextHover;
       repaint();
     }
     const want = !!(hit || selectedDrawingId || dragDraw);
-    canvas.classList.toggle("active", want);
-    if (dragDraw) canvas.style.cursor = "grabbing";
-    else if (hit) canvas.style.cursor = hit.mode === "move" ? "grab" : "nwse-resize";
-    else canvas.style.cursor = "default";
+    if (canvas.classList.contains("active") !== want) canvas.classList.toggle("active", want);
+    const nextCursor = dragDraw ? "grabbing" : hit ? (hit.mode === "move" ? "grab" : "nwse-resize") : "default";
+    if (canvas.style.cursor !== nextCursor) canvas.style.cursor = nextCursor;
   };
 
+  let ptrRaf = 0;
+  let ptrMx = 0;
+  let ptrMy = 0;
   host.hostEl.onmousemove = (e) => {
     if (focusedPaneId !== host.id) return;
     const rect = host.hostEl.getBoundingClientRect();
-    syncPointer(e.clientX - rect.left, e.clientY - rect.top);
+    ptrMx = e.clientX - rect.left;
+    ptrMy = e.clientY - rect.top;
+    if (ptrRaf) return;
+    ptrRaf = requestAnimationFrame(() => {
+      ptrRaf = 0;
+      syncPointer(ptrMx, ptrMy);
+    });
   };
 
   host.drawCanvas.onmousedown = (e) => {
@@ -2083,22 +2126,35 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   }
 
   if (opts.onCrosshair) {
+    let lastXhTime: number | null = null;
+    let lastXhKey = "";
     chart.subscribeCrosshairMove((param) => {
       if (!param.time) {
-        opts.onCrosshair?.(null);
+        if (lastXhTime !== null || lastXhKey) {
+          lastXhTime = null;
+          lastXhKey = "";
+          opts.onCrosshair?.(null);
+        }
         return;
       }
       const t = param.time as number;
-      const fromRaw = rawCandlesCache.find((c) => c.time === t);
-      const fromSeries = currentCandles.find((c) => c.time === t);
+      // Prefer series payload (already on the event); only index-lookup for volume / HA.
       const hit =
         param.seriesData.get(candleSeries!) ??
         (barSeries ? param.seriesData.get(barSeries) : undefined) ??
         (lineSeries ? param.seriesData.get(lineSeries) : undefined) ??
         (areaSeries ? param.seriesData.get(areaSeries) : undefined);
       const seriesHit = hit as { open?: number; high?: number; low?: number; close?: number; value?: number } | undefined;
-      const bar = currentMode === "heikin" ? (fromSeries ?? fromRaw) : (fromRaw ?? fromSeries);
+      const fromRaw = candleAtTime(rawCandlesCache, t);
+      const bar =
+        currentMode === "heikin"
+          ? (candleAtTime(currentCandles, t) ?? fromRaw)
+          : (fromRaw ?? candleAtTime(currentCandles, t));
       if (bar) {
+        const key = `${t}|${bar.open}|${bar.high}|${bar.low}|${bar.close}|${bar.volume ?? 0}`;
+        if (key === lastXhKey) return;
+        lastXhTime = t;
+        lastXhKey = key;
         opts.onCrosshair?.({
           time: t,
           open: bar.open,
@@ -2111,14 +2167,25 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       }
       const close = seriesHit?.close ?? seriesHit?.value;
       if (close == null || !Number.isFinite(close)) {
-        opts.onCrosshair?.(null);
+        if (lastXhKey) {
+          lastXhTime = null;
+          lastXhKey = "";
+          opts.onCrosshair?.(null);
+        }
         return;
       }
+      const open = seriesHit?.open ?? close;
+      const high = seriesHit?.high ?? close;
+      const low = seriesHit?.low ?? close;
+      const key = `${t}|${open}|${high}|${low}|${close}|0`;
+      if (key === lastXhKey) return;
+      lastXhTime = t;
+      lastXhKey = key;
       opts.onCrosshair?.({
         time: t,
-        open: seriesHit?.open ?? close,
-        high: seriesHit?.high ?? close,
-        low: seriesHit?.low ?? close,
+        open,
+        high,
+        low,
         close,
         volume: 0,
       });

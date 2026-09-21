@@ -1,4 +1,5 @@
 import type { IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
+import { nearestCandle } from "./chartCandleIndex";
 import type { Candle } from "./types";
 
 export type CrosshairPane = {
@@ -44,20 +45,6 @@ export function clearCrosshairRegistry(): void {
 
 const paneMoveHandlers = new Map<string, (param: { time?: unknown; point?: { x: number; y: number } }) => void>();
 
-function nearestCandle(candles: Candle[], time: number): Candle | null {
-  if (!candles.length) return null;
-  let best: Candle | null = null;
-  let bestDist = Infinity;
-  for (const c of candles) {
-    const d = Math.abs(c.time - time);
-    if (d < bestDist) {
-      bestDist = d;
-      best = c;
-    }
-  }
-  return best;
-}
-
 function priceAtTime(pane: CrosshairPane, time: number): number | null {
   const bar = nearestCandle(pane.candles(), time);
   const p = bar?.close;
@@ -76,6 +63,12 @@ function clearAllCrosshairs(): void {
 
 function propagate(fromId: string, time: number | null, price: number | null): void {
   if (!enabled || syncing) return;
+  if (time == null) {
+    if (lastSyncedTime == null) return;
+  } else if (time === lastSyncedTime) {
+    // Same bar — siblings already show this crosshair; skip O(panes) LWC writes.
+    return;
+  }
   syncing = true;
   try {
     if (time == null) {
