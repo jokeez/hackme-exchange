@@ -20,10 +20,16 @@ function cspPaperProdPlugin(): Plugin {
         mode === "lab" || labFlag === "1" || labFlag === "true" || !!apiOrigin || !!ctx.server;
       if (wantsLab) return html;
       // Production paper: strip loopback lab connect-src from meta CSP.
-      return html.replace(
+      const next = html.replace(
         /content="default-src 'self';[\s\S]*?object-src 'none'"/,
         `content="${paperCsp}"`,
       );
+      if (next === html || !next.includes("frame-ancestors")) {
+        throw new Error(
+          "hackme-csp-paper-prod: failed to rewrite paper CSP meta (regex drift) — check index.html CSP content=",
+        );
+      }
+      return next;
     },
   };
 }
