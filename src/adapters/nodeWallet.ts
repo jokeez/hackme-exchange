@@ -1,6 +1,7 @@
 import { INTEGRATION } from "../config/integration";
 import { isLoopbackOrigin } from "../sanitize";
 import type { Wallet } from "../types";
+import { fetchWithTimeout } from "../fetchTimeout";
 
 export type NodeWalletSnapshot = {
   ok: true;
@@ -135,7 +136,7 @@ export async function probeNodeOnline(): Promise<boolean> {
     return false;
   }
   try {
-    const res = await fetch(url, { cache: "no-store", mode: "cors" });
+    const res = await fetchWithTimeout(url, { cache: "no-store", mode: "cors" }, 2_500);
     nodeProbeCache = { at: now, ok: res.ok };
     return res.ok;
   } catch {
