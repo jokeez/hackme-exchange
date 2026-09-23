@@ -926,7 +926,7 @@ export function setContextPriceMarker(price: number | null): void {
   if (!candleSeries) return;
   if (contextPriceLine) {
     try {
-      candleSeries.removePriceLine(contextPriceLine);
+    candleSeries.removePriceLine(contextPriceLine);
     } catch {
       /* already detached */
     }
@@ -1183,7 +1183,7 @@ function paintDrawingsOnHost(
     canvas.width = w;
     canvas.height = h;
   } else {
-    ctx.clearRect(0, 0, w, h);
+  ctx.clearRect(0, 0, w, h);
   }
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
@@ -2171,7 +2171,7 @@ function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
           const p = ptFromEvent(ev) ?? drawPoints[0];
           ghostPreview = null;
           if (!drawPoints[0] || !p) {
-            drawPoints = [];
+      drawPoints = [];
             measurePreview = null;
             repaint();
             interactionHost = null;
@@ -2182,13 +2182,13 @@ function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
           if (activeTool === "measure") {
             if (!isMeaningfulMeasure(points[0], points[1])) {
               measurePreview = null;
-              drawPoints = [];
+      drawPoints = [];
               repaint();
               interactionHost = null;
               return;
-            }
+    }
             const st = computeMeasureStats(points[0], points[1], host.tf);
-            onAdd({
+      onAdd({
               id,
               pairId: host.pairId,
               tool: "measure",
@@ -2209,7 +2209,7 @@ function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
             onAdd({ id, pairId: host.pairId, tool: "rect", points, color: "#4de4ff" });
             selectedDrawingId = id;
           }
-          drawPoints = [];
+      drawPoints = [];
           measurePreview = null;
           repaint();
           interactionHost = null;
@@ -2396,7 +2396,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         if (lastXhTime !== null || lastXhKey) {
           lastXhTime = null;
           lastXhKey = "";
-          opts.onCrosshair?.(null);
+        opts.onCrosshair?.(null);
         }
         return;
       }
@@ -2413,11 +2413,11 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
         const key = `${t}|${bar.open}|${bar.high}|${bar.low}|${bar.close}|${bar.volume ?? 0}`;
         if (key === lastXhKey) {
           lastXhTime = t;
-          return;
-        }
+        return;
+      }
         lastXhTime = t;
         lastXhKey = key;
-        opts.onCrosshair?.({
+      opts.onCrosshair?.({
           time: t,
           open: bar.open,
           high: bar.high,
@@ -2714,17 +2714,17 @@ export function setCandleData(
   const mode = opts.mode ?? currentMode ?? "candles";
   // Only feed the visible series — 4 full series made every hair move heavier in LWC.
   if (mode === "bars") {
-    barSeries.setData(barData);
+  barSeries.setData(barData);
     candleSeries.setData([]);
     lineSeries.setData([]);
     areaSeries.setData([]);
   } else if (mode === "line") {
-    lineSeries.setData(lineData);
+  lineSeries.setData(lineData);
     candleSeries.setData([]);
     barSeries.setData([]);
     areaSeries.setData([]);
   } else if (mode === "area") {
-    areaSeries.setData(lineData);
+  areaSeries.setData(lineData);
     candleSeries.setData([]);
     barSeries.setData([]);
     lineSeries.setData([]);
@@ -2824,10 +2824,10 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   }
   if (lastOpts?.overlays.showVolume !== false) {
     volumeSeries?.update({
-      time: t,
+    time: t,
       value: d.volume,
       color: d.close >= d.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
-    });
+  });
   }
   return true;
 }
@@ -2891,13 +2891,13 @@ export function updateLivePriceHud(price: number, up: boolean, countdown: string
     if (!lastPriceLine) {
       priceLineOwner = series;
       lastPriceLine = series.createPriceLine({
-        price,
-        color: up ? "#00e676" : "#ff5252",
-        lineWidth: 1,
-        lineStyle: 0,
+      price,
+      color: up ? "#00e676" : "#ff5252",
+      lineWidth: 1,
+      lineStyle: 0,
         axisLabelVisible: false,
         title: "",
-      });
+    });
       priceLines.push(lastPriceLine);
       lastHudUp = up;
     }
@@ -3758,7 +3758,7 @@ export function destroyChart(): void {
   savedLogicalRange = null;
   if (chart) {
     try {
-      chart.remove();
+    chart.remove();
     } catch {
       /* ignore */
     }

@@ -33,7 +33,9 @@ With `?embed=hub` (or nested iframe):
 
 ## CSP
 
-Paper build `frame-ancestors`:
+Paper build ships `frame-ancestors` in HTML meta **and** ops nginx must send the same
+policy as an **HTTP** `Content-Security-Policy` header (`scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
+Browsers ignore `frame-ancestors` in `<meta http-equiv>` — header is the real gate.
 
 `frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
 

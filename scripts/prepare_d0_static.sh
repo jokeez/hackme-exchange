@@ -36,6 +36,7 @@ if ! grep -qs 'frame-ancestors.*hackme\.tech' "$OUT_DIR"/index.html 2>/dev/null;
   echo "[d0-static] FAIL: paper CSP missing frame-ancestors https://hackme.tech (hub embed)" >&2
   exit 1
 fi
+echo "[d0-static] NOTE: meta CSP is a soft signal — deploy nginx must send Content-Security-Policy HTTP header (frame-ancestors). See docs/HUB_TAB.md"
 # The blocked-live console string is expected in the bundle; ignore it.
 
 tar -C "$(dirname "$OUT_DIR")" -czf "$TAR" "$(basename "$OUT_DIR")"

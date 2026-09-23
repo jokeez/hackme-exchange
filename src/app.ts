@@ -1489,7 +1489,7 @@ function renderActivityBody(): string {
         <div class="act-line">
           <span class="mono">${formatPrice(a.price)}</span>
           <span class="${a.fired ? "down" : "up"}">${a.fired ? "Fired" : "Armed"}</span>
-        </div>
+      </div>
         <div class="act-meta dim">${new Date(a.createdAt).toLocaleString()}</div>
         <div class="act-actions">
           ${a.fired ? `<button type="button" class="link" data-alert-reset="${escapeHtml(a.id)}">Re-arm</button>` : ""}
@@ -1506,8 +1506,8 @@ function renderActivityBody(): string {
         <div class="act-export-row">
           <button type="button" class="btn-sm" id="btn-export-fills" disabled>Export fills CSV</button>
           <button type="button" class="btn-sm" id="btn-export-orders">Export orders CSV</button>
-        </div>`;
-    }
+    </div>`;
+  }
     return `<div class="act-export-row">
         <button type="button" class="btn-sm" id="btn-export-fills">Export fills CSV</button>
         <button type="button" class="btn-sm" id="btn-export-orders">Export orders CSV</button>
@@ -1526,7 +1526,7 @@ function renderActivityBody(): string {
           <span>×${formatNum(t.amountBase, 2)}</span>
         </div>
         <div class="act-meta dim">${formatTradeFee(t, p.quote)} · ${new Date(t.ts).toLocaleString()}</div>
-      </div>`;
+    </div>`;
       })
       .join("")}</div>`;
   }
@@ -2362,11 +2362,11 @@ function renderSpot(): string {
       <button type="button" class="tb-pair tb-pair-btn" id="btn-mobile-pair" aria-label="Switch trading pair">
         <span class="tb-pair-icons">${pairAssetIcons(pair.base, pair.quote)}</span>
         <div>
-          <h1>${pair.label}</h1>
+      <h1>${pair.label}</h1>
           <span class="tb-sub muted small">${
             useLabMatching() ? "Lab book · DEMO matching" : "Pool oracle · paper demo"
           }</span>
-        </div>
+    </div>
         <span class="tb-chev" aria-hidden="true">▾</span>
       </button>
       <div class="tb-quote">
@@ -2397,8 +2397,8 @@ function renderSpot(): string {
       </div>
       <button type="button" class="btn-sm alerts-chip" id="btn-open-alerts" title="Price alerts">Alerts${alertCount ? ` · ${alertCount}` : ""}</button>
       <button type="button" class="btn-sm" id="btn-hotkeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-      <div class="pnl-chip mono">PnL <span class="${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</span></div>
-    </div>
+    <div class="pnl-chip mono">PnL <span class="${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</span></div>
+  </div>
   </div>
   ${
     recentPairs.length
@@ -2476,9 +2476,9 @@ function renderSpot(): string {
           <div class="ohlc-legend mono" id="ohlc-legend">${ohlc}</div>
           <div class="mobile-ohlc-bar mono" id="mobile-ohlc-bar" aria-live="polite">${ohlc}</div>
           <div class="chart-split ${layoutClass}">
-            <div id="chart-host" class="chart-host"></div>
-            ${state.multiChartLayout !== "1" ? `<div id="chart-host-2" class="chart-host chart-host-sub"></div>` : ""}
-            ${state.multiChartLayout === "4" ? `<div id="chart-host-3" class="chart-host chart-host-sub"></div><div id="chart-host-4" class="chart-host chart-host-sub"></div>` : ""}
+          <div id="chart-host" class="chart-host"></div>
+          ${state.multiChartLayout !== "1" ? `<div id="chart-host-2" class="chart-host chart-host-sub"></div>` : ""}
+          ${state.multiChartLayout === "4" ? `<div id="chart-host-3" class="chart-host chart-host-sub"></div><div id="chart-host-4" class="chart-host chart-host-sub"></div>` : ""}
           </div>
         </div>
       </div>
@@ -2540,7 +2540,7 @@ function renderSpot(): string {
 
   <div class="mining-strip mono" id="mining-strip">
     ${pair.label} · ${formatGh(poolLive!.poolGh)} · ${poolLive!.workers} workers · reward/M ${formatRewardPerM(poolLive!.rewardPerM)} · #${formatNum(poolLive!.blockHeight, 0)}
-  </div>
+    </div>
   <div class="mobile-footer-stack" id="mobile-footer-stack">
     ${renderMobileChartTradeBar()}
     <div class="mobile-panel-wrap mobile-bottom-nav">${renderMobilePanelTabs()}</div>
@@ -2711,10 +2711,10 @@ function wireBookClicks(): void {
   const applyRow = (row: HTMLElement) => {
     const price = Number(row.dataset.bookPrice);
     const side = row.dataset.bookSide === "ask" ? "buy" : "sell";
-    if (!Number.isFinite(price) || price <= 0) return;
+      if (!Number.isFinite(price) || price <= 0) return;
     hapticLight();
-    fillOrderPanelAtPrice(side, uiType === "stop_limit" ? "stop_limit" : "limit", price);
-    toast(`${side === "buy" ? "Buy" : "Sell"} price ← ${formatPrice(price)}`, "info");
+      fillOrderPanelAtPrice(side, uiType === "stop_limit" ? "stop_limit" : "limit", price);
+      toast(`${side === "buy" ? "Buy" : "Sell"} price ← ${formatPrice(price)}`, "info");
   };
   host.addEventListener("click", (ev) => {
     const row = (ev.target as HTMLElement | null)?.closest?.("[data-book-price]") as HTMLElement | null;
@@ -3687,7 +3687,7 @@ function fillOrderPanelAtPrice(
   updatePreviewForSide(side);
   if (isMobileLayout()) setMobileTradeSide(side);
   if (opts?.scroll !== false) {
-    document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  document.getElementById("order-zone")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 }
 
@@ -3723,11 +3723,11 @@ function quickPlaceFromChart(
     runLockedLabOrder(async () => {
       await refreshLabBook(pairId);
       if (!paperGuardsOrWarn(side, kind, amt, price)) return;
-      if (kind === "limit") {
+  if (kind === "limit") {
         const mid = labBookMid(pairId) || (market ? midForPair(market, pairId) : price);
-        const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
-        if (!check.ok) {
-          toast(check.reason, "warn");
+    const check = validateLimitOrder(side, price, mid, uiTif, uiPostOnly);
+    if (!check.ok) {
+      toast(check.reason, "warn");
           fillOrderPanelAtPrice(side, kind, price, pairId);
           return;
         }
@@ -4394,7 +4394,7 @@ function patchLive(): void {
   // Book/tape DOM is heavier — throttle like microTick (avoid full rewire every call).
   throttledBookTapePatch();
   if (chartMounted) {
-    const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
+  const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
     const opts = chartOpts();
     const last = candles[candles.length - 1];
     const scrubbing = isChartPointerBusy();
@@ -4808,7 +4808,7 @@ function submitOrder(side: "buy" | "sell"): void {
 
   if (uiType === "trailing_stop") {
     if (useLabMatching()) {
-      const t = activeTicker();
+    const t = activeTicker();
       runLockedLabOrder(async () => {
         const lab = await placeLabOrder(
           state,
@@ -5949,7 +5949,7 @@ function wireEvents(): void {
       syncChartOverlayEffects();
       applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
     }, () => el.classList.remove("active"));
-  });
+    });
   document.getElementById("btn-screenshot")?.addEventListener("click", () => toastChartScreenshot());
   document.getElementById("btn-fullscreen")?.addEventListener("click", () => {
     toggleChartFullscreen();
@@ -6076,10 +6076,10 @@ function wireBookTabs(): void {
       const sel = ev.target as HTMLElement | null;
       if (!sel || sel.id !== "book-group-select") return;
       state.bookGrouping = Number((sel as HTMLSelectElement).value);
-      saveState(state);
+        saveState(state);
       book.innerHTML = renderBook();
-      wireBookClicks();
-    });
+        wireBookClicks();
+      });
   }
   wireBookClicks();
 }
@@ -6368,7 +6368,7 @@ function microTickPrices(): void {
   const labLive = useLabMatching();
   // Lab → paper: hard reseed so lab tip extremes / path never stick.
   if (wasLabMatching && !labLive) {
-    for (const p of PAIRS) {
+  for (const p of PAIRS) {
       state.candles[p.id] = applyPaperClockToPairCandles({}, p.id);
       prevMids[p.id] = midForPair(market, p.id);
     }
@@ -6408,9 +6408,9 @@ function microTickPrices(): void {
   }
   if (!changed || !chartMounted) return;
 
-  const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-  const last = candles[candles.length - 1];
-  const opts = chartOpts();
+    const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
+    const last = candles[candles.length - 1];
+    const opts = chartOpts();
   const scrubbing = isChartPointerBusy();
   // Tip series.update is deferred inside updateLastCandle while scrubbing.
   // Full replace (gap / new bucket) still paints — rare vs 700ms tip ticks.
@@ -6560,7 +6560,7 @@ async function refresh(): Promise<void> {
         tickers[p.id] = { ...tk, mid: labMid };
       }
     } else {
-      tickers[p.id] = tk;
+    tickers[p.id] = tk;
     }
     const mid = displayMid;
     const prev = prevMids[p.id];
@@ -6615,7 +6615,7 @@ export async function boot(): Promise<void> {
   }
   render();
   try {
-    await refresh();
+  await refresh();
     // One soft retry — first paint / aborted navigations can miss a healthy proxy.
     if (oracleMeta.source !== "live" || poolLive?.status !== "ok") {
       await new Promise((r) => window.setTimeout(r, 400));
@@ -6655,7 +6655,7 @@ export async function boot(): Promise<void> {
   void refreshTradingGuardsFromHealth();
   pollTimer = window.setInterval(async () => {
     try {
-      await refresh();
+    await refresh();
       if (isLabApiEnabled()) void refreshTradingGuardsFromHealth();
     } catch (err) {
       console.warn("[hackme-exchange] poll refresh failed", err);

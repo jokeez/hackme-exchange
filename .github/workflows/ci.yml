@@ -29,3 +29,15 @@ jobs:
           VITE_INTEGRATION_MODE: paper
           VITE_LAB_API: ""
           VITE_EXCHANGE_API_ORIGIN: ""
+      - name: CRYPTO-001 + paper CSP meta guard
+        run: |
+          set -euo pipefail
+          if grep -Rqs '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20' dist/assets/*.js; then
+            echo "FAIL: lab fixture seed in dist" >&2
+            exit 1
+          fi
+          if ! grep -qs "frame-ancestors" dist/index.html; then
+            echo "FAIL: paper CSP meta missing frame-ancestors (hosting MUST also send HTTP CSP header)" >&2
+            exit 1
+          fi
+          echo "OK: paper dist seed-free + meta CSP present"

@@ -4,7 +4,7 @@
  *
  * @vitest-environment happy-dom
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { executeFill } from "./execution";
 import { calcFee, applyFeeToWallet } from "./fees";
 import { applyMarketTrade, loadState, resetDemo, walletEquityFromMarket } from "./store";
@@ -13,6 +13,7 @@ import { INTEGRATION, isLiveMode, isLiveModeBlocked } from "./config/integration
 import { activeSettlement } from "./adapters/settlement";
 import { fetchMarket } from "./market";
 import { fetchPoolLive } from "./pool";
+import { fetchWithTimeout } from "./fetchTimeout";
 
 describe("abuse: trade input validation", () => {
   it("rejects NaN / Infinity / negative price and size", () => {
@@ -160,32 +161,25 @@ describe("security / mode boundaries", () => {
 });
 
 describe("latency: oracle / pool ping", () => {
-  it(
-    "fetchMarket reports live vs fallback honestly (no fake SLA on CORS fail)",
-    async () => {
-      const t0 = performance.now();
-      let source: "live" | "fallback" | "error" = "error";
-      try {
-        const { source: s } = await fetchMarket();
-        source = s;
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.log(`[oracle-latency] network error — ${err instanceof Error ? err.message : "unknown"}`);
-        return;
-      }
-      const ms = performance.now() - t0;
-      expect(["live", "fallback"]).toContain(source);
-      if (source === "live") {
-        expect(ms).toBeLessThan(5000);
-        // eslint-disable-next-line no-console
-        console.log(`[oracle-latency] live ${ms.toFixed(0)}ms`);
-      } else {
-        // eslint-disable-next-line no-console
-        console.log(`[oracle-latency] fallback ${ms.toFixed(0)}ms — not counted as live SLA`);
-      }
-    },
-    25_000,
-  );
+  it("fetchMarket reports fallback honestly when pool is unreachable (no fake live SLA)", async () => {
+    // Stub at fetch layer: hang past timeout → fetchMarket must return fallback, not hang the suite.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise(() => {
+            /* never resolves — exercises hard timeout fence */
+          }),
+      ),
+    );
+    const t0 = performance.now();
+    await expect(fetchWithTimeout("https://example.invalid/hang", {}, 200)).rejects.toThrow(/timeout/);
+    expect(performance.now() - t0).toBeLessThan(2_000);
+
+    const { source } = await fetchMarket();
+    expect(source).toBe("fallback");
+    expect(performance.now() - t0).toBeLessThan(12_000);
+  }, 15_000);
 
   it(
     "pool live probe returns status object or offline (no masked pass)",
@@ -198,6 +192,6 @@ describe("latency: oracle / pool ping", () => {
         console.log(`[pool-live] skipped — ${err instanceof Error ? err.message : "network"}`);
       }
     },
-    25_000,
+    15_000,
   );
 });
