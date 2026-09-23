@@ -37,6 +37,8 @@ Paper build ships `frame-ancestors` in HTML meta **and** ops nginx must send the
 policy as an **HTTP** `Content-Security-Policy` header (`scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
 Browsers ignore `frame-ancestors` in `<meta http-equiv>` — header is the real gate.
 
+**Cloudflare:** if public `curl -sI https://exchange.hackme.tech/` lacks CSP / shows `X-Frame-Options: SAMEORIGIN`, fix Transform Rules — see [HackMe `docs/EXCHANGE_CF_CSP.md`](https://github.com/jokeez/hackme/blob/main/docs/EXCHANGE_CF_CSP.md).
+
 `frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
 
 ## Override SPA origin (private lab dev)
