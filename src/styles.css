@@ -5638,9 +5638,10 @@ html[data-embed="hub"] .ohlc-legend {
 html[data-embed="hub"] .terminal.mobile-stack .col-center .chart-body,
 html[data-embed="hub"] .chart-body {
   display: flex !important;
-  flex: 1 1 0 !important;
+  flex: 1 1 auto !important;
   flex-direction: row;
-  min-height: 0 !important;
+  /* Keep a real plot area in short hub iframes — order form must not crush the chart. */
+  min-height: clamp(220px, 36vh, 480px) !important;
   max-height: none;
   overflow: hidden !important;
   position: relative;
@@ -5663,15 +5664,17 @@ html[data-embed="hub"] .chart-main {
 html[data-embed="hub"] .chart-host {
   flex: 1 1 0 !important;
   height: auto !important;
+  min-height: clamp(200px, 32vh, 420px) !important;
 }
 
 html[data-embed="hub"] .order-zone {
   display: block !important;
   position: relative;
-  z-index: 2;
-  flex: 0 0 auto !important;
-  min-height: 300px !important;
-  max-height: min(42vh, 380px) !important;
+  z-index: 1;
+  flex: 0 1 auto !important;
+  /* Was 300px min — stole the iframe and left chart ~120px (crosshair unusable). */
+  min-height: 0 !important;
+  max-height: min(30vh, 260px) !important;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0.16rem 0.28rem 0.22rem;

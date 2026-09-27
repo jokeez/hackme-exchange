@@ -273,8 +273,9 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain('html[data-embed="hub"] .terminal.mobile-stack');
     expect(css).toContain("grid-template-columns: 200px minmax(0, 1fr) 248px");
     expect(css).toContain('html[data-embed="hub"] .chart-host');
-    expect(css).toMatch(/html\[data-embed="hub"\][\s\S]*?\.chart-body[\s\S]*?min-height:\s*0\s*!important/);
-    expect(css).toMatch(/html\[data-embed="hub"\][\s\S]*?\.order-zone[\s\S]*?max-height:\s*min\(42vh,\s*380px\)/);
+    expect(css).toMatch(/html\[data-embed="hub"\][\s\S]*?\.chart-body[\s\S]*?min-height:\s*clamp\(/);
+    expect(css).toMatch(/html\[data-embed="hub"\][\s\S]*?\.order-zone[\s\S]*?max-height:\s*min\(30vh,\s*260px\)/);
+    expect(css).toMatch(/html\[data-embed="hub"\][\s\S]*?\.order-zone[\s\S]*?min-height:\s*0\s*!important/);
     expect(css).toContain("grid-template-columns: max-content minmax(0, 1fr)");
     expect(css).toContain(".mr-px");
     expect(css).toContain('html[data-embed="hub"] #activity-body');

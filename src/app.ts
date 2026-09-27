@@ -6672,6 +6672,21 @@ export async function boot(): Promise<void> {
       requestAnimationFrame(() => resizeChart());
     });
   });
+  // Hub iframe layout settles after first paint — kick chart resize so free-crosshair
+  // gets a real host box (otherwise plot stays ~100px under a 300px order form).
+  if (isHubEmbed()) {
+    const kickEmbedChart = () => {
+      if (!chartMounted || state.mainView !== "spot") return;
+      resizeChart();
+      resizeSecondaryCharts();
+    };
+    requestAnimationFrame(() => {
+      kickEmbedChart();
+      requestAnimationFrame(kickEmbedChart);
+    });
+    window.setTimeout(kickEmbedChart, 120);
+    window.setTimeout(kickEmbedChart, 450);
+  }
   try {
     window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_PX}px)`).addEventListener("change", onMobileLayoutChange);
   } catch {
