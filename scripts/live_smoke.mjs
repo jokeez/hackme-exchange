@@ -15,16 +15,25 @@ const fail = (msg) => {
 const ok = (msg) => console.log(`[OK] ${msg}`);
 
 async function httpCheck() {
-  const res = await fetch(`${BASE}/`);
-  if (!res.ok) fail(`HTTP ${res.status} for ${BASE}/`);
+  const res = await fetch(`${BASE}/`, { redirect: "manual" });
+  // Prefer headers from a HEAD where available; fetch() already has response headers.
+  const csp = res.headers.get("content-security-policy") || "";
+  const xfo = (res.headers.get("x-frame-options") || "").trim();
+  if (!res.ok && res.status !== 301 && res.status !== 302) fail(`HTTP ${res.status} for ${BASE}/`);
   else ok(`HTTP ${res.status}`);
-  const html = await res.text();
-  if (!/boot-[A-Za-z0-9_]+/.test(html) && !/index-[A-Za-z0-9_]+\.js/.test(html)) {
-    fail("no boot/index asset tag in HTML");
-  } else ok("asset tag present");
-  if (!/Content-Security-Policy/i.test(html) && !res.headers.get("content-security-policy")) {
-    fail("missing CSP");
-  } else ok("CSP present");
+  const html = res.ok ? await res.text() : "";
+  if (res.ok) {
+    if (!/boot-[A-Za-z0-9_]+/.test(html) && !/index-[A-Za-z0-9_]+\.js/.test(html)) {
+      fail("no boot/index asset tag in HTML");
+    } else ok("asset tag present");
+  }
+  // HTTP CSP is the real gate (meta frame-ancestors is ignored by browsers).
+  if (!/frame-ancestors/i.test(csp)) {
+    fail("missing HTTP Content-Security-Policy frame-ancestors (CF/nginx must send header — meta alone is not enough)");
+  } else ok("HTTP CSP frame-ancestors present");
+  if (/^sameorigin$/i.test(xfo)) {
+    fail("X-Frame-Options: SAMEORIGIN blocks hub iframe — remove via CF Transform Rules (see HackMe docs/EXCHANGE_CF_CSP.md)");
+  } else ok("no X-Frame-Options: SAMEORIGIN");
   // common static assets
   for (const path of ["/manifest.webmanifest", "/icons/favicon-32.png", "/theme-boot.js"]) {
     const r = await fetch(`${BASE}${path}`);

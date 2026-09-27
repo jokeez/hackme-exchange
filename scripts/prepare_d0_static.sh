@@ -21,7 +21,6 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 cp -a dist/. "$OUT_DIR/"
 cp -a STATUS.md "$OUT_DIR/STATUS.md"
-cp -a docs/D0_CHECKLIST.md "$OUT_DIR/D0_CHECKLIST.md" 2>/dev/null || true
 
 # Soft check: warn only if live mode is the *default* build (should be paper).
 if grep -Rqs 'VITE_INTEGRATION_MODE","live\|mode:"live"' "$OUT_DIR"/assets/*.js 2>/dev/null; then

@@ -33,11 +33,12 @@ With `?embed=hub` (or nested iframe):
 
 ## CSP
 
-Paper build ships `frame-ancestors` in HTML meta **and** ops nginx must send the same
-policy as an **HTTP** `Content-Security-Policy` header (`scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
+Paper build ships `frame-ancestors` in HTML meta **and** hub ops nginx must send the same
+policy as an **HTTP** `Content-Security-Policy` header — config lives in the **HackMe** repo:
+[`scripts/ops/nginx/hackme-exchange-domain.tls.conf`](https://github.com/jokeez/hackme/blob/main/scripts/ops/nginx/hackme-exchange-domain.tls.conf).
 Browsers ignore `frame-ancestors` in `<meta http-equiv>` — header is the real gate.
 
-**Cloudflare:** if public `curl -sI https://exchange.hackme.tech/` lacks CSP / shows `X-Frame-Options: SAMEORIGIN`, fix Transform Rules — see [HackMe `docs/EXCHANGE_CF_CSP.md`](https://github.com/jokeez/hackme/blob/main/docs/EXCHANGE_CF_CSP.md).
+**Cloudflare:** if public `curl -sI https://exchange.hackme.tech/` lacks CSP / shows `X-Frame-Options: SAMEORIGIN`, fix Transform Rules — see [HackMe `docs/EXCHANGE_CF_CSP.md`](https://github.com/jokeez/hackme/blob/main/docs/EXCHANGE_CF_CSP.md). `npm run smoke:live` asserts HTTP CSP + no `XFO: SAMEORIGIN`.
 
 `frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
 

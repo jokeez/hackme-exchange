@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-09-15 · **Source:** public · **Product:** paper SPA · **Matching / custody:** **HOLD**
+**Updated:** 2026-09-27 · **Source:** public · **Product:** paper SPA · **Matching / custody:** **HOLD**
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
@@ -83,6 +83,5 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
 - [`docs/README.md`](docs/README.md) — index  
 - [`docs/SCOPE.md`](docs/SCOPE.md) · [`docs/ECONOMICS.md`](docs/ECONOMICS.md) · [`docs/SECURITY.md`](docs/SECURITY.md)  
-- [`docs/D0_CHECKLIST.md`](docs/D0_CHECKLIST.md) — historical ship record  
 
 No public withdrawal support until custody ships.
