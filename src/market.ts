@@ -37,8 +37,8 @@ export const DEFAULT_BTC_USD = 67_500;
  */
 export const DEFAULT_REFERENCE_MID = 0.05;
 
-/** Operator reference mid (USDT per 1 SUP) — fair paper desk. */
-export const DEFAULT_SUP_REFERENCE_MID = 0.01;
+/** Operator reference mid (USDT per 1 SUP). Scarce companion (21M vs HMC 100M) → ~×5 HMC soft mid. */
+export const DEFAULT_SUP_REFERENCE_MID = 0.25;
 
 /** Live paper drift band around each reference (±0.35%). */
 export const PAPER_MID_BAND = 0.0035;

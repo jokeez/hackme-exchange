@@ -1,7 +1,7 @@
 import type { Candle, DemoState, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES, normalizeChartOverlays } from "./types";
 import { applyPaperClockToPairCandles, CANDLE_BASE_TF } from "./candles";
-import { DEFAULT_REFERENCE_MID, midForPair } from "./market";
+import { DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID, midForPair } from "./market";
 import { PAIRS } from "./pairs";
 import {
   finiteNonNegCapped,
@@ -276,7 +276,7 @@ export function loadState(): DemoState {
       .slice(0, STORAGE_TRADES_CAP)
       .map((t) => sanitizeImportedTrade(t));
     if (s.equityBaselineV < 2) {
-      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.01, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID, 67_500);
       s.equityBaselineV = 2;
     }
     if (s.stateVersion < STATE_VERSION) {
@@ -291,7 +291,7 @@ export function loadState(): DemoState {
 
 function freshState(): DemoState {
   const s = structuredClone(DEFAULT);
-      s.initialEquityUsdt = walletEquityUsdt(s.wallet, 0.05, 0.01, 67_500);
+      s.initialEquityUsdt = walletEquityUsdt(s.wallet, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID, 67_500);
   s.equityBaselineV = 2;
   return s;
 }

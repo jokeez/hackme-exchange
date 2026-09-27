@@ -12,7 +12,7 @@ import type { MultiPanePairs, MultiPaneTfs } from "./types";
 
 export function sampleMarket(over: Partial<MarketSnapshot> = {}): MarketSnapshot {
   const baseHmcUsdt = 0.05;
-  const baseSupUsdt = 0.01;
+  const baseSupUsdt = 0.25;
   const baseBtcUsd = 67_500;
 
   const base: Omit<MarketSnapshot, "assetUsd"> = {

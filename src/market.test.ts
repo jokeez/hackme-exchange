@@ -34,9 +34,9 @@ describe("buildMarket", () => {
     );
     expect(low.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
     expect(high.hmcUsdt).toBe(DEFAULT_REFERENCE_MID);
-    expect(low.supUsdt).toBe(0.01);
+    expect(low.supUsdt).toBe(DEFAULT_SUP_REFERENCE_MID);
     expect(high.poolGh).toBeGreaterThan(low.poolGh);
-    expect(low.hmcSup).toBeCloseTo(5, 8);
+    expect(low.hmcSup).toBeCloseTo(DEFAULT_REFERENCE_MID / DEFAULT_SUP_REFERENCE_MID, 8);
     expect(low.hmcBtc).toBeCloseTo(low.hmcUsdt / 67_500, 12);
     expect(low.blockHeight).toBe(155000);
   });
@@ -68,11 +68,11 @@ describe("buildMarket", () => {
       ...buildMarket({}, {}, {}, 0.05, 67_500),
       btcUsd: 100_000,
       hmcUsdt: 0.05,
-      supUsdt: 0.01,
+      supUsdt: DEFAULT_SUP_REFERENCE_MID,
     });
     expect(m.hmcBtc).toBeCloseTo(0.05 / 100_000, 14);
-    expect(m.supBtc).toBeCloseTo(0.01 / 100_000, 14);
-    expect(m.hmcSup).toBeCloseTo(5, 12);
+    expect(m.supBtc).toBeCloseTo(DEFAULT_SUP_REFERENCE_MID / 100_000, 14);
+    expect(m.hmcSup).toBeCloseTo(0.05 / DEFAULT_SUP_REFERENCE_MID, 12);
   });
 
   it("fetchMarket stays live when work/stats fails but pool/stats ok", async () => {
@@ -154,7 +154,7 @@ describe("midForPair / tickerFromMarket", () => {
 
   it("resolves each pair mid", () => {
     expect(midForPair(m, "HMC_USDT")).toBe(0.05);
-    expect(midForPair(m, "SUP_USDT")).toBe(0.01);
+    expect(midForPair(m, "SUP_USDT")).toBe(DEFAULT_SUP_REFERENCE_MID);
     expect(midForPair(m, "HMC_SUP")).toBeCloseTo(m.hmcSup, 12);
     expect(midForPair(m, "HMC_BTC")).toBeCloseTo(m.hmcBtc, 14);
     expect(midForPair(m, "SUP_BTC")).toBeCloseTo(m.supBtc, 14);

@@ -86,7 +86,7 @@ Demo paper mode (no lab API) **burns nothing** — fees vanish from the paper wa
 
 ```
 hmcUsdt = liveReferenceMid(oracleAnchor)   // ~0.05 ±0.35% paper drift
-supUsdt = liveReferenceMid(0.01)           // ~0.01 ±0.35%
+supUsdt = liveReferenceMid(0.25)           // ~0.25 ±0.35%
 hmcSup  = hmcUsdt / supUsdt
 hmcBtc  = hmcUsdt / btcUsd                 // btcUsd pinned DEFAULT_BTC_USD = 67500 (shared paper)
 supBtc  = supUsdt / btcUsd
@@ -97,7 +97,7 @@ spreadBps = clamp(8 + 35/poolGh × 6, 8, 36)   // cosmetic book only
 
 Sources (telemetry): `GET …/pool/stats`, `…/work/stats`, `…/api/sup/economics`, BTCUSDT mark.
 
-D0/D1 soft reference: **0.05 USDT/HMC**, **0.01 USDT/SUP**. Lab MM soft mids match the refs (exact); SPA breathes around them.
+D0/D1 soft reference: **0.05 USDT/HMC**, **0.25 USDT/SUP** (scarce companion ≈×5 HMC by 21M/100M cap). Lab MM soft mids match the refs (exact); SPA breathes around them.
 
 ### Demo book (`book.ts`)
 
@@ -149,7 +149,7 @@ Demo **Sync HMC/SUP** merges node balances into paper wallet — **not** custodi
 |-----------|-------|-------|
 | Starting wallet | 10k USDT · 50k HMC · 8k SUP · 0.15 BTC | `store.ts` |
 | Demo top-up buttons | **Removed** — use node Sync / lab custody | Account · Funds |
-| Oracle / reference mid | **0.05** USDT/HMC · **0.01** USDT/SUP | Settings · `DEFAULT_REFERENCE_MID` / `DEFAULT_SUP_REFERENCE_MID` |
+| Oracle / reference mid | **0.05** USDT/HMC · **0.25** USDT/SUP | Settings · `DEFAULT_REFERENCE_MID` / `DEFAULT_SUP_REFERENCE_MID` |
 | BTC ref | 67_500 USD | `market.ts` |
 | Fee discount default | 25% | `DEFAULT_FEE_CONFIG` |
 

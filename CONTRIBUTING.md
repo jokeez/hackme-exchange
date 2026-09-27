@@ -52,4 +52,4 @@ Contributions are under **[AGPL-3.0](LICENSE)** (same as [HackMe](https://github
 
 ## Reference mids
 
-Paper defaults: **0.05** USDT/HMC · **0.01** USDT/SUP. Do not reintroduce GH-based mid multipliers without a product decision.
+Paper defaults: **0.05** USDT/HMC · **0.25** USDT/SUP. Do not reintroduce GH-based mid multipliers without a product decision.

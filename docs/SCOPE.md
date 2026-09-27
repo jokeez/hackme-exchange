@@ -19,7 +19,7 @@
 - Optional **lab** mode against loopback API for contributors
 - Hub iframe embed (`?embed=hub`)
 - Read-only oracle from public `hackme.tech` APIs
-- Operator reference mids (**0.05** HMC · **0.01** SUP); pool GH is telemetry only
+- Operator reference mids (**0.05** HMC · **0.25** SUP); pool GH is telemetry only
 
 ---
 

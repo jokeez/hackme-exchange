@@ -282,7 +282,7 @@ export function renderPoolPage(
           <p class="formula mono">hmc = ref±drift · sup = ref±drift · ×BTC = usdt/btcUsd</p>
           <ul class="pool-list muted small pool-formula-notes">
             <li><span>HMC ref</span><strong>0.05 USDT (locked)</strong></li>
-            <li><span>SUP ref</span><strong>0.01 USDT</strong></li>
+            <li><span>SUP ref</span><strong>0.25 USDT</strong></li>
             <li><span>BTC crosses</span><strong>pinned $67,500 (shared paper)</strong></li>
             <li><span>Spread now</span><strong data-pool-mid="spread">${formatNum(spreadBps, 1)} bps</strong></li>
           </ul>

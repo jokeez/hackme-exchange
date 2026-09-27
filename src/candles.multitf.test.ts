@@ -111,7 +111,7 @@ describe("multi-TF CEX audit (all timeframes)", () => {
   it("all pairs seed without cross-TF tip drift", () => {
     const pairs = ["HMC_USDT", "SUP_USDT", "HMC_SUP", "HMC_BTC", "SUP_BTC"] as const;
     for (const pairId of pairs) {
-      const mid = pairId === "HMC_SUP" ? 5 : pairId.includes("BTC") ? 0.01 / 67_500 : 0.05;
+      const mid = pairId === "HMC_SUP" ? 0.2 : pairId.includes("BTC") ? 0.25 / 67_500 : 0.05;
       const all = seedAllTimeframes(pairId, mid);
       const tip1m = all[CANDLE_BASE_TF]![all[CANDLE_BASE_TF]!.length - 1]!.close;
       for (const tf of COARSER_TFS) {

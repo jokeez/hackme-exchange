@@ -20,7 +20,7 @@
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Matching API](https://img.shields.io/badge/matching_API-HOLD-ff6b9d?style=for-the-badge)](STATUS.md)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
-[![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.01-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
+[![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.25-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
 [![Hub](https://img.shields.io/badge/hackme.tech-hub-ff6b9d?style=for-the-badge)](https://hackme.tech)
 
 <br/>
@@ -64,8 +64,8 @@ Never put admin tokens in `VITE_*` — Vite inlines them into the browser bundle
 | Pair / leg | Reference | Notes |
 |------------|-----------|-------|
 | **HMC/USDT** | **0.05** | Mild paper drift · **not** scaled by pool GH |
-| **SUP/USDT** | **0.01** | Same |
-| **HMC/SUP** | **5.0** | Cross = HMC ÷ SUP |
+| **SUP/USDT** | **0.25** | Same |
+| **HMC/SUP** | **0.2** | Cross = HMC ÷ SUP |
 | **HMC/BTC · SUP/BTC** | `usdt / btcUsd` | Shared paper pin |
 
 Canonical sheet: [`docs/ECONOMICS.md`](docs/ECONOMICS.md).

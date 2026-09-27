@@ -106,7 +106,7 @@ describe("seedCandles", () => {
     const tip = a[a.length - 1]!;
     expect(tip.close).toBeCloseTo(mid, 12);
     // Different pairs keep aligned bucket times
-    const sup = seedCandles("SUP_USDT", "1m", 0.01, 120);
+    const sup = seedCandles("SUP_USDT", "1m", 0.25, 120);
     expect(sup.map((c) => c.time)).toEqual(a.map((c) => c.time));
   });
 });

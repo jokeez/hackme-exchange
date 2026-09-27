@@ -59,8 +59,8 @@ Pool: useful-PoW → [hackme.tech](https://hackme.tech/). No ROI promises.
 | Asset | Reference | Notes |
 |-------|-----------|-------|
 | HMC/USDT | **0.05** | Mild drift; **not** scaled by pool GH |
-| SUP/USDT | **0.01** | Same |
-| HMC/SUP | **5.0** | Cross = HMC÷SUP |
+| SUP/USDT | **0.25** | Same |
+| HMC/SUP | **0.2** | Cross = HMC÷SUP |
 
 See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
