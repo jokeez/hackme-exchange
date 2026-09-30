@@ -16,7 +16,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "chart",
     title: "Spot chart",
-    body: "Tap or click the chart for quick order. Right-click to set a price alert. Pair and timeframe persist.",
+    body: "Tap the chart for quick order. Long-press (or right-click on desktop) to set a price alert. Pair and timeframe persist.",
     selector: "#chart-wrap",
   },
   {

@@ -66,6 +66,9 @@ async function bootPage(browser, vp) {
       localStorage.setItem("hackme.tour.v2.done", "1");
       localStorage.removeItem("hackme-exchange-demo-v5-layout-v3");
       localStorage.removeItem("hackme-ex-layout-v3");
+      // Fresh first-visit path every audit context: enable quickOrder via onboarding.
+      localStorage.removeItem("hackme-ex-onboard-v2");
+      localStorage.removeItem("hackme-ex-mobile-qo-boot-v1");
       if (!sessionStorage.getItem("e2e-demo-reset")) {
         localStorage.removeItem("hackme-exchange-demo-v5");
         sessionStorage.setItem("e2e-demo-reset", "1");

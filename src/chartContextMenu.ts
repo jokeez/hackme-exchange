@@ -89,12 +89,22 @@ export function showChartContextMenu(
   openMenu = menu;
 
   const pad = 8;
+  const navReserve = (() => {
+    try {
+      if (!document.documentElement.classList.contains("mobile-layout")) return 0;
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--mobile-nav-h").trim();
+      const n = parseFloat(raw);
+      return Number.isFinite(n) && n > 0 ? n : 52;
+    } catch {
+      return 0;
+    }
+  })();
   const mw = menu.offsetWidth;
   const mh = menu.offsetHeight;
   let left = clientX;
   let top = clientY;
   if (left + mw > window.innerWidth - pad) left = window.innerWidth - mw - pad;
-  if (top + mh > window.innerHeight - pad) top = window.innerHeight - mh - pad;
+  if (top + mh > window.innerHeight - pad - navReserve) top = window.innerHeight - mh - pad - navReserve;
   if (left < pad) left = pad;
   if (top < pad) top = pad;
   menu.style.left = `${left}px`;

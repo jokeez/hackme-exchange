@@ -2577,7 +2577,7 @@ function render(): void {
   const view = state.mainView;
   syncRouteHash();
   const embed = isHubEmbed();
-  const brandTitle = embed ? "Exchange" : "HackMe Exchange";
+  const brandTitle = embed ? "Exchange" : isMobileLayout() ? "HackMe" : "HackMe Exchange";
   const brandSub = embed ? "hub embed · lab" : `Spot · ${INTEGRATION.mode}`;
   // Live oracle / lab sync used to remount the whole tree every few seconds and
   // collapse <details>, wipe withdraw fields, etc. Capture → restore after wire.
@@ -6614,6 +6614,16 @@ export async function boot(): Promise<void> {
     }
   }
   render();
+  // First-visit prefs must run before oracle await — otherwise settings/UI race with defaults.
+  applyFirstVisitPrefs(state, {
+    saveState: () => saveState(state),
+    normalizeOverlays: normalizeChartOverlays,
+    onQuickOrderEnabled: () => {
+      const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
+      softRefreshChart(candles, { ...chartOpts(), drawingsLocked: state.drawingsLocked });
+    },
+  });
+  scheduleChartTapHint();
   try {
   await refresh();
     // One soft retry — first paint / aborted navigations can miss a healthy proxy.
@@ -6645,11 +6655,6 @@ export async function boot(): Promise<void> {
   }
   maybeShowTour();
   maybeShowTourV2();
-  applyFirstVisitPrefs(state, {
-    saveState: () => saveState(state),
-    normalizeOverlays: normalizeChartOverlays,
-  });
-  scheduleChartTapHint();
   startMarketStreamLoop();
   startLabSessionLoop();
   void refreshTradingGuardsFromHealth();
@@ -6779,8 +6784,8 @@ function maybeShowTour(): void {
     {
       t: "Trade",
       d: labOn
-        ? "Market/Limit hit the lab book when connected; otherwise paper fills. Alerts: right-click chart or the Alerts tab. VIP fees show on the ticker."
-        : "Use Market/Limit on the dual panel. Alerts: right-click chart or the Alerts tab. VIP fees show on the ticker.",
+        ? "Market/Limit hit the lab book when connected; otherwise paper fills. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker."
+        : "Use Market/Limit on the dual panel. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker.",
     },
     {
       t: "Convert & Pool",

@@ -18,6 +18,7 @@ import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
 import { chartInteractionOptions, isMobileLayout } from "./mobile";
+import { bindLongPress, longPressRecentlyFired } from "./longPress";
 
 export type SecondaryMountOpts = {
   pairId: PairId;
@@ -54,6 +55,7 @@ type Slot = {
   orderPriceLines: IPriceLine[];
   previewPriceLine: IPriceLine | null;
   pricePickCleanup: (() => void) | null;
+  longPressCleanup: (() => void) | null;
   freeXh: FreeCrosshairHandle | null;
   freeXhCleanup: (() => void) | null;
 };
@@ -441,6 +443,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     orderPriceLines: [],
     previewPriceLine: null,
     pricePickCleanup: null,
+    longPressCleanup: null,
     freeXh: null,
     freeXhCleanup: null,
   };
@@ -511,17 +514,23 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   shell.addEventListener("pointerdown", focusPane);
 
   if (resolved.onContextMenu) {
+    const fireCtx = (clientX: number, clientY: number) => {
+      focusPane();
+      const price = priceAtClientY(slot, clientY);
+      if (price == null) return;
+      slots.get(key)?.mountOpts.onContextMenu?.(price, clientX, clientY);
+    };
     const ctxHandler = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      focusPane();
-      const price = priceAtClientY(slot, e.clientY);
-      if (price == null) return;
-      slots.get(key)?.mountOpts.onContextMenu?.(price, e.clientX, e.clientY);
+      if (longPressRecentlyFired()) return;
+      fireCtx(e.clientX, e.clientY);
     };
     el.addEventListener("contextmenu", ctxHandler);
     drawCanvas.addEventListener("contextmenu", ctxHandler);
     shell.addEventListener("contextmenu", ctxHandler);
+    slot.longPressCleanup?.();
+    slot.longPressCleanup = bindLongPress([el, drawCanvas, shell], (x, y) => fireCtx(x, y));
   }
 
   slot.pricePickCleanup?.();
@@ -553,6 +562,10 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     if (!pickDown || e.button !== 0) return;
     const down = pickDown;
     pickDown = null;
+    if (longPressRecentlyFired()) {
+      pickDragged = false;
+      return;
+    }
     const opts = slots.get(key)?.mountOpts;
     if (!opts?.onChartPricePick || getActiveDrawTool() !== "cursor") return;
     const dx = e.clientX - down.x;
@@ -731,6 +744,7 @@ function destroySecondarySlot(key: string): void {
   const slot = slots.get(key);
   if (!slot) return;
   slot.pricePickCleanup?.();
+  slot.longPressCleanup?.();
   slot.freeXhCleanup?.();
   slot.cleanup?.();
   clearSlotPriceLines(slot);

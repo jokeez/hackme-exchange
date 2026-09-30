@@ -618,9 +618,11 @@ a:hover { text-decoration: underline; }
     padding: 0.2rem 0.35rem calc(0.35rem + env(safe-area-inset-bottom, 0));
     border-top: 1px solid var(--edge);
   }
-  html.mobile-layout .spot-layout {
+  html.mobile-layout {
     --mobile-nav-h: calc(3.1rem + env(safe-area-inset-bottom, 0));
     --mobile-tradebar-h: 3.35rem;
+  }
+  html.mobile-layout .spot-layout {
     padding-bottom: var(--mobile-nav-h);
   }
   html.mobile-layout[data-mobile-panel="chart"] .spot-layout {
@@ -840,9 +842,11 @@ a:hover { text-decoration: underline; }
     order: 0;
     width: auto;
     flex: 1;
+    min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    overscroll-behavior-x: contain;
   }
   .ex-nav::-webkit-scrollbar { display: none; }
   .nav-btn {
@@ -1008,10 +1012,25 @@ a:hover { text-decoration: underline; }
     touch-action: manipulation;
   }
   .toast-root {
-    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0));
+    /* Sit above bottom nav (+ optional chart trade bar). */
+    bottom: calc(var(--mobile-nav-h, 3.1rem) + 0.55rem);
     right: calc(0.75rem + env(safe-area-inset-right, 0));
     left: auto;
     max-width: min(320px, calc(100vw - 1.5rem));
+  }
+  html.mobile-layout[data-mobile-panel="chart"] .toast-root {
+    bottom: calc(var(--mobile-nav-h, 3.1rem) + var(--mobile-tradebar-h, 3.35rem) + 0.45rem);
+  }
+  html.mobile-layout .modal-backdrop {
+    align-items: end;
+    padding: 0.5rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0));
+  }
+  html.mobile-layout .modal {
+    width: min(420px, 100%);
+    max-height: min(88dvh, calc(100dvh - 1rem - env(safe-area-inset-bottom, 0)));
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 14px;
   }
   .convert-page, .pool-page, .account-page {
     margin: 0.65rem;
@@ -1722,12 +1741,28 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   padding: 0.35rem 0; border-radius: 10px; border: 1px solid var(--line);
   background: rgba(14, 20, 34, 0.97); box-shadow: 0 16px 48px rgba(0,0,0,.55);
   backdrop-filter: blur(12px);
+  max-height: min(70vh, 28rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .chart-ctx-menu .ctx-item {
   display: flex; align-items: center; justify-content: space-between; gap: 1.25rem;
   width: 100%; border: none; background: transparent; color: var(--text);
   padding: 0.45rem 0.85rem; font-size: 0.78rem; text-align: left; cursor: pointer;
   font-family: var(--sans);
+}
+html.mobile-layout .chart-ctx-menu {
+  max-width: min(360px, calc(100vw - 1rem));
+  max-height: min(62dvh, calc(100dvh - var(--mobile-nav-h, 3.1rem) - 1.25rem));
+}
+html.mobile-layout .chart-ctx-menu .ctx-item {
+  min-height: 2.65rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.88rem;
+  touch-action: manipulation;
+}
+html.mobile-layout .chart-ctx-menu .ctx-item kbd {
+  display: none;
 }
 .chart-ctx-menu .ctx-item:hover:not([disabled]) { background: rgba(77,228,255,.1); }
 .chart-ctx-menu .ctx-item[disabled] { opacity: 0.4; cursor: default; }
@@ -1795,7 +1830,8 @@ html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .btn-mobile
   color: var(--text); font-size: 0.8rem;
 }
 html.mobile-layout .market-search {
-  font-size: 16px;
+  font-size: 16px !important;
+  min-height: 2.75rem;
 }
 .lane-tabs {
   display: flex; gap: 0.3rem; padding: 0 0.5rem 0.45rem; flex-wrap: wrap;
@@ -4107,8 +4143,88 @@ a#tv-attr-logo,
     overflow-x: hidden !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
-    padding: 0.45rem 0.55rem 0.65rem;
+    padding: 0.45rem 0.55rem calc(1.1rem + env(safe-area-inset-bottom, 0));
   }
+
+  /* iOS Safari zooms focused inputs under 16px — cover trade/book/convert/account/modals. */
+  html.mobile-layout input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="button"]):not([type="submit"]),
+  html.mobile-layout select,
+  html.mobile-layout textarea,
+  html.mobile-layout .order-zone .inp,
+  html.mobile-layout .order-zone select.inp,
+  html.mobile-layout .order-zone .type-adv-select,
+  html.mobile-layout .book-select,
+  html.mobile-layout .tf-more,
+  html.mobile-layout .type-adv-select,
+  html.mobile-layout .cv-slippage-inp,
+  html.mobile-layout .cqo-amt,
+  html.mobile-layout .convert-page input,
+  html.mobile-layout .convert-page select,
+  html.mobile-layout .account-page input,
+  html.mobile-layout .account-page select {
+    font-size: 16px !important;
+  }
+  html.mobile-layout .type-adv-select {
+    min-height: 2.1rem;
+    height: auto;
+    line-height: 1.25;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+  }
+  html.mobile-layout .book-select,
+  html.mobile-layout .tf-more {
+    min-height: 2.1rem;
+    padding: 0.35rem 0.45rem;
+  }
+  html.mobile-layout .order-zone .fld-label {
+    font-size: 0.68rem;
+  }
+  html.mobile-layout .binance-type-tabs .type {
+    font-size: 0.8rem;
+    padding: 0.45rem 0.55rem;
+  }
+  html.mobile-layout #chart-wrap,
+  html.mobile-layout .chart-shell,
+  html.mobile-layout .chart-host {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Narrow phones: stack book under form (side-by-side is unusably tight). */
+  @media (max-width: 430px) {
+    html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] {
+      flex-direction: column !important;
+    }
+    html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .col-center {
+      order: -1;
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: 58%;
+      border-right: none;
+      border-bottom: 1px solid var(--edge);
+    }
+    html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .col-book {
+      flex: 1 1 auto;
+      max-width: none !important;
+      min-height: 0;
+      max-height: 42%;
+      border-bottom: none;
+    }
+    html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .mobile-trade-tape-wrap {
+      max-height: 28%;
+    }
+  }
+
+  html.mobile-layout .bottom-empty.act-empty {
+    align-items: center;
+    text-align: center;
+    padding: 1.25rem 1rem 1.5rem;
+  }
+  html.mobile-layout .bottom-empty.act-empty .btn-sm {
+    align-self: center;
+  }
+
   .convert-page, .pool-page, .account-page {
     overflow-x: hidden;
     max-width: 100%;
@@ -4852,7 +4968,12 @@ label { display: block; font-size: 0.68rem; color: var(--muted); margin-bottom: 
   justify-content: flex-start;
 }
 html.mobile-layout .bottom-empty.act-empty {
-  padding: 0.65rem 0.75rem 0.75rem;
+  padding: 1.15rem 1rem 1.35rem;
+  align-items: center;
+  text-align: center;
+}
+html.mobile-layout .bottom-empty.act-empty .btn-sm {
+  align-self: center;
 }
 .bottom-empty.act-empty .empty-title { font-size: 0.78rem; }
 .bottom-empty.act-empty .muted.small { font-size: 0.68rem; line-height: 1.35; }
@@ -5259,6 +5380,12 @@ html.mobile-layout .chart-quick-order.sheet .cqo-actions button {
 }
 
 .act-edit-inp { width: 5.5rem; padding: 0.1rem 0.25rem; font-size: 0.78rem; }
+html.mobile-layout .act-edit-inp {
+  font-size: 16px !important;
+  min-height: 2.4rem;
+  width: 6.5rem;
+  padding: 0.35rem 0.45rem;
+}
 .act-edit { padding: 0; border: none; background: transparent; cursor: pointer; }
 .act-edit:hover { text-decoration: underline; }
 

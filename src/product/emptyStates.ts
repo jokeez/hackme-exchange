@@ -1,8 +1,10 @@
 import { escapeHtml } from "../sanitize";
+import { isMobileLayout } from "../mobile";
 
 export type EmptySpotContext = "orders" | "positions" | "history" | "alerts";
 
 export function renderSpotEmptyState(ctx: EmptySpotContext): string {
+  const mobile = typeof window !== "undefined" && isMobileLayout();
   const map: Record<EmptySpotContext, { title: string; body: string; cta?: string; href?: string }> = {
     orders: {
       title: "No open orders",
@@ -22,7 +24,9 @@ export function renderSpotEmptyState(ctx: EmptySpotContext): string {
     },
     alerts: {
       title: "No price alerts",
-      body: "Right-click the chart (or Alert at mid) to arm a paper price alert.",
+      body: mobile
+        ? "Long-press the chart (or Alert at mid) to arm a paper price alert."
+        : "Right-click the chart (or Alert at mid) to arm a paper price alert.",
       cta: "Alert at mid",
     },
   };

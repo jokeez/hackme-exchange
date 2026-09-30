@@ -28,6 +28,7 @@ import type {
 import { CANDLE_SCHEME_PRESETS, DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { bumpTimeSyncPane } from "./chartTimeSync";
 import { chartLocalization, chartPriceFormatter } from "./format";
+import { bindLongPress, longPressRecentlyFired } from "./longPress";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
 import {
@@ -89,6 +90,7 @@ let chartPreviewPrice: number | null = null;
 let chartPreviewSide: "buy" | "sell" | null = null;
 let chartPreviewPaneId = "chart-host";
 let chartPricePickCleanup: (() => void) | null = null;
+let chartLongPressCleanup: (() => void) | null = null;
 let ydayPriceLine: IPriceLine | null = null;
 let lastPriceLine: IPriceLine | null = null;
 let tradeMarks: Trade[] = [];
@@ -2474,19 +2476,26 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
 
   el.addEventListener("pointerdown", () => setFocusedChartPane("chart-host"));
 
+  chartLongPressCleanup?.();
+  chartLongPressCleanup = null;
   if (opts.onContextMenu) {
+    const fireCtx = (clientX: number, clientY: number) => {
+      if (!candleSeries || !hostEl) return;
+      const rect = hostEl.getBoundingClientRect();
+      const y = clientY - rect.top;
+      const price = candleSeries.coordinateToPrice(y);
+      if (price == null || !Number.isFinite(price) || price <= 0) return;
+      opts.onContextMenu?.(price, clientX, clientY);
+    };
     const ctxHandler = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!candleSeries || !hostEl) return;
-      const rect = hostEl.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const price = candleSeries.coordinateToPrice(y);
-      if (price == null || !Number.isFinite(price) || price <= 0) return;
-      opts.onContextMenu?.(price, e.clientX, e.clientY);
+      if (longPressRecentlyFired()) return;
+      fireCtx(e.clientX, e.clientY);
     };
     el.addEventListener("contextmenu", ctxHandler);
     if (drawCanvas) drawCanvas.addEventListener("contextmenu", ctxHandler);
+    chartLongPressCleanup = bindLongPress([el, drawCanvas, hostEl], (x, y) => fireCtx(x, y));
   }
 
   chartPricePickCleanup?.();
@@ -2525,6 +2534,10 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     if (!pickDown || e.button !== 0) return;
     const down = pickDown;
     pickDown = null;
+    if (longPressRecentlyFired()) {
+      pickDragged = false;
+      return;
+    }
     if (!overlaysOn() || activeTool !== "cursor") return;
     const dx = e.clientX - down.x;
     const dy = e.clientY - down.y;
@@ -3749,6 +3762,8 @@ export function destroyChart(): void {
   priceWheelCleanup?.();
   mobilePanCleanup?.();
   chartPricePickCleanup?.();
+  chartLongPressCleanup?.();
+  chartLongPressCleanup = null;
   freeXhCleanup?.();
   pendingLiveTip = null;
   pendingHud = null;

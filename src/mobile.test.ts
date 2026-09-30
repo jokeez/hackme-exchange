@@ -154,6 +154,42 @@ describe("mobile layout helpers", () => {
     expect(css).toMatch(/ind-tabs\.compact[\s\S]*?min-height:\s*2\.75rem/);
   });
 
+  it("stacks trade book under form on narrow phones and bumps order inputs to 16px", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(css).toMatch(/@media \(max-width: 430px\)[\s\S]*?flex-direction: column !important/);
+    expect(css).toMatch(/html\.mobile-layout input:not\(\[type="checkbox"\]\)[\s\S]*?font-size: 16px !important/);
+    expect(css).toContain("html.mobile-layout .book-select");
+    expect(css).toContain("min-width: 0");
+  });
+
+  it("wires chart long-press for mobile price alerts", () => {
+    const chart = readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8");
+    const sec = readFileSync(resolve(process.cwd(), "src/chartSecondary.ts"), "utf8");
+    expect(chart).toContain("bindLongPress");
+    expect(chart).toContain("longPressRecentlyFired");
+    expect(sec).toContain("bindLongPress");
+  });
+
+  it("uses long-press copy for mobile alert empty state", async () => {
+    const orig = window.matchMedia;
+    window.matchMedia = ((q: string) =>
+      ({
+        matches: String(q).includes("1024"),
+        media: q,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      }) as MediaQueryList) as typeof window.matchMedia;
+    const { renderSpotEmptyState } = await import("./product/emptyStates");
+    const html = renderSpotEmptyState("alerts");
+    expect(html).toContain("Long-press");
+    expect(html).not.toContain("Right-click");
+    window.matchMedia = orig;
+  });
+
   it("persists mobile trade side in sessionStorage", () => {
     saveMobileTradeSide("sell");
     expect(loadMobileTradeSide()).toBe("sell");
