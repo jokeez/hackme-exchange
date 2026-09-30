@@ -217,9 +217,11 @@ function renderCashDock(
         labOn
           ? `<details class="lab-ops acct-cash-ops" data-ui="wd-complete-cli">
         <summary>Operator complete withdraw (CLI)</summary>
-        <pre class="mono small lab-cli-hint">curl -H "X-Admin-Token: $EXCHANGE_ADMIN_TOKEN" -H "Content-Type: application/json" \\
+        <pre class="mono small lab-cli-hint"># Dry-run (releases reserve, no debit):
+curl -H "X-Admin-Token: $EXCHANGE_ADMIN_TOKEN" -H "Content-Type: application/json" \\
   -d '{"id":"WD_ID","tx_id":"lab-dry-run-1"}' \\
-  http://127.0.0.1:18443/admin/withdraw/complete</pre>
+  http://127.0.0.1:18443/admin/withdraw/complete
+# Real complete+debit: use a non lab-dry-run tx_id</pre>
       </details>
       ${labFeeWalletSection(opts?.feeWallet)}`
           : ""
