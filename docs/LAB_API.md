@@ -49,4 +49,5 @@ Admin complete / fee sweep stay **CLI + `X-Admin-Token`** — the SPA never embe
 - Paper is default; lab is opt-in.  
 - `isLiveMode()` stays **false** until an explicit public go-live.  
 - Do not ship `VITE_EXCHANGE_API_ORIGIN` in public D0 builds.  
-- Pre-public gates: [API PRE_PUBLIC_CHECKLIST](https://github.com/jokeez/hackme-exchange-api/blob/main/docs/PRE_PUBLIC_CHECKLIST.md)
+- Admin `lab-dry-run-*` withdraw complete **releases** reserve (no debit) — use a real `tx_id` to burn.  
+- Pre-public gates: sibling API repo `docs/PRE_PUBLIC_CHECKLIST.md` (private GitHub — clone locally)

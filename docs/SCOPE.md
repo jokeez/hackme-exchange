@@ -32,6 +32,14 @@
 | Merging SPA into HackMe hub git | Sidecar only |
 | Foreign CEX “listing” claims | Not this product’s paper launch |
 
+### Hostmap (ops)
+
+| Role | Host |
+|------|------|
+| Paper SPA / Caddy | `89.150.41.40` · `exchange.hackme.tech` |
+| Private C2 API (loopback) | **same** `89.150.41.40` — matching OFF |
+| Mining hub / node | `132.243.112.100` — **not** exchange edge |
+
 ---
 
 ## Allowed touchpoints with main HackMe

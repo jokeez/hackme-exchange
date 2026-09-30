@@ -580,14 +580,14 @@ function renderAnnounce(): string {
   const lab = useLabMatching();
   const label = modeChromeLabel();
   const bold = isLiveModeBlocked()
-    ? "Live mode blocked — exchange-api not connected"
+    ? "Live mode blocked — matching API not connected"
     : lab
       ? "Private lab matching — not production custody or real money"
-      : "Paper desk — simulated balances, not real money or a licensed exchange";
+      : "Paper desk — simulated balances · matching API on HOLD";
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
     · ${label}
-    · ${lab ? "lab ledger balances" : "pool-oracle mids · paper balances in localStorage"}
+    · ${lab ? "lab ledger balances" : "reference mids · paper balances in localStorage"}
     ${lab ? LAB_BOOK_BADGE : PAPER_BADGE}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
   </div>`;

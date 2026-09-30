@@ -197,11 +197,14 @@ a:hover { text-decoration: underline; }
 /* Announcement */
 .announce {
   position: relative; z-index: 4;
-  padding: 0.45rem 1.75rem 0.45rem 1rem; font-size: 0.78rem; text-align: center;
-  background: linear-gradient(90deg, rgba(77,228,255,.08), rgba(110,255,173,.06));
-  border-bottom: 1px solid var(--line); color: var(--muted);
+  padding: 0.5rem 1.75rem 0.5rem 1rem; font-size: 0.78rem; text-align: center;
+  background:
+    linear-gradient(90deg, rgba(77,228,255,.1), rgba(110,255,173,.05) 55%, rgba(77,228,255,.04)),
+    rgba(8, 14, 24, 0.55);
+  border-bottom: 1px solid rgba(77, 228, 255, 0.18); color: var(--muted);
+  letter-spacing: 0.01em;
 }
-.announce strong { color: var(--primary); }
+.announce strong { color: var(--primary); font-weight: 650; }
 .announce-x {
   position: absolute; right: 0.55rem; top: 50%; transform: translateY(-50%);
   border: none; background: transparent; color: var(--muted); cursor: pointer;

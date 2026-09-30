@@ -26,7 +26,7 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 - [x] Build with **no** `VITE_HACKME_ADMIN_TOKEN`
 - [x] `VITE_INTEGRATION_MODE=paper` (live remains blocked)
 - [x] Keep `VITE_NODE_ORIGIN` as loopback in public SPA
-- [ ] Prefer HTTP CSP headers in addition to meta (hosting-side)
+- [x] HTTP CSP + security headers on paper origin (Caddy on `89.150.41.40`)
 - [ ] Self-host fonts or add SRI when convenient
 
 ## Principles (when matching/custody land later)
@@ -36,4 +36,4 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 3. Session cookies httpOnly + CSRF + CORS allowlist  
 4. Hot wallet on server / HSM — never SPA-signed privileged chain txs  
 
-See also: [`SCOPE.md`](SCOPE.md) · [`STATUS.md`](../STATUS.md).
+See also: [`SCOPE.md`](SCOPE.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`STATUS.md`](../STATUS.md).

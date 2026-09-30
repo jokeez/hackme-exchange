@@ -19,6 +19,7 @@
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Matching API](https://img.shields.io/badge/matching_API-HOLD-ff6b9d?style=for-the-badge)](STATUS.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/jokeez/hackme-exchange/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/jokeez/hackme-exchange/actions)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
 [![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.25-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
 [![Hub](https://img.shields.io/badge/hackme.tech-hub-ff6b9d?style=for-the-badge)](https://hackme.tech)

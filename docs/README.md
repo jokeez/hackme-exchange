@@ -1,6 +1,6 @@
 # Docs — HackMe Exchange (SPA)
 
-Open-source **paper** Spot UI. Matching API and custody stay off the public edge.
+Open-source **paper** Spot UI. Matching API and custody stay **HOLD** on the public edge.
 
 ## Ecosystem
 
@@ -8,7 +8,9 @@ Open-source **paper** Spot UI. Matching API and custody stay off the public edge
 |---------|------|
 | HackMe hub | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
 | Paper SPA | [exchange.hackme.tech](https://exchange.hackme.tech) · [../README.md](../README.md) |
-| Matching API | Private sibling lab (not required to run paper UI) |
+| Matching API | Private sibling [`hackme-exchange-api`](https://github.com/jokeez/hackme-exchange-api) (lab / VPS loopback only) |
+
+> GitHub repo name: **`jokeez/hackme-exchange`**. Local checkouts are often named `hackme-exchange-demo`.
 
 ## Start here
 
@@ -24,6 +26,7 @@ Open-source **paper** Spot UI. Matching API and custody stay off the public edge
 | Doc | Purpose |
 |-----|---------|
 | [SCOPE.md](SCOPE.md) | Boundaries vs HackMe hub |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Topology · hostmap |
 | [ECONOMICS.md](ECONOMICS.md) | Fees · VIP · reference mids |
 | [SECURITY.md](SECURITY.md) | SPA threat checklist |
 | [HUB_TAB.md](HUB_TAB.md) | Hub `#exchange` embed |

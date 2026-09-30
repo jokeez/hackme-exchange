@@ -16,6 +16,8 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 | `d1-smoke.ts` / `d1-local-dev.sh` | Staging helpers |
 | `node-watch-auth.ts` | Helper for API `d1_node_watch_e2e.sh` (auth + HMC/SUP deposit addrs, no lab mint) |
 
+See also [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) · [`STATUS.md`](../STATUS.md).
+
 **Playwright:** Vite on `:5199` (`npm run dev`) or set `EX_UI_BASE`.
 
 **Live lab custody vitest:** skipped by default — `EX_LIVE_LAB=1 npm test`.
