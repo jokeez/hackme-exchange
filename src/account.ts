@@ -134,7 +134,7 @@ function renderDepositCard(labOn: boolean, labLive: boolean, session: ReturnType
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Open Hub wallet" : "Open node wallet"}</a>
           </div>
           <p id="sync-node-msg" class="muted small sync-msg"></p>
-          <p class="muted small acct-cash-hint">No demo +USDT/+HMC. Enable loopback LAB API for paper mint.</p>`
+          <p class="muted small acct-cash-hint">Paper mode · balances live in this browser. Live deposit (personal <code>HMC-…</code> address → exchange ledger) stays <strong>HOLD</strong> on the public site. Sync pulls HMC/SUP from a local node wallet when one is running.</p>`
           }
         </article>`;
 }
@@ -180,7 +180,7 @@ function renderWithdrawCard(labOn: boolean, labLive: boolean): string {
           </div>
           <p id="lab-wd-msg" class="muted small sync-msg" role="status"></p>
           <ul id="lab-wd-list" class="lab-wd-list mono small" aria-live="polite"><li class="dim">No withdraw requests yet</li></ul>`
-              : `<p class="muted small acct-cash-hint">Withdraw requests need private LAB API (loopback). Use node wallet for on-chain HMC/SUP.</p>
+              : `<p class="muted small acct-cash-hint">Paper mode · on-chain withdraw from the exchange is <strong>HOLD</strong>. Move HMC/SUP via your node / Hub wallet for now.</p>
           <div class="acct-cash-actions">
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" target="_blank" rel="noopener noreferrer">Node wallet →</a>
           </div>`
@@ -205,7 +205,7 @@ function renderCashDock(
           ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
           : labOn
             ? "Connect fixture once, then deposit / withdraw here"
-            : "Sync HMC/SUP from node · LAB unlocks paper mint & withdraw"
+            : "Paper funds · live exchange deposit/withdraw on HOLD · optional node Sync for HMC/SUP"
       }</p>
       <div class="acct-cash-panel" data-cash-panel="deposit" id="acct-cash-deposit">
         ${renderDepositCard(labOn, labLive, session)}

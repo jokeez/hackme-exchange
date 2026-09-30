@@ -246,6 +246,12 @@ describe("account page HTML metrics", () => {
     expect(html.toLowerCase()).toMatch(/usdt|hmc|vip|fee/);
     expect(html).not.toMatch(/\+1000 USDT/);
     expect(html).not.toMatch(/\+5000 HMC/);
+    // Paper public posture: deposit/withdraw clearly HOLD (not fake mint buttons).
+    if (!html.includes("lab-api-card") && !html.includes("btn-lab-mint-hmc")) {
+      expect(html).toMatch(/HOLD/);
+      expect(html).toMatch(/Paper mode/);
+      expect(html).toMatch(/btn-sync-node/);
+    }
     // Lab custody UI (deposit stubs / revoke) only when loopback API is opted in.
     if (html.includes("lab-api-card")) {
       expect(html.toLowerCase()).toMatch(/bridge|revoke|withdraw/);

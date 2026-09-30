@@ -3315,7 +3315,15 @@ html.mobile-layout .market-search {
 }
 .acct-cash-actions .btn-lab,
 .acct-cash-actions .btn-sm { min-height: 2.2rem; }
-.acct-cash-hint { margin: 0; line-height: 1.35; }
+.acct-cash-hint { margin: 0; line-height: 1.45; max-width: 42rem; }
+.acct-cash-hint strong { color: var(--warn, #ffb347); font-weight: 650; }
+.acct-cash-hint code {
+  font-size: 0.85em;
+  padding: 0.05rem 0.28rem;
+  border-radius: 4px;
+  background: rgba(77, 228, 255, 0.08);
+  border: 1px solid rgba(77, 228, 255, 0.18);
+}
 .acct-cash-ops { margin-top: 0.75rem; }
 .acct-cash .lab-fee-wallet { margin-top: 0.85rem; }
 .acct-oracle-mini {
