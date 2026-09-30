@@ -14,6 +14,7 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 | `deploy_paper_origin.sh` | rsync `dist-d0` → CF origin `89.150.41.40:/var/www/exchange` (not hub VPS) |
 | `lab-smoke.ts` | `npm run smoke:lab` — loopback `:18443` |
 | `d1-smoke.ts` / `d1-local-dev.sh` | Staging helpers |
+| `node-watch-auth.ts` | Helper for API `d1_node_watch_e2e.sh` (auth + HMC/SUP deposit addrs, no lab mint) |
 
 **Playwright:** Vite on `:5199` (`npm run dev`) or set `EX_UI_BASE`.
 
