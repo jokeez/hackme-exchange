@@ -2598,7 +2598,7 @@ function render(): void {
     <div class="ex-actions">
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
       <div class="sys-menu-wrap">
-        <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false">⚙ System</button>
+        <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false" aria-label="System menu">⚙ <span class="sys-label">System</span></button>
         <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
         <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
@@ -6244,6 +6244,21 @@ function onKeydown(e: KeyboardEvent): void {
     e.preventDefault();
     if (document.querySelector(".modal-backdrop")) {
       document.querySelector(".modal-backdrop")?.remove();
+      return;
+    }
+    const moreDrop = document.getElementById("chart-more-drop");
+    if (moreDrop && !moreDrop.classList.contains("hidden")) {
+      showChartMoreDrop(false);
+      return;
+    }
+    const typeDrop = document.getElementById("chart-type-drop");
+    if (typeDrop && !typeDrop.classList.contains("hidden")) {
+      showChartTypeDrop(false);
+      return;
+    }
+    const sysDrop = document.getElementById("sys-drop");
+    if (document.body.classList.contains("sys-menu-open") || (sysDrop && !sysDrop.classList.contains("hidden"))) {
+      showSystemDrop(false);
       return;
     }
     if (state.chartFullscreen) {

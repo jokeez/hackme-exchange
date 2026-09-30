@@ -328,6 +328,12 @@ describe("mobile CSS contracts", () => {
     expect(css).toContain("flex-direction: row !important");
     expect(css).toContain('[data-mobile-panel="orders"]');
     expect(css).toContain(".mobile-chart-trade-bar");
+    // Toasts must not steal taps from bottom nav (cascade after base .toast-root).
+    expect(css).toMatch(/\.toast-root\s*\{[\s\S]*?pointer-events:\s*none/);
+    expect(css).toMatch(
+      /@media \(max-width: 1024px\)\s*\{[\s\S]*?html\.mobile-layout \.toast-root\s*\{[\s\S]*?--mobile-nav-h/,
+    );
+    expect(css).toContain("#btn-system-status .sys-label");
   });
 
   it("ships mobile tools sheet, draggable price axis, no panel rails", () => {

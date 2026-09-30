@@ -858,6 +858,13 @@ a:hover { text-decoration: underline; }
   .ex-actions { flex-shrink: 0; }
   .pill-live { display: none; }
   .btn-sm { min-height: 2.5rem; padding: 0.4rem 0.55rem; }
+  /* Free header width for Spot/Convert/Account — System is icon-only on phones. */
+  #btn-system-status .sys-label { display: none; }
+  #btn-system-status {
+    min-width: 2.75rem;
+    padding-inline: 0.55rem;
+    justify-content: center;
+  }
   /* Early mobile hints — definitive overrides live after base .dual-order / .trade-side-toggle. */
   .dual-order { grid-template-columns: 1fr; }
   .trade-side-toggle { display: inline-flex; }
@@ -1011,15 +1018,8 @@ a:hover { text-decoration: underline; }
     min-height: 2.75rem;
     touch-action: manipulation;
   }
-  .toast-root {
-    /* Sit above bottom nav (+ optional chart trade bar). */
-    bottom: calc(var(--mobile-nav-h, 3.1rem) + 0.55rem);
-    right: calc(0.75rem + env(safe-area-inset-right, 0));
-    left: auto;
-    max-width: min(320px, calc(100vw - 1.5rem));
-  }
-  html.mobile-layout[data-mobile-panel="chart"] .toast-root {
-    bottom: calc(var(--mobile-nav-h, 3.1rem) + var(--mobile-tradebar-h, 3.35rem) + 0.45rem);
+  html.mobile-layout .mobile-footer-stack {
+    z-index: 80;
   }
   html.mobile-layout .modal-backdrop {
     align-items: end;
@@ -4164,6 +4164,13 @@ a#tv-attr-logo,
   html.mobile-layout .account-page select {
     font-size: 16px !important;
   }
+  /* Keep checkbox/range computed font ≥16px so audits/UA heuristics stay quiet. */
+  html.mobile-layout input[type="checkbox"],
+  html.mobile-layout input[type="radio"],
+  html.mobile-layout input[type="range"],
+  html.mobile-layout .pct-slider {
+    font-size: 16px !important;
+  }
   html.mobile-layout .type-adv-select {
     min-height: 2.1rem;
     height: auto;
@@ -5070,7 +5077,17 @@ html.mobile-layout .bottom-empty.act-empty .btn-sm {
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 
 /* Toast */
-.toast-root { position: fixed; bottom: 1rem; right: 1rem; z-index: 200; display: flex; flex-direction: column; gap: 0.5rem; }
+.toast-root {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Root must not steal taps from mobile bottom nav / trade bar. */
+  pointer-events: none;
+}
 .toast {
   padding: 0.65rem 1rem; border-radius: 10px; font-size: 0.8rem;
   background: rgba(14, 22, 38, 0.96); border: 1px solid var(--line);
@@ -5080,11 +5097,25 @@ html.mobile-layout .bottom-empty.act-empty .btn-sm {
   max-width: min(360px, calc(100vw - 1.5rem));
   line-height: 1.35;
   word-break: break-word;
+  pointer-events: none;
 }
 .toast.show { transform: translateX(0); }
 .toast-ok { border-color: rgba(110,255,173,.45); background: rgba(8, 28, 22, 0.95); }
 .toast-warn { border-color: rgba(255,179,71,.5); background: rgba(32, 24, 10, 0.95); }
 .toast-info { border-color: rgba(77,228,255,.4); }
+
+/* After base .toast-root — mobile must clear bottom nav (base bottom:1rem otherwise wins). */
+@media (max-width: 1024px) {
+  html.mobile-layout .toast-root {
+    bottom: calc(var(--mobile-nav-h, 3.1rem) + 0.55rem);
+    right: calc(0.75rem + env(safe-area-inset-right, 0));
+    left: auto;
+    max-width: min(320px, calc(100vw - 1.5rem));
+  }
+  html.mobile-layout[data-mobile-panel="chart"] .toast-root {
+    bottom: calc(var(--mobile-nav-h, 3.1rem) + var(--mobile-tradebar-h, 3.35rem) + 0.45rem);
+  }
+}
 
 /* Shortcuts hint */
 .kbd-hint {
