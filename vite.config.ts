@@ -20,8 +20,9 @@ function cspPaperProdPlugin(): Plugin {
         mode === "lab" || labFlag === "1" || labFlag === "true" || !!apiOrigin || !!ctx.server;
       if (wantsLab) return html;
       // Production paper: strip loopback lab connect-src from meta CSP.
+      // Match through frame-ancestors — index.html ends CSP after that, not at object-src.
       const next = html.replace(
-        /content="default-src 'self';[\s\S]*?object-src 'none'"/,
+        /content="default-src 'self';[\s\S]*?frame-ancestors[^"]*"/,
         `content="${paperCsp}"`,
       );
       if (next === html || !next.includes("frame-ancestors")) {

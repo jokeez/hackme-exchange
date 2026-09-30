@@ -57,6 +57,21 @@ describe("paper build CSP (FE-M-CSP)", () => {
     expect(csp).toContain("frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080");
   });
 
+  it("paper CSP rewrite regex matches index.html through frame-ancestors", () => {
+    const src = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf8");
+    const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+    const reMatch = src.match(/html\.replace\(\s*(\/content="default-src[\s\S]*?\/)/);
+    expect(reMatch?.[1], "rewrite regex literal").toBeTruthy();
+    // Extract body between first / and last / of the regex literal.
+    const lit = reMatch![1];
+    const body = lit.slice(1, lit.lastIndexOf("/"));
+    const re = new RegExp(body);
+    expect(html).toMatch(re);
+    expect(html).toContain("frame-ancestors");
+    // Old object-src-only end would miss frame-ancestors suffix — keep that trap dead.
+    expect(src).toContain("frame-ancestors[^\"]*");
+  });
+
   it("dev index.html may keep loopback; paper transform strips it", () => {
     const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
     expect(html).toContain("127.0.0.1:18443");

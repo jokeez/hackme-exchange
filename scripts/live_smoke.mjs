@@ -29,12 +29,11 @@ async function httpCheck() {
   }
   // HTTP CSP is the real gate (meta frame-ancestors is ignored by browsers).
   if (!/frame-ancestors/i.test(csp)) {
-    fail("missing HTTP Content-Security-Policy frame-ancestors (CF/nginx must send header — meta alone is not enough)");
+    fail("missing HTTP Content-Security-Policy frame-ancestors (origin Caddy/nginx must send header — meta alone is not enough)");
   } else ok("HTTP CSP frame-ancestors present");
   if (/^sameorigin$/i.test(xfo)) {
-    fail("X-Frame-Options: SAMEORIGIN blocks hub iframe — remove via CF Transform Rules (see HackMe docs/EXCHANGE_CF_CSP.md)");
-  } else ok("no X-Frame-Options: SAMEORIGIN");
-  // common static assets
+    fail("X-Frame-Options: SAMEORIGIN blocks hub iframe — fix origin Caddy (-X-Frame-Options) or CF Transform Rules (HackMe docs/EXCHANGE_CF_CSP.md)");
+  } else ok("no X-Frame-Options: SAMEORIGIN");  // common static assets
   for (const path of ["/manifest.webmanifest", "/icons/favicon-32.png", "/theme-boot.js"]) {
     const r = await fetch(`${BASE}${path}`);
     if (r.status === 404) fail(`404 ${path}`);
@@ -44,7 +43,18 @@ async function httpCheck() {
 }
 
 async function browserCheck() {
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (err) {
+    const msg = String(err);
+    if (/Executable doesn't exist|playwright install/i.test(msg)) {
+      fail("Playwright browser missing — run: npx playwright install chromium");
+      return;
+    }
+    throw err;
+  }
+  try {
   const page = await browser.newPage();
   const consoleErrs = [];
   const pageErrs = [];
@@ -73,7 +83,7 @@ async function browserCheck() {
 
   // Convert
   await page.goto(`${BASE}/#convert`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.waitForTimeout(800);
+  await page.waitForSelector("#cv-go, .convert-page, .convert-shell", { state: "visible", timeout: 15_000 }).catch(() => null);
   const cv = await page.locator("#cv-go, .convert-page, .convert-shell").first().isVisible().catch(() => false);
   if (!cv) fail("convert desk not visible");
   else ok("convert desk visible");
@@ -83,6 +93,30 @@ async function browserCheck() {
   await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForTimeout(1200);
   ok("mobile viewport loaded");
+
+  // Hub embed framing + chart floor (crosshair needs non-crushed chart).
+  // Fresh page so prior mobile viewport / tour state cannot zero the desk.
+  const embedPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  try {
+    await embedPage.goto(`${BASE}/?embed=hub`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await embedPage.waitForTimeout(2000);
+    const skipEmbed = embedPage.locator("#tour-v2-skip, #tour-skip");
+    if (await skipEmbed.count()) await skipEmbed.first().click({ timeout: 2000 }).catch(() => {});
+    await embedPage.waitForSelector("#chart-host", { state: "visible", timeout: 20_000 });
+    const embedOk = await embedPage.evaluate(() => document.documentElement.dataset.embed === "hub");
+    if (!embedOk) fail("hub embed dataset not set");
+    else ok("hub embed mode active");
+    const chartH = await embedPage.locator("#chart-host").boundingBox();
+    const orderH = await embedPage.locator("#order-zone").boundingBox().catch(() => null);
+    if (!chartH || chartH.height < 180) {
+      fail(`hub embed chart too short (${chartH?.height ?? 0}px)`);
+    } else ok(`hub embed chart height ${Math.round(chartH.height)}px`);
+    if (orderH && orderH.height > 320) {
+      fail(`hub embed order-zone too tall (${Math.round(orderH.height)}px) — crushes chart`);
+    } else if (orderH) ok(`hub embed order-zone ${Math.round(orderH.height)}px`);
+  } finally {
+    await embedPage.close();
+  }
 
   const noise = (s) =>
     /favicon|cloudflare|Failed to load resource: net::ERR_|ResizeObserver|frame-ancestors|Content Security Policy directive/i.test(
@@ -104,8 +138,9 @@ async function browserCheck() {
     console.error("[http]", real404.slice(0, 8));
     fail(`${real404.length} 4xx/5xx response(s)`);
   } else ok("no app 4xx/5xx");
-
-  await browser.close();
+  } finally {
+    await browser.close();
+  }
 }
 
 console.log(`Live smoke → ${BASE}\n`);

@@ -21,7 +21,7 @@ With `?embed=hub` (or nested iframe):
 - Brand shortens to **Exchange · hub embed · lab**
 - Desktop desk forced (Book | Chart+Orders | Markets+Activity) even if iframe &lt; 1024px
 - Chart `min-height: 0` + ResizeObserver so canvas scales (no fold / overlap onto Buy/Sell)
-- Order form taller hub (~300–380px) so Buy/Sell fit without cramped scroll; **no bottom strip** — Orders / Fills / Tape / Alerts live in the right column under Markets (`#activity-body`)
+- Order zone capped (`max-height: min(30vh, 260px)`, `min-height: 0`) so the chart keeps a usable floor for crosshair in short iframes; **no bottom strip** — Orders / Fills / Tape / Alerts live under Markets (`#activity-body`)
 - Account opens with **Deposit & Withdraw** first; Balances / Lab / Activity below
 - Hub hides mining status / coin-context / quick-actions so the desk fills the viewport
 
@@ -33,12 +33,16 @@ With `?embed=hub` (or nested iframe):
 
 ## CSP
 
-Paper build ships `frame-ancestors` in HTML meta **and** hub ops nginx must send the same
-policy as an **HTTP** `Content-Security-Policy` header — config lives in the **HackMe** repo:
-[`scripts/ops/nginx/hackme-exchange-domain.tls.conf`](https://github.com/jokeez/hackme/blob/main/scripts/ops/nginx/hackme-exchange-domain.tls.conf).
+Paper build ships `frame-ancestors` in HTML meta **and** origin must send the same
+policy as an **HTTP** `Content-Security-Policy` header. Live origin is **Caddy** on
+`89.150.41.40` — see HackMe [`scripts/ops/caddy/exchange.Caddyfile`](https://github.com/jokeez/hackme/blob/main/scripts/ops/caddy/exchange.Caddyfile)
+(legacy nginx sketch: `scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
 Browsers ignore `frame-ancestors` in `<meta http-equiv>` — header is the real gate.
 
-**Cloudflare:** if public `curl -sI https://exchange.hackme.tech/` lacks CSP / shows `X-Frame-Options: SAMEORIGIN`, fix Transform Rules — see [HackMe `docs/EXCHANGE_CF_CSP.md`](https://github.com/jokeez/hackme/blob/main/docs/EXCHANGE_CF_CSP.md). `npm run smoke:live` asserts HTTP CSP + no `XFO: SAMEORIGIN`.
+**Framing check:** `curl -sI https://exchange.hackme.tech/` must show CSP with
+`frame-ancestors` including `hackme.tech` and must **not** send `X-Frame-Options: SAMEORIGIN`.
+If edge regresses, see [HackMe `docs/EXCHANGE_CF_CSP.md`](https://github.com/jokeez/hackme/blob/main/docs/EXCHANGE_CF_CSP.md).
+`npm run smoke:live` asserts HTTP CSP + no `XFO: SAMEORIGIN`.
 
 `frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
 
