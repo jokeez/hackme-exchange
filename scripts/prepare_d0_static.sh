@@ -23,11 +23,12 @@ cp -a dist/. "$OUT_DIR/"
 cp -a STATUS.md "$OUT_DIR/STATUS.md"
 
 # Soft check: warn only if live mode is the *default* build (should be paper).
-if grep -Rqs 'VITE_INTEGRATION_MODE","live\|mode:"live"' "$OUT_DIR"/assets/*.js 2>/dev/null; then
+# cf_chunk_assets splits the bundle into *.part — scan js + part + boot loaders.
+if grep -RqsE 'VITE_INTEGRATION_MODE","live|mode:"live"' "$OUT_DIR"/assets --include='*.js' --include='*.part' 2>/dev/null; then
   echo "[d0-static] WARN: possible live default in bundle — inspect" >&2
 fi
 # CRYPTO-001: known DEMO/LAB fixture seed must not ship in paper release dist.
-if grep -Rqs '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20' "$OUT_DIR"/assets/*.js 2>/dev/null; then
+if grep -Rqs '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20' "$OUT_DIR"/assets --include='*.js' --include='*.part' 2>/dev/null; then
   echo "[d0-static] FAIL: lab fixture Ed25519 seed present in dist — build without VITE_LAB_API / VITE_EXCHANGE_API_ORIGIN" >&2
   exit 1
 fi
