@@ -11,10 +11,16 @@ Topology sketch for the **open-source paper desk**. Matching / custody stay off 
              ▼                                     │
 ┌────────────────────────────┐                     │
 │  exchange.hackme.tech      │  CF → 89.150.41.40  │
-│  static paper SPA (Caddy)  │  no matching proxy  │
+│  static paper SPA (Caddy)  │  /api → 404         │
 └────────────────────────────┘                     │
                                                    │
-Private (SSH / loopback only) — HOLD               │
+Public desk HOLD (matching OFF)                    │
+┌────────────────────────────┐                     │
+│  exchange-api.hackme.tech  │  CF → Caddy →       │
+│  (api.exchange fallback)   │  127.0.0.1:18444    │
+└────────────────────────────┘                     │
+                                                   │
+Private C2 (SSH / loopback) — same VPS             │
 ┌────────────────────────────┐                     │
 │  89.150.41.40              │                     │
 │  exchange-api staging      │  127.0.0.1:18444    │

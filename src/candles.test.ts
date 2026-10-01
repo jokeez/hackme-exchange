@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   barCountForTf,
   candlesAreContiguous,
@@ -89,25 +89,33 @@ describe("seedCandles", () => {
   });
 
   it("is deterministic for the same pair/tf/time/mid", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
-    const a = seedCandles("HMC_USDT", "15m", 0.00043, 20);
-    const b = seedCandles("HMC_USDT", "15m", 0.00043, 20);
-    expect(b).toEqual(a);
+    try {
+      const a = seedCandles("HMC_USDT", "15m", 0.00043, 20);
+      const b = seedCandles("HMC_USDT", "15m", 0.00043, 20);
+      expect(b).toEqual(a);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("matches across fresh clients at the same wall clock (no local fork)", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-16T12:00:00.000Z"));
-    const mid = 0.05;
-    const a = seedCandles("HMC_USDT", "1m", mid, 120);
-    const b = seedCandles("HMC_USDT", "1m", mid, 120);
-    expect(b).toEqual(a);
-    const tip = a[a.length - 1]!;
-    expect(tip.close).toBeCloseTo(mid, 12);
-    // Different pairs keep aligned bucket times
-    const sup = seedCandles("SUP_USDT", "1m", 0.25, 120);
-    expect(sup.map((c) => c.time)).toEqual(a.map((c) => c.time));
+    try {
+      const mid = 0.05;
+      const a = seedCandles("HMC_USDT", "1m", mid, 120);
+      const b = seedCandles("HMC_USDT", "1m", mid, 120);
+      expect(b).toEqual(a);
+      const tip = a[a.length - 1]!;
+      expect(tip.close).toBeCloseTo(mid, 12);
+      // Different pairs keep aligned bucket times
+      const sup = seedCandles("SUP_USDT", "1m", 0.25, 120);
+      expect(sup.map((c) => c.time)).toEqual(a.map((c) => c.time));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -123,12 +131,16 @@ describe("prependOlderCandles", () => {
   });
 
   it("is deterministic for the same existing history", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
-    const base = seedCandles("HMC_USDT", "15m", 0.0004, 10);
-    const first = prependOlderCandles(base, "HMC_USDT", "15m", 5);
-    const second = prependOlderCandles(base, "HMC_USDT", "15m", 5);
-    expect(second).toEqual(first);
+    try {
+      const base = seedCandles("HMC_USDT", "15m", 0.0004, 10);
+      const first = prependOlderCandles(base, "HMC_USDT", "15m", 5);
+      const second = prependOlderCandles(base, "HMC_USDT", "15m", 5);
+      expect(second).toEqual(first);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("respects MAX_CANDLES cap", () => {
@@ -179,22 +191,25 @@ describe("upsertTick", () => {
   });
 
   it("keeps open continuous with previous close on oracle jump", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"));
-    const seeded = seedCandles("HMC_USDT", "1m", 0.05, 8);
-    const prev = seeded[seeded.length - 1]!.close;
-    let series = seeded;
-    const seededLen = seeded.length;
-    let mid = prev;
-    for (const step of [0.92, 0.9, 0.88]) {
-      mid = prev * step;
-      series = upsertTick(series, "1m", mid, "HMC_USDT", series[series.length - 1]!.close);
+    try {
+      const seeded = seedCandles("HMC_USDT", "1m", 0.05, 8);
+      const prev = seeded[seeded.length - 1]!.close;
+      let series = seeded;
+      const seededLen = seeded.length;
+      let mid = prev;
+      for (const step of [0.92, 0.9, 0.88]) {
+        mid = prev * step;
+        series = upsertTick(series, "1m", mid, "HMC_USDT", series[series.length - 1]!.close);
+      }
+      // Continuity for bars introduced / extended by upsert (seed path is paper-clock open≠tip mid).
+      for (let i = Math.max(1, seededLen - 1); i < series.length; i++) {
+        expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 6);
+      }
+    } finally {
+      vi.useRealTimers();
     }
-    // Continuity for bars introduced / extended by upsert (seed path is paper-clock open≠tip mid).
-    for (let i = Math.max(1, seededLen - 1); i < series.length; i++) {
-      expect(series[i]!.open).toBeCloseTo(series[i - 1]!.close, 6);
-    }
-    vi.useRealTimers();
   });
 });
 
@@ -336,8 +351,4 @@ describe("1D contiguity / gap abuse", () => {
     expect(candlesAreContiguous(healed, "1m")).toBe(true);
     expect(healed[healed.length - 1].time).toBe(end);
   });
-});
-
-afterEach(() => {
-  vi.useRealTimers();
 });

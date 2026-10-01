@@ -27,7 +27,8 @@
 
 | Item | Status |
 |------|--------|
-| Public matching API | **HOLD** |
+| Public matching (book/orders live) | **HOLD** |
+| Public desk hostname (health only) | Live under HOLD — `exchange-api.hackme.tech` |
 | Real USDT / BTC custody in the browser | Never |
 | Merging SPA into HackMe hub git | Sidecar only |
 | Foreign CEX “listing” claims | Not this product’s paper launch |
@@ -37,6 +38,7 @@
 | Role | Host |
 |------|------|
 | Paper SPA / Caddy | `89.150.41.40` · `exchange.hackme.tech` |
+| Public desk API HOLD | `exchange-api.hackme.tech` (CF) · `api.exchange.hackme.tech` fallback |
 | Private C2 API (loopback) | **same** `89.150.41.40` — matching OFF |
 | Mining hub / node | `132.243.112.100` — **not** exchange edge |
 

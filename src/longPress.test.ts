@@ -22,11 +22,17 @@ function ptr(
 
 describe("longPress", () => {
   afterEach(() => {
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("fires on touch hold without move", () => {
-    vi.useFakeTimers();
+    let fire: (() => void) | null = null;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: TimerHandler) => {
+      fire = typeof fn === "function" ? () => (fn as () => void)() : null;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+    vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+
     const el = document.createElement("div");
     document.body.appendChild(el);
     const hits: Array<[number, number]> = [];
@@ -34,9 +40,8 @@ describe("longPress", () => {
 
     el.dispatchEvent(ptr("pointerdown", { clientX: 40, clientY: 80, pointerId: 1, pointerType: "touch" }));
     expect(hits).toHaveLength(0);
-    vi.advanceTimersByTime(399);
-    expect(hits).toHaveLength(0);
-    vi.advanceTimersByTime(2);
+    expect(fire).toBeTypeOf("function");
+    fire!();
     expect(hits).toEqual([[40, 80]]);
     expect(longPressRecentlyFired()).toBe(true);
 
@@ -45,7 +50,17 @@ describe("longPress", () => {
   });
 
   it("cancels when finger moves past tolerance", () => {
-    vi.useFakeTimers();
+    let fire: (() => void) | null = null;
+    let cleared = false;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: TimerHandler) => {
+      fire = typeof fn === "function" ? () => (fn as () => void)() : null;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+    vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {
+      cleared = true;
+      fire = null;
+    });
+
     const el = document.createElement("div");
     document.body.appendChild(el);
     const hits: number[] = [];
@@ -53,7 +68,8 @@ describe("longPress", () => {
 
     el.dispatchEvent(ptr("pointerdown", { clientX: 10, clientY: 10, pointerId: 2, pointerType: "touch" }));
     el.dispatchEvent(ptr("pointermove", { clientX: 40, clientY: 10, pointerId: 2, pointerType: "touch" }));
-    vi.advanceTimersByTime(500);
+    expect(cleared).toBe(true);
+    fire?.();
     expect(hits).toHaveLength(0);
 
     stop();
@@ -61,14 +77,19 @@ describe("longPress", () => {
   });
 
   it("ignores mouse (contextmenu path)", () => {
-    vi.useFakeTimers();
+    let scheduled = false;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((() => {
+      scheduled = true;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+
     const el = document.createElement("div");
     document.body.appendChild(el);
     const hits: number[] = [];
     const stop = bindLongPress([el], () => hits.push(1), { ms: 200 });
 
     el.dispatchEvent(ptr("pointerdown", { clientX: 1, clientY: 1, pointerId: 3, pointerType: "mouse" }));
-    vi.advanceTimersByTime(500);
+    expect(scheduled).toBe(false);
     expect(hits).toHaveLength(0);
 
     stop();

@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-09-30 · **Source:** public · **Product:** paper SPA · **Matching / custody:** **HOLD**
+**Updated:** 2026-10-01 · **Source:** public · **Product:** paper SPA · **Matching / custody:** **HOLD**
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
@@ -22,9 +22,10 @@
 | **This repo (source)** | Open (AGPL) — paper Spot SPA |
 | **Paper site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) |
 | **Private matching (C2)** | Loopback on same origin VPS — **HOLD** (matching / deposit / withdraw OFF) |
-| **Public matching API** | **HOLD** — no DNS → matching |
+| **Public desk API** | [exchange-api.hackme.tech](https://exchange-api.hackme.tech/health) — **HOLD** (`matching: disabled`; deposit/withdraw off) |
+| **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO |
 | **Real custody / withdrawals** | **HOLD** (none in the browser) |
-| **Live mode in SPA** | **Blocked** |
+| **Live mode in SPA** | **Blocked** (paper only; no `VITE_EXCHANGE_API_ORIGIN` in D0) |
 
 Balances are simulated (`localStorage`). Not financial advice. Not a licensed exchange.
 
@@ -34,7 +35,7 @@ Balances are simulated (`localStorage`). Not financial advice. Not a licensed ex
 |---------|------|
 | **HackMe hub** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
 | **Paper SPA** | [exchange.hackme.tech](https://exchange.hackme.tech) · this repo (`jokeez/hackme-exchange`) |
-| **Matching API** | Private sibling lab — VPS loopback / SSH tunnel only |
+| **Matching API** | Private sibling — loopback C2 + public desk HOLD (`exchange-api`) |
 
 ## Messaging
 
@@ -80,7 +81,8 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 |------|--------|
 | **D0 Paper** | Static SPA, PAPER only — **shipped** |
 | **D1 private** | Loopback staging rails — **shipped under HOLD** |
-| **Public matching** | After PRE_PUBLIC + GO |
+| **Public desk (no matching)** | `exchange-api.hackme.tech` — **shipped under HOLD** |
+| **Public matching** | After PRE_PUBLIC + explicit GO |
 | **Custody** | Sidecar + caps — after matching GO |
 
 ## Docs

@@ -2,7 +2,7 @@
  * Lab cancel must return immediately after DELETE — never wait on full ledger sync.
  * @vitest-environment happy-dom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadState } from "../store";
 
 vi.mock("./exchangeApi", async (importOriginal) => {
@@ -10,14 +10,9 @@ vi.mock("./exchangeApi", async (importOriginal) => {
   return {
     ...actual,
     cancelExchangeOrder: vi.fn(),
-    fetchExchangeBalances: vi.fn(async () => {
-      await new Promise((r) => setTimeout(r, 50_000));
-      return { ok: false, status: 0, code: "timeout", message: "hung" };
-    }),
-    listExchangeOrders: vi.fn(async () => {
-      await new Promise((r) => setTimeout(r, 50_000));
-      return { ok: false, status: 0, code: "timeout", message: "hung" };
-    }),
+    // Never-resolving — cancel must not await these.
+    fetchExchangeBalances: vi.fn(() => new Promise(() => {})),
+    listExchangeOrders: vi.fn(() => new Promise(() => {})),
     listExchangeFills: vi.fn(async () => ({ ok: true, fills: [] })),
     fetchExchangeBook: vi.fn(async () => ({ ok: true, bids: [], asks: [] })),
     getLabSessionMeta: vi.fn(() => ({
@@ -37,11 +32,7 @@ vi.mock("../config/integration", async (importOriginal) => {
 });
 
 describe("cancelLabOrder", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -78,9 +69,7 @@ describe("cancelLabOrder", () => {
       },
     ];
 
-    const p = cancelLabOrder(state, "lab-ord-1");
-    await vi.advanceTimersByTimeAsync(10);
-    const res = await p;
+    const res = await cancelLabOrder(state, "lab-ord-1");
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.syncPending).toBe(true);
     expect(state.orders.find((o) => o.id === "lab-ord-1")?.status).toBe("cancelled");
