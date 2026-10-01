@@ -11,7 +11,8 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 | `g10_visual_pass.mjs` | `npm run test:e2e` |
 | `mega_ui_audit.mjs` | `npm run test:e2e:full` |
 | `live_smoke.mjs` | `npm run smoke:live` — production paper site + `/desk-api/health` HOLD |
-| `desk-connect-smoke.ts` | `npm run smoke:desk` — Connect + book 503; `EX_MATCHING_GO=1` flips book expect to 200 |
+| `desk-connect-smoke.ts` | `npm run smoke:desk` — Connect + book 503 + place HOLD + CSRF; `EX_MATCHING_GO=1` flips book expect to 200 |
+| `matching_go_security_probe.ts` | `npm run smoke:matching-sec` — CSRF/CORS/cookies/admin/metrics HOLD matrix |
 | `deploy_paper_origin.sh` | rsync `dist-d0` → CF origin `89.150.41.40:/var/www/exchange` (not hub VPS) |
 | `lab-smoke.ts` | `npm run smoke:lab` — loopback `:18443` |
 | `d1-smoke.ts` / `d1-local-dev.sh` | Staging helpers |
@@ -24,7 +25,8 @@ Matching GO ops checklist: [`docs/MATCHING_GO_CHECKLIST.md`](../docs/MATCHING_GO
 | Command | Expect |
 |---------|--------|
 | `npm run smoke:live` | Public paper origin + CSP; `/desk-api/health` matching HOLD |
-| `npm run smoke:desk` | Connect + book **503** (HOLD) |
+| `npm run smoke:desk` | Connect + book **503** + place HOLD + CSRF (HOLD) |
+| `npm run smoke:matching-sec` | Full HOLD security matrix (CSRF/CORS/cookies/admin) |
 | `EX_MATCHING_GO=1 npm run smoke:desk` | Book **200** only after explicit Matching GO |
 | `npm run smoke:lab` | Loopback `:18443` only — never against public edge |
 

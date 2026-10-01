@@ -66,6 +66,17 @@ Run against **staging first**, then public desk after GO:
 
 Automate: extend `scripts/desk-connect-smoke.ts` behind `EX_MATCHING_GO=1` (default still asserts HOLD).
 
+**HOLD security probe (run anytime against public desk):**
+
+```bash
+npm run smoke:matching-sec
+# or: npx tsx scripts/matching_go_security_probe.ts
+```
+
+Asserts: health HOLD, book 503 + `trading_disabled`, place 503, CSRF on logout, cookie HttpOnly/Secure/SameSite=Strict, no evil CORS ACAO, admin closed, metrics/openapi closed, post-logout unauthorized.
+
+API sibling: `hackme-exchange-api/scripts/matching_go_hold_probe.sh` · `ops_drill_matching_rollback.sh`.
+
 ---
 
 ## 4. Caps & economics
@@ -113,3 +124,18 @@ Automate: extend `scripts/desk-connect-smoke.ts` behind `EX_MATCHING_GO=1` (defa
 
 **GO command (ops only):** enable matching on desk API → verify §3 → announce.  
 **ABORT:** disable matching flag immediately; leave deposit/withdraw off.
+
+---
+
+## Prep evidence (HOLD — not a GO)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Observability & rollback | Partial | `ops_drill_matching_rollback.sh` hold-only green; live drill = staging only |
+| Caps & economics | Partial | `maxOpenPerAccount=100`; MinNotional/PriceBandBps via config — soft-launch caps still need product numbers |
+| `npm run smoke:desk` | Automated | book 503 + place 503 + CSRF logout |
+| `npm run smoke:matching-sec` | Automated | CSRF/CORS/cookies/admin/metrics matrix |
+| API `go test -run MatchingHold` | Automated | `trading_disabled` unit |
+| API `matching_go_hold_probe.sh` | Automated | Public desk HOLD |
+
+**Matching remains HOLD** — no public `EXCHANGE_TRADING_ENABLED=1` until §7 sign-off.

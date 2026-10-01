@@ -90,12 +90,44 @@ async function main() {
     console.log("PASS  book 503 HOLD");
   }
 
+  // Place must stay blocked while HOLD (even with valid session+CSRF).
+  if (!matchingGo) {
+    const placeRes = await fetch(`${BASE}/orders`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Origin: "https://exchange.hackme.tech",
+        Cookie: cookieHeader(),
+        "X-CSRF-Token": ver.csrf_token!,
+      },
+      body: JSON.stringify({
+        pair: "HMC/USDT",
+        side: "buy",
+        type: "limit",
+        price: 5_000_000,
+        qty: 100_000_000,
+      }),
+    });
+    if (placeRes.status !== 503) throw new Error(`place HOLD want 503 got ${placeRes.status}`);
+    console.log("PASS  place 503 HOLD");
+
+    const loNoCsrf = await fetch(`${BASE}/auth/logout`, {
+      method: "POST",
+      headers: {
+        Origin: "https://exchange.hackme.tech",
+        Cookie: cookieHeader(),
+      },
+    });
+    if (loNoCsrf.status !== 403) throw new Error(`logout without CSRF want 403 got ${loNoCsrf.status}`);
+    console.log("PASS  logout CSRF required");
+  }
+
   const loRes = await fetch(`${BASE}/auth/logout`, {
     method: "POST",
     headers: {
       Origin: "https://exchange.hackme.tech",
       Cookie: cookieHeader(),
-      "X-CSRF-Token": ver.csrf_token,
+      "X-CSRF-Token": ver.csrf_token!,
     },
   });
   if (!loRes.ok) throw new Error(`logout ${loRes.status}`);
@@ -105,7 +137,7 @@ async function main() {
     headers: {
       Origin: "https://exchange.hackme.tech",
       Cookie: cookieHeader(),
-      "X-CSRF-Token": ver.csrf_token,
+      "X-CSRF-Token": ver.csrf_token!,
     },
   });
   if (balAfter.status === 200) throw new Error("balances still authorized after logout");
