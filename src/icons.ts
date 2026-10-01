@@ -51,6 +51,18 @@ export const Ico = {
   search: () => svg(`<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`),
   swap: () => svg(`<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>`),
   more: () => svg(`<circle cx="12" cy="5" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.25" fill="currentColor" stroke="none"/>`),
+  wallet: () =>
+    svg(
+      `<path d="M20 7H5a2 2 0 0 1 0-4h14v4"/><path d="M4 5v12a2 2 0 0 0 2 2h14v-6H10a2 2 0 0 1 0-4h10V7"/><circle cx="16" cy="13" r="1" fill="currentColor" stroke="none"/>`,
+    ),
+  palette: () =>
+    svg(
+      `<circle cx="13.5" cy="6.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.7-.7 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.7 1.7-1.7H16c3.3 0 6-2.7 6-6 0-5.5-4.5-10-10-10z"/>`,
+    ),
+  database: () =>
+    svg(
+      `<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>`,
+    ),
 } as const;
 
 /** Bump when coin art changes — busts CDN cache on exchange.hackme.tech. */

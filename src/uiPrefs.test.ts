@@ -7,10 +7,12 @@ import {
   loadAcctTab,
   loadActivityTab,
   loadConvertDesk,
+  loadSettingsTab,
   saveAcctHideSmall,
   saveAcctTab,
   saveActivityTab,
   saveConvertDesk,
+  saveSettingsTab,
 } from "./uiPrefs";
 
 describe("uiPrefs", () => {
@@ -35,5 +37,13 @@ describe("uiPrefs", () => {
     expect(loadActivityTab()).toBe("tape");
     expect(loadAcctTab()).toBe("account");
     expect(loadAcctHideSmall()).toBe(true);
+  });
+
+  it("persists settings tab", () => {
+    expect(loadSettingsTab()).toBe("layout");
+    saveSettingsTab("wallet");
+    expect(loadSettingsTab()).toBe("wallet");
+    saveSettingsTab("theme");
+    expect(loadSettingsTab()).toBe("theme");
   });
 });

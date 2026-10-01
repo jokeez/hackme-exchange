@@ -120,11 +120,13 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const matching = formatDeskMatchingLabel(edge?.matching);
   const dep = !!edge?.depositEnabled;
   const wd = !!edge?.withdrawEnabled;
-  return `<div class="settings-hold-row acct-desk-hold" aria-live="polite">
+  return `<div class="settings-edge-card acct-desk-edge" aria-live="polite">
+        <div class="settings-edge-top"><strong>Edge status</strong></div>
+        <div class="settings-hold-row acct-desk-hold">
         <span class="settings-hold-pill" data-on="${isDeskMatchingLive(edge?.matching) ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
         <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${dep ? "on" : "HOLD"}</span>
         <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${wd ? "on" : "HOLD"}</span>
-      </div>`;
+      </div></div>`;
 }
 
 function renderDesk2faHoldNotice(): string {

@@ -2,6 +2,8 @@ import type { ChartOverlaySettings, DemoState, ThemeId } from "./types";
 import { type LayoutPrefs, type LayoutPresetId } from "./layoutPrefs";
 import { trapModalFocus } from "./oracleSettings";
 import { escapeHtml } from "./sanitize";
+import { Ico } from "./icons";
+import { loadSettingsTab, saveSettingsTab, type SettingsTabId } from "./uiPrefs";
 
 export type SettingsModalActions = {
   onSaveOracle: (anchor: number) => void;
@@ -99,146 +101,275 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   });
 }
 
+function switchRow(id: string, title: string, hint: string, checked: boolean, disabled = false): string {
+  return `<label class="settings-switch-row${disabled ? " is-disabled" : ""}">
+    <span class="settings-switch-meta">
+      <strong>${title}</strong>
+      <span class="muted small">${hint}</span>
+    </span>
+    <span class="settings-switch">
+      <input type="checkbox" id="${id}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+      <i aria-hidden="true"></i>
+    </span>
+  </label>`;
+}
+
+function railBtn(tab: SettingsTabId, label: string, icon: string, active: boolean): string {
+  return `<button type="button" class="settings-rail-btn${active ? " active" : ""}" data-tab="${tab}" role="tab" aria-selected="${active ? "true" : "false"}">${icon}<span>${label}</span></button>`;
+}
+
 export function renderUnifiedSettingsModal(
   state: DemoState,
   layout: LayoutPrefs,
   theme: ThemeId,
   wallet?: SettingsWalletChrome,
+  initialTab: SettingsTabId = "layout",
 ): string {
   const anchor = Number.isFinite(state.oracleAnchor) && state.oracleAnchor > 0 ? state.oracleAnchor : 0.05;
   const deskOn = !!wallet?.deskConnect;
   const session = wallet?.deskSessionLabel || "not connected";
-  return `<div class="modal glass modal-wide modal-tabs settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <div class="modal-head"><h3 id="settings-title">Settings</h3><button type="button" class="modal-x" aria-label="Close">×</button></div>
-    <nav class="modal-nav settings-nav" role="tablist" aria-label="Settings sections">
-      <button type="button" class="active" data-tab="layout" role="tab" aria-selected="true">Layout</button>
-      <button type="button" data-tab="chart" role="tab" aria-selected="false">Chart</button>
-      <button type="button" data-tab="wallet" role="tab" aria-selected="false">Wallet</button>
-      <button type="button" data-tab="oracle" role="tab" aria-selected="false">Oracle</button>
-      <button type="button" data-tab="theme" role="tab" aria-selected="false">Theme</button>
-      <button type="button" data-tab="data" role="tab" aria-selected="false">Data</button>
-    </nav>
+  const tab = initialTab;
+  const pane = (id: SettingsTabId) => ({
+    active: id === tab ? " active" : "",
+    hidden: id === tab ? "" : " hidden",
+  });
+  const layoutP = pane("layout");
+  const chartP = pane("chart");
+  const walletP = pane("wallet");
+  const oracleP = pane("oracle");
+  const themeP = pane("theme");
+  const dataP = pane("data");
 
-    <div class="modal-pane active" id="pane-layout" role="tabpanel">
-      <p class="muted small">Named presets — like Binance Pro layout modes.</p>
-      <div class="settings-preset-row">
-        <button type="button" class="btn-sm" id="set-preset-standard">Standard</button>
-        <button type="button" class="btn-sm" id="set-preset-chart">Chart focus</button>
-        <button type="button" class="btn-sm" id="set-preset-scalper">Scalper</button>
+  return `<div class="modal glass settings-modal settings-shell" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head settings-head">
+      <div>
+        <p class="settings-kicker muted small">Preferences</p>
+        <h3 id="settings-title">Settings</h3>
       </div>
-      <p class="muted small">Or toggle panels individually:</p>
-      <div class="settings-grid">
-        <label><input type="checkbox" id="set-book" ${!layout.bookCollapsed ? "checked" : ""} /> Order book</label>
-        <label><input type="checkbox" id="set-right" ${!layout.rightCollapsed ? "checked" : ""} /> Markets</label>
-        <label><input type="checkbox" id="set-tools" ${!layout.toolsCollapsed ? "checked" : ""} /> Drawing tools</label>
-        <label><input type="checkbox" id="set-bottom" ${!layout.bottomCollapsed ? "checked" : ""} /> Activity panel</label>
-        <label><input type="checkbox" id="set-mc-link" ${state.multiChartLinked ? "checked" : ""} /> Link multi-chart panes</label>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn-sm" id="set-layout-reset">Reset layout</button>
-      </div>
+      <button type="button" class="modal-x" aria-label="Close">×</button>
     </div>
-
-    <div class="modal-pane" id="pane-chart" role="tabpanel" hidden>
-      <p class="muted small">Chart appearance and trading overlays.</p>
-      <div class="settings-grid">
-        <label><input type="checkbox" id="set-ov-preview" ${state.chartOverlays.orderPreview && state.chartOverlays.quickOrder ? "checked" : ""} ${state.chartOverlays.quickOrder ? "" : "disabled"} /> Order preview (ghost line)</label>
-        <label><input type="checkbox" id="set-ov-quick" ${state.chartOverlays.quickOrder ? "checked" : ""} /> Quick order (chart click)</label>
-        <label><input type="checkbox" id="set-ov-skip-confirm" ${state.chartOverlays.quickOrderSkipConfirm ? "checked" : ""} ${state.chartOverlays.quickOrder ? "" : "disabled"} /> Skip confirm (instant place)</label>
-      </div>
-      <div class="settings-btn-row">
-        <button type="button" class="btn-sm" id="set-chart-style">Chart style…</button>
-        <button type="button" class="btn-sm" id="set-chart-overlays">More overlays…</button>
-      </div>
-    </div>
-
-    <div class="modal-pane" id="pane-wallet" role="tabpanel" hidden>
-      <p class="muted small">Security &amp; wallet — paper Spot stays local; desk matching/deposit/withdraw stay HOLD until GO.</p>
-      <div class="settings-hold-row" id="set-desk-hold" aria-live="polite">
-        <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">matching · ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}</span>
-        <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
-        <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
-        <button type="button" class="btn-sm settings-hold-refresh" id="set-desk-health" title="Refresh /desk-api health">↻</button>
-      </div>
-      <div class="settings-wallet-grid">
-        <article class="settings-widget glass-inset">
-          <h4>Desk Connect</h4>
-          <p class="muted small">Browser-local <code>HMC-…</code> against same-origin <code>/desk-api</code>.</p>
-          <p class="mono small" id="set-desk-session">${deskOn ? escapeHtml(session) : "desk Connect off in this build"}</p>
-          <div class="settings-btn-row">
-            <button type="button" class="btn-sm" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? (wallet?.sessionLive ? "Reconnect" : "Connect") : "Unavailable"}</button>
-            <button type="button" class="btn-sm" id="set-desk-copy" ${deskOn && wallet?.deskAddress ? "" : "disabled"} title="Copy HMC address">Copy addr</button>
+    <div class="settings-body">
+      <nav class="modal-nav settings-nav settings-rail" role="tablist" aria-label="Settings sections">
+        ${railBtn("layout", "Layout", Ico.layout(), tab === "layout")}
+        ${railBtn("chart", "Chart", Ico.candlestick(), tab === "chart")}
+        ${railBtn("wallet", "Wallet", Ico.wallet(), tab === "wallet")}
+        ${railBtn("oracle", "Oracle", Ico.activity(), tab === "oracle")}
+        ${railBtn("theme", "Theme", Ico.palette(), tab === "theme")}
+        ${railBtn("data", "Data", Ico.database(), tab === "data")}
+      </nav>
+      <div class="settings-content">
+        <div class="modal-pane${layoutP.active}" id="pane-layout" role="tabpanel"${layoutP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Workspace layout</h4>
+            <p class="muted small">Presets first — or toggle panels one by one.</p>
+          </header>
+          <div class="settings-preset-grid" role="group" aria-label="Layout presets">
+            <button type="button" class="settings-preset-card" id="set-preset-standard">
+              <strong>Standard</strong>
+              <span class="muted small">Book · chart · markets</span>
+            </button>
+            <button type="button" class="settings-preset-card" id="set-preset-chart">
+              <strong>Chart focus</strong>
+              <span class="muted small">Hide side panels</span>
+            </button>
+            <button type="button" class="settings-preset-card" id="set-preset-scalper">
+              <strong>Scalper</strong>
+              <span class="muted small">Dense book + tools</span>
+            </button>
           </div>
-        </article>
-        <article class="settings-widget glass-inset">
-          <h4>Session</h4>
-          <p class="muted small">Cookie session on the desk API. Revoke invalidates all devices for this address.</p>
-          <div class="settings-btn-row">
-            <button type="button" class="btn-sm" id="set-desk-logout" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Logout</button>
-            <button type="button" class="btn-sm danger" id="set-desk-revoke" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Revoke all</button>
+          <div class="settings-switch-list" role="group" aria-label="Panel visibility">
+            ${switchRow("set-book", "Order book", "Left depth column", !layout.bookCollapsed)}
+            ${switchRow("set-right", "Markets", "Right markets rail", !layout.rightCollapsed)}
+            ${switchRow("set-tools", "Drawing tools", "Chart tool strip", !layout.toolsCollapsed)}
+            ${switchRow("set-bottom", "Activity panel", "Orders · fills · tape", !layout.bottomCollapsed)}
+            ${switchRow("set-mc-link", "Link multi-chart panes", "Shared crosshair &amp; time", !!state.multiChartLinked)}
           </div>
-        </article>
-        <article class="settings-widget glass-inset">
-          <h4>Node Sync</h4>
-          <p class="muted small">Read-only HMC/SUP from local <code>hackme-node</code> (this device) or Hub embed — not exchange custody.</p>
-          <div class="settings-btn-row">
-            <button type="button" class="btn-sm" id="set-node-sync">↻ Sync HMC/SUP</button>
-            ${
-              wallet?.hubWalletHref
-                ? `<a class="btn-sm btn-secondary" id="set-hub-wallet" href="${escapeHtml(wallet.hubWalletHref)}" target="_blank" rel="noopener noreferrer">${wallet.hubEmbed ? "Hub wallet" : "Node wallet"}</a>`
-                : ""
-            }
+          <div class="settings-pane-actions">
+            <button type="button" class="btn-sm" id="set-layout-reset">Reset layout</button>
           </div>
-        </article>
-        <article class="settings-widget glass-inset">
-          <h4>2FA</h4>
-          <p class="muted small">TOTP for withdraw GO. Public withdraw stays HOLD; lab loopback can enroll now.</p>
-          <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
-        </article>
-        <article class="settings-widget glass-inset">
-          <h4>Desk key</h4>
-          <p class="muted small">Ephemeral seed in <code>sessionStorage</code> only. New wallet clears it and logs out — irreversible for this tab.</p>
-          <button type="button" class="btn-sm danger" id="set-desk-new-key" ${deskOn ? "" : "disabled"}>New desk wallet…</button>
-        </article>
-        <article class="settings-widget glass-inset">
-          <h4>Account</h4>
-          <p class="muted small">Paper funds, deposits HOLD copy, and desk session panel live on Account.</p>
-          <button type="button" class="btn-sm" id="set-open-account">Open Account</button>
-        </article>
-      </div>
-      <p class="muted small settings-wallet-foot" id="set-wallet-msg" role="status"></p>
-    </div>
+        </div>
 
-    <div class="modal-pane" id="pane-oracle" role="tabpanel" hidden>
-      <label for="set-anchor">Reference mid (USDT per HMC)
-        <input class="inp mono" id="set-anchor" type="number" step="0.001" value="${anchor}" readonly disabled />
-      </label>
-      <p class="muted small">Shared D0 paper mid is locked at 0.05 USDT/HMC on every device. This field is display-only.</p>
-      <div class="modal-actions">
-        <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Oracle reference mid locked at 0.05" disabled title="Locked for cross-device sync">Locked at 0.05</button>
+        <div class="modal-pane${chartP.active}" id="pane-chart" role="tabpanel"${chartP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Chart &amp; trading</h4>
+            <p class="muted small">Overlays stay on this pair until you change them.</p>
+          </header>
+          <div class="settings-switch-list">
+            ${switchRow("set-ov-quick", "Quick order", "Place from chart click", !!state.chartOverlays.quickOrder)}
+            ${switchRow("set-ov-preview", "Order preview", "Ghost line before submit", !!(state.chartOverlays.orderPreview && state.chartOverlays.quickOrder), !state.chartOverlays.quickOrder)}
+            ${switchRow("set-ov-skip-confirm", "Skip confirm", "Instant place on click", !!state.chartOverlays.quickOrderSkipConfirm, !state.chartOverlays.quickOrder)}
+          </div>
+          <div class="settings-btn-row settings-pane-actions">
+            <button type="button" class="btn-sm btn-primary" id="set-chart-style">Chart style…</button>
+            <button type="button" class="btn-sm" id="set-chart-overlays">More overlays…</button>
+          </div>
+        </div>
+
+        <div class="modal-pane${walletP.active}" id="pane-wallet" role="tabpanel"${walletP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Security &amp; wallet</h4>
+            <p class="muted small">Paper Spot stays local. Desk matching / deposit / withdraw stay HOLD.</p>
+          </header>
+          <div class="settings-edge-card" id="set-desk-hold" aria-live="polite">
+            <div class="settings-edge-top">
+              <strong>Edge status</strong>
+              <button type="button" class="btn-sm settings-hold-refresh" id="set-desk-health" title="Refresh /desk-api health">↻ Refresh</button>
+            </div>
+            <div class="settings-hold-row">
+              <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">matching · ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
+            </div>
+          </div>
+          <div class="settings-action-list">
+            <div class="settings-action-row is-primary">
+              <div class="settings-action-meta">
+                <strong>Desk Connect</strong>
+                <p class="muted small">Browser-local <code>HMC-…</code> via same-origin <code>/desk-api</code>.</p>
+                <p class="mono small settings-session" id="set-desk-session">${deskOn ? escapeHtml(session) : "desk Connect off in this build"}</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm btn-primary" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? (wallet?.sessionLive ? "Reconnect" : "Connect") : "Unavailable"}</button>
+                <button type="button" class="btn-sm" id="set-desk-copy" ${deskOn && wallet?.deskAddress ? "" : "disabled"} title="Copy HMC address">Copy</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Session</strong>
+                <p class="muted small">Logout this device · revoke clears every device for this address.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-desk-logout" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Logout</button>
+                <button type="button" class="btn-sm danger" id="set-desk-revoke" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Revoke all</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Node Sync</strong>
+                <p class="muted small">Read-only HMC/SUP from local node or Hub — not exchange custody.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-node-sync">↻ Sync</button>
+                ${
+                  wallet?.hubWalletHref
+                    ? `<a class="btn-sm btn-secondary" id="set-hub-wallet" href="${escapeHtml(wallet.hubWalletHref)}" target="_blank" rel="noopener noreferrer">${wallet.hubEmbed ? "Hub wallet" : "Node wallet"}</a>`
+                    : ""
+                }
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>2FA</strong>
+                <p class="muted small">TOTP for withdraw GO. Public withdraw stays HOLD.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Desk key</strong>
+                <p class="muted small">Ephemeral <code>sessionStorage</code> seed — new wallet is irreversible for this tab.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm danger" id="set-desk-new-key" ${deskOn ? "" : "disabled"}>New wallet…</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Account</strong>
+                <p class="muted small">Funds, HOLD copy, and desk session panel.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-open-account">Open Account</button>
+              </div>
+            </div>
+          </div>
+          <p class="muted small settings-wallet-foot" id="set-wallet-msg" role="status"></p>
+        </div>
+
+        <div class="modal-pane${oracleP.active}" id="pane-oracle" role="tabpanel"${oracleP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Paper oracle</h4>
+            <p class="muted small">Shared reference mid — locked for cross-device sync.</p>
+          </header>
+          <div class="settings-oracle-card">
+            <label for="set-anchor">USDT per HMC
+              <input class="inp mono" id="set-anchor" type="number" step="0.001" value="${anchor}" readonly disabled />
+            </label>
+            <p class="muted small">Display-only. Every device uses <strong>0.05</strong> USDT/HMC on paper Spot.</p>
+            <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Oracle reference mid locked at 0.05" disabled title="Locked for cross-device sync">Locked at 0.05</button>
+          </div>
+        </div>
+
+        <div class="modal-pane${themeP.active}" id="pane-theme" role="tabpanel"${themeP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Appearance</h4>
+            <p class="muted small">Pick a chrome that matches where you work.</p>
+          </header>
+          <div class="settings-theme-grid" role="group" aria-label="Theme">
+            <button type="button" class="settings-theme-card${theme === "hub" ? " active" : ""}" id="set-theme-hub" data-theme="hub">
+              <span class="settings-theme-swatch settings-theme-hub" aria-hidden="true"></span>
+              <strong>Hub</strong>
+              <span class="muted small">hackme.tech cyan</span>
+            </button>
+            <button type="button" class="settings-theme-card${theme === "wallet" ? " active" : ""}" id="set-theme-wallet" data-theme="wallet">
+              <span class="settings-theme-swatch settings-theme-wallet" aria-hidden="true"></span>
+              <strong>Wallet</strong>
+              <span class="muted small">Lab amber desk</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-pane${dataP.active}" id="pane-data" role="tabpanel"${dataP.hidden}>
+          <header class="settings-pane-head">
+            <h4>Demo data</h4>
+            <p class="muted small">Export / import paper wallet, orders, and chart state.</p>
+          </header>
+          <div class="settings-action-list">
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Backup</strong>
+                <p class="muted small">Download a JSON snapshot of this browser’s demo state.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-export">↓ Export</button>
+                <button type="button" class="btn-sm" id="set-import">↑ Import</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Reset</strong>
+                <p class="muted small">Wipe local demo balances and reopen with defaults.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm danger" id="set-reset-demo">Reset demo</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-
-    <div class="modal-pane" id="pane-theme" role="tabpanel" hidden>
-      <div class="settings-theme-row">
-        <button type="button" class="btn-sm ${theme === "hub" ? "active" : ""}" id="set-theme-hub" data-theme="hub">Hub (hackme.tech)</button>
-        <button type="button" class="btn-sm ${theme === "wallet" ? "active" : ""}" id="set-theme-wallet" data-theme="wallet">Wallet (lab)</button>
-      </div>
-    </div>
-
-    <div class="modal-pane" id="pane-data" role="tabpanel" hidden>
-      <p class="muted small">Export or import demo wallet, orders, and chart state.</p>
-      <div class="settings-btn-row">
-        <button type="button" class="btn-sm" id="set-export">↓ Export state</button>
-        <button type="button" class="btn-sm" id="set-import">↑ Import state</button>
-        <button type="button" class="btn-sm danger" id="set-reset-demo">Reset demo</button>
-      </div>
-    </div>
-
     <div class="modal-actions settings-foot">
-      <button type="button" class="btn-sm" id="set-close" aria-label="Close settings">Close</button>
+      <button type="button" class="btn-sm" id="set-close" aria-label="Close settings">Done</button>
     </div>
   </div>`;
+}
+
+function activateSettingsTab(root: HTMLElement, tab: string): void {
+  const nav = root.querySelector(".settings-nav");
+  if (!nav) return;
+  nav.querySelectorAll("[data-tab]").forEach((b) => {
+    const on = (b as HTMLElement).dataset.tab === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  root.querySelectorAll<HTMLElement>(".modal-pane").forEach((pane) => {
+    const id = pane.id.replace("pane-", "");
+    const on = id === tab;
+    pane.classList.toggle("active", on);
+    pane.hidden = !on;
+  });
 }
 
 function wireSettingsTabs(root: HTMLElement): void {
@@ -246,18 +377,10 @@ function wireSettingsTabs(root: HTMLElement): void {
   if (!nav) return;
   nav.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const tab = btn.dataset.tab;
+      const tab = btn.dataset.tab as SettingsTabId | undefined;
       if (!tab) return;
-      nav.querySelectorAll("[data-tab]").forEach((b) => {
-        b.classList.toggle("active", (b as HTMLElement).dataset.tab === tab);
-        b.setAttribute("aria-selected", (b as HTMLElement).dataset.tab === tab ? "true" : "false");
-      });
-      root.querySelectorAll<HTMLElement>(".modal-pane").forEach((pane) => {
-        const id = pane.id.replace("pane-", "");
-        const on = id === tab;
-        pane.classList.toggle("active", on);
-        pane.hidden = !on;
-      });
+      activateSettingsTab(root, tab);
+      saveSettingsTab(tab);
     });
   });
 }
@@ -268,12 +391,14 @@ export function showUnifiedSettingsModal(
   theme: ThemeId,
   actions: SettingsModalActions,
   wallet?: SettingsWalletChrome,
+  opts?: { tab?: SettingsTabId },
 ): void {
   document.querySelectorAll(".modal-backdrop[data-settings-modal]").forEach((el) => el.remove());
+  const initialTab = opts?.tab ?? loadSettingsTab();
   const bd = document.createElement("div");
-  bd.className = "modal-backdrop";
+  bd.className = "modal-backdrop settings-backdrop";
   bd.dataset.settingsModal = "1";
-  bd.innerHTML = renderUnifiedSettingsModal(state, layout, theme, wallet);
+  bd.innerHTML = renderUnifiedSettingsModal(state, layout, theme, wallet, initialTab);
   const modal = bd.querySelector(".modal") as HTMLElement;
 
   const close = () => {
@@ -349,8 +474,8 @@ export function showUnifiedSettingsModal(
     const on = quickInp.checked;
     previewInp.disabled = !on;
     skipInp && (skipInp.disabled = !on);
-    previewInp.closest("label")?.classList.toggle("ov-disabled", !on);
-    skipInp?.closest("label")?.classList.toggle("ov-disabled", !on);
+    previewInp.closest(".settings-switch-row")?.classList.toggle("is-disabled", !on);
+    skipInp?.closest(".settings-switch-row")?.classList.toggle("is-disabled", !on);
     if (!on) {
       previewInp.checked = false;
       if (skipInp) skipInp.checked = false;

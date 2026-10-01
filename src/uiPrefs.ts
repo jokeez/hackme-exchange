@@ -28,7 +28,11 @@ const KEYS = {
   orderKind: "hackme.ui.orderKind",
   orderTif: "hackme.ui.orderTif",
   orderPostOnly: "hackme.ui.orderPostOnly",
+  settingsTab: "hackme.ui.settingsTab",
 } as const;
+
+export type SettingsTabId = "layout" | "chart" | "wallet" | "oracle" | "theme" | "data";
+const SETTINGS_TABS = new Set<SettingsTabId>(["layout", "chart", "wallet", "oracle", "theme", "data"]);
 
 export const DEFAULT_CONVERT_SLIPPAGE_BPS = 50;
 
@@ -129,4 +133,15 @@ export function saveOrderDesk(kind: OrderKind, tif: TimeInForce, postOnly: boole
     localStorage.setItem(KEYS.orderTif, tif);
     localStorage.setItem(KEYS.orderPostOnly, postOnly ? "1" : "0");
   });
+}
+
+export function loadSettingsTab(): SettingsTabId {
+  const raw = readStorage(() => localStorage.getItem(KEYS.settingsTab));
+  if (raw && SETTINGS_TABS.has(raw as SettingsTabId)) return raw as SettingsTabId;
+  return "layout";
+}
+
+export function saveSettingsTab(tab: SettingsTabId): void {
+  if (!SETTINGS_TABS.has(tab)) return;
+  writeStorage(() => localStorage.setItem(KEYS.settingsTab, tab));
 }

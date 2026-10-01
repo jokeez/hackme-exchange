@@ -5458,7 +5458,8 @@ html.mobile-layout .act-edit-inp {
 }
 .settings-modal .settings-widget .btn-sm { align-self: flex-start; margin-top: 0.15rem; }
 .settings-modal .settings-widget .btn-sm.danger,
-.settings-modal .settings-btn-row .btn-sm.danger {
+.settings-modal .settings-btn-row .btn-sm.danger,
+.settings-modal .settings-action-btns .btn-sm.danger {
   color: var(--sell, #f07178);
   border-color: color-mix(in srgb, var(--sell, #f07178) 40%, var(--line));
 }
@@ -5489,6 +5490,386 @@ html.mobile-layout .act-edit-inp {
   padding-inline: 0.4rem;
 }
 .settings-modal .settings-wallet-foot { min-height: 1.1em; margin: 0.35rem 0 0; }
+
+/* Settings shell — side rail + readable content */
+.modal-backdrop.settings-backdrop {
+  background: rgba(2, 6, 14, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 0.75rem;
+  align-items: center;
+}
+.settings-modal.settings-shell {
+  width: min(820px, 100%);
+  max-height: min(92vh, 760px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--line));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(77, 228, 255, 0.04);
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(77, 228, 255, 0.08), transparent 55%),
+    var(--panel2);
+}
+.settings-modal .settings-head {
+  margin: 0;
+  padding: 1rem 1.15rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.settings-modal .settings-kicker {
+  margin: 0 0 0.15rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+}
+.settings-modal .settings-head h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.settings-modal .settings-body {
+  display: grid;
+  grid-template-columns: 11.5rem minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.settings-modal .settings-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.75rem 0.55rem;
+  border-bottom: none;
+  border-right: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+}
+.settings-modal .settings-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.settings-modal .settings-rail-btn .ico { flex-shrink: 0; opacity: 0.85; }
+.settings-modal .settings-rail-btn:hover {
+  color: var(--text);
+  background: rgba(77, 228, 255, 0.06);
+  border-color: rgba(77, 228, 255, 0.18);
+}
+.settings-modal .settings-rail-btn.active {
+  color: #041018;
+  background: linear-gradient(135deg, var(--primary), #2dd4ff);
+  border-color: transparent;
+  box-shadow: 0 8px 22px rgba(77, 228, 255, 0.18);
+}
+.settings-modal .settings-rail-btn.active .ico { opacity: 1; }
+.settings-modal .settings-content {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem 1.15rem 1.1rem;
+}
+.settings-modal .modal-pane { margin: 0; }
+.settings-modal .settings-pane-head { margin-bottom: 0.85rem; }
+.settings-modal .settings-pane-head h4 {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+  font-family: var(--display);
+}
+.settings-modal .settings-pane-head p { margin: 0; }
+.settings-modal .settings-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.9rem;
+}
+.settings-modal .settings-preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+}
+.settings-modal .settings-preset-card:hover {
+  border-color: rgba(77, 228, 255, 0.45);
+  background: rgba(77, 228, 255, 0.07);
+  transform: translateY(-1px);
+}
+.settings-modal .settings-preset-card strong { font-size: 0.88rem; }
+.settings-modal .settings-switch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.75rem;
+}
+.settings-modal .settings-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0.72rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+.settings-modal .settings-switch-row.is-disabled { opacity: 0.5; cursor: not-allowed; }
+.settings-modal .settings-switch-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+.settings-modal .settings-switch-meta strong { font-size: 0.86rem; }
+.settings-modal .settings-switch {
+  position: relative;
+  width: 2.55rem;
+  height: 1.45rem;
+  flex-shrink: 0;
+}
+.settings-modal .settings-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+.settings-modal .settings-switch i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #2a3142;
+  border: 1px solid var(--line);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.settings-modal .settings-switch i::after {
+  content: "";
+  position: absolute;
+  top: 0.16rem;
+  left: 0.16rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: #d7e4f5;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.settings-modal .settings-switch input:checked + i {
+  background: color-mix(in srgb, var(--primary) 55%, #123);
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--line));
+}
+.settings-modal .settings-switch input:checked + i::after {
+  transform: translateX(1.1rem);
+  background: #041018;
+}
+.settings-modal .settings-switch input:focus-visible + i {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.settings-modal .settings-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+.settings-modal .settings-edge-card {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(77, 228, 255, 0.2);
+  background: rgba(77, 228, 255, 0.05);
+  margin-bottom: 0.75rem;
+}
+.settings-edge-card.acct-desk-edge {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(77, 228, 255, 0.2);
+  background: rgba(77, 228, 255, 0.05);
+  margin: 0.45rem 0 0.65rem;
+}
+.settings-modal .settings-edge-top,
+.settings-edge-card .settings-edge-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.settings-modal .settings-edge-card .settings-hold-row { margin: 0; }
+.settings-modal .settings-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.settings-modal .settings-action-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.8rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.settings-modal .settings-action-row.is-primary {
+  border-color: rgba(77, 228, 255, 0.28);
+  background: linear-gradient(135deg, rgba(77, 228, 255, 0.08), rgba(0, 0, 0, 0.18));
+}
+.settings-modal .settings-action-meta { min-width: 0; flex: 1; }
+.settings-modal .settings-action-meta strong { display: block; margin-bottom: 0.15rem; font-size: 0.9rem; }
+.settings-modal .settings-action-meta p { margin: 0.1rem 0; }
+.settings-modal .settings-session {
+  margin-top: 0.35rem !important;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  word-break: break-all;
+}
+.settings-modal .settings-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.settings-modal .settings-oracle-card,
+.settings-modal .settings-theme-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+.settings-modal .settings-oracle-card {
+  padding: 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.settings-modal .settings-oracle-card label { margin: 0 0 0.45rem; }
+.settings-modal .settings-theme-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-modal .settings-theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+.settings-modal .settings-theme-card:hover {
+  border-color: rgba(77, 228, 255, 0.4);
+  transform: translateY(-1px);
+}
+.settings-modal .settings-theme-card.active {
+  border-color: rgba(77, 228, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(77, 228, 255, 0.25), 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+.settings-modal .settings-theme-swatch {
+  width: 100%;
+  height: 2.4rem;
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--line);
+}
+.settings-modal .settings-theme-hub {
+  background: linear-gradient(135deg, #041018, #0b2740 45%, #4de4ff);
+}
+.settings-modal .settings-theme-wallet {
+  background: linear-gradient(135deg, #1a1208, #3a2810 45%, #f0b429);
+}
+.settings-modal .settings-foot {
+  margin: 0;
+  padding: 0.75rem 1.15rem;
+  border-top: 1px solid var(--line);
+  justify-content: flex-end;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.16);
+}
+.btn-settings-quick {
+  width: 2.15rem;
+  height: 2.15rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--muted);
+  cursor: pointer;
+}
+.btn-settings-quick:hover {
+  color: var(--primary);
+  border-color: rgba(77, 228, 255, 0.45);
+  background: rgba(77, 228, 255, 0.08);
+}
+.sys-drop .sys-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.sys-drop .sys-item .ico { opacity: 0.85; }
+
+@media (max-width: 720px) {
+  .settings-modal.settings-shell {
+    width: 100%;
+    max-height: min(94vh, 900px);
+    border-radius: 1rem 1rem 0.75rem 0.75rem;
+  }
+  .settings-modal .settings-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-modal .settings-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 0.55rem 0.65rem;
+    gap: 0.35rem;
+    scrollbar-width: thin;
+  }
+  .settings-modal .settings-rail-btn {
+    width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 0.45rem 0.7rem;
+  }
+  .settings-modal .settings-rail-btn span { font-size: 0.78rem; }
+  .settings-modal .settings-preset-grid,
+  .settings-modal .settings-theme-grid {
+    grid-template-columns: 1fr;
+  }
+  .settings-modal .settings-action-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-modal .settings-action-btns { justify-content: flex-start; }
+}
 
 /* Order panel polish */
 .order-col-head {

@@ -38,6 +38,9 @@ describe("Settings → Wallet pane", () => {
       withdrawEnabled: false,
     });
     expect(html).toContain('data-tab="wallet"');
+    expect(html).toContain("settings-shell");
+    expect(html).toContain("settings-rail");
+    expect(html).toContain("settings-switch-row");
     expect(html).toContain("matching · HOLD");
     expect(html).toContain("deposit · HOLD");
     expect(html).toContain("withdraw · HOLD");
@@ -46,7 +49,21 @@ describe("Settings → Wallet pane", () => {
     expect(html).toContain("Coming with withdraw");
     expect(html).toMatch(/id="set-open-2fa"[^>]*disabled/);
     expect(html).toContain("HMC-abcdef0123456789");
+    expect(html).toContain("settings-action-row");
     expect(html).not.toContain("<script>");
+  });
+
+  it("opens a specific initial tab", () => {
+    const html = renderUnifiedSettingsModal(
+      baseState(),
+      LAYOUT_DEFAULTS,
+      "hub",
+      { deskConnect: false, deskSessionLabel: "not connected", labLoopback: false },
+      "wallet",
+    );
+    expect(html).toContain('id="pane-wallet" role="tabpanel"');
+    expect(html).not.toMatch(/id="pane-wallet"[^>]*hidden/);
+    expect(html).toMatch(/id="pane-layout"[^>]*hidden/);
   });
 
   it("disables Connect controls when deskConnect is off", () => {

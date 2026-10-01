@@ -161,7 +161,7 @@ import {
   wireConvertAssetPickers,
 } from "./convertUi";
 import { loadRecentPairs, pushRecentPair } from "./recentPairs";
-import { loadConvertDesk, loadActivityTab, loadConvertSlippageBps, loadOrderDesk, saveActivityTab, saveConvertDesk, saveConvertSlippageBps, saveOrderDesk } from "./uiPrefs";
+import { loadConvertDesk, loadActivityTab, loadConvertSlippageBps, loadOrderDesk, saveActivityTab, saveConvertDesk, saveConvertSlippageBps, saveOrderDesk, type SettingsTabId } from "./uiPrefs";
 import { downloadText, exportDemoJson, parseDemoImport } from "./demoIo";
 import { exportFillsCsv, exportOrdersCsv, exportOrdersFilename } from "./product/exportOrders";
 import { renderSpotEmptyState } from "./product/emptyStates";
@@ -2612,12 +2612,14 @@ function render(): void {
     </nav>
     <div class="ex-actions">
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
+      <button type="button" class="btn-ico btn-settings-quick" id="btn-settings-quick" title="Settings" aria-label="Open settings">${Ico.settings()}</button>
       <div class="sys-menu-wrap">
         <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false" aria-label="System menu">⚙ <span class="sys-label">System</span></button>
         <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
         <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
-          <button type="button" class="sys-item" id="btn-settings">Settings…</button>
+          <button type="button" class="sys-item" id="btn-settings">${Ico.settings()} Settings</button>
+          <button type="button" class="sys-item" id="btn-settings-wallet" data-settings-tab="wallet">${Ico.wallet()} Wallet &amp; security</button>
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
           <button type="button" class="sys-item" id="btn-sync-node-header" title="Local hackme-node on this device (127.0.0.1:8080) or Hub embed">↻ Sync HMC/SUP (local node)</button>
           <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
@@ -5344,7 +5346,7 @@ function resyncPctSizedAmounts(): void {
   }
 }
 
-function showSettings(opts?: { tab?: string }): void {
+function showSettings(opts?: { tab?: SettingsTabId }): void {
   showUnifiedSettingsModal(
     state,
     layoutPrefs,
@@ -5447,13 +5449,8 @@ function showSettings(opts?: { tab?: string }): void {
       onRefreshDeskHealth: () => refreshDeskEdgeHealthUi(),
     },
     currentSettingsWalletChrome(),
+    opts?.tab ? { tab: opts.tab } : undefined,
   );
-  if (opts?.tab) {
-    const btn = document.querySelector(
-      `.settings-modal .settings-nav [data-tab="${opts.tab}"]`,
-    ) as HTMLButtonElement | null;
-    btn?.click();
-  }
 }
 
 function syncLayoutChips(): void {
@@ -5936,7 +5933,12 @@ function wireEvents(): void {
     showSystemDrop(false);
     showSettings();
   });
-  document.getElementById("btn-oracle-anchor")?.addEventListener("click", () => showSettings());
+  document.getElementById("btn-settings-quick")?.addEventListener("click", () => showSettings());
+  document.getElementById("btn-settings-wallet")?.addEventListener("click", () => {
+    showSystemDrop(false);
+    showSettings({ tab: "wallet" });
+  });
+  document.getElementById("btn-oracle-anchor")?.addEventListener("click", () => showSettings({ tab: "oracle" }));
   document.getElementById("btn-sync-node-header")?.addEventListener("click", () => {
     showSystemDrop(false);
     void syncFromNode();
