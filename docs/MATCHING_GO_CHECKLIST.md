@@ -81,11 +81,13 @@ API sibling: `hackme-exchange-api/scripts/matching_go_hold_probe.sh` · `ops_dri
 
 ## 4. Caps & economics
 
-- [ ] Per-address open order count / notional cap  
-- [ ] Global notional / rate caps for soft launch  
-- [ ] Fee schedule matches SPA (`fees.ts` ↔ API)  
-- [ ] HMC fee-pay only if health advertises it  
-- [ ] Paper oracle mids **do not** override live book mid when matching live  
+- [x] Per-address open order count — `EXCHANGE_MAX_OPEN_ORDERS` (lab 100 / public edge **20**)
+- [x] Soft-launch rate caps — auth 20 / book 60 / trade 30 per IP/min on PUBLIC_EDGE defaults
+- [x] Fee schedule matches SPA (`fees.ts` ↔ API) — `src/fees.parity.test.ts`
+- [x] HMC fee-pay only if health advertises it (existing SPA guards)
+- [ ] Paper oracle mids **do not** override live book mid when matching live — **SPA live-book client path still HOLD** (`useLabMatching()` loopback-only)
+
+Global notional soft-launch: rely on min notional + open-order cap + trade rate; product may lower `EXCHANGE_MAX_OPEN_ORDERS` further before GO.
 
 ---
 
@@ -93,13 +95,12 @@ API sibling: `hackme-exchange-api/scripts/matching_go_hold_probe.sh` · `ops_dri
 
 | Item | Ready? |
 |------|--------|
-| Matching enable/disable is a **single ops flag** (no redeploy SPA required) | [ ] |
-| Metrics: place/cancel latency, 4xx/5xx, 429s, book depth | [ ] |
-| Alerts on matching error rate | [ ] |
-| Rollback: set `matching=disabled` → SPA pills show HOLD → book 503 | [ ] |
-| Cutover marker / changelog entry | [ ] |
-| Hub embed still paper-safe if matching OFF | [ ] |
-
+| Matching enable/disable is a **single ops flag** (no redeploy SPA required) | [x] `EXCHANGE_TRADING_ENABLED` — unit rollback drill in API |
+| Metrics: place/cancel latency, 4xx/5xx, 429s, book depth | [x] Lab `/metrics` latency + open_orders + book depth; public edge metrics stay dark |
+| Alerts on matching error rate | [ ] Wire ops monitor (exchange-ops) when GO nears |
+| Rollback: set `matching=disabled` → SPA pills show HOLD → book 503 | [x] Unit + `ops_drill_matching_rollback.sh` hold-only on public |
+| Cutover marker / changelog entry | [ ] At GO time |
+| Hub embed still paper-safe if matching OFF | [x] `useLabMatching` loopback-only + hold probes |
 **Rollback drill (required before GO):** enable matching on staging → place/cancel → disable → confirm 503 + SPA HOLD badges within one health poll.
 
 ---
@@ -131,11 +132,12 @@ API sibling: `hackme-exchange-api/scripts/matching_go_hold_probe.sh` · `ops_dri
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Observability & rollback | Partial | `ops_drill_matching_rollback.sh` hold-only green; live drill = staging only |
-| Caps & economics | Partial | `maxOpenPerAccount=100`; MinNotional/PriceBandBps via config — soft-launch caps still need product numbers |
+| Caps & economics | Mostly green | Soft-launch defaults on edge; fee parity tested; SPA live-book path still HOLD |
+| Observability & rollback | Mostly green | In-process flag flip unit + hold probe; alerts still TODO |
+| `npm run smoke:matching-go` | Lab/staging | Full place/cancel acceptance (§3) |
 | `npm run smoke:desk` | Automated | book 503 + place 503 + CSRF logout |
 | `npm run smoke:matching-sec` | Automated | CSRF/CORS/cookies/admin/metrics matrix |
-| API `go test -run MatchingHold` | Automated | `trading_disabled` unit |
+| API `go test -run Matching` | Automated | HOLD + rollback flag flip |
 | API `matching_go_hold_probe.sh` | Automated | Public desk HOLD |
 
 **Matching remains HOLD** — no public `EXCHANGE_TRADING_ENABLED=1` until §7 sign-off.

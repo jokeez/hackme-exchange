@@ -13,6 +13,7 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 | `live_smoke.mjs` | `npm run smoke:live` — production paper site + `/desk-api/health` HOLD |
 | `desk-connect-smoke.ts` | `npm run smoke:desk` — Connect + book 503 + place HOLD + CSRF; `EX_MATCHING_GO=1` flips book expect to 200 |
 | `matching_go_security_probe.ts` | `npm run smoke:matching-sec` — CSRF/CORS/cookies/admin/metrics HOLD matrix |
+| `matching_go_acceptance_smoke.ts` | `npm run smoke:matching-go` — lab/staging place/cancel (§3); refuses public by default |
 | `deploy_paper_origin.sh` | rsync `dist-d0` → CF origin `89.150.41.40:/var/www/exchange` (not hub VPS) |
 | `lab-smoke.ts` | `npm run smoke:lab` — loopback `:18443` |
 | `d1-smoke.ts` / `d1-local-dev.sh` | Staging helpers |
