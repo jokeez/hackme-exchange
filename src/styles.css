@@ -5439,6 +5439,24 @@ html.mobile-layout .act-edit-inp {
 .settings-modal .settings-theme-row { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .settings-modal .settings-hints { margin: 0.5rem 0 0; padding-left: 1rem; }
 .settings-modal .settings-foot { margin-top: 0.5rem; border-top: 1px solid var(--line); padding-top: 0.5rem; }
+.settings-modal .settings-wallet-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+  margin: 0.4rem 0 0.2rem;
+}
+.settings-modal .settings-widget {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.settings-modal .settings-widget h4 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.settings-modal .settings-widget .btn-sm { align-self: flex-start; margin-top: 0.15rem; }
 
 /* Order panel polish */
 .order-col-head {

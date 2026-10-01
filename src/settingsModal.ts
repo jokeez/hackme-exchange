@@ -1,6 +1,7 @@
 import type { ChartOverlaySettings, DemoState, ThemeId } from "./types";
 import { type LayoutPrefs, type LayoutPresetId } from "./layoutPrefs";
 import { trapModalFocus } from "./oracleSettings";
+import { escapeHtml } from "./sanitize";
 
 export type SettingsModalActions = {
   onSaveOracle: (anchor: number) => void;
@@ -15,19 +16,33 @@ export type SettingsModalActions = {
   onOpenOverlays: (anchor: HTMLElement) => void;
   onChartOverlays: (patch: Partial<ChartOverlaySettings>) => void;
   onToggleMultiLink: (linked: boolean) => void;
+  /** Optional wallet/security widgets (desk Connect, node sync, Account deep-link). */
+  onDeskConnect?: () => void;
+  onNodeSync?: () => void;
+  onOpenAccountSecurity?: () => void;
+};
+
+export type SettingsWalletChrome = {
+  deskConnect: boolean;
+  deskSessionLabel: string;
+  labLoopback: boolean;
 };
 
 export function renderUnifiedSettingsModal(
   state: DemoState,
   layout: LayoutPrefs,
   theme: ThemeId,
+  wallet?: SettingsWalletChrome,
 ): string {
   const anchor = Number.isFinite(state.oracleAnchor) && state.oracleAnchor > 0 ? state.oracleAnchor : 0.05;
+  const deskOn = !!wallet?.deskConnect;
+  const session = wallet?.deskSessionLabel || "not connected";
   return `<div class="modal glass modal-wide modal-tabs settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <div class="modal-head"><h3 id="settings-title">Settings</h3><button type="button" class="modal-x" aria-label="Close">×</button></div>
     <nav class="modal-nav settings-nav" role="tablist" aria-label="Settings sections">
       <button type="button" class="active" data-tab="layout" role="tab" aria-selected="true">Layout</button>
       <button type="button" data-tab="chart" role="tab" aria-selected="false">Chart</button>
+      <button type="button" data-tab="wallet" role="tab" aria-selected="false">Wallet</button>
       <button type="button" data-tab="oracle" role="tab" aria-selected="false">Oracle</button>
       <button type="button" data-tab="theme" role="tab" aria-selected="false">Theme</button>
       <button type="button" data-tab="data" role="tab" aria-selected="false">Data</button>
@@ -63,6 +78,28 @@ export function renderUnifiedSettingsModal(
       <div class="settings-btn-row">
         <button type="button" class="btn-sm" id="set-chart-style">Chart style…</button>
         <button type="button" class="btn-sm" id="set-chart-overlays">More overlays…</button>
+      </div>
+    </div>
+
+    <div class="modal-pane" id="pane-wallet" role="tabpanel" hidden>
+      <p class="muted small">Security &amp; wallet widgets — desk Connect is HOLD (no matching yet). Deposit/withdraw stay off.</p>
+      <div class="settings-wallet-grid">
+        <article class="settings-widget glass-inset">
+          <h4>Desk Connect</h4>
+          <p class="muted small">Browser-local <code>HMC-…</code> session against <code>/desk-api</code>.</p>
+          <p class="mono small" id="set-desk-session">${deskOn ? escapeHtml(session) : "desk Connect off in this build"}</p>
+          <button type="button" class="btn-sm" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? "Connect / reconnect" : "Unavailable"}</button>
+        </article>
+        <article class="settings-widget glass-inset">
+          <h4>Node Sync</h4>
+          <p class="muted small">Read-only HMC/SUP from local <code>hackme-node</code> (127.0.0.1:8080) or Hub embed — not the exchange ledger.</p>
+          <button type="button" class="btn-sm" id="set-node-sync">↻ Sync HMC/SUP</button>
+        </article>
+        <article class="settings-widget glass-inset">
+          <h4>2FA</h4>
+          <p class="muted small">Authenticator (TOTP) ships with withdraw GO. Lab loopback can enroll today; public withdraw stays HOLD.</p>
+          <button type="button" class="btn-sm" id="set-open-2fa">${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
+        </article>
       </div>
     </div>
 
@@ -124,12 +161,13 @@ export function showUnifiedSettingsModal(
   layout: LayoutPrefs,
   theme: ThemeId,
   actions: SettingsModalActions,
+  wallet?: SettingsWalletChrome,
 ): void {
   document.querySelectorAll(".modal-backdrop[data-settings-modal]").forEach((el) => el.remove());
   const bd = document.createElement("div");
   bd.className = "modal-backdrop";
   bd.dataset.settingsModal = "1";
-  bd.innerHTML = renderUnifiedSettingsModal(state, layout, theme);
+  bd.innerHTML = renderUnifiedSettingsModal(state, layout, theme, wallet);
   const modal = bd.querySelector(".modal") as HTMLElement;
 
   const close = () => {
@@ -257,5 +295,19 @@ export function showUnifiedSettingsModal(
   bd.querySelector("#set-reset-demo")?.addEventListener("click", () => {
     actions.onResetDemo();
     close();
+  });
+
+  bd.querySelector("#set-desk-connect")?.addEventListener("click", () => {
+    if (!actions.onDeskConnect) return;
+    close();
+    actions.onDeskConnect();
+  });
+  bd.querySelector("#set-node-sync")?.addEventListener("click", () => {
+    actions.onNodeSync?.();
+  });
+  bd.querySelector("#set-open-2fa")?.addEventListener("click", () => {
+    if (!actions.onOpenAccountSecurity) return;
+    close();
+    actions.onOpenAccountSecurity();
   });
 }

@@ -69,11 +69,23 @@ async function fetchNodeWalletOnce(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const aborted = ctrl?.signal.aborted || /abort/i.test(msg);
+    const pageHost =
+      typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
+    const onPublicExchange =
+      pageHost === "exchange.hackme.tech" || pageHost.endsWith(".hackme.tech");
+    if (aborted) {
+      return { ok: false, reason: `Node wallet timeout (${timeoutMs}ms) at ${base}` };
+    }
+    if (onPublicExchange && /failed to fetch|networkerror|load failed/i.test(msg)) {
+      return {
+        ok: false,
+        reason:
+          "Local node only — Sync reads http://127.0.0.1:8080 on this device (Hub embed or local hackme-node). Paper balances stay in the browser.",
+      };
+    }
     return {
       ok: false,
-      reason: aborted
-        ? `Node wallet timeout (${timeoutMs}ms) at ${base}`
-        : `Cannot reach node at ${base}: ${msg}`,
+      reason: `Cannot reach node at ${base}: ${msg}`,
     };
   } finally {
     if (timer) clearTimeout(timer);

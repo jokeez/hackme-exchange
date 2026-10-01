@@ -92,6 +92,7 @@ import {
   listWithdrawals,
   minorToDisplay,
   getLabSessionMeta,
+  labSessionLabel,
   postLabBridgeCredit,
   postLabConvert,
   postLabDeposit,
@@ -122,7 +123,7 @@ import {
   validatePaperTradingGuards,
   type TradingGuards,
 } from "./tradingGuards";
-import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
+import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
 import { assertOrderFunds, freeBalance, maxOrderBaseAmount } from "./balance";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
@@ -2605,7 +2606,7 @@ function render(): void {
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
           <button type="button" class="sys-item" id="btn-settings">Settings…</button>
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
-          <button type="button" class="sys-item" id="btn-sync-node-header">↻ Sync HMC/SUP</button>
+          <button type="button" class="sys-item" id="btn-sync-node-header" title="Local hackme-node on this device (127.0.0.1:8080) or Hub embed">↻ Sync HMC/SUP (local node)</button>
           <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
           <a class="sys-link" href="https://hackme.tech/pool/coordinator" target="_blank" rel="noreferrer">Official pool</a>
           <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>
@@ -3032,7 +3033,8 @@ async function syncNodeHmcSupUi(): Promise<void> {
   const msgEl = document.getElementById("sync-node-msg");
   if (!snap.ok) {
     if (msgEl) msgEl.textContent = snap.reason;
-    toast(snap.reason, "warn");
+    const soft = /Local node only/i.test(snap.reason);
+    toast(snap.reason, soft ? "info" : "warn");
     return;
   }
   cachedNodeWallet = { hmc: snap.hmc, sup: snap.sup };
@@ -5189,77 +5191,107 @@ function resyncPctSizedAmounts(): void {
   }
 }
 
-function showSettings(): void {
-  showUnifiedSettingsModal(state, layoutPrefs, theme, {
-    onSaveOracle: (v) => {
-      state.oracleAnchor = v;
-      saveState(state);
-      toast(`Anchor → ${v} USDT/HMC`, "ok");
-      refresh();
-    },
-    onTheme: (next) => {
-      theme = next;
-      saveTheme(theme);
-      toast(theme === "hub" ? "Theme → Hub" : "Theme → Wallet", "ok");
-      render();
-    },
-    onLayout: (patch) => {
-      layoutPrefs = { ...layoutPrefs, ...patch };
-      saveLayoutPrefs(layoutPrefs);
-      applyLayoutToDom();
-      syncLayoutChips();
-    },
-    onResetLayout: () => {
-      layoutPrefs = { ...LAYOUT_DEFAULTS };
-      saveLayoutPrefs(layoutPrefs);
-      state.chartFullscreen = false;
-      saveState(state);
-      applyLayoutToDom();
-      syncLayoutChips();
-      toast("Layout reset", "info");
-      render();
-    },
-    onApplyLayoutPreset: (id: LayoutPresetId) => {
-      layoutPrefs = applyLayoutPreset(id);
-      saveLayoutPrefs(layoutPrefs);
-      state.chartFullscreen = false;
-      saveState(state);
-      applyLayoutToDom();
-      syncLayoutChips();
-      toast(`Layout → ${id}`, "info");
-      scheduleChartResize();
-    },
-    onExport: () => {
-      const stamp = new Date().toISOString().slice(0, 10);
-      downloadText(`hackme-exchange-demo-${stamp}.json`, exportDemoJson(state));
-      toast("State exported", "ok");
-    },
-    onImportClick: () => {
-      document.getElementById("import-demo-file")?.click();
-    },
-    onResetDemo: () => {
-      document.getElementById("btn-reset")?.click();
-    },
-    onOpenChartStyle: () => {
-      showChartStyleModal(state, (patch) => saveChartPatch(patch));
-    },
-    onOpenOverlays: (anchor) => {
-      showOverlayMenu(state, anchor, (patch) => {
-        saveChartPatch(patch, { silent: true });
+function showSettings(opts?: { tab?: string }): void {
+  showUnifiedSettingsModal(
+    state,
+    layoutPrefs,
+    theme,
+    {
+      onSaveOracle: (v) => {
+        state.oracleAnchor = v;
+        saveState(state);
+        toast(`Anchor → ${v} USDT/HMC`, "ok");
+        refresh();
+      },
+      onTheme: (next) => {
+        theme = next;
+        saveTheme(theme);
+        toast(theme === "hub" ? "Theme → Hub" : "Theme → Wallet", "ok");
+        render();
+      },
+      onLayout: (patch) => {
+        layoutPrefs = { ...layoutPrefs, ...patch };
+        saveLayoutPrefs(layoutPrefs);
+        applyLayoutToDom();
+        syncLayoutChips();
+      },
+      onResetLayout: () => {
+        layoutPrefs = { ...LAYOUT_DEFAULTS };
+        saveLayoutPrefs(layoutPrefs);
+        state.chartFullscreen = false;
+        saveState(state);
+        applyLayoutToDom();
+        syncLayoutChips();
+        toast("Layout reset", "info");
+        render();
+      },
+      onApplyLayoutPreset: (id: LayoutPresetId) => {
+        layoutPrefs = applyLayoutPreset(id);
+        saveLayoutPrefs(layoutPrefs);
+        state.chartFullscreen = false;
+        saveState(state);
+        applyLayoutToDom();
+        syncLayoutChips();
+        toast(`Layout → ${id}`, "info");
+        scheduleChartResize();
+      },
+      onExport: () => {
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadText(`hackme-exchange-demo-${stamp}.json`, exportDemoJson(state));
+        toast("State exported", "ok");
+      },
+      onImportClick: () => {
+        document.getElementById("import-demo-file")?.click();
+      },
+      onResetDemo: () => {
+        document.getElementById("btn-reset")?.click();
+      },
+      onOpenChartStyle: () => {
+        showChartStyleModal(state, (patch) => saveChartPatch(patch));
+      },
+      onOpenOverlays: (anchor) => {
+        showOverlayMenu(state, anchor, (patch) => {
+          saveChartPatch(patch, { silent: true });
+          applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
+        });
+      },
+      onChartOverlays: (patch) => {
+        saveChartPatch({ chartOverlays: { ...state.chartOverlays, ...patch } }, { silent: true });
         applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
-      });
+      },
+      onToggleMultiLink: (linked) => {
+        state.multiChartLinked = linked;
+        saveState(state);
+        wireMultiChartSync();
+        toast(linked ? "Panes linked" : "Panes independent", "info");
+      },
+      onDeskConnect: () => {
+        gotoMainView("account");
+        void deskWalletConnectUi();
+      },
+      onNodeSync: () => {
+        void syncFromNode();
+      },
+      onOpenAccountSecurity: () => {
+        gotoMainView("account");
+        requestAnimationFrame(() => {
+          document.getElementById("acct-lab")?.setAttribute("open", "");
+          document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      },
     },
-    onChartOverlays: (patch) => {
-      saveChartPatch({ chartOverlays: { ...state.chartOverlays, ...patch } }, { silent: true });
-      applyOverlays(state.chartOverlays, state.orders.filter((o) => o.pairId === state.activePair), activeTicker().mid);
+    {
+      deskConnect: isDeskConnectEnabled(),
+      deskSessionLabel: labSessionLabel().label,
+      labLoopback: isLabLoopbackApi(),
     },
-    onToggleMultiLink: (linked) => {
-      state.multiChartLinked = linked;
-      saveState(state);
-      wireMultiChartSync();
-      toast(linked ? "Panes linked" : "Panes independent", "info");
-    },
-  });
+  );
+  if (opts?.tab) {
+    const btn = document.querySelector(
+      `.settings-modal .settings-nav [data-tab="${opts.tab}"]`,
+    ) as HTMLButtonElement | null;
+    btn?.click();
+  }
 }
 
 function syncLayoutChips(): void {
