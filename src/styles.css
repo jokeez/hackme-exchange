@@ -5463,14 +5463,15 @@ html.mobile-layout .act-edit-inp {
   border-color: color-mix(in srgb, var(--sell, #f07178) 40%, var(--line));
 }
 .settings-modal .settings-widget .settings-btn-row { margin: 0.15rem 0 0; }
-.settings-modal .settings-hold-row {
+.settings-hold-row,
+.acct-desk-hold {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
   margin: 0.35rem 0 0.55rem;
 }
-.settings-modal .settings-hold-pill {
+.settings-hold-pill {
   font-size: 0.72rem;
   font-family: var(--mono, ui-monospace, monospace);
   padding: 0.2rem 0.45rem;
@@ -5479,7 +5480,7 @@ html.mobile-layout .act-edit-inp {
   color: var(--muted, #9aa);
   background: color-mix(in srgb, var(--panel, #111) 80%, transparent);
 }
-.settings-modal .settings-hold-pill[data-on="1"] {
+.settings-hold-pill[data-on="1"] {
   color: var(--ok, #6dcc8a);
   border-color: color-mix(in srgb, var(--ok, #6dcc8a) 45%, var(--line));
 }

@@ -79,6 +79,27 @@ async function main() {
   if (bookRes.status !== 503) throw new Error(`book want 503 got ${bookRes.status}`);
   console.log("PASS  book 503 HOLD");
 
+  const loRes = await fetch(`${BASE}/auth/logout`, {
+    method: "POST",
+    headers: {
+      Origin: "https://exchange.hackme.tech",
+      Cookie: cookieHeader(),
+      "X-CSRF-Token": ver.csrf_token,
+    },
+  });
+  if (!loRes.ok) throw new Error(`logout ${loRes.status}`);
+  console.log("PASS  logout");
+
+  const balAfter = await fetch(`${BASE}/balances`, {
+    headers: {
+      Origin: "https://exchange.hackme.tech",
+      Cookie: cookieHeader(),
+      "X-CSRF-Token": ver.csrf_token,
+    },
+  });
+  if (balAfter.status === 200) throw new Error("balances still authorized after logout");
+  console.log("PASS  balances unauthorized after logout");
+
   console.log(`[desk-connect-smoke] OK — ${BASE} · ${addr}`);
 }
 

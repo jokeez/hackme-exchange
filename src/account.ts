@@ -40,6 +40,8 @@ export type AccountPageOpts = {
   feeWallet?: string | null;
   /** Optional node wallet snapshot for multi-wallet row. */
   nodeWallet?: { hmc: number; sup: number } | null;
+  /** Last /health edge snapshot for desk HOLD badges. */
+  deskEdge?: { matching: string; depositEnabled: boolean; withdrawEnabled: boolean };
 };
 
 /** Read-only lab fee sink row — empty when address missing (graceful hide). */
@@ -77,6 +79,51 @@ function modeBlurb(): string {
   if (isLabApiEnabled()) return "API wired";
   if (isDemoMode()) return "paper wallet";
   return "paper / synthetic";
+}
+
+/** Shared TOTP UI (desk + lab) — same ids so wireLabApiButtons stays single-path. */
+function renderSecurity2faCard(sessionLive: boolean): string {
+  return `<article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
+        <h4>Security · 2FA</h4>
+        <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled. Public withdraw stays HOLD.</p>
+        <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
+        <div id="lab-2fa-setup-panel" hidden>
+          <p class="muted small">Add to Google Authenticator / Authy:</p>
+          <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
+          <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
+          <label class="lab-field">Confirm code
+            <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          </label>
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
+        </div>
+        <div id="lab-2fa-enabled-panel" hidden>
+          <p class="muted small" id="lab-2fa-recovery-left"></p>
+          <pre class="mono small lab-2fa-recovery" id="lab-2fa-recovery-codes" hidden></pre>
+          <label class="lab-field">Code to disable (TOTP or recovery)
+            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or XXXX-XXXX-…" />
+          </label>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
+          <label class="lab-field">Rotate recovery (current TOTP)
+            <input id="lab-2fa-rotate-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
+          </label>
+          <button type="button" class="btn-lab" id="btn-lab-2fa-rotate">Rotate recovery codes</button>
+        </div>
+        <div id="lab-2fa-idle-panel">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${sessionLive ? "" : " disabled"}>Enable 2FA</button>
+        </div>
+        <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
+      </article>`;
+}
+
+function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
+  const matching = edge?.matching || "HOLD";
+  const dep = !!edge?.depositEnabled;
+  const wd = !!edge?.withdrawEnabled;
+  return `<div class="settings-hold-row acct-desk-hold" aria-live="polite">
+        <span class="settings-hold-pill" data-on="${matching === "ok" ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
+        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${dep ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${wd ? "on" : "HOLD"}</span>
+      </div>`;
 }
 
 function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: number): string {
@@ -630,14 +677,19 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <span class="lab-badge">DESK · HOLD</span>
           <p class="muted small">Session: <strong class="mono" id="desk-session-addr">${escapeHtml(session.label)}</strong></p>
         </div>
+        ${renderDeskHoldPills(opts?.deskEdge)}
         <p class="muted small">Connect creates a browser-local <code>HMC-…</code> key (sessionStorage). Matching / deposit / withdraw stay <strong>HOLD</strong> — Spot stays paper.</p>
         <div class="lab-action-grid lab-session-actions">
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">Connect wallet</button>
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">${session.live ? "Reconnect" : "Connect wallet"}</button>
+          <button type="button" class="btn-lab" id="btn-desk-copy-addr" ${session.address || session.live ? "" : "disabled"} title="Copy HMC address">Copy addr</button>
           <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync ledger</button>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout">Logout</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout" ${session.live ? "" : "disabled"}>Logout</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear sessionStorage seed and create a new address">New desk wallet…</button>
         </div>
         <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
       </article>
+      ${renderSecurity2faCard(session.live)}
     </details>`
         : ""
     }
@@ -666,36 +718,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         </div>
         <p id="sync-node-msg" class="muted small sync-msg"></p>
       </article>
-      <article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
-        <h4>Security · 2FA</h4>
-        <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled.</p>
-        <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
-        <div id="lab-2fa-setup-panel" hidden>
-          <p class="muted small">Add to Google Authenticator / Authy:</p>
-          <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
-          <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
-          <label class="lab-field">Confirm code
-            <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-          </label>
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
-        </div>
-        <div id="lab-2fa-enabled-panel" hidden>
-          <p class="muted small" id="lab-2fa-recovery-left"></p>
-          <pre class="mono small lab-2fa-recovery" id="lab-2fa-recovery-codes" hidden></pre>
-          <label class="lab-field">Code to disable (TOTP or recovery)
-            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or XXXX-XXXX-…" />
-          </label>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
-          <label class="lab-field">Rotate recovery (current TOTP)
-            <input id="lab-2fa-rotate-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-          </label>
-          <button type="button" class="btn-lab" id="btn-lab-2fa-rotate">Rotate recovery codes</button>
-        </div>
-        <div id="lab-2fa-idle-panel">
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${labLive ? "" : " disabled"}>Enable 2FA</button>
-        </div>
-        <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
-      </article>
+      ${renderSecurity2faCard(labLive)}
     </details>`
         : ""
     }

@@ -2626,7 +2626,7 @@ function render(): void {
       </div>
     </div>
   </header>
-  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
+  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
   ${view === "pool" ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
@@ -3177,13 +3177,22 @@ async function refreshDeskEdgeHealthUi(): Promise<void> {
 async function labApiLogoutUi(): Promise<void> {
   const res = await authLogout();
   clearLabBookCache();
-  const msg = document.getElementById("lab-api-msg");
+  const desk = isDeskConnectEnabled();
+  const msg =
+    document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
+    document.getElementById("lab-api-msg") ||
+    document.getElementById("desk-api-msg");
   if (msg) msg.textContent = res.ok ? "Logged out" : res.message;
-  toast(res.ok ? "Lab session cleared" : res.message, res.ok ? "info" : "warn");
+  toast(
+    res.ok ? (desk ? "Desk session cleared" : "Lab session cleared") : res.message,
+    res.ok ? "info" : "warn",
+  );
   if (state.mainView === "account") render();
   else {
-    const addrEl = document.getElementById("lab-session-addr");
-    if (addrEl) addrEl.textContent = "not connected";
+    for (const id of ["lab-session-addr", "desk-session-addr"]) {
+      const addrEl = document.getElementById(id);
+      if (addrEl) addrEl.textContent = "not connected";
+    }
     patchModeChrome();
     if (state.mainView === "spot") {
       const book = document.getElementById("book");
@@ -3198,13 +3207,26 @@ async function labApiLogoutUi(): Promise<void> {
 async function labRevokeAllUi(): Promise<void> {
   const res = await authRevokeAll();
   clearLabBookCache();
-  const msg = document.getElementById("lab-api-msg");
+  const desk = isDeskConnectEnabled();
+  const msg =
+    document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
+    document.getElementById("lab-api-msg") ||
+    document.getElementById("desk-api-msg");
   if (msg) msg.textContent = res.ok ? `All sessions revoked (sv=${res.session_version ?? "?"})` : res.message;
-  toast(res.ok ? "All lab sessions revoked — reconnect" : res.message, res.ok ? "info" : "warn");
+  toast(
+    res.ok
+      ? desk
+        ? "All desk sessions revoked — reconnect"
+        : "All lab sessions revoked — reconnect"
+      : res.message,
+    res.ok ? "info" : "warn",
+  );
   if (state.mainView === "account") render();
   else {
-    const addrEl = document.getElementById("lab-session-addr");
-    if (addrEl) addrEl.textContent = "not connected";
+    for (const id of ["lab-session-addr", "desk-session-addr"]) {
+      const addrEl = document.getElementById(id);
+      if (addrEl) addrEl.textContent = "not connected";
+    }
     patchModeChrome();
   }
 }
@@ -3694,6 +3716,21 @@ function wireLabApiButtons(): void {
   click("btn-desk-wallet-connect", () => void deskWalletConnectUi());
   click("btn-desk-api-sync", () => void syncLabLedgerUi());
   click("btn-desk-api-logout", () => void labApiLogoutUi());
+  click("btn-desk-api-revoke", () => {
+    if (!window.confirm("Revoke all desk sessions for this address?")) return;
+    void labRevokeAllUi();
+  });
+  click("btn-desk-copy-addr", () => void deskCopyAddressUi());
+  click("btn-desk-new-key", () => {
+    if (
+      !window.confirm(
+        "Create a new browser desk wallet? This clears the sessionStorage seed and logs out. You cannot recover the old address from this tab.",
+      )
+    ) {
+      return;
+    }
+    void deskNewWalletUi();
+  });
   click("btn-lab-api-sync", () => void syncLabLedgerUi());
   click("btn-lab-api-logout", () => void labApiLogoutUi());
   click("btn-lab-revoke-all", () => void labRevokeAllUi());
@@ -5333,6 +5370,7 @@ function showSettings(opts?: { tab?: string }): void {
       onOpenAccountSecurity: () => {
         gotoMainView("account");
         requestAnimationFrame(() => {
+          document.getElementById("acct-desk")?.setAttribute("open", "");
           document.getElementById("acct-lab")?.setAttribute("open", "");
           document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });

@@ -29,4 +29,17 @@ describe("deskWallet", () => {
     const pub = ed.getPublicKey(Uint8Array.from(a.match(/.{2}/g)!.map((x) => parseInt(x, 16))));
     expect(id.address).toBe(addressFromPubKey(pub));
   });
+
+  it("clearDeskSeed forces a new address on next identity", async () => {
+    vi.doMock("../config/integration", () => ({
+      isDeskConnectEnabled: () => true,
+      isExchangeApiWired: () => true,
+    }));
+    const { loadOrCreateDeskSeed, clearDeskSeed, deskWalletIdentity } = await import("./deskWallet");
+    const first = deskWalletIdentity(loadOrCreateDeskSeed()).address;
+    clearDeskSeed();
+    const second = deskWalletIdentity(loadOrCreateDeskSeed()).address;
+    expect(second).toMatch(/^HMC-[0-9a-f]{16}$/);
+    expect(second).not.toBe(first);
+  });
 });

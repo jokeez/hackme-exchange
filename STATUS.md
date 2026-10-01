@@ -26,7 +26,7 @@
 | **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO |
 | **Real custody / withdrawals** | **HOLD** (none in the browser) |
 | **Live mode in SPA** | **Blocked** (paper Spot) |
-| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD |
+| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD · Settings/Account wallet + 2FA enroll |
 
 Balances are simulated (`localStorage`). Not financial advice. Not a licensed exchange.
 

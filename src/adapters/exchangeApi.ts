@@ -247,6 +247,11 @@ export function clearLabSessionMeta(): void {
   }
 }
 
+/** Memory CSRF + address (tests / reconnect helpers). CSRF never written to sessionStorage. */
+export function setLabSessionMeta(address: string, csrf: string): void {
+  persistSession(address, csrf);
+}
+
 function persistSession(address: string, csrf: string): void {
   sessionAddress = address;
   sessionCsrf = csrf;
