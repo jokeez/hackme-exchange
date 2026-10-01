@@ -108,8 +108,20 @@ export function renderConvertBalanceList(
 
 export function renderConvertRecentList(
   rows: { note: string; amount: string }[],
+  mode: "paper" | "desk" | "lab" = "paper",
 ): string {
-  if (!rows.length) return `<p class="muted small cv-recent-empty">No converts yet</p>`;
+  if (!rows.length) {
+    const body =
+      mode === "desk"
+        ? "Paper Convert stays available while public matching is HOLD."
+        : mode === "lab"
+          ? "Lab convert uses seed mid after you connect the fixture on Account."
+          : "Pick a route and Convert at mid — fees follow your VIP schedule.";
+    return `<div class="cv-recent-empty product-empty" data-empty="convert">
+      <p class="empty-title">No converts yet</p>
+      <p class="muted small">${escapeHtml(body)}</p>
+    </div>`;
+  }
   return `<ul class="cv-recent">${rows
     .map(
       (r) => `<li class="mono cv-recent-row">

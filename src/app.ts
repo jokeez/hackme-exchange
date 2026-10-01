@@ -1632,9 +1632,14 @@ function renderConvert(): string {
   <section class="convert-page glass">
     <div class="convert-shell">
       <header class="convert-hero">
-        <p class="kicker">Instant swap · paper</p>
+        <p class="kicker">${isDeskConnectEnabled() ? "Instant swap · paper · desk HOLD" : isLabLoopbackApi() ? "Instant swap · lab" : "Instant swap · paper"}</p>
         <h2>Convert</h2>
         <p class="muted convert-lead">Swap paper balances at mid · ${feeNote}. No book, no futures.</p>
+        ${
+          isDeskConnectEnabled()
+            ? `<p class="muted small convert-hold-banner" role="status">Public matching stays HOLD — Convert uses local paper balances (desk Connect does not enable live convert yet).</p>`
+            : ""
+        }
         <p class="muted small convert-fee-mode mono">${hmcPay}</p>
       </header>
       <div class="convert-desk-wrap">
@@ -1707,7 +1712,10 @@ function renderConvert(): string {
         <h3>Balances</h3>
         <ul class="cv-bal-list">${renderConvertBalanceList(balRows)}</ul>
         <h3>Recent</h3>
-        ${renderConvertRecentList(recentRows)}
+        ${renderConvertRecentList(
+          recentRows,
+          isDeskConnectEnabled() ? "desk" : isLabLoopbackApi() ? "lab" : "paper",
+        )}
       </aside>
       </div>
     </div>
@@ -2085,13 +2093,22 @@ function softPatchConvertDesk(): void {
     const recentH = [...side.querySelectorAll("h3")].find((h) => /recent/i.test(h.textContent || ""));
     if (recentH) {
       let node = recentH.nextElementSibling;
-      while (node && (node.matches("p.muted") || node.matches("ul.cv-recent") || node.matches("p.cv-recent-empty"))) {
+      while (
+        node &&
+        (node.matches("p.muted") ||
+          node.matches("ul.cv-recent") ||
+          node.matches("p.cv-recent-empty") ||
+          node.matches(".cv-recent-empty"))
+      ) {
         const next = node.nextElementSibling;
         node.remove();
         node = next;
       }
       const wrap = document.createElement("div");
-      wrap.innerHTML = renderConvertRecentList(recentRows);
+      wrap.innerHTML = renderConvertRecentList(
+        recentRows,
+        isDeskConnectEnabled() ? "desk" : isLabLoopbackApi() ? "lab" : "paper",
+      );
       const child = wrap.firstElementChild;
       if (child) recentH.after(child);
     }
@@ -2601,7 +2618,15 @@ function render(): void {
   syncRouteHash();
   const embed = isHubEmbed();
   const brandTitle = embed ? "Exchange" : isMobileLayout() ? "HackMe" : "HackMe Exchange";
-  const brandSub = embed ? "hub embed · lab" : `Spot · ${INTEGRATION.mode}`;
+  const brandSub = embed
+    ? isDeskConnectEnabled()
+      ? "hub embed · desk HOLD"
+      : isLabLoopbackApi()
+        ? "hub embed · lab"
+        : "hub embed · paper"
+    : isDeskConnectEnabled()
+      ? `Spot · ${INTEGRATION.mode} · desk HOLD`
+      : `Spot · ${INTEGRATION.mode}`;
   // Live oracle / lab sync used to remount the whole tree every few seconds and
   // collapse <details>, wipe withdraw fields, etc. Capture → restore after wire.
   const uiSnap = captureEphemeralUi(app);
@@ -2628,18 +2653,23 @@ function render(): void {
           <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
           <button type="button" class="sys-item" id="btn-settings">${Ico.settings()} Settings</button>
           <button type="button" class="sys-item" id="btn-settings-wallet" data-settings-tab="wallet">${Ico.wallet()} Wallet &amp; security</button>
-          <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">${embed ? "Hub wallet" : "Node wallet"}</a>
+          ${
+            embed
+              ? `<button type="button" class="sys-item" id="btn-sync-node-header" title="Hub wallet balances">↻ Sync HMC/SUP</button>
+          <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Hub wallet</a>`
+              : `<a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Node wallet</a>
           <button type="button" class="sys-item" id="btn-sync-node-header" title="Local hackme-node on this device (127.0.0.1:8080) or Hub embed">↻ Sync HMC/SUP (local node)</button>
-          <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
           <a class="sys-link" href="https://hackme.tech/pool/coordinator" target="_blank" rel="noreferrer">Official pool</a>
-          <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>
+          <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>`
+          }
+          <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
           <button type="button" class="sys-item danger" id="btn-reset">Reset demo</button>
         </div>
       </div>
     </div>
   </header>
   ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
-  ${view === "pool" ? `<div class="mining-strip mono" id="mining-strip">
+  ${view === "pool" && !embed ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
 
@@ -3855,6 +3885,10 @@ function wireLabApiButtons(): void {
   };
   click("btn-lab-fixture-connect", () => void labFixtureConnectUi());
   click("btn-desk-wallet-connect", () => void deskWalletConnectUi());
+  click("btn-desk-cash-connect", () => void deskWalletConnectUi());
+  click("btn-desk-jump-panel", () => {
+    document.getElementById("acct-desk")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   click("btn-desk-api-sync", () => void syncLabLedgerUi());
   click("btn-desk-api-logout", () => void labApiLogoutUi());
   click("btn-desk-api-revoke", () => {

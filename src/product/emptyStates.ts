@@ -1,33 +1,45 @@
 import { escapeHtml } from "../sanitize";
 import { isMobileLayout } from "../mobile";
-import { isDeskConnectEnabled } from "../config/integration";
+import { isDeskConnectEnabled, isLabLoopbackApi } from "../config/integration";
 
 export type EmptySpotContext = "orders" | "positions" | "history" | "alerts";
 
+function spotModeBody(paperDefault: string): string {
+  if (isDeskConnectEnabled()) {
+    return "Paper Spot while matching stays HOLD — Connect desk wallet on Account when you want a session.";
+  }
+  if (isLabLoopbackApi()) {
+    return "Lab Spot — connect fixture on Account for server matching; without a session this UI is paper preview.";
+  }
+  return paperDefault;
+}
+
 export function renderSpotEmptyState(ctx: EmptySpotContext): string {
   const mobile = typeof window !== "undefined" && isMobileLayout();
-  const desk = isDeskConnectEnabled();
-  const paperHint = desk
-    ? "Paper Spot while matching stays HOLD — Connect desk wallet on Account when you want a session."
-    : "Paper desk — place a limit (rests on the book) or market (fills now).";
   const map: Record<EmptySpotContext, { title: string; body: string; cta?: string; href?: string }> = {
     orders: {
       title: "No open orders",
-      body: `${paperHint} Open orders show here.`,
+      body: `${spotModeBody("Paper desk — place a limit (rests on the book) or market (fills now).")} Open orders show here.`,
       cta: "Focus order form",
       href: "#spot",
     },
     positions: {
-      title: "No positions yet",
-      body: desk
+      title: "No spot inventory yet",
+      body: isDeskConnectEnabled()
         ? "Spot fills update paper balances. Live ledger sync stays HOLD until matching GO."
-        : "Spot fills update paper balances instantly. Track equity on Account.",
+        : isLabLoopbackApi()
+          ? "Lab fills update the connected ledger. Without a session, paper balances stay local."
+          : "Spot fills update paper balances instantly. Track equity on Account.",
       cta: "View Account",
       href: "#account",
     },
     history: {
       title: "No fills yet",
-      body: "After your first paper fill, history and CSV export appear here.",
+      body: isDeskConnectEnabled()
+        ? "Paper fills and CSV export appear here. Public matching stays HOLD."
+        : isLabLoopbackApi()
+          ? "After your first lab (or paper) fill, history and CSV export appear here."
+          : "After your first paper fill, history and CSV export appear here.",
     },
     alerts: {
       title: "No price alerts",

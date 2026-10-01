@@ -19,13 +19,23 @@ Hub (hackme.tech or :8080)  --tab Exchange-->  iframe  exchange.hackme.tech/?emb
 With `?embed=hub` (or nested iframe):
 
 - Flat hub background, denser header, no announce / tour / mining strip
-- Brand shortens to **Exchange · hub embed · lab**
+- Brand shortens by mode: **Exchange · hub embed · paper** (default D0), **· desk HOLD** when `VITE_PUBLIC_DESK_CONNECT=1`, **· lab** only on loopback lab builds — never hard-code “lab” on public paper
 - Desktop desk forced (Book | Chart+Orders | Markets+Activity) even if iframe &lt; 1024px
 - Chart `min-height: 0` + ResizeObserver so canvas scales (no fold / overlap onto Buy/Sell)
-- Order zone capped (`max-height: min(30vh, 260px)`, `min-height: 0`) so the chart keeps a usable floor for crosshair in short iframes; **no bottom strip** — Orders / Fills / Tape / Alerts live under Markets (`#activity-body`)
+- Order zone capped (`max-height: min(28vh, 250px)`, `min-height: 0`) so the chart keeps a usable floor for crosshair in short iframes; **no bottom strip** — Orders / Fills / Tape / Alerts live under Markets (`#activity-body`)
 - Account opens with **Deposit & Withdraw** first; Balances / Lab / Activity below
 - Hub hides mining status / coin-context / quick-actions so the desk fills the viewport
+- System menu drops Mine / Official pool links; keeps Sync + Hub wallet
 
+## Parent postMessage (wallet)
+
+SPA → parent (only when `?embed=hub` and referrer/origin allowlisted):
+
+```json
+{ "type": "hackme-exchange", "action": "goto-tab", "tab": "wallet" }
+```
+
+Hub must listen for `message` events, verify `event.origin` is the exchange origin (`https://exchange.hackme.tech` or loopback lab), then switch its tab chrome. Empty `document.referrer` on production hostname falls back to `https://hackme.tech` as the postMessage target.
 ## Requirements
 
 1. Static paper build on `https://exchange.hackme.tech` (see `scripts/prepare_d0_static.sh`)

@@ -2552,6 +2552,45 @@ html.mobile-layout .market-search {
   gap: 0.55rem;
   min-height: 100%;
 }
+.acct-cash-dock.desk-hold-card {
+  border-color: rgba(255, 179, 71, 0.28);
+  background:
+    linear-gradient(160deg, rgba(255, 179, 71, 0.06), transparent 52%),
+    rgba(0, 0, 0, 0.26);
+}
+.acct-desk-cash-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 179, 71, 0.22);
+  background: rgba(255, 179, 71, 0.04);
+}
+.acct-positions-empty {
+  margin: 0 0 0.65rem;
+}
+.acct-positions-empty .product-empty {
+  padding: 0.65rem 0.75rem;
+  border: 1px dashed rgba(87, 118, 168, 0.35);
+  border-radius: 8px;
+}
+.convert-hold-banner {
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 179, 71, 0.28);
+  background: rgba(255, 179, 71, 0.06);
+}
+.cv-recent-empty.product-empty {
+  padding: 0.55rem 0.65rem;
+  border: 1px dashed rgba(87, 118, 168, 0.35);
+  border-radius: 8px;
+}
+.cv-recent-empty .empty-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+}
 .acct-cash-tabs {
   display: flex;
   gap: 0.15rem;
@@ -5109,7 +5148,23 @@ html.mobile-layout .bottom-empty.act-empty .btn-sm {
   line-height: 1.35;
   word-break: break-word;
   pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
 }
+.toast-msg { flex: 1; min-width: 0; }
+.toast-dismiss {
+  flex: 0 0 auto;
+  pointer-events: auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.1rem;
+  cursor: pointer;
+}
+.toast-dismiss:hover { color: var(--text); }
 .toast.show { transform: translateX(0); }
 .toast-ok { border-color: rgba(110,255,173,.45); background: rgba(8, 28, 22, 0.95); }
 .toast-warn { border-color: rgba(255,179,71,.5); background: rgba(32, 24, 10, 0.95); }
@@ -6290,7 +6345,7 @@ html[data-embed="hub"] .order-zone {
   flex: 0 1 auto !important;
   /* Was 300px min — stole the iframe and left chart ~120px (crosshair unusable). */
   min-height: 0 !important;
-  max-height: min(30vh, 260px) !important;
+  max-height: min(28vh, 250px) !important;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0.16rem 0.28rem 0.22rem;
@@ -6520,9 +6575,10 @@ html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .panel-rail {
   html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen.book-collapsed.right-collapsed {
     grid-template-columns: minmax(0, 1fr) !important;
   }
+  /* Keep hub order-zone under smoke ceiling (≤320px); do not re-raise min-height. */
   html[data-embed="hub"] .order-zone {
-    min-height: 280px !important;
-    max-height: min(40vh, 340px) !important;
+    min-height: 0 !important;
+    max-height: min(28vh, 250px) !important;
   }
   html[data-embed="hub"] .terminal.chart-fullscreen .order-zone,
   html[data-embed="hub"] .terminal.mobile-stack.chart-fullscreen .order-zone {

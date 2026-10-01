@@ -19,6 +19,15 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 
 Matching GO ops checklist: [`docs/MATCHING_GO_CHECKLIST.md`](../docs/MATCHING_GO_CHECKLIST.md).
 
+## Smoke matrix
+
+| Command | Expect |
+|---------|--------|
+| `npm run smoke:live` | Public paper origin + CSP; `/desk-api/health` matching HOLD |
+| `npm run smoke:desk` | Connect + book **503** (HOLD) |
+| `EX_MATCHING_GO=1 npm run smoke:desk` | Book **200** only after explicit Matching GO |
+| `npm run smoke:lab` | Loopback `:18443` only — never against public edge |
+
 See also [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) · [`STATUS.md`](../STATUS.md).
 
 **Playwright:** Vite on `:5199` (`npm run dev`) or set `EX_UI_BASE`.

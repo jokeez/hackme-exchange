@@ -19,6 +19,8 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 
 **Desk Connect (optional HOLD lane):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Auth is for desk prep only — not custody; matching/deposit/withdraw stay OFF.
 
+**Residual (accepted for HOLD desk prep):** XSS in the SPA origin that can read `sessionStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps, HTTP CSP, no durable seed in `localStorage`, user-confirm on export, never embed fixture seeds in paper builds. Treat exported backup JSON as a private key.
+
 **This is not a financial system.** Do not treat paper settlement as production custody.
 
 ---

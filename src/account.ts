@@ -33,6 +33,7 @@ import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "
 import { renderDustPanel } from "./product/dustConvert";
 import { portfolioEquityChart30d, refreshPortfolioChartHtml, wirePortfolioEquityChart } from "./product/portfolioChart";
 import { renderMultiWalletCard, type WalletSlice } from "./product/multiWallet";
+import { renderSpotEmptyState } from "./product/emptyStates";
 import { formatDeskMatchingLabel, isDeskMatchingLive } from "./settingsModal";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
@@ -253,19 +254,33 @@ function renderCashDock(
   session: ReturnType<typeof labSessionLabel>,
   opts?: AccountPageOpts,
 ): string {
+  const deskOn = isDeskConnectEnabled();
+  const intro = labLive
+    ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
+    : labOn
+      ? "Connect fixture once, then deposit / withdraw here"
+      : deskOn
+        ? "Desk Connect · matching/deposit/withdraw HOLD — paper funds here; Connect for a session"
+        : "Paper funds · live exchange deposit/withdraw on HOLD · optional node Sync for HMC/SUP";
   return `
-    <section class="acct-cash-dock glass-inset${labOn ? " lab-custody-card" : ""}" id="acct-cash" aria-label="Deposit and withdraw">
+    <section class="acct-cash-dock glass-inset${labOn ? " lab-custody-card" : ""}${deskOn && !labOn ? " desk-hold-card" : ""}" id="acct-cash" aria-label="Deposit and withdraw">
       <div class="acct-cash-tabs" role="tablist" aria-label="Funds">
         <button type="button" class="acct-cash-tab active" data-cash-tab="deposit" role="tab" aria-selected="true">Deposit</button>
         <button type="button" class="acct-cash-tab" data-cash-tab="withdraw" role="tab" aria-selected="false">Withdraw</button>
       </div>
-      <p class="muted small acct-cash-intro">${
-        labLive
-          ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
-          : labOn
-            ? "Connect fixture once, then deposit / withdraw here"
-            : "Paper funds · live exchange deposit/withdraw on HOLD · optional node Sync for HMC/SUP"
-      }</p>
+      <p class="muted small acct-cash-intro">${intro}</p>
+      ${
+        deskOn && !labOn
+          ? `<div class="acct-desk-cash-cta">
+        ${renderDeskHoldPills(opts?.deskEdge)}
+        <p class="muted small">Session: <strong class="mono">${escapeHtml(session.label)}</strong></p>
+        <div class="acct-cash-actions">
+          <button type="button" class="btn-sm btn-primary" id="btn-desk-cash-connect">${session.live ? "Reconnect desk" : "Connect desk wallet"}</button>
+          <button type="button" class="btn-sm" id="btn-desk-jump-panel">Desk session ↓</button>
+        </div>
+      </div>`
+          : ""
+      }
       <div class="acct-cash-panel" data-cash-panel="deposit" id="acct-cash-deposit">
         ${renderDepositCard(labOn, labLive, session)}
       </div>
@@ -523,6 +538,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
   const denom = getEquityDenom();
   const eqView = equityInDenom(eq, market, denom);
   const assetRows = buildAssetPortfolioRows(state, market);
+  const hasSpotInventory = assetRows.some((r) => r.symbol !== "USDT" && r.usdtValue >= 1);
   const acctTab = loadAcctTab();
   const hideSmall = loadAcctHideSmall();
 
@@ -588,6 +604,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </header>
 
       <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds"${acctTab !== "assets" ? " hidden" : ""}>
+        ${!hasSpotInventory ? `<div class="acct-positions-empty">${renderSpotEmptyState("positions")}</div>` : ""}
         <table class="acct-asset-table data-table">
           <thead>
             <tr>

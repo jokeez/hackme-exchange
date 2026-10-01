@@ -346,7 +346,20 @@ describe("toast + theme", () => {
     vi.useFakeTimers();
     toast("Synced", "ok");
     const el = document.querySelector(".toast-ok");
-    expect(el?.textContent).toBe("Synced");
+    expect(el?.querySelector(".toast-msg")?.textContent).toBe("Synced");
+    expect(el?.getAttribute("role")).toBe("status");
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("toast caps stack at 3", () => {
+    vi.useFakeTimers();
+    toast("a", "info");
+    toast("b", "info");
+    toast("c", "info");
+    toast("d", "info");
+    expect(document.querySelectorAll(".toast")).toHaveLength(3);
+    expect(document.querySelector(".toast-msg")?.textContent).toBe("b");
     vi.runAllTimers();
     vi.useRealTimers();
   });

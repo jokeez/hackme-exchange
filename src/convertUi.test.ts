@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   closeConvertAssetMenus,
   renderConvertAssetPicker,
+  renderConvertRecentList,
   syncConvertPickerUi,
   wireConvertAssetPickers,
 } from "./convertUi";
@@ -93,5 +94,13 @@ describe("convertUi dropdowns", () => {
     closeConvertAssetMenus();
     expect(fromTrigger().getAttribute("aria-expanded")).toBe("false");
     expect(fromMenu().hasAttribute("hidden")).toBe(true);
+  });
+});
+
+describe("convertUi recent empty", () => {
+  it("renders desk HOLD empty copy", () => {
+    const html = renderConvertRecentList([], "desk");
+    expect(html).toContain('data-empty="convert"');
+    expect(html).toContain("matching is HOLD");
   });
 });

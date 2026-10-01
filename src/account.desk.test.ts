@@ -34,6 +34,10 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("deposit · HOLD");
     expect(html).toContain("withdraw · HOLD");
     expect(html).toContain("btn-desk-wallet-connect");
+    expect(html).toContain("btn-desk-cash-connect");
+    expect(html).toContain("btn-desk-jump-panel");
+    expect(html).toContain("desk-hold-card");
+    expect(html).toContain("matching · HOLD");
     expect(html).toContain("btn-desk-copy-addr");
     expect(html).toContain("btn-desk-api-revoke");
     expect(html).toContain("btn-desk-new-key");
