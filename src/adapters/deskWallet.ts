@@ -18,28 +18,35 @@ function bytesToHex(b: Uint8Array): string {
 }
 
 function hexToBytes(hex: string): Uint8Array {
-  const h = hex.trim().toLowerCase().replace(/^0x/, "");
-  if (h.length !== 64 || !/^[0-9a-f]+$/.test(h)) throw new Error("seed must be 32-byte hex");
+  const h = normalizeDeskSeedHex(hex);
+  if (!h) throw new Error("seed must be 32-byte hex");
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
+/** Accept 64-hex seed (optional 0x / whitespace). */
+export function normalizeDeskSeedHex(raw: string): string | null {
+  const h = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^0x/, "")
+    .replace(/\s+/g, "");
+  if (h.length !== 64 || !/^[0-9a-f]+$/.test(h)) return null;
+  return h;
+}
+
 export function loadOrCreateDeskSeed(): string {
   try {
-    const existing = sessionStorage.getItem(SEED_KEY)?.trim() ?? "";
-    if (existing.length === 64 && /^[0-9a-fA-F]+$/.test(existing)) return existing.toLowerCase();
+    const existing = normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "");
+    if (existing) return existing;
   } catch {
     /* ignore */
   }
   const seed = new Uint8Array(32);
   crypto.getRandomValues(seed);
   const hex = bytesToHex(seed);
-  try {
-    sessionStorage.setItem(SEED_KEY, hex);
-  } catch {
-    /* ignore */
-  }
+  persistDeskSeed(hex);
   return hex;
 }
 
@@ -48,6 +55,75 @@ export function clearDeskSeed(): void {
     sessionStorage.removeItem(SEED_KEY);
   } catch {
     /* ignore */
+  }
+}
+
+/** Replace sessionStorage seed (does not connect). */
+export function persistDeskSeed(seedHex: string): string {
+  const n = normalizeDeskSeedHex(seedHex);
+  if (!n) throw new Error("seed must be 32-byte hex");
+  // Prove it is a valid Ed25519 seed before writing.
+  ed.getPublicKey(hexToBytes(n));
+  try {
+    sessionStorage.setItem(SEED_KEY, n);
+  } catch {
+    /* ignore quota */
+  }
+  return n;
+}
+
+export type DeskSeedBackupV1 = {
+  v: 1;
+  kind: "hackme-desk-seed";
+  address: string;
+  seed_hex: string;
+  created_at: string;
+  warning: string;
+};
+
+export function buildDeskSeedBackup(seedHex = loadOrCreateDeskSeed()): DeskSeedBackupV1 {
+  const id = deskWalletIdentity(seedHex);
+  return {
+    v: 1,
+    kind: "hackme-desk-seed",
+    address: id.address,
+    seed_hex: id.seedHex,
+    created_at: new Date().toISOString(),
+    warning:
+      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Matching/deposit/withdraw stay HOLD until GO.",
+  };
+}
+
+export function parseDeskSeedImport(
+  raw: string,
+): { ok: true; seedHex: string; address: string } | { ok: false; message: string } {
+  const text = String(raw ?? "").trim();
+  if (!text) return { ok: false, message: "empty backup" };
+
+  const asHex = normalizeDeskSeedHex(text);
+  if (asHex) {
+    try {
+      const id = deskWalletIdentity(asHex);
+      return { ok: true, seedHex: asHex, address: id.address };
+    } catch {
+      return { ok: false, message: "invalid seed bytes" };
+    }
+  }
+
+  try {
+    const o = JSON.parse(text) as Partial<DeskSeedBackupV1>;
+    if (o?.kind !== "hackme-desk-seed" || o?.v !== 1) {
+      return { ok: false, message: "not a hackme desk seed backup" };
+    }
+    const seed = normalizeDeskSeedHex(String(o.seed_hex ?? ""));
+    if (!seed) return { ok: false, message: "backup seed_hex invalid" };
+    const id = deskWalletIdentity(seed);
+    if (o.address && String(o.address).trim() && String(o.address).trim() !== id.address) {
+      return { ok: false, message: "backup address does not match seed" };
+    }
+    return { ok: true, seedHex: seed, address: id.address };
+  } catch {
+    return { ok: false, message: "backup must be JSON or 64-hex seed" };
   }
 }
 

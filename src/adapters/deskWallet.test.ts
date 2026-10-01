@@ -56,4 +56,38 @@ describe("deskWallet", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("disabled");
   });
+
+  it("backup round-trip preserves address", async () => {
+    vi.doMock("../config/integration", () => ({
+      isDeskConnectEnabled: () => true,
+      isExchangeApiWired: () => true,
+      isLabLoopbackApi: () => false,
+    }));
+    const {
+      loadOrCreateDeskSeed,
+      buildDeskSeedBackup,
+      parseDeskSeedImport,
+      persistDeskSeed,
+      deskWalletIdentity,
+      clearDeskSeed,
+    } = await import("./deskWallet");
+    const seed = loadOrCreateDeskSeed();
+    const backup = buildDeskSeedBackup(seed);
+    expect(backup.kind).toBe("hackme-desk-seed");
+    expect(backup.address).toBe(deskWalletIdentity(seed).address);
+    const parsed = parseDeskSeedImport(JSON.stringify(backup));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    clearDeskSeed();
+    persistDeskSeed(parsed.seedHex);
+    expect(deskWalletIdentity().address).toBe(backup.address);
+    const hexOnly = parseDeskSeedImport(`  ${seed.toUpperCase()}  `);
+    expect(hexOnly).toMatchObject({ ok: true, seedHex: seed, address: backup.address });
+    expect(parseDeskSeedImport('{"v":1,"kind":"nope"}').ok).toBe(false);
+    expect(
+      parseDeskSeedImport(
+        JSON.stringify({ ...backup, address: "HMC-0000000000000000" }),
+      ).ok,
+    ).toBe(false);
+  });
 });

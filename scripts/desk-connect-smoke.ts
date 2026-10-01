@@ -81,8 +81,14 @@ async function main() {
   console.log("PASS  balances");
 
   const bookRes = await fetch(`${BASE}/book?pair=HMC/USDT`);
-  if (bookRes.status !== 503) throw new Error(`book want 503 got ${bookRes.status}`);
-  console.log("PASS  book 503 HOLD");
+  const matchingGo = process.env.EX_MATCHING_GO === "1";
+  if (matchingGo) {
+    if (bookRes.status !== 200) throw new Error(`matching GO: book want 200 got ${bookRes.status}`);
+    console.log("PASS  book 200 (EX_MATCHING_GO=1)");
+  } else {
+    if (bookRes.status !== 503) throw new Error(`book want 503 got ${bookRes.status}`);
+    console.log("PASS  book 503 HOLD");
+  }
 
   const loRes = await fetch(`${BASE}/auth/logout`, {
     method: "POST",

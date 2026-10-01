@@ -20,6 +20,7 @@
     "smoke:d1": "npx tsx scripts/d1-smoke.ts",
     "smoke:lab": "npx tsx scripts/lab-smoke.ts",
     "audit:full": "bash scripts/full_audit.sh",
+    "audit:security": "vitest run src/stress_redteam.test.ts src/hardening.ui.test.ts src/nav_views.security.test.ts src/abuse_ddos.chart.test.ts src/abuse_econ_latency.test.ts src/exchangeAudit.test.ts src/import_xss_probe.test.ts src/labHardening.test.ts src/embed.test.ts src/sanitize.test.ts",
     "d0:static": "bash scripts/prepare_d0_static.sh"
   },
   "devDependencies": {

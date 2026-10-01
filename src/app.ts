@@ -100,7 +100,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, parseDeskSeedImport, persistDeskSeed } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -586,16 +586,24 @@ function ensurePublicTape(force = false): void {
 function renderAnnounce(): string {
   if (announceDismissed) return "";
   const lab = useLabMatching();
+  const desk = isDeskConnectEnabled();
   const label = modeChromeLabel();
   const bold = isLiveModeBlocked()
     ? "Live mode blocked — matching API not connected"
     : lab
       ? "Private lab matching — not production custody or real money"
-      : "Paper desk — simulated balances · matching API on HOLD";
+      : desk
+        ? "Desk Connect ready · matching / deposit / withdraw on HOLD"
+        : "Paper desk — simulated balances · matching API on HOLD";
+  const detail = lab
+    ? "lab ledger balances"
+    : desk
+      ? "browser HMC wallet via /desk-api · Spot stays paper"
+      : "reference mids · paper balances in localStorage";
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
     · ${label}
-    · ${lab ? "lab ledger balances" : "reference mids · paper balances in localStorage"}
+    · ${detail}
     ${lab ? LAB_BOOK_BADGE : PAPER_BADGE}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
   </div>`;
@@ -3196,6 +3204,79 @@ async function deskNewWalletUi(): Promise<void> {
   await deskWalletConnectUi();
 }
 
+function deskExportSeedUi(): void {
+  if (!isDeskConnectEnabled()) {
+    toast("Desk Connect off in this build", "warn");
+    return;
+  }
+  if (
+    !window.confirm(
+      "Export SECRET desk seed backup?\n\nAnyone with this file can Connect as your HMC address. Never share, screenshot, or commit it.",
+    )
+  ) {
+    return;
+  }
+  const backup = buildDeskSeedBackup();
+  const stamp = backup.address.replace(/^HMC-/, "").slice(0, 8);
+  downloadText(`hackme-desk-seed-${stamp}.json`, `${JSON.stringify(backup, null, 2)}\n`);
+  toast(`Seed backup saved · ${backup.address.slice(0, 14)}… — keep offline`, "warn");
+}
+
+async function applyDeskSeedImport(raw: string): Promise<void> {
+  const parsed = parseDeskSeedImport(raw);
+  if (!parsed.ok) {
+    toast(`Import failed: ${parsed.message}`, "warn");
+    return;
+  }
+  if (labSessionLabel().live) {
+    await authLogout();
+    clearLabBookCache();
+  }
+  persistDeskSeed(parsed.seedHex);
+  toast(`Seed imported · ${parsed.address.slice(0, 14)}… — connecting…`, "info");
+  await deskWalletConnectUi();
+  patchOpenSettingsWalletChrome();
+}
+
+function deskImportSeedUi(): void {
+  if (!isDeskConnectEnabled()) {
+    toast("Desk Connect off in this build", "warn");
+    return;
+  }
+  if (
+    !window.confirm(
+      "Import replaces this tab’s desk seed and reconnects.\n\nUse a backup JSON or 64-hex seed from your other device. Continue?",
+    )
+  ) {
+    return;
+  }
+  const pasted = window.prompt("Paste backup JSON or 64-hex seed.\nLeave empty to choose a file instead:", "");
+  if (pasted === null) return;
+  if (pasted.trim()) {
+    void applyDeskSeedImport(pasted);
+    return;
+  }
+  const existing = document.getElementById("desk-seed-import-file") as HTMLInputElement | null;
+  const input = existing ?? document.createElement("input");
+  if (!existing) {
+    input.type = "file";
+    input.accept = "application/json,.json,.txt,text/plain";
+    input.className = "hidden";
+    document.body.appendChild(input);
+  }
+  input.value = "";
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 32_768) {
+      toast("Backup file too large", "warn");
+      return;
+    }
+    void file.text().then((text) => applyDeskSeedImport(text));
+  };
+  input.click();
+}
+
 async function refreshDeskEdgeHealthUi(): Promise<boolean> {
   healthBackoffUntil = 0;
   const before = { ...deskEdgeSnap };
@@ -3781,6 +3862,8 @@ function wireLabApiButtons(): void {
     void labRevokeAllUi();
   });
   click("btn-desk-copy-addr", () => void deskCopyAddressUi());
+  click("btn-desk-export-seed", () => deskExportSeedUi());
+  click("btn-desk-import-seed", () => deskImportSeedUi());
   click("btn-desk-new-key", () => {
     if (
       !window.confirm(
@@ -3791,6 +3874,20 @@ function wireLabApiButtons(): void {
     }
     void deskNewWalletUi();
   });
+  const seedFile = document.getElementById("desk-seed-import-file") as HTMLInputElement | null;
+  if (seedFile) {
+    const next = seedFile.cloneNode(true) as HTMLInputElement;
+    seedFile.replaceWith(next);
+    next.addEventListener("change", () => {
+      const file = next.files?.[0];
+      if (!file) return;
+      if (file.size > 32_768) {
+        toast("Backup file too large", "warn");
+        return;
+      }
+      void file.text().then((text) => applyDeskSeedImport(text));
+    });
+  }
   click("btn-lab-api-sync", () => void syncLabLedgerUi());
   click("btn-lab-api-logout", () => void labApiLogoutUi());
   click("btn-lab-revoke-all", () => void labRevokeAllUi());
@@ -5445,6 +5542,8 @@ function showSettings(opts?: { tab?: SettingsTabId }): void {
         gotoMainView("account");
         void deskNewWalletUi();
       },
+      onExportDeskSeed: () => deskExportSeedUi(),
+      onImportDeskSeed: () => deskImportSeedUi(),
       onOpenAccount: () => gotoMainView("account"),
       onRefreshDeskHealth: () => refreshDeskEdgeHealthUi(),
     },

@@ -51,3 +51,10 @@ Admin complete / fee sweep stay **CLI + `X-Admin-Token`** — the SPA never embe
 - Do not ship `VITE_EXCHANGE_API_ORIGIN` in public D0 builds.  
 - Admin `lab-dry-run-*` withdraw complete **releases** reserve (no debit) — use a real `tx_id` to burn.  
 - Pre-public gates: sibling API repo `docs/PRE_PUBLIC_CHECKLIST.md` (private GitHub — clone locally)
+- Public matching GO (SPA-facing): [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md)
+
+## Hardening reminders
+
+- CSRF is **memory-only** in the SPA (`sessionStorage` keeps address, never CSRF).
+- `useLabMatching()` requires **loopback** + CSRF — public desk Connect must not enable lab book.
+- Fixture seed (`LAB_FIXTURE_SEED_HEX`) is empty in paper production builds (DCE); `prepare_d0_static.sh` greps it out.

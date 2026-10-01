@@ -58,3 +58,5 @@ Allowed overrides: `https://exchange.hackme.tech`, `http://127.0.0.1:5199`, `htt
 ## Verdict
 
 **GO** for hub paper embed. **HOLD** for public matching API / real custody.
+
+See also: [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md) before any public matching flip. Hub must not host the exchange API edge.

@@ -6063,6 +6063,22 @@ html[data-embed="hub"] #app {
   max-height: 100%;
 }
 html[data-embed="hub"] .announce { display: none !important; }
+html[data-embed="hub"] .btn-settings-quick {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 8px;
+}
+html[data-embed="hub"] .sys-drop .sys-item {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.55rem;
+}
+html[data-embed="hub"] .settings-backdrop {
+  padding: 0.35rem;
+}
+html[data-embed="hub"] .settings-modal.settings-shell {
+  max-height: min(96vh, 720px);
+  width: min(760px, 100%);
+}
 html[data-embed="hub"] .ex-header {
   padding: 0.4rem 0.65rem;
   gap: 0.55rem;

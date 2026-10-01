@@ -30,6 +30,7 @@ Open-source **paper** Spot UI. Matching API and custody stay **HOLD** on the pub
 | [ECONOMICS.md](ECONOMICS.md) | Fees · VIP · reference mids |
 | [SECURITY.md](SECURITY.md) | SPA threat checklist |
 | [HUB_TAB.md](HUB_TAB.md) | Hub `#exchange` embed |
+| [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md) | Public matching GO gates · rollback |
 
 ## Contributors (loopback lab)
 
@@ -37,4 +38,4 @@ Open-source **paper** Spot UI. Matching API and custody stay **HOLD** on the pub
 |-----|---------|
 | [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
 
-**Rule:** Public edge ships **static paper UI** only. Public matching / custody is a separate gate.
+**Rule:** Public edge ships **static paper UI** only. Public matching / custody is a separate gate — see [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md).

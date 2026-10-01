@@ -695,7 +695,10 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync ledger</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout" ${session.live ? "" : "disabled"}>Logout</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-export-seed" title="Download secret seed backup JSON">Export seed…</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear sessionStorage seed and create a new address">New desk wallet…</button>
+          <input type="file" id="desk-seed-import-file" accept="application/json,.json,.txt,text/plain" class="hidden" />
         </div>
         <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
       </article>

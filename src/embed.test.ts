@@ -53,4 +53,35 @@ describe("hub embed helpers", () => {
     expect(hubParentPostMessageOrigin("")).toBe("https://hackme.tech");
     Object.defineProperty(window.location, "hostname", { value: prev, configurable: true });
   });
+
+  it("postHubGotoTab allowlists wallet and rejects evil origins", () => {
+    window.history.replaceState({}, "", "/?embed=hub");
+    Object.defineProperty(document, "referrer", {
+      value: "https://evil.example/",
+      configurable: true,
+    });
+    expect(postHubGotoTab("wallet")).toBe(false);
+
+    Object.defineProperty(document, "referrer", {
+      value: "https://hackme.tech/dashboard.html",
+      configurable: true,
+    });
+    const posted: unknown[] = [];
+    const fakeParent = {
+      postMessage: (data: unknown, origin: string) => {
+        posted.push({ data, origin });
+      },
+    };
+    const desc = Object.getOwnPropertyDescriptor(window, "parent");
+    Object.defineProperty(window, "parent", { value: fakeParent, configurable: true });
+    expect(postHubGotoTab("wallet")).toBe(true);
+    expect(posted).toEqual([
+      {
+        data: { type: "hackme-exchange", action: "goto-tab", tab: "wallet" },
+        origin: "https://hackme.tech",
+      },
+    ]);
+    if (desc) Object.defineProperty(window, "parent", desc);
+    else Object.defineProperty(window, "parent", { value: window, configurable: true });
+  });
 });

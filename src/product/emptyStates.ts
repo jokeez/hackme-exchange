@@ -1,20 +1,27 @@
 import { escapeHtml } from "../sanitize";
 import { isMobileLayout } from "../mobile";
+import { isDeskConnectEnabled } from "../config/integration";
 
 export type EmptySpotContext = "orders" | "positions" | "history" | "alerts";
 
 export function renderSpotEmptyState(ctx: EmptySpotContext): string {
   const mobile = typeof window !== "undefined" && isMobileLayout();
+  const desk = isDeskConnectEnabled();
+  const paperHint = desk
+    ? "Paper Spot while matching stays HOLD — Connect desk wallet on Account when you want a session."
+    : "Paper desk — place a limit (rests on the book) or market (fills now).";
   const map: Record<EmptySpotContext, { title: string; body: string; cta?: string; href?: string }> = {
     orders: {
       title: "No open orders",
-      body: "Paper desk — place a limit (rests on the book) or market (fills now). Open orders show here.",
+      body: `${paperHint} Open orders show here.`,
       cta: "Focus order form",
       href: "#spot",
     },
     positions: {
       title: "No positions yet",
-      body: "Spot fills update paper balances instantly. Track equity on Account.",
+      body: desk
+        ? "Spot fills update paper balances. Live ledger sync stays HOLD until matching GO."
+        : "Spot fills update paper balances instantly. Track equity on Account.",
       cta: "View Account",
       href: "#account",
     },

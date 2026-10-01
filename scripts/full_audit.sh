@@ -25,12 +25,27 @@ npx vitest run \
   src/abuse_ddos.chart.test.ts \
   src/abuse_econ_latency.test.ts \
   src/exchangeAudit.test.ts \
-  src/import_xss_probe.test.ts
+  src/import_xss_probe.test.ts \
+  src/labHardening.test.ts \
+  src/embed.test.ts \
+  src/sanitize.test.ts
 pass "security subset"
 
 step "D0 paper static build (CRYPTO-001 fixture guard)"
 bash scripts/prepare_d0_static.sh
 pass "prepare_d0_static"
+
+if [[ "${FULL_AUDIT_SKIP_DESK:-}" != "1" ]]; then
+  step "desk Connect smoke (public HOLD)"
+  if npm run smoke:desk; then
+    pass "smoke:desk"
+  else
+    echo "WARN  smoke:desk failed (network?) — not failing audit unless FULL_AUDIT_REQUIRE_DESK=1" >&2
+    if [[ "${FULL_AUDIT_REQUIRE_DESK:-}" == "1" ]]; then
+      exit 1
+    fi
+  fi
+fi
 
 if [[ "${FULL_AUDIT_SKIP_E2E:-}" != "1" ]]; then
   step "G10 visual pass (preview on :5199)"

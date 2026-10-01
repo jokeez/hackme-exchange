@@ -26,6 +26,8 @@ export type SettingsModalActions = {
   onDeskRevokeAll?: () => void;
   onCopyDeskAddress?: () => void;
   onNewDeskWallet?: () => void;
+  onExportDeskSeed?: () => void;
+  onImportDeskSeed?: () => void;
   onOpenAccount?: () => void;
   onRefreshDeskHealth?: () => void | Promise<void | boolean>;
 };
@@ -81,6 +83,8 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   setDisabled("set-desk-logout", !(deskOn && live));
   setDisabled("set-desk-revoke", !(deskOn && live));
   setDisabled("set-desk-new-key", !deskOn);
+  setDisabled("set-desk-export", !deskOn);
+  setDisabled("set-desk-import", !deskOn);
   const twoFa = root.querySelector("#set-open-2fa") as HTMLButtonElement | null;
   if (twoFa) {
     const lab = !!wallet.labLoopback;
@@ -264,6 +268,16 @@ export function renderUnifiedSettingsModal(
               </div>
               <div class="settings-action-btns">
                 <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <div class="settings-action-meta">
+                <strong>Backup / restore</strong>
+                <p class="muted small">Move the same <code>HMC-…</code> to phone or another browser. Seed is secret — never share.</p>
+              </div>
+              <div class="settings-action-btns">
+                <button type="button" class="btn-sm" id="set-desk-export" ${deskOn ? "" : "disabled"}>Export seed…</button>
+                <button type="button" class="btn-sm" id="set-desk-import" ${deskOn ? "" : "disabled"}>Import seed…</button>
               </div>
             </div>
             <div class="settings-action-row">
@@ -563,6 +577,14 @@ export function showUnifiedSettingsModal(
     }
     close();
     actions.onNewDeskWallet();
+  });
+  bd.querySelector("#set-desk-export")?.addEventListener("click", () => {
+    actions.onExportDeskSeed?.();
+  });
+  bd.querySelector("#set-desk-import")?.addEventListener("click", () => {
+    if (!actions.onImportDeskSeed) return;
+    close();
+    actions.onImportDeskSeed();
   });
   bd.querySelector("#set-open-account")?.addEventListener("click", () => {
     if (!actions.onOpenAccount) return;

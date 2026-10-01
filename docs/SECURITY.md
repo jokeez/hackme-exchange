@@ -17,7 +17,7 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 
 **Residual (accepted for paper):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
 
-**Desk Connect (optional HOLD lane):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); cookie session + memory-only CSRF against same-origin `/desk-api`. Auth is for desk prep only — not custody; matching/deposit/withdraw stay OFF.
+**Desk Connect (optional HOLD lane):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Auth is for desk prep only — not custody; matching/deposit/withdraw stay OFF.
 
 **This is not a financial system.** Do not treat paper settlement as production custody.
 
@@ -37,5 +37,9 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 2. Server-authoritative balances  
 3. Session cookies httpOnly + CSRF + CORS allowlist  
 4. Hot wallet on server / HSM — never SPA-signed privileged chain txs  
+
+## Matching GO (later)
+
+Before enabling public book/orders, complete [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md): CSRF, rate limits, caps, rollback drill. Deposit/withdraw stay OFF until their own GOs.
 
 See also: [`SCOPE.md`](SCOPE.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`STATUS.md`](../STATUS.md).

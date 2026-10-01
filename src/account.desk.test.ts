@@ -37,6 +37,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("btn-desk-copy-addr");
     expect(html).toContain("btn-desk-api-revoke");
     expect(html).toContain("btn-desk-new-key");
+    expect(html).toContain("btn-desk-export-seed");
+    expect(html).toContain("btn-desk-import-seed");
     expect(html).toContain('id="acct-security-2fa-hold"');
     expect(html).toContain("withdraw GO");
     expect(html).not.toContain('id="acct-security-2fa"');

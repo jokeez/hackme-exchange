@@ -26,7 +26,7 @@
 | **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO |
 | **Real custody / withdrawals** | **HOLD** (none in the browser) |
 | **Live mode in SPA** | **Blocked** (paper Spot) |
-| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD · Settings/Account wallet (2FA enroll with withdraw GO) |
+| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD · seed export/import for multi-device · 2FA with withdraw GO |
 
 Balances are simulated (`localStorage`). Not financial advice. Not a licensed exchange.
 
@@ -83,7 +83,7 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 | **D0 Paper** | Static SPA, PAPER only — **shipped** |
 | **D1 private** | Loopback staging rails — **shipped under HOLD** |
 | **Public desk (no matching)** | `exchange-api.hackme.tech` — **shipped under HOLD** |
-| **Public matching** | After PRE_PUBLIC + explicit GO |
+| **Public matching** | After [MATCHING_GO_CHECKLIST](docs/MATCHING_GO_CHECKLIST.md) + explicit GO |
 | **Custody** | Sidecar + caps — after matching GO |
 
 ## Docs

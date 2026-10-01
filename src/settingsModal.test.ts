@@ -46,6 +46,8 @@ describe("Settings → Wallet pane", () => {
     expect(html).toContain("withdraw · HOLD");
     expect(html).toContain("set-desk-connect");
     expect(html).toContain("Reconnect");
+    expect(html).toContain("set-desk-export");
+    expect(html).toContain("set-desk-import");
     expect(html).toContain("Coming with withdraw");
     expect(html).toMatch(/id="set-open-2fa"[^>]*disabled/);
     expect(html).toContain("HMC-abcdef0123456789");
