@@ -1,4 +1,4 @@
-import { INTEGRATION, isDemoMode, isLabApiEnabled, isLiveModeBlocked } from "./config/integration";
+import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
 import { labSessionLabel } from "./adapters/exchangeApi";
 import { useLabMatching } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
@@ -72,7 +72,9 @@ export function labFeeWalletSection(feeWallet: string | null | undefined): strin
 
 function modeBlurb(): string {
   if (isLiveModeBlocked()) return "live blocked — paper/lab only";
-  if (isLabApiEnabled()) return useLabMatching() ? "lab ledger connected" : "LAB ready · connect fixture below";
+  if (isDeskConnectEnabled()) return "desk Connect · matching HOLD · paper Spot";
+  if (isLabLoopbackApi()) return useLabMatching() ? "lab ledger connected" : "LAB ready · connect fixture below";
+  if (isLabApiEnabled()) return "API wired";
   if (isDemoMode()) return "paper wallet";
   return "paper / synthetic";
 }
@@ -453,7 +455,8 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
   const vip = activeVipTier(state, market);
   const vol = volume30dUsdt(state, market);
   const vipProg = nextVipProgress(state, market);
-  const labOn = isLabApiEnabled();
+  const labOn = isLabLoopbackApi();
+  const deskOn = isDeskConnectEnabled();
   const labLive = useLabMatching();
   const session = labSessionLabel();
   const ledger = state.ledger.slice(0, 24);
@@ -617,6 +620,27 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
     ${renderDustPanel(w, market, "usdt", state)}
 
     ${renderFeesBlock(state, market, vip, vol)}
+
+    ${
+      deskOn
+        ? `<details class="acct-panel" id="acct-desk" open>
+      <summary>Desk session (HOLD)</summary>
+      <article class="glass-inset account-card lab-api-card">
+        <div class="acct-lab-status">
+          <span class="lab-badge">DESK · HOLD</span>
+          <p class="muted small">Session: <strong class="mono" id="desk-session-addr">${escapeHtml(session.label)}</strong></p>
+        </div>
+        <p class="muted small">Connect creates a browser-local <code>HMC-…</code> key (sessionStorage). Matching / deposit / withdraw stay <strong>HOLD</strong> — Spot stays paper.</p>
+        <div class="lab-action-grid lab-session-actions">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">Connect wallet</button>
+          <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync ledger</button>
+          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout">Logout</button>
+        </div>
+        <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
+      </article>
+    </details>`
+        : ""
+    }
 
     ${
       labOn

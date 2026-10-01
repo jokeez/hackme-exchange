@@ -25,7 +25,8 @@
 | **Public desk API** | [exchange-api.hackme.tech](https://exchange-api.hackme.tech/health) — **HOLD** (`matching: disabled`; deposit/withdraw off) |
 | **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO |
 | **Real custody / withdrawals** | **HOLD** (none in the browser) |
-| **Live mode in SPA** | **Blocked** (paper only; no `VITE_EXCHANGE_API_ORIGIN` in D0) |
+| **Live mode in SPA** | **Blocked** (paper Spot) |
+| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD |
 
 Balances are simulated (`localStorage`). Not financial advice. Not a licensed exchange.
 

@@ -1,4 +1,4 @@
-import { isLoopbackOrigin, sanitizeHttpUrl } from "../sanitize";
+import { isLoopbackOrigin, isAllowedExchangeApiOrigin, sanitizeHttpUrl } from "../sanitize";
 
 export type IntegrationMode = "demo" | "paper" | "live" | "lab" | "staging";
 
@@ -9,8 +9,8 @@ export type IntegrationConfig = {
   /** Spot UI deploy target (future) */
   exchangeOrigin: string;
   /**
-   * Optional private-lab exchange-api origin (loopback only).
-   * Empty = paper/demo localStorage only — no API wiring for everyone.
+   * Opt-in exchange-api origin: loopback lab OR public desk (when desk connect enabled).
+   * Empty = paper/demo localStorage only.
    */
   exchangeApiOrigin: string;
   /** Local hackme-node dashboard + wallet APIs */
@@ -22,11 +22,18 @@ export type IntegrationConfig = {
    * Never set for public builds — Vite inlines VITE_* into the client bundle.
    */
   adminToken?: string;
+  /** Public desk Connect lane (auth/session only; matching stays server HOLD). */
+  publicDeskConnect: boolean;
 };
 
 function env(key: string, fallback: string): string {
   const v = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.[key];
   return (v && v.trim()) || fallback;
+}
+
+function envTruthy(key: string): boolean {
+  const v = env(key, "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
 }
 
 const RAW_MODE = parseModeRaw(env("VITE_INTEGRATION_MODE", "paper"));
@@ -67,6 +74,7 @@ const nodeOrigin = (() => {
 })();
 const rawLabFlag = env("VITE_LAB_API", "");
 const rawApiOrigin = env("VITE_EXCHANGE_API_ORIGIN", "");
+const publicDeskConnect = envTruthy("VITE_PUBLIC_DESK_CONNECT");
 
 const isVitest =
   !!(import.meta as ImportMeta & { env?: { VITEST?: boolean; MODE?: string } }).env?.VITEST ||
@@ -94,22 +102,44 @@ const wantsLabApi =
   rawLabFlag.toLowerCase() === "true" ||
   !!rawApiOrigin.trim();
 
+function defaultDeskApiOrigin(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname.toLowerCase();
+    if (host === "exchange.hackme.tech" || host === "127.0.0.1" || host === "localhost") {
+      return `${window.location.origin}/desk-api`;
+    }
+  }
+  return "https://exchange-api.hackme.tech";
+}
+
 function resolveExchangeApiOrigin(): string {
+  // Public desk Connect: allowlisted host or same-origin /desk-api (no lab mint).
+  if (publicDeskConnect && !wantsLabApi) {
+    const candidate = sanitizeHttpUrl(
+      rawApiOrigin.trim() || defaultDeskApiOrigin(),
+      defaultDeskApiOrigin(),
+    );
+    if (isAllowedExchangeApiOrigin(candidate, true)) return candidate;
+    if (typeof console !== "undefined") {
+      console.warn(
+        "[hackme-exchange] VITE_PUBLIC_DESK_CONNECT set but API origin not allowlisted — desk Connect disabled.",
+      );
+    }
+    return "";
+  }
   if (!wantsLabApi) return "";
   const candidate = sanitizeHttpUrl(
     rawApiOrigin.trim() || "http://127.0.0.1:18443",
     "http://127.0.0.1:18443",
   );
-  if (!isLoopbackOrigin(candidate)) {
+  if (!isAllowedExchangeApiOrigin(candidate, publicDeskConnect)) {
     if (typeof console !== "undefined") {
       console.warn(
-        "[hackme-exchange] VITE_EXCHANGE_API_ORIGIN ignored — must be loopback (127.0.0.1/localhost). No public API wiring.",
+        "[hackme-exchange] VITE_EXCHANGE_API_ORIGIN ignored — must be loopback (or allowlisted desk with VITE_PUBLIC_DESK_CONNECT=1).",
       );
     }
     return "";
   }
-  // Production *public* builds: still allow loopback for private lab preview on the same machine.
-  // Never accept a non-loopback origin (already rejected above).
   return candidate;
 }
 
@@ -151,6 +181,7 @@ export const INTEGRATION: IntegrationConfig = {
   nodeOrigin,
   poolCoordinatorOrigin: resolvePoolOrigin(),
   adminToken: undefined,
+  publicDeskConnect,
 };
 
 export function isDemoMode(): boolean {
@@ -174,9 +205,27 @@ export function isLiveModeBlocked(): boolean {
   return RAW_MODE === "live";
 }
 
-/** True when operator opted into loopback exchange-api (auth/balances/orders client). */
-export function isLabApiEnabled(): boolean {
+/** Any wired exchange-api (loopback lab or public desk Connect). */
+export function isExchangeApiWired(): boolean {
   return !!INTEGRATION.exchangeApiOrigin;
+}
+
+/** Loopback private lab (mint / matching client). */
+export function isLabLoopbackApi(): boolean {
+  return !!INTEGRATION.exchangeApiOrigin && isLoopbackOrigin(INTEGRATION.exchangeApiOrigin);
+}
+
+/**
+ * True when operator opted into exchange-api client (auth/balances).
+ * Does not imply matching — see useLabMatching() / isLabLoopbackApi().
+ */
+export function isLabApiEnabled(): boolean {
+  return isExchangeApiWired();
+}
+
+/** Public desk Connect lane (auth/session; matching stays server HOLD). */
+export function isDeskConnectEnabled(): boolean {
+  return INTEGRATION.publicDeskConnect && isExchangeApiWired() && !isLabLoopbackApi();
 }
 
 /** Raw mode was lab or D1 staging (chrome may still say paper). */
@@ -195,6 +244,7 @@ export type IntegrationFlags = {
   effectiveMode: IntegrationMode;
   staging: boolean;
   labApi: boolean;
+  deskConnect: boolean;
   exchangeApiOrigin: string;
 };
 
@@ -202,6 +252,9 @@ export function resolveIntegrationFlags(vars: Record<string, string>): Integrati
   const raw = parseModeRaw(vars.VITE_INTEGRATION_MODE ?? "paper");
   const rawLabFlag = (vars.VITE_LAB_API ?? "").trim();
   const rawApiOrigin = (vars.VITE_EXCHANGE_API_ORIGIN ?? "").trim();
+  const desk =
+    (vars.VITE_PUBLIC_DESK_CONNECT ?? "").trim() === "1" ||
+    (vars.VITE_PUBLIC_DESK_CONNECT ?? "").trim().toLowerCase() === "true";
   const wants =
     raw === "lab" ||
     raw === "staging" ||
@@ -209,15 +262,22 @@ export function resolveIntegrationFlags(vars: Record<string, string>): Integrati
     rawLabFlag.toLowerCase() === "true" ||
     !!rawApiOrigin;
   let api = "";
-  if (wants) {
+  if (desk && !wants) {
+    const candidate = sanitizeHttpUrl(
+      rawApiOrigin || "https://exchange.hackme.tech/desk-api",
+      "https://exchange.hackme.tech/desk-api",
+    );
+    if (isAllowedExchangeApiOrigin(candidate, true)) api = candidate;
+  } else if (wants) {
     const candidate = sanitizeHttpUrl(rawApiOrigin || "http://127.0.0.1:18443", "http://127.0.0.1:18443");
-    if (isLoopbackOrigin(candidate)) api = candidate;
+    if (isAllowedExchangeApiOrigin(candidate, desk)) api = candidate;
   }
   return {
     rawMode: raw,
     effectiveMode: effectiveMode(raw),
     staging: raw === "staging",
-    labApi: !!api,
+    labApi: !!api && isLoopbackOrigin(api),
+    deskConnect: desk && !!api && !isLoopbackOrigin(api),
     exchangeApiOrigin: api,
   };
 }

@@ -128,6 +128,50 @@ export function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
+/** Public desk API hosts (exact). Used only when VITE_PUBLIC_DESK_CONNECT=1. */
+const PUBLIC_DESK_API_HOSTS = new Set([
+  "exchange-api.hackme.tech",
+  "api.exchange.hackme.tech",
+]);
+
+/** Same-origin paper SPA proxy path for desk API (Caddy → loopback staging). */
+export function isDeskApiProxyPath(originOrUrl: string): boolean {
+  try {
+    const u = new URL(originOrUrl, "https://exchange.hackme.tech");
+    const path = u.pathname.replace(/\/$/, "") || "/";
+    return path === "/desk-api" || path.startsWith("/desk-api/");
+  } catch {
+    return false;
+  }
+}
+
+/** True when origin is an allowlisted public desk API (host or same-origin /desk-api). */
+export function isPublicDeskApiOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    if (PUBLIC_DESK_API_HOSTS.has(host)) return true;
+    // Same-origin desk proxy on paper host / local preview
+    if (
+      (host === "exchange.hackme.tech" || host === "127.0.0.1" || host === "localhost") &&
+      isDeskApiProxyPath(origin)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Loopback lab API or allowlisted public desk — never arbitrary https. */
+export function isAllowedExchangeApiOrigin(origin: string, deskConnectOptIn: boolean): boolean {
+  if (isLoopbackOrigin(origin)) return true;
+  if (!deskConnectOptIn) return false;
+  return isPublicDeskApiOrigin(origin);
+}
+
 export function finiteNonNeg(n: unknown, fallback = 0): number {
   if (typeof n === "number" && Number.isFinite(n) && n >= 0) return n;
   if (typeof n === "string" && n.trim()) {

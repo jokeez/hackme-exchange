@@ -99,6 +99,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
+import { deskWalletConnect } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -121,7 +122,7 @@ import {
   validatePaperTradingGuards,
   type TradingGuards,
 } from "./tradingGuards";
-import { INTEGRATION, isLabApiEnabled, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
+import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
 import { assertOrderFunds, freeBalance, maxOrderBaseAmount } from "./balance";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
@@ -3087,6 +3088,32 @@ async function labFixtureConnectUi(): Promise<void> {
   }
 }
 
+async function deskWalletConnectUi(): Promise<void> {
+  const msg = document.getElementById("desk-api-msg");
+  if (msg) msg.textContent = "Connecting browser HMC wallet…";
+  const res = await deskWalletConnect();
+  if (!res.ok) {
+    if (msg) msg.textContent = res.message;
+    toast(`Desk Connect: ${res.message}`, "warn");
+    return;
+  }
+  if (msg) msg.textContent = `Connected ${res.wallet.address} · matching HOLD`;
+  toast(`Desk wallet connected · ${res.wallet.address.slice(0, 14)}…`, "ok");
+  // Balances sync is fine; do NOT enable lab matching / book poll.
+  const sync = await syncLabBalancesAndBook(state, market);
+  if (sync.ok) {
+    saveState(state);
+    if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
+  } else if (msg) {
+    msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
+  }
+  if (state.mainView === "account") render();
+  else {
+    const addrEl = document.getElementById("desk-session-addr");
+    if (addrEl) addrEl.textContent = res.wallet.address;
+  }
+}
+
 async function labApiLogoutUi(): Promise<void> {
   const res = await authLogout();
   clearLabBookCache();
@@ -3604,6 +3631,9 @@ function wireLabApiButtons(): void {
     next.addEventListener("click", fn);
   };
   click("btn-lab-fixture-connect", () => void labFixtureConnectUi());
+  click("btn-desk-wallet-connect", () => void deskWalletConnectUi());
+  click("btn-desk-api-sync", () => void syncLabLedgerUi());
+  click("btn-desk-api-logout", () => void labApiLogoutUi());
   click("btn-lab-api-sync", () => void syncLabLedgerUi());
   click("btn-lab-api-logout", () => void labApiLogoutUi());
   click("btn-lab-revoke-all", () => void labRevokeAllUi());

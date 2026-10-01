@@ -4,7 +4,7 @@
  */
 
 import type { BookLevel, DemoState, MarketSnapshot, Order, OrderSide, PairId, Trade } from "../types";
-import { isLabApiEnabled } from "../config/integration";
+import { isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
 import {
   apiPairToId,
   apiPriceToDisplay,
@@ -30,14 +30,17 @@ import { activeVipTier } from "../fees";
 import { recordTradeLedger } from "../ledger";
 import { cancelOrder } from "../store";
 
-/** True when loopback API is opted in and fixture/session is connected. */
+/**
+ * True when loopback lab matching client is live (CSRF session).
+ * Public desk Connect must NOT flip this — Spot stays paper while matching HOLD.
+ */
 export function useLabMatching(): boolean {
-  return isLabApiEnabled() && getLabSessionMeta().hasCsrf;
+  return isLabLoopbackApi() && getLabSessionMeta().hasCsrf;
 }
 
 /** FE-M02: address remembered after reload but CSRF gone — freeze paper matching. */
 export function isLabSessionStale(): boolean {
-  if (!isLabApiEnabled()) return false;
+  if (!isLabLoopbackApi()) return false;
   const m = getLabSessionMeta();
   return !!m.address && !m.hasCsrf;
 }
@@ -114,7 +117,7 @@ function bookFingerprint(bids: ApiBookLevel[], asks: ApiBookLevel[]): string {
 
 /** Fetch live lab L2 for pair; updates module cache. Returns whether fingerprint changed. */
 export async function refreshLabBook(pairId: PairId): Promise<{ ok: boolean; changed: boolean; note?: string }> {
-  if (!isLabApiEnabled()) return { ok: false, changed: false, note: "lab API not enabled" };
+  if (!isExchangeApiWired()) return { ok: false, changed: false, note: "lab API not enabled" };
   const res = await fetchExchangeBook(pairIdToApi(pairId));
   if (!res.ok) return { ok: false, changed: false, note: res.message };
   const fp = bookFingerprint(res.bids, res.asks);
@@ -404,12 +407,20 @@ export async function syncLabBalancesAndBook(
   state: DemoState,
   market?: MarketSnapshot | null,
 ): Promise<{ ok: true; note: string } | ExchangeApiError> {
-  if (!isLabApiEnabled()) {
+  if (!isExchangeApiWired()) {
     return { ok: false, status: 0, code: "disabled", message: "lab API not enabled" };
   }
   const bal = await fetchExchangeBalances();
   if (!bal.ok) return bal;
   state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+
+  // Public desk HOLD: skip order/fill/book sync that hammers 503 matching.
+  if (!isLabLoopbackApi()) {
+    return {
+      ok: true,
+      note: `Desk sync · ${bal.address.slice(0, 14)}… · matching HOLD · paper Spot`,
+    };
+  }
 
   const orders = await listExchangeOrders();
   if (orders.ok) mergeServerOpenOrders(state, orders.orders);
@@ -437,8 +448,11 @@ export async function syncLabOrdersFillsLight(
   | { ok: true; note: string; changed: boolean; bookChanged: boolean }
   | ExchangeApiError
 > {
-  if (!isLabApiEnabled()) {
+  if (!isExchangeApiWired()) {
     return { ok: false, status: 0, code: "disabled", message: "lab API not enabled" };
+  }
+  if (!isLabLoopbackApi()) {
+    return { ok: true, note: "desk HOLD — skip matching stream", changed: false, bookChanged: false };
   }
   const account = getLabSessionMeta().address;
   const ordersBefore = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;

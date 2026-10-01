@@ -5,7 +5,7 @@
 
 import { INTEGRATION } from "../config/integration";
 import { fetchWithTimeout } from "../fetchTimeout";
-import { isLoopbackOrigin } from "../sanitize";
+import { isAllowedExchangeApiOrigin, isLoopbackOrigin } from "../sanitize";
 import type { OrderSide, PairId, Wallet } from "../types";
 
 export const MINOR_UNIT_SCALE = 1e8;
@@ -265,7 +265,8 @@ export function exchangeApiBase(): string {
   if (typeof window !== "undefined") {
     const page = window.location.origin.replace(/\/$/, "");
     // Vite dev (:5199) and preview — same-origin proxy, avoids direct :18443 spam.
-    if (page !== configured && isLoopbackOrigin(page)) {
+    // Only for loopback lab targets (desk uses configured /desk-api or CF host as-is).
+    if (page !== configured && isLoopbackOrigin(page) && isLoopbackOrigin(configured)) {
       return `${page}/exchange-api`;
     }
   }
@@ -279,8 +280,8 @@ function resolveBase(baseOverride?: string): string {
 function apiUrl(path: string, baseOverride?: string): string | null {
   const base = resolveBase(baseOverride);
   if (!base) return null;
-  // Always enforce loopback — reject attacker/mis-set overrides.
-  if (!isLoopbackOrigin(base)) return null;
+  // Loopback lab OR allowlisted public desk (when INTEGRATION opted in).
+  if (!isAllowedExchangeApiOrigin(base, INTEGRATION.publicDeskConnect)) return null;
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
