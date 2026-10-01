@@ -35,10 +35,15 @@ async function main() {
     [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 
   const health = await fetch(`${BASE}/health`);
-  const hj = (await health.json()) as { matching?: string; deposit?: { enabled?: boolean } };
+  const hj = (await health.json()) as {
+    matching?: string;
+    deposit?: { enabled?: boolean };
+    withdraw?: { enabled?: boolean };
+  };
   if (hj.matching !== "disabled") throw new Error(`matching not HOLD: ${hj.matching}`);
   if (hj.deposit?.enabled) throw new Error("deposit enabled");
-  console.log("PASS  health HOLD");
+  if (hj.withdraw?.enabled) throw new Error("withdraw enabled");
+  console.log("PASS  health HOLD (matching/deposit/withdraw)");
 
   const chRes = await fetch(`${BASE}/auth/challenge`, {
     method: "POST",

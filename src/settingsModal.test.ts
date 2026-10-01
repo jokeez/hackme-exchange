@@ -2,9 +2,26 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it, vi } from "vitest";
-import { renderUnifiedSettingsModal, showUnifiedSettingsModal } from "./settingsModal";
+import {
+  formatDeskMatchingLabel,
+  isDeskMatchingLive,
+  patchSettingsWalletSessionChrome,
+  renderUnifiedSettingsModal,
+  showUnifiedSettingsModal,
+} from "./settingsModal";
 import { baseState } from "./testFixtures";
 import { LAYOUT_DEFAULTS } from "./layoutPrefs";
+
+describe("desk matching labels", () => {
+  it("normalizes disabled/off to HOLD", () => {
+    expect(formatDeskMatchingLabel("disabled")).toBe("HOLD");
+    expect(formatDeskMatchingLabel("off")).toBe("HOLD");
+    expect(formatDeskMatchingLabel("")).toBe("HOLD");
+    expect(formatDeskMatchingLabel("ok")).toBe("ok");
+    expect(isDeskMatchingLive("ok")).toBe(true);
+    expect(isDeskMatchingLive("disabled")).toBe(false);
+  });
+});
 
 describe("Settings → Wallet pane", () => {
   it("renders HOLD badges, session controls, and desk widgets when Connect is on", () => {
@@ -21,18 +38,13 @@ describe("Settings → Wallet pane", () => {
       withdrawEnabled: false,
     });
     expect(html).toContain('data-tab="wallet"');
-    expect(html).toContain("matching · disabled");
+    expect(html).toContain("matching · HOLD");
     expect(html).toContain("deposit · HOLD");
     expect(html).toContain("withdraw · HOLD");
     expect(html).toContain("set-desk-connect");
     expect(html).toContain("Reconnect");
-    expect(html).toContain("set-desk-copy");
-    expect(html).toContain("set-desk-logout");
-    expect(html).toContain("set-desk-revoke");
-    expect(html).toContain("set-desk-new-key");
-    expect(html).toContain("set-open-2fa");
-    expect(html).toContain("set-open-account");
-    expect(html).toContain("set-hub-wallet");
+    expect(html).toContain("Coming with withdraw");
+    expect(html).toMatch(/id="set-open-2fa"[^>]*disabled/);
     expect(html).toContain("HMC-abcdef0123456789");
     expect(html).not.toContain("<script>");
   });
@@ -45,7 +57,6 @@ describe("Settings → Wallet pane", () => {
     });
     expect(html).toContain("desk Connect off in this build");
     expect(html).toMatch(/id="set-desk-connect"[^>]*disabled/);
-    expect(html).toMatch(/id="set-desk-new-key"[^>]*disabled/);
     expect(html).toMatch(/id="set-open-2fa"[^>]*disabled/);
   });
 
@@ -62,7 +73,6 @@ describe("Settings → Wallet pane", () => {
   });
 
   it("wires Wallet actions without throwing", () => {
-    const onDeskConnect = vi.fn();
     const onCopyDeskAddress = vi.fn();
     const onOpenAccount = vi.fn();
     showUnifiedSettingsModal(
@@ -82,7 +92,6 @@ describe("Settings → Wallet pane", () => {
         onOpenOverlays: () => {},
         onChartOverlays: () => {},
         onToggleMultiLink: () => {},
-        onDeskConnect,
         onCopyDeskAddress,
         onOpenAccount,
       },
@@ -100,6 +109,51 @@ describe("Settings → Wallet pane", () => {
     expect(onCopyDeskAddress).toHaveBeenCalledTimes(1);
     (document.getElementById("set-open-account") as HTMLButtonElement).click();
     expect(onOpenAccount).toHaveBeenCalledTimes(1);
+    document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+  });
+
+  it("patchSettingsWalletSessionChrome updates live session controls", () => {
+    showUnifiedSettingsModal(
+      baseState(),
+      LAYOUT_DEFAULTS,
+      "hub",
+      {
+        onSaveOracle: () => {},
+        onTheme: () => {},
+        onLayout: () => {},
+        onApplyLayoutPreset: () => {},
+        onResetLayout: () => {},
+        onExport: () => {},
+        onImportClick: () => {},
+        onResetDemo: () => {},
+        onOpenChartStyle: () => {},
+        onOpenOverlays: () => {},
+        onChartOverlays: () => {},
+        onToggleMultiLink: () => {},
+      },
+      {
+        deskConnect: true,
+        deskSessionLabel: "HMC-aaaaaaaaaaaaaaaa",
+        deskAddress: "HMC-aaaaaaaaaaaaaaaa",
+        sessionLive: true,
+        labLoopback: false,
+        matching: "disabled",
+      },
+    );
+    patchSettingsWalletSessionChrome({
+      deskConnect: true,
+      deskSessionLabel: "not connected",
+      deskAddress: "HMC-bbbbbbbbbbbbbbbb",
+      sessionLive: false,
+      labLoopback: false,
+      matching: "HOLD",
+      depositEnabled: false,
+      withdrawEnabled: false,
+    });
+    expect(document.getElementById("set-desk-session")?.textContent).toBe("not connected");
+    expect((document.getElementById("set-desk-logout") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("set-desk-connect") as HTMLButtonElement).textContent).toBe("Connect");
+    expect(document.getElementById("set-desk-hold")?.textContent).toContain("matching · HOLD");
     document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
   });
 });

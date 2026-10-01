@@ -40,6 +40,17 @@ async function httpCheck() {
     else if (!r.ok) fail(`${r.status} ${path}`);
     else ok(`${path} → ${r.status}`);
   }
+
+  const deskHealth = await fetch(`${BASE}/desk-api/health`);
+  if (!deskHealth.ok) fail(`desk-api/health ${deskHealth.status}`);
+  else {
+    const hj = await deskHealth.json();
+    if (!hj?.ok) fail("desk-api/health ok≠true");
+    else if (hj.matching !== "disabled") fail(`desk matching not HOLD: ${hj.matching}`);
+    else if (hj.deposit?.enabled) fail("desk deposit enabled");
+    else if (hj.withdraw?.enabled) fail("desk withdraw enabled");
+    else ok("desk-api/health HOLD (matching/deposit/withdraw)");
+  }
 }
 
 async function browserCheck() {

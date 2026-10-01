@@ -25,7 +25,7 @@ export type SettingsModalActions = {
   onCopyDeskAddress?: () => void;
   onNewDeskWallet?: () => void;
   onOpenAccount?: () => void;
-  onRefreshDeskHealth?: () => void | Promise<void>;
+  onRefreshDeskHealth?: () => void | Promise<void | boolean>;
 };
 
 export type SettingsWalletChrome = {
@@ -41,6 +41,63 @@ export type SettingsWalletChrome = {
   depositEnabled?: boolean;
   withdrawEnabled?: boolean;
 };
+
+/** Server may say `disabled` — UI shows HOLD until matching is truly `ok`. */
+export function formatDeskMatchingLabel(raw?: string): string {
+  const v = (raw || "").trim();
+  if (!v) return "HOLD";
+  const lower = v.toLowerCase();
+  if (lower === "disabled" || lower === "hold" || lower === "off") return "HOLD";
+  return v;
+}
+
+export function isDeskMatchingLive(raw?: string): boolean {
+  return (raw || "").trim().toLowerCase() === "ok";
+}
+
+/** Live-update Wallet pane controls while Settings stays open. */
+export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): void {
+  const root = document.querySelector(".modal-backdrop[data-settings-modal]");
+  if (!root) return;
+  const deskOn = !!wallet.deskConnect;
+  const live = !!wallet.sessionLive;
+  const sessionEl = root.querySelector("#set-desk-session");
+  if (sessionEl) {
+    sessionEl.textContent = deskOn ? wallet.deskSessionLabel || "not connected" : "desk Connect off in this build";
+  }
+  const setDisabled = (id: string, disabled: boolean) => {
+    const el = root.querySelector(`#${id}`) as HTMLButtonElement | null;
+    if (!el) return;
+    el.disabled = disabled;
+  };
+  const connectBtn = root.querySelector("#set-desk-connect") as HTMLButtonElement | null;
+  if (connectBtn) {
+    connectBtn.disabled = !deskOn;
+    connectBtn.textContent = deskOn ? (live ? "Reconnect" : "Connect") : "Unavailable";
+  }
+  setDisabled("set-desk-copy", !(deskOn && !!wallet.deskAddress));
+  setDisabled("set-desk-logout", !(deskOn && live));
+  setDisabled("set-desk-revoke", !(deskOn && live));
+  setDisabled("set-desk-new-key", !deskOn);
+  const twoFa = root.querySelector("#set-open-2fa") as HTMLButtonElement | null;
+  if (twoFa) {
+    const lab = !!wallet.labLoopback;
+    twoFa.disabled = !lab;
+    twoFa.textContent = lab ? "Open Account · 2FA" : "Coming with withdraw";
+  }
+  const matching = formatDeskMatchingLabel(wallet.matching);
+  const vals = [
+    { on: isDeskMatchingLive(wallet.matching), text: `matching · ${matching}` },
+    { on: !!wallet.depositEnabled, text: `deposit · ${wallet.depositEnabled ? "on" : "HOLD"}` },
+    { on: !!wallet.withdrawEnabled, text: `withdraw · ${wallet.withdrawEnabled ? "on" : "HOLD"}` },
+  ];
+  root.querySelectorAll("#set-desk-hold .settings-hold-pill").forEach((el, i) => {
+    const v = vals[i];
+    if (!v) return;
+    el.setAttribute("data-on", v.on ? "1" : "0");
+    el.textContent = v.text;
+  });
+}
 
 export function renderUnifiedSettingsModal(
   state: DemoState,
@@ -98,7 +155,7 @@ export function renderUnifiedSettingsModal(
     <div class="modal-pane" id="pane-wallet" role="tabpanel" hidden>
       <p class="muted small">Security &amp; wallet — paper Spot stays local; desk matching/deposit/withdraw stay HOLD until GO.</p>
       <div class="settings-hold-row" id="set-desk-hold" aria-live="polite">
-        <span class="settings-hold-pill" data-on="${wallet?.matching === "ok" ? "1" : "0"}">matching · ${escapeHtml(wallet?.matching || "—")}</span>
+        <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">matching · ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}</span>
         <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
         <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
         <button type="button" class="btn-sm settings-hold-refresh" id="set-desk-health" title="Refresh /desk-api health">↻</button>
@@ -136,7 +193,7 @@ export function renderUnifiedSettingsModal(
         <article class="settings-widget glass-inset">
           <h4>2FA</h4>
           <p class="muted small">TOTP for withdraw GO. Public withdraw stays HOLD; lab loopback can enroll now.</p>
-          <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback || wallet?.sessionLive ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : wallet?.sessionLive ? "Open Account · 2FA" : "Needs session / lab"}</button>
+          <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
         </article>
         <article class="settings-widget glass-inset">
           <h4>Desk key</h4>
@@ -390,8 +447,12 @@ export function showUnifiedSettingsModal(
   bd.querySelector("#set-desk-health")?.addEventListener("click", () => {
     const msg = bd.querySelector("#set-wallet-msg");
     if (msg) msg.textContent = "Refreshing desk health…";
-    void Promise.resolve(actions.onRefreshDeskHealth?.()).then(() => {
-      if (msg) msg.textContent = "Edge HOLD badges updated.";
-    });
+    void Promise.resolve(actions.onRefreshDeskHealth?.())
+      .then((ok) => {
+        if (msg) msg.textContent = ok === false ? "Health refresh failed — badges may be stale." : "Edge HOLD badges updated.";
+      })
+      .catch(() => {
+        if (msg) msg.textContent = "Health refresh failed — badges may be stale.";
+      });
   });
 }

@@ -74,7 +74,7 @@ import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, s
 import { detectMultiChartLayout, listChartPaneHosts } from "./chartScreenshot";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
-import { showUnifiedSettingsModal } from "./settingsModal";
+import { showUnifiedSettingsModal, patchSettingsWalletSessionChrome, formatDeskMatchingLabel, isDeskMatchingLive, type SettingsWalletChrome } from "./settingsModal";
 import {
   auth2faConfirm,
   auth2faDisable,
@@ -775,7 +775,9 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
     }
     healthBackoffUntil = 0;
     deskEdgeSnap = {
-      matching: typeof h.matching === "string" && h.matching ? h.matching : useLabMatching() ? "ok" : "HOLD",
+      matching: formatDeskMatchingLabel(
+        typeof h.matching === "string" && h.matching ? h.matching : useLabMatching() ? "ok" : "HOLD",
+      ),
       depositEnabled: h.deposit?.enabled === true,
       withdrawEnabled: h.withdraw?.enabled === true,
     };
@@ -3014,18 +3016,54 @@ async function maybeAutoReconnectLabSession(): Promise<void> {
 
 /** Lab ledger sync (balances, open orders, fills, book). Does not touch node /api/wallet. */
 async function syncLabLedgerUi(): Promise<void> {
+  const desk = isDeskConnectEnabled();
+  const msgEl =
+    document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
+    document.getElementById("lab-api-msg") ||
+    document.getElementById("desk-api-msg") ||
+    document.getElementById("sync-node-msg");
   const res = await syncLabBalancesAndBook(state, market);
   if (!res.ok) {
-    const msgEl = document.getElementById("lab-api-msg") ?? document.getElementById("sync-node-msg");
     if (msgEl) msgEl.textContent = res.message;
     toast(res.message, "warn");
     return;
   }
   saveState(state);
-  const msgEl = document.getElementById("lab-api-msg") ?? document.getElementById("sync-node-msg");
   if (msgEl) msgEl.textContent = res.note;
-  toast(res.note, "ok");
+  if (desk && !isLabLoopbackApi()) {
+    toast("Desk ledger synced · matching HOLD", "info");
+  } else {
+    toast(res.note, "ok");
+  }
   refreshAccountAfterLab();
+}
+
+function currentSettingsWalletChrome(): SettingsWalletChrome {
+  const sess = labSessionLabel();
+  let deskAddr = sess.address;
+  if (!deskAddr && isDeskConnectEnabled()) {
+    try {
+      deskAddr = deskWalletIdentity().address;
+    } catch {
+      /* ignore */
+    }
+  }
+  return {
+    deskConnect: isDeskConnectEnabled(),
+    deskSessionLabel: sess.label,
+    deskAddress: deskAddr || undefined,
+    sessionLive: sess.live,
+    labLoopback: isLabLoopbackApi(),
+    hubWalletHref: nodeWalletUrl(),
+    hubEmbed: isHubEmbed(),
+    matching: deskEdgeSnap.matching,
+    depositEnabled: deskEdgeSnap.depositEnabled,
+    withdrawEnabled: deskEdgeSnap.withdrawEnabled,
+  };
+}
+
+function patchOpenSettingsWalletChrome(): void {
+  patchSettingsWalletSessionChrome(currentSettingsWalletChrome());
 }
 
 /**
@@ -3125,6 +3163,7 @@ async function deskWalletConnectUi(): Promise<void> {
     const addrEl = document.getElementById("desk-session-addr");
     if (addrEl) addrEl.textContent = res.wallet.address;
   }
+  patchOpenSettingsWalletChrome();
 }
 
 async function deskCopyAddressUi(): Promise<void> {
@@ -3155,23 +3194,40 @@ async function deskNewWalletUi(): Promise<void> {
   await deskWalletConnectUi();
 }
 
-async function refreshDeskEdgeHealthUi(): Promise<void> {
+async function refreshDeskEdgeHealthUi(): Promise<boolean> {
   healthBackoffUntil = 0;
-  await refreshTradingGuardsFromHealth();
+  const before = { ...deskEdgeSnap };
+  try {
+    await refreshTradingGuardsFromHealth();
+  } catch {
+    return false;
+  }
+  const changed =
+    before.matching !== deskEdgeSnap.matching ||
+    before.depositEnabled !== deskEdgeSnap.depositEnabled ||
+    before.withdrawEnabled !== deskEdgeSnap.withdrawEnabled;
+  // If health failed silently (unreachable), snap stays default/previous — still refresh DOM.
   const row = document.getElementById("set-desk-hold");
-  if (!row) return;
-  const pills = row.querySelectorAll(".settings-hold-pill");
-  const vals = [
-    { on: deskEdgeSnap.matching === "ok", text: `matching · ${deskEdgeSnap.matching}` },
-    { on: deskEdgeSnap.depositEnabled, text: `deposit · ${deskEdgeSnap.depositEnabled ? "on" : "HOLD"}` },
-    { on: deskEdgeSnap.withdrawEnabled, text: `withdraw · ${deskEdgeSnap.withdrawEnabled ? "on" : "HOLD"}` },
-  ];
-  pills.forEach((el, i) => {
-    const v = vals[i];
-    if (!v) return;
-    el.setAttribute("data-on", v.on ? "1" : "0");
-    el.textContent = v.text;
-  });
+  if (row) {
+    const matching = formatDeskMatchingLabel(deskEdgeSnap.matching);
+    const vals = [
+      { on: isDeskMatchingLive(deskEdgeSnap.matching), text: `matching · ${matching}` },
+      { on: deskEdgeSnap.depositEnabled, text: `deposit · ${deskEdgeSnap.depositEnabled ? "on" : "HOLD"}` },
+      { on: deskEdgeSnap.withdrawEnabled, text: `withdraw · ${deskEdgeSnap.withdrawEnabled ? "on" : "HOLD"}` },
+    ];
+    row.querySelectorAll(".settings-hold-pill").forEach((el, i) => {
+      const v = vals[i];
+      if (!v) return;
+      el.setAttribute("data-on", v.on ? "1" : "0");
+      el.textContent = v.text;
+    });
+  }
+  patchOpenSettingsWalletChrome();
+  // Treat unchanged default HOLD after failed probe as soft fail when API wired but backoff set.
+  if (isDeskConnectEnabled() || isLabApiEnabled()) {
+    if (Date.now() < healthBackoffUntil && !changed) return false;
+  }
+  return true;
 }
 
 async function labApiLogoutUi(): Promise<void> {
@@ -3202,6 +3258,7 @@ async function labApiLogoutUi(): Promise<void> {
       }
     }
   }
+  patchOpenSettingsWalletChrome();
 }
 
 async function labRevokeAllUi(): Promise<void> {
@@ -3229,6 +3286,7 @@ async function labRevokeAllUi(): Promise<void> {
     }
     patchModeChrome();
   }
+  patchOpenSettingsWalletChrome();
 }
 
 async function labShowDepositAddr(asset: string): Promise<void> {
@@ -5368,9 +5426,12 @@ function showSettings(opts?: { tab?: string }): void {
         void syncFromNode();
       },
       onOpenAccountSecurity: () => {
+        if (!isLabLoopbackApi()) {
+          toast("2FA enroll ships with withdraw GO (lab can enroll today)", "info");
+          return;
+        }
         gotoMainView("account");
         requestAnimationFrame(() => {
-          document.getElementById("acct-desk")?.setAttribute("open", "");
           document.getElementById("acct-lab")?.setAttribute("open", "");
           document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });
@@ -5385,29 +5446,7 @@ function showSettings(opts?: { tab?: string }): void {
       onOpenAccount: () => gotoMainView("account"),
       onRefreshDeskHealth: () => refreshDeskEdgeHealthUi(),
     },
-    (() => {
-      const sess = labSessionLabel();
-      let deskAddr = sess.address;
-      if (!deskAddr && isDeskConnectEnabled()) {
-        try {
-          deskAddr = deskWalletIdentity().address;
-        } catch {
-          /* ignore */
-        }
-      }
-      return {
-        deskConnect: isDeskConnectEnabled(),
-        deskSessionLabel: sess.label,
-        deskAddress: deskAddr || undefined,
-        sessionLive: sess.live,
-        labLoopback: isLabLoopbackApi(),
-        hubWalletHref: nodeWalletUrl(),
-        hubEmbed: isHubEmbed(),
-        matching: deskEdgeSnap.matching,
-        depositEnabled: deskEdgeSnap.depositEnabled,
-        withdrawEnabled: deskEdgeSnap.withdrawEnabled,
-      };
-    })(),
+    currentSettingsWalletChrome(),
   );
   if (opts?.tab) {
     const btn = document.querySelector(

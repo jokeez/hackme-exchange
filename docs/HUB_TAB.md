@@ -12,6 +12,7 @@ Hub (hackme.tech or :8080)  --tab Exchange-->  iframe  exchange.hackme.tech/?emb
 - Hub tab is **Exchange**, not Market (`#orders` = useful-PoW/fuzz market; HMS Market = storage).
 - Node Wallet remains `#wallet` (hub chrome + SPA System → Hub wallet via `postMessage`).
 - **D0 default:** static paper SPA on `https://exchange.hackme.tech` — no public matching API.
+- **Desk Connect (HOLD):** same-origin `/desk-api` auth/session only when `VITE_PUBLIC_DESK_CONNECT=1`. Matching / deposit / withdraw remain HOLD. Hub (`132…`) must not host the exchange edge.
 
 ## Embed chrome
 

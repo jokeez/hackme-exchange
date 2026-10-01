@@ -15,7 +15,9 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 | localStorage pollution | `loadState` strip + clamps |
 | Origin spoof | `sanitizeHttpUrl` — `http:` / `https:` only |
 
-**Residual (accepted for paper):** no auth, synthetic book/tape, client-side balances, meta CSP with `'unsafe-inline'`.
+**Residual (accepted for paper):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
+
+**Desk Connect (optional HOLD lane):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); cookie session + memory-only CSRF against same-origin `/desk-api`. Auth is for desk prep only — not custody; matching/deposit/withdraw stay OFF.
 
 **This is not a financial system.** Do not treat paper settlement as production custody.
 

@@ -7,7 +7,7 @@ import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha512";
 import { authChallenge, authVerify, type ExchangeApiError, type VerifyResponse } from "./exchangeApi";
 import { addressFromPubKey, signLabFixtureMessage } from "./labFixture";
-import { isDeskConnectEnabled, isExchangeApiWired } from "../config/integration";
+import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
 
 ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 
@@ -83,8 +83,13 @@ export async function deskWalletConnect(
       message: "Exchange API not wired — set VITE_PUBLIC_DESK_CONNECT=1 (or lab loopback)",
     };
   }
-  if (!isDeskConnectEnabled() && seedHex === undefined) {
-    // Allow explicit seed path only on desk lane by default messaging.
+  if (!isDeskConnectEnabled() && !isLabLoopbackApi()) {
+    return {
+      ok: false,
+      status: 0,
+      code: "disabled",
+      message: "Desk Connect off — enable VITE_PUBLIC_DESK_CONNECT=1 (or lab loopback)",
+    };
   }
   const wallet = deskWalletIdentity(seedHex ?? loadOrCreateDeskSeed());
   const ch = await authChallenge(wallet.address);

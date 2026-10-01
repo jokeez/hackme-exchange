@@ -33,6 +33,7 @@ import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "
 import { renderDustPanel } from "./product/dustConvert";
 import { portfolioEquityChart30d, refreshPortfolioChartHtml, wirePortfolioEquityChart } from "./product/portfolioChart";
 import { renderMultiWalletCard, type WalletSlice } from "./product/multiWallet";
+import { formatDeskMatchingLabel, isDeskMatchingLive } from "./settingsModal";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
 export type AccountPageOpts = {
@@ -116,14 +117,21 @@ function renderSecurity2faCard(sessionLive: boolean): string {
 }
 
 function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
-  const matching = edge?.matching || "HOLD";
+  const matching = formatDeskMatchingLabel(edge?.matching);
   const dep = !!edge?.depositEnabled;
   const wd = !!edge?.withdrawEnabled;
   return `<div class="settings-hold-row acct-desk-hold" aria-live="polite">
-        <span class="settings-hold-pill" data-on="${matching === "ok" ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
+        <span class="settings-hold-pill" data-on="${isDeskMatchingLive(edge?.matching) ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
         <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${dep ? "on" : "HOLD"}</span>
         <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${wd ? "on" : "HOLD"}</span>
       </div>`;
+}
+
+function renderDesk2faHoldNotice(): string {
+  return `<article class="glass-inset account-card" id="acct-security-2fa-hold">
+        <h4>Security · 2FA</h4>
+        <p class="muted small">Authenticator (TOTP) enroll ships with <strong>withdraw GO</strong>. Public withdraw stays HOLD — lab loopback can enroll today.</p>
+      </article>`;
 }
 
 function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: number): string {
@@ -689,7 +697,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         </div>
         <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
       </article>
-      ${renderSecurity2faCard(session.live)}
+      ${renderDesk2faHoldNotice()}
     </details>`
         : ""
     }

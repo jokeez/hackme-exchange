@@ -18,6 +18,7 @@ describe("deskWallet", () => {
     vi.doMock("../config/integration", () => ({
       isDeskConnectEnabled: () => true,
       isExchangeApiWired: () => true,
+      isLabLoopbackApi: () => false,
     }));
     const { loadOrCreateDeskSeed, deskWalletIdentity } = await import("./deskWallet");
     const a = loadOrCreateDeskSeed();
@@ -34,6 +35,7 @@ describe("deskWallet", () => {
     vi.doMock("../config/integration", () => ({
       isDeskConnectEnabled: () => true,
       isExchangeApiWired: () => true,
+      isLabLoopbackApi: () => false,
     }));
     const { loadOrCreateDeskSeed, clearDeskSeed, deskWalletIdentity } = await import("./deskWallet");
     const first = deskWalletIdentity(loadOrCreateDeskSeed()).address;
@@ -41,5 +43,17 @@ describe("deskWallet", () => {
     const second = deskWalletIdentity(loadOrCreateDeskSeed()).address;
     expect(second).toMatch(/^HMC-[0-9a-f]{16}$/);
     expect(second).not.toBe(first);
+  });
+
+  it("deskWalletConnect refuses when desk and lab are both off", async () => {
+    vi.doMock("../config/integration", () => ({
+      isDeskConnectEnabled: () => false,
+      isExchangeApiWired: () => true,
+      isLabLoopbackApi: () => false,
+    }));
+    const { deskWalletConnect } = await import("./deskWallet");
+    const res = await deskWalletConnect();
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("disabled");
   });
 });

@@ -15,6 +15,7 @@
     "test:e2e": "node scripts/g10_visual_pass.mjs",
     "test:e2e:full": "node scripts/mega_ui_audit.mjs",
     "smoke:live": "node scripts/live_smoke.mjs",
+    "smoke:desk": "npx tsx scripts/desk-connect-smoke.ts",
     "dev:d1": "bash scripts/d1-local-dev.sh",
     "smoke:d1": "npx tsx scripts/d1-smoke.ts",
     "smoke:lab": "npx tsx scripts/lab-smoke.ts",

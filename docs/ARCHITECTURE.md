@@ -11,7 +11,8 @@ Topology sketch for the **open-source paper desk**. Matching / custody stay off 
              ▼                                     │
 ┌────────────────────────────┐                     │
 │  exchange.hackme.tech      │  CF → 89.150.41.40  │
-│  static paper SPA (Caddy)  │  /api → 404         │
+│  static paper SPA (Caddy)  │  /desk-api → desk   │
+│                            │  (Connect HOLD)     │
 └────────────────────────────┘                     │
                                                    │
 Public desk HOLD (matching OFF)                    │
@@ -33,6 +34,8 @@ Private C2 (SSH / loopback) — same VPS             │
 │  hackme-node :18080        │  (not exchange edge)│
 └────────────────────────────┘                     │
 ```
+
+**Desk Connect (HOLD):** opt-in `VITE_PUBLIC_DESK_CONNECT` uses same-origin `/desk-api` for auth/session cookies. Matching / deposit / withdraw stay server HOLD. Hub VPS must not run the exchange edge.
 
 ## Modes
 
