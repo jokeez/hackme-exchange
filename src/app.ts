@@ -100,7 +100,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { deskWalletConnect } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -398,6 +398,12 @@ let labFeeWallet: string | null = null;
 let labUser2faEnabled = false;
 let labDepositEnabled = true;
 let labWithdrawEnabled = true;
+/** Last /health edge snapshot for Settings → Wallet HOLD badges. */
+let deskEdgeSnap: { matching: string; depositEnabled: boolean; withdrawEnabled: boolean } = {
+  matching: "HOLD",
+  depositEnabled: false,
+  withdrawEnabled: false,
+};
 const cvDeskInit = loadConvertDesk();
 /** Convert desk selection — survives re-render without form wipe. */
 let convertFrom: keyof Wallet = cvDeskInit.from;
@@ -768,6 +774,11 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
       return;
     }
     healthBackoffUntil = 0;
+    deskEdgeSnap = {
+      matching: typeof h.matching === "string" && h.matching ? h.matching : useLabMatching() ? "ok" : "HOLD",
+      depositEnabled: h.deposit?.enabled === true,
+      withdrawEnabled: h.withdraw?.enabled === true,
+    };
     tradingGuards = parseHealthTradingGuards(h);
     labFeeWallet = parseHealthFeeWallet(h);
     if (tradingGuards.hmcDiscountPctServer != null) {
@@ -3116,6 +3127,53 @@ async function deskWalletConnectUi(): Promise<void> {
   }
 }
 
+async function deskCopyAddressUi(): Promise<void> {
+  const sess = labSessionLabel();
+  let addr = sess.address;
+  if (!addr && isDeskConnectEnabled()) {
+    try {
+      addr = deskWalletIdentity().address;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!addr) {
+    toast("No desk address yet — Connect first", "warn");
+    return;
+  }
+  const ok = await copyTextToClipboard(addr);
+  toast(ok ? `Copied ${addr.slice(0, 18)}…` : "Clipboard blocked", ok ? "ok" : "warn");
+}
+
+async function deskNewWalletUi(): Promise<void> {
+  if (labSessionLabel().live) {
+    await authLogout();
+    clearLabBookCache();
+  }
+  clearDeskSeed();
+  toast("Desk seed cleared — connecting new wallet…", "info");
+  await deskWalletConnectUi();
+}
+
+async function refreshDeskEdgeHealthUi(): Promise<void> {
+  healthBackoffUntil = 0;
+  await refreshTradingGuardsFromHealth();
+  const row = document.getElementById("set-desk-hold");
+  if (!row) return;
+  const pills = row.querySelectorAll(".settings-hold-pill");
+  const vals = [
+    { on: deskEdgeSnap.matching === "ok", text: `matching · ${deskEdgeSnap.matching}` },
+    { on: deskEdgeSnap.depositEnabled, text: `deposit · ${deskEdgeSnap.depositEnabled ? "on" : "HOLD"}` },
+    { on: deskEdgeSnap.withdrawEnabled, text: `withdraw · ${deskEdgeSnap.withdrawEnabled ? "on" : "HOLD"}` },
+  ];
+  pills.forEach((el, i) => {
+    const v = vals[i];
+    if (!v) return;
+    el.setAttribute("data-on", v.on ? "1" : "0");
+    el.textContent = v.text;
+  });
+}
+
 async function labApiLogoutUi(): Promise<void> {
   const res = await authLogout();
   clearLabBookCache();
@@ -5279,12 +5337,39 @@ function showSettings(opts?: { tab?: string }): void {
           document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });
       },
+      onDeskLogout: () => void labApiLogoutUi(),
+      onDeskRevokeAll: () => void labRevokeAllUi(),
+      onCopyDeskAddress: () => void deskCopyAddressUi(),
+      onNewDeskWallet: () => {
+        gotoMainView("account");
+        void deskNewWalletUi();
+      },
+      onOpenAccount: () => gotoMainView("account"),
+      onRefreshDeskHealth: () => refreshDeskEdgeHealthUi(),
     },
-    {
-      deskConnect: isDeskConnectEnabled(),
-      deskSessionLabel: labSessionLabel().label,
-      labLoopback: isLabLoopbackApi(),
-    },
+    (() => {
+      const sess = labSessionLabel();
+      let deskAddr = sess.address;
+      if (!deskAddr && isDeskConnectEnabled()) {
+        try {
+          deskAddr = deskWalletIdentity().address;
+        } catch {
+          /* ignore */
+        }
+      }
+      return {
+        deskConnect: isDeskConnectEnabled(),
+        deskSessionLabel: sess.label,
+        deskAddress: deskAddr || undefined,
+        sessionLive: sess.live,
+        labLoopback: isLabLoopbackApi(),
+        hubWalletHref: nodeWalletUrl(),
+        hubEmbed: isHubEmbed(),
+        matching: deskEdgeSnap.matching,
+        depositEnabled: deskEdgeSnap.depositEnabled,
+        withdrawEnabled: deskEdgeSnap.withdrawEnabled,
+      };
+    })(),
   );
   if (opts?.tab) {
     const btn = document.querySelector(

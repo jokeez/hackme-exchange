@@ -20,12 +20,26 @@ export type SettingsModalActions = {
   onDeskConnect?: () => void;
   onNodeSync?: () => void;
   onOpenAccountSecurity?: () => void;
+  onDeskLogout?: () => void;
+  onDeskRevokeAll?: () => void;
+  onCopyDeskAddress?: () => void;
+  onNewDeskWallet?: () => void;
+  onOpenAccount?: () => void;
+  onRefreshDeskHealth?: () => void | Promise<void>;
 };
 
 export type SettingsWalletChrome = {
   deskConnect: boolean;
   deskSessionLabel: string;
+  deskAddress?: string;
+  sessionLive?: boolean;
   labLoopback: boolean;
+  hubWalletHref?: string;
+  hubEmbed?: boolean;
+  /** Edge HOLD snapshot (from last health probe). */
+  matching?: string;
+  depositEnabled?: boolean;
+  withdrawEnabled?: boolean;
 };
 
 export function renderUnifiedSettingsModal(
@@ -82,25 +96,60 @@ export function renderUnifiedSettingsModal(
     </div>
 
     <div class="modal-pane" id="pane-wallet" role="tabpanel" hidden>
-      <p class="muted small">Security &amp; wallet widgets — desk Connect is HOLD (no matching yet). Deposit/withdraw stay off.</p>
+      <p class="muted small">Security &amp; wallet — paper Spot stays local; desk matching/deposit/withdraw stay HOLD until GO.</p>
+      <div class="settings-hold-row" id="set-desk-hold" aria-live="polite">
+        <span class="settings-hold-pill" data-on="${wallet?.matching === "ok" ? "1" : "0"}">matching · ${escapeHtml(wallet?.matching || "—")}</span>
+        <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
+        <button type="button" class="btn-sm settings-hold-refresh" id="set-desk-health" title="Refresh /desk-api health">↻</button>
+      </div>
       <div class="settings-wallet-grid">
         <article class="settings-widget glass-inset">
           <h4>Desk Connect</h4>
-          <p class="muted small">Browser-local <code>HMC-…</code> session against <code>/desk-api</code>.</p>
+          <p class="muted small">Browser-local <code>HMC-…</code> against same-origin <code>/desk-api</code>.</p>
           <p class="mono small" id="set-desk-session">${deskOn ? escapeHtml(session) : "desk Connect off in this build"}</p>
-          <button type="button" class="btn-sm" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? "Connect / reconnect" : "Unavailable"}</button>
+          <div class="settings-btn-row">
+            <button type="button" class="btn-sm" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? (wallet?.sessionLive ? "Reconnect" : "Connect") : "Unavailable"}</button>
+            <button type="button" class="btn-sm" id="set-desk-copy" ${deskOn && wallet?.deskAddress ? "" : "disabled"} title="Copy HMC address">Copy addr</button>
+          </div>
+        </article>
+        <article class="settings-widget glass-inset">
+          <h4>Session</h4>
+          <p class="muted small">Cookie session on the desk API. Revoke invalidates all devices for this address.</p>
+          <div class="settings-btn-row">
+            <button type="button" class="btn-sm" id="set-desk-logout" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Logout</button>
+            <button type="button" class="btn-sm danger" id="set-desk-revoke" ${deskOn && wallet?.sessionLive ? "" : "disabled"}>Revoke all</button>
+          </div>
         </article>
         <article class="settings-widget glass-inset">
           <h4>Node Sync</h4>
-          <p class="muted small">Read-only HMC/SUP from local <code>hackme-node</code> (127.0.0.1:8080) or Hub embed — not the exchange ledger.</p>
-          <button type="button" class="btn-sm" id="set-node-sync">↻ Sync HMC/SUP</button>
+          <p class="muted small">Read-only HMC/SUP from local <code>hackme-node</code> (this device) or Hub embed — not exchange custody.</p>
+          <div class="settings-btn-row">
+            <button type="button" class="btn-sm" id="set-node-sync">↻ Sync HMC/SUP</button>
+            ${
+              wallet?.hubWalletHref
+                ? `<a class="btn-sm btn-secondary" id="set-hub-wallet" href="${escapeHtml(wallet.hubWalletHref)}" target="_blank" rel="noopener noreferrer">${wallet.hubEmbed ? "Hub wallet" : "Node wallet"}</a>`
+                : ""
+            }
+          </div>
         </article>
         <article class="settings-widget glass-inset">
           <h4>2FA</h4>
-          <p class="muted small">Authenticator (TOTP) ships with withdraw GO. Lab loopback can enroll today; public withdraw stays HOLD.</p>
-          <button type="button" class="btn-sm" id="set-open-2fa">${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
+          <p class="muted small">TOTP for withdraw GO. Public withdraw stays HOLD; lab loopback can enroll now.</p>
+          <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback || wallet?.sessionLive ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : wallet?.sessionLive ? "Open Account · 2FA" : "Needs session / lab"}</button>
+        </article>
+        <article class="settings-widget glass-inset">
+          <h4>Desk key</h4>
+          <p class="muted small">Ephemeral seed in <code>sessionStorage</code> only. New wallet clears it and logs out — irreversible for this tab.</p>
+          <button type="button" class="btn-sm danger" id="set-desk-new-key" ${deskOn ? "" : "disabled"}>New desk wallet…</button>
+        </article>
+        <article class="settings-widget glass-inset">
+          <h4>Account</h4>
+          <p class="muted small">Paper funds, deposits HOLD copy, and desk session panel live on Account.</p>
+          <button type="button" class="btn-sm" id="set-open-account">Open Account</button>
         </article>
       </div>
+      <p class="muted small settings-wallet-foot" id="set-wallet-msg" role="status"></p>
     </div>
 
     <div class="modal-pane" id="pane-oracle" role="tabpanel" hidden>
@@ -309,5 +358,40 @@ export function showUnifiedSettingsModal(
     if (!actions.onOpenAccountSecurity) return;
     close();
     actions.onOpenAccountSecurity();
+  });
+  bd.querySelector("#set-desk-logout")?.addEventListener("click", () => {
+    void actions.onDeskLogout?.();
+  });
+  bd.querySelector("#set-desk-revoke")?.addEventListener("click", () => {
+    if (!actions.onDeskRevokeAll) return;
+    if (!window.confirm("Revoke all desk sessions for this address?")) return;
+    void actions.onDeskRevokeAll();
+  });
+  bd.querySelector("#set-desk-copy")?.addEventListener("click", () => {
+    actions.onCopyDeskAddress?.();
+  });
+  bd.querySelector("#set-desk-new-key")?.addEventListener("click", () => {
+    if (!actions.onNewDeskWallet) return;
+    if (
+      !window.confirm(
+        "Create a new browser desk wallet? This clears the sessionStorage seed and logs out. You cannot recover the old address from this tab.",
+      )
+    ) {
+      return;
+    }
+    close();
+    actions.onNewDeskWallet();
+  });
+  bd.querySelector("#set-open-account")?.addEventListener("click", () => {
+    if (!actions.onOpenAccount) return;
+    close();
+    actions.onOpenAccount();
+  });
+  bd.querySelector("#set-desk-health")?.addEventListener("click", () => {
+    const msg = bd.querySelector("#set-wallet-msg");
+    if (msg) msg.textContent = "Refreshing desk health…";
+    void Promise.resolve(actions.onRefreshDeskHealth?.()).then(() => {
+      if (msg) msg.textContent = "Edge HOLD badges updated.";
+    });
   });
 }

@@ -5457,6 +5457,37 @@ html.mobile-layout .act-edit-inp {
   font-size: 0.92rem;
 }
 .settings-modal .settings-widget .btn-sm { align-self: flex-start; margin-top: 0.15rem; }
+.settings-modal .settings-widget .btn-sm.danger,
+.settings-modal .settings-btn-row .btn-sm.danger {
+  color: var(--sell, #f07178);
+  border-color: color-mix(in srgb, var(--sell, #f07178) 40%, var(--line));
+}
+.settings-modal .settings-widget .settings-btn-row { margin: 0.15rem 0 0; }
+.settings-modal .settings-hold-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0.55rem;
+}
+.settings-modal .settings-hold-pill {
+  font-size: 0.72rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted, #9aa);
+  background: color-mix(in srgb, var(--panel, #111) 80%, transparent);
+}
+.settings-modal .settings-hold-pill[data-on="1"] {
+  color: var(--ok, #6dcc8a);
+  border-color: color-mix(in srgb, var(--ok, #6dcc8a) 45%, var(--line));
+}
+.settings-modal .settings-hold-refresh {
+  min-width: 2rem;
+  padding-inline: 0.4rem;
+}
+.settings-modal .settings-wallet-foot { min-height: 1.1em; margin: 0.35rem 0 0; }
 
 /* Order panel polish */
 .order-col-head {
