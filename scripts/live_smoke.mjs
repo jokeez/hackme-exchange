@@ -45,8 +45,18 @@ async function httpCheck() {
   if (!deskHealth.ok) fail(`desk-api/health ${deskHealth.status}`);
   else {
     const hj = await deskHealth.json();
+    const matchingGo = process.env.EX_MATCHING_GO === "1" || hj.matching === "ok";
+    const custodyGo = process.env.EX_CUSTODY_GO === "1";
     if (!hj?.ok) fail("desk-api/health ok≠true");
-    else if (hj.matching !== "disabled") fail(`desk matching not HOLD: ${hj.matching}`);
+    else if (matchingGo) {
+      if (hj.matching !== "ok") fail(`desk matching want ok got ${hj.matching}`);
+      else if (!custodyGo && hj.deposit?.enabled) fail("desk deposit enabled (set EX_CUSTODY_GO=1 after Custody GO)");
+      else if (!custodyGo && hj.withdraw?.enabled) fail("desk withdraw enabled (set EX_CUSTODY_GO=1 after Custody GO)");
+      else if (custodyGo && (!hj.deposit?.enabled || !hj.withdraw?.enabled)) fail("desk custody GO incomplete");
+      else ok(custodyGo
+        ? "desk-api/health matching=ok · deposit/withdraw ON"
+        : "desk-api/health matching=ok · deposit/withdraw OFF");
+    } else if (hj.matching !== "disabled") fail(`desk matching not HOLD: ${hj.matching}`);
     else if (hj.deposit?.enabled) fail("desk deposit enabled");
     else if (hj.withdraw?.enabled) fail("desk withdraw enabled");
     else ok("desk-api/health HOLD (matching/deposit/withdraw)");

@@ -34,10 +34,10 @@ export function applyBookFlashes(prev: BookLevelSnap, root: HTMLElement | null):
     const up = newAmt > oldAmt;
     const flashClass = side === "bid" ? (up ? "ob-flash-up" : "ob-flash-down") : up ? "ob-flash-down" : "ob-flash-up";
     row.classList.remove("ob-flash-up", "ob-flash-down", "depth-flash-up", "depth-flash-down");
-    void row.offsetWidth;
     const depthClass = row.classList.contains("depth-row")
       ? (side === "bid" ? (up ? "depth-flash-up" : "depth-flash-down") : up ? "depth-flash-down" : "depth-flash-up")
       : flashClass;
+    // No forced reflow (offsetWidth) — it janked scroll while the live book patched.
     row.classList.add(depthClass);
     window.setTimeout(() => row.classList.remove(flashClass, depthClass), 520);
   });

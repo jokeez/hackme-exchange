@@ -4,7 +4,7 @@
 
 import { isLabApiEnabled } from "../config/integration";
 import { labSessionRestoreOrConnect } from "./labSessionRestore";
-import { isLabSessionStale, syncLabOrdersFillsLight, useLabMatching } from "./labMatching";
+import { isLabSessionStale, syncLabOrdersFillsLight, useServerMatching } from "./labMatching";
 import type { DemoState, MarketSnapshot } from "../types";
 
 export type LabSessionGuardOpts = {
@@ -52,7 +52,7 @@ export function startLabSessionGuard(opts: LabSessionGuardOpts): () => void {
       return;
     }
 
-    if (!useLabMatching()) return;
+    if (!useServerMatching()) return;
     if (syncInFlight) return;
     // Light sync every ~30s, or on forced visibility resume.
     if (!forceSync && tickN % 2 !== 0) return;

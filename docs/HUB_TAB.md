@@ -27,7 +27,7 @@ With `?embed=hub` (or nested iframe):
 - Hub hides mining status / coin-context / quick-actions so the desk fills the viewport
 - System menu drops Mine / Official pool links; keeps Sync + Hub wallet
 
-## Parent postMessage (wallet)
+## Parent postMessage (wallet + route)
 
 SPA → parent (only when `?embed=hub` and referrer/origin allowlisted):
 
@@ -35,7 +35,16 @@ SPA → parent (only when `?embed=hub` and referrer/origin allowlisted):
 { "type": "hackme-exchange", "action": "goto-tab", "tab": "wallet" }
 ```
 
-Hub must listen for `message` events, verify `event.origin` is the exchange origin (`https://exchange.hackme.tech` or loopback lab), then switch its tab chrome. Empty `document.referrer` on production hostname falls back to `https://hackme.tech` as the postMessage target.
+```json
+{ "type": "hackme-exchange", "action": "route", "hash": "#spot/HMC_SUP/1m" }
+```
+
+Hub must listen for `message` events, verify `event.origin` is the exchange origin (`https://exchange.hackme.tech` or loopback lab), then:
+
+- `goto-tab` — switch hub chrome tab
+- `route` — persist hash in `localStorage.hackme.exchange.hash`, update **Pop out** to `origin/#spot/…`, restore the same hash on iframe reload (`/?embed=hub#spot/…`)
+
+Empty `document.referrer` on production hostname falls back to `https://hackme.tech` as the postMessage target.
 ## Requirements
 
 1. Static paper build on `https://exchange.hackme.tech` (see `scripts/prepare_d0_static.sh`)

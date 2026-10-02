@@ -124,5 +124,9 @@ describe("portfolioChart", () => {
     stage.dispatchEvent(new PointerEvent("pointermove", { clientX: 0, bubbles: true }));
     expect(document.getElementById("portfolio-30d-val")?.textContent).toContain("15,000");
     expect(formatChartDayLabel(now - 5 * 864e5)).not.toBe("Today");
+    // Right edge of plot (not past y-label pad) maps to latest point.
+    stage.dispatchEvent(new PointerEvent("pointermove", { clientX: 308, bubbles: true }));
+    expect(document.getElementById("portfolio-30d-val")?.textContent).toContain("12,000");
+    expect(document.getElementById("portfolio-30d-chg")?.classList.contains("down")).toBe(true);
   });
 });

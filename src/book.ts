@@ -24,8 +24,9 @@ export function buildOrderBook(
     const bidPrice = bid0 - step * i;
     const askPrice = ask0 + step * i;
     if (bidPrice <= 0 || askPrice <= 0) continue;
-    const wave = 1 + Math.sin(i * 1.6 + mid * 8000 + phase) * 0.32;
-    const wobble = 1 + Math.sin(phase * 1.7 + i * 0.9) * 0.08;
+    // Milder waves — large phase swings were forcing constant DOM amount churn.
+    const wave = 1 + Math.sin(i * 1.6 + mid * 8000 + phase) * 0.18;
+    const wobble = 1 + Math.sin(phase * 1.7 + i * 0.9) * 0.045;
     const bidAmt = (600 + i * 380) * wave * wobble;
     const askAmt = (580 + i * 360) * wave * (2 - wobble);
     bids.push({ price: bidPrice, amountBase: bidAmt, totalQuote: bidPrice * bidAmt });

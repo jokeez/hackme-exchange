@@ -3,7 +3,7 @@
  * @vitest-environment happy-dom
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyMidToPairCandles } from "./candles";
+import { applyMidToPairCandles, clampFillWickPx } from "./candles";
 import { isDefaultChartAppearance, loadChartPrefs, mergeChartPrefsOnLoad, saveChartPrefs, CHART_PREFS_KEY } from "./chartPrefs";
 import { isMarketableLimit, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
@@ -111,6 +111,38 @@ describe("CEX candle OHLC", () => {
     const bodyLow = Math.min(tip.open, tip.close);
     expect(tip.high).toBeGreaterThanOrEqual(bodyHigh);
     expect(tip.low).toBeLessThanOrEqual(bodyLow);
+  });
+
+  it("soft-MM fill wick stays within 25bps of L2 mid (no spike-snap)", () => {
+    const mid = 0.2;
+    // Soft-MM bid ~160 bps below mid — must not yank tip close there.
+    const fillBid = mid * 0.984;
+    const wick = clampFillWickPx(mid, fillBid, 25);
+    expect(wick).toBeCloseTo(mid * (1 - 25 / 10_000), 8);
+    expect(Math.abs(wick / mid - 1)).toBeLessThanOrEqual(0.0026);
+    const fillNear = mid * 1.001;
+    expect(clampFillWickPx(mid, fillNear, 25)).toBeCloseTo(fillNear, 10);
+  });
+
+  it("applyMid after lived tip does not replace history with a reseed", () => {
+    const mid = 0.2;
+    const t0 = Math.floor(Date.now() / 1000 / 60) * 60 - 300;
+    const base = Array.from({ length: 5 }, (_, i) => ({
+      time: t0 + i * 60,
+      open: mid * (1 + i * 0.0001),
+      high: mid * (1 + i * 0.0002),
+      low: mid * (1 - i * 0.0001),
+      close: mid * (1 + i * 0.00015),
+      volume: 10 + i,
+    }));
+    const firstOpen = base[0]!.open;
+    const next = applyMidToPairCandles({ "1m": base }, "HMC_SUP", mid * 1.001, mid);
+    const series = next["1m"]!;
+    expect(series.length).toBeGreaterThanOrEqual(5);
+    expect(series[0]!.open).toBe(firstOpen);
+    expect(series[0]!.time).toBe(t0);
+    const tip = series[series.length - 1]!;
+    expect(Math.abs(tip.close / mid - 1)).toBeLessThan(0.01);
   });
 });
 

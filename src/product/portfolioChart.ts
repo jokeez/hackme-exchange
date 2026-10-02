@@ -11,8 +11,8 @@ import type { EquitySnapshot, MarketSnapshot } from "../types";
 const MS_30D = 30 * 24 * 60 * 60 * 1000;
 const MS_DAY = 86_400_000;
 const CHART_W = 360;
-const CHART_H = 96;
-const PAD = { t: 10, r: 8, b: 10, l: 8 };
+const CHART_H = 108;
+const PAD = { t: 14, r: 52, b: 18, l: 8 };
 
 export type PortfolioChartOpts = {
   market?: MarketSnapshot;
@@ -54,18 +54,25 @@ export function chartEquitySeries(
   initialEquityUsdt: number,
 ): EquitySnapshot[] {
   const daily = equityDailySeries(snapshots);
-  if (daily.length >= 2) return daily;
-  const raw = snapshotsLast30d(snapshots).sort((a, b) => a.ts - b.ts);
+  // Drop empty-connect zeros that squash the y-axis against a real balance.
+  const scrub = (rows: EquitySnapshot[]): EquitySnapshot[] => {
+    const last = rows[rows.length - 1]?.equityUsdt ?? 0;
+    if (!(last > 0)) return rows;
+    const kept = rows.filter((r) => r.equityUsdt > last * 0.02);
+    return kept.length >= 2 ? kept : rows.filter((r) => r.equityUsdt > 0);
+  };
+  if (daily.length >= 2) return scrub(daily);
+  const raw = scrub(snapshotsLast30d(snapshots).sort((a, b) => a.ts - b.ts));
   if (raw.length >= 2) return raw;
   const current = raw[raw.length - 1]?.equityUsdt ?? initialEquityUsdt;
   const start = initialEquityUsdt > 0 ? initialEquityUsdt : current;
   if (Math.abs(current - start) < 1e-9 && raw.length === 1) {
-    // Flat balance — still show a gentle 30d line so the chart is usable.
+    // Flat balance — gentle 30d ramp (no jagged noise).
     const anchor = current || start || 1;
     const now = Date.now();
     return Array.from({ length: 30 }, (_, i) => ({
       ts: now - (29 - i) * MS_DAY,
-      equityUsdt: anchor * (0.992 + (i / 29) * 0.008),
+      equityUsdt: anchor * (0.997 + (i / 29) * 0.003),
     }));
   }
   const now = Date.now();
@@ -156,21 +163,40 @@ export function portfolioEquityChart30d(
     : "";
 
   const chartDenom = opts.denom ?? getEquityDenom();
-  const uid = `pf30-${Math.abs(series.length * 31 + Math.round(last.equityUsdt)) % 99999}`;
+  const uid = `pf30-${Math.abs(series.length * 31 + Math.round(last.equityUsdt * 1e6)) % 99999}`;
   const innerH = CHART_H - PAD.t - PAD.b;
-  const gridLines = [0.25, 0.5, 0.75]
-    .map(
-      (r) =>
-        `<line class="portfolio-30d-grid-line" x1="${PAD.l}" x2="${CHART_W - PAD.r}" y1="${(PAD.t + innerH * r).toFixed(1)}" y2="${(PAD.t + innerH * r).toFixed(1)}" />`,
-    )
+  const vals = series.map((s) => s.equityUsdt);
+  const minEq = Math.min(...vals);
+  const maxEq = Math.max(...vals);
+  const chgPct = first.equityUsdt > 0 ? ((last.equityUsdt - first.equityUsdt) / first.equityUsdt) * 100 : 0;
+  const chgAbs = last.equityUsdt - first.equityUsdt;
+  const chgSign = chgPct >= 0 ? "+" : "";
+  const chgCls = chgPct >= 0 ? "up" : "down";
+  const gridLines = [0, 0.5, 1]
+    .map((r) => {
+      const y = (PAD.t + innerH * (1 - r)).toFixed(1);
+      return `<line class="portfolio-30d-grid-line" x1="${PAD.l}" x2="${CHART_W - PAD.r}" y1="${y}" y2="${y}" />`;
+    })
     .join("");
+  const maxLabel = formatBalance(maxEq, { ...opts, hidden: opts.hidden });
+  const minLabel = formatBalance(minEq, { ...opts, hidden: opts.hidden });
+  const showMinY = minLabel !== maxLabel;
+  const rangeLabel =
+    formatChartDayLabel(first.ts) === formatChartDayLabel(last.ts)
+      ? "30d"
+      : `${formatChartDayLabel(first.ts)}→now`;
+  const nowLabel = formatBalance(last.equityUsdt, opts);
+
   return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-chart-denom="${chartDenom}"${marketAttrs}>
     <div class="portfolio-30d-head">
-      <span class="portfolio-30d-val mono" id="portfolio-30d-val">${formatBalance(last.equityUsdt, opts)}</span>
-      <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)}</p>
+      <div class="portfolio-30d-head-main">
+        <span class="portfolio-30d-val mono" id="portfolio-30d-val">${nowLabel}</span>
+        <span class="portfolio-30d-chg mono ${chgCls}" id="portfolio-30d-chg">${chgSign}${formatNum(chgPct, 2)}%</span>
+      </div>
+      <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)} · ${rangeLabel}</p>
     </div>
     <div class="portfolio-30d-stage" id="portfolio-30d-stage">
-      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="30-day equity ${nowLabel}">
         <defs>
           <linearGradient id="${uid}-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="currentColor" stop-opacity="0.42" />
@@ -196,10 +222,17 @@ export function portfolioEquityChart30d(
         <polygon class="portfolio-30d-fill" points="${area}" fill="url(#${uid}-fill)" />
         <polyline class="portfolio-30d-line-glow" fill="none" points="${linePts}" filter="url(#${uid}-glow)" />
         <polyline class="portfolio-30d-line" fill="none" points="${linePts}" stroke="url(#${uid}-stroke)" />
+        <text class="portfolio-30d-ylabel" x="${CHART_W - 4}" y="${PAD.t + 2}" text-anchor="end" dominant-baseline="hanging">${escapeAttr(maxLabel)}</text>
+        ${showMinY ? `<text class="portfolio-30d-ylabel muted" x="${CHART_W - 4}" y="${CHART_H - PAD.b - 2}" text-anchor="end" dominant-baseline="auto">${escapeAttr(minLabel)}</text>` : ""}
+        <circle class="portfolio-30d-end-ring" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="6.5" />
+        <circle class="portfolio-30d-end" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3.2" filter="url(#${uid}-dot)" />
         <line class="portfolio-30d-cross" id="portfolio-30d-cross" y1="${PAD.t}" y2="${CHART_H - PAD.b}" hidden />
         <circle class="portfolio-30d-dot-ring" id="portfolio-30d-dot-ring" r="7.5" hidden />
         <circle class="portfolio-30d-dot" id="portfolio-30d-dot" r="4" filter="url(#${uid}-dot)" hidden />
       </svg>
+    </div>
+    <div class="portfolio-30d-foot muted small">
+      <span id="portfolio-30d-delta">${chgSign}${formatBalance(Math.abs(chgAbs), opts)} · 30d</span>
     </div>
   </div>`;
 }
@@ -241,6 +274,8 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const svg = host.querySelector<SVGSVGElement>(".portfolio-30d-chart");
   const valEl = host.querySelector<HTMLElement>("#portfolio-30d-val");
   const dateEl = host.querySelector<HTMLElement>("#portfolio-30d-date");
+  const chgEl = host.querySelector<HTMLElement>("#portfolio-30d-chg");
+  const deltaEl = host.querySelector<HTMLElement>("#portfolio-30d-delta");
   const cross = host.querySelector<SVGLineElement>("#portfolio-30d-cross");
   const dotRing = host.querySelector<SVGCircleElement>("#portfolio-30d-dot-ring");
   const dot = host.querySelector<SVGCircleElement>("#portfolio-30d-dot");
@@ -249,6 +284,15 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const rawPts = readPoints(host);
   if (rawPts.length < 2) return;
   const chartPts = chartPoints(rawPts.map((p) => ({ ts: p.ts, equityUsdt: p.eq })));
+  const first = chartPts[0]!;
+  const lastPt = chartPts[chartPts.length - 1]!;
+  const rangeLabel =
+    formatChartDayLabel(first.ts) === formatChartDayLabel(lastPt.ts)
+      ? "30d"
+      : `${formatChartDayLabel(first.ts)}→now`;
+  const x0 = first.x;
+  const x1 = lastPt.x;
+  const xSpan = Math.max(x1 - x0, 1e-9);
 
   const market = marketFromHost(host);
   const fmtOpts = (): PortfolioChartOpts => ({
@@ -257,38 +301,49 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
     hidden: isBalanceHidden(),
   });
 
-  const paint = (idx: number) => {
+  const paint = (idx: number, hovering: boolean) => {
     const p = chartPts[idx];
     if (!p) return;
-    setSvgVisible(cross, true);
-    setSvgVisible(dotRing, true);
-    setSvgVisible(dot, true);
-    cross.setAttribute("x1", String(p.x));
-    cross.setAttribute("x2", String(p.x));
-    dotRing.setAttribute("cx", String(p.x));
-    dotRing.setAttribute("cy", String(p.y));
-    dot.setAttribute("cx", String(p.x));
-    dot.setAttribute("cy", String(p.y));
+    setSvgVisible(cross, hovering);
+    setSvgVisible(dotRing, hovering);
+    setSvgVisible(dot, hovering);
+    if (hovering) {
+      cross.setAttribute("x1", String(p.x));
+      cross.setAttribute("x2", String(p.x));
+      dotRing.setAttribute("cx", String(p.x));
+      dotRing.setAttribute("cy", String(p.y));
+      dot.setAttribute("cx", String(p.x));
+      dot.setAttribute("cy", String(p.y));
+    }
     valEl.textContent = formatBalance(p.equityUsdt, fmtOpts());
-    dateEl.textContent = formatChartDayLabel(p.ts);
+    dateEl.textContent = hovering
+      ? `${formatChartDayLabel(p.ts)} · equity`
+      : `${formatChartDayLabel(lastPt.ts)} · ${rangeLabel}`;
+    const chgPct = first.equityUsdt > 0 ? ((p.equityUsdt - first.equityUsdt) / first.equityUsdt) * 100 : 0;
+    const chgAbs = p.equityUsdt - first.equityUsdt;
+    const chgSign = chgPct >= 0 ? "+" : "";
+    if (chgEl) {
+      chgEl.textContent = `${chgSign}${formatNum(chgPct, 2)}%`;
+      chgEl.classList.toggle("up", chgPct >= 0);
+      chgEl.classList.toggle("down", chgPct < 0);
+    }
+    if (deltaEl) {
+      const absLabel = formatBalance(Math.abs(chgAbs), fmtOpts());
+      deltaEl.textContent = `${chgSign}${absLabel} · ${hovering ? "vs start" : "30d"}`;
+    }
   };
 
+  /** Map pointer to series index using plot polyline span (not full SVG incl. y-labels pad). */
   const indexFromX = (clientX: number): number => {
     const rect = svg.getBoundingClientRect();
     if (rect.width <= 0) return chartPts.length - 1;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const svgX = ((clientX - rect.left) / rect.width) * CHART_W;
+    const ratio = Math.max(0, Math.min(1, (svgX - x0) / xSpan));
     return Math.round(ratio * (chartPts.length - 1));
   };
 
-  const onMove = (ev: PointerEvent) => paint(indexFromX(ev.clientX));
-  const onLeave = () => {
-    setSvgVisible(cross, false);
-    setSvgVisible(dotRing, false);
-    setSvgVisible(dot, false);
-    const last = chartPts[chartPts.length - 1]!;
-    valEl.textContent = formatBalance(last.equityUsdt, fmtOpts());
-    dateEl.textContent = formatChartDayLabel(last.ts);
-  };
+  const onMove = (ev: PointerEvent) => paint(indexFromX(ev.clientX), true);
+  const onLeave = () => paint(chartPts.length - 1, false);
 
   stage.addEventListener("pointerenter", onMove);
   stage.addEventListener("pointermove", onMove);

@@ -83,7 +83,8 @@ export function chartInteractionOptions(): {
 } {
   return {
     handleScale: {
-      axisPressedMouseMove: { time: true, price: true },
+      // Price-axis pan is custom in setupPortableChartPan (clamped) — disable LWC native.
+      axisPressedMouseMove: { time: true, price: false },
       // Price-axis wheel is handled in chart.ts — LWC native wheel fights our clamped zoom.
       mouseWheel: false,
       pinch: true,
@@ -92,7 +93,8 @@ export function chartInteractionOptions(): {
     handleScroll: {
       // Plot wheel zoom/pan is custom in chart.ts (Binance-like).
       mouseWheel: false,
-      pressedMouseMove: true,
+      // Free drag (time + price) is custom in setupPortableChartPan — LWC is horizontal-only.
+      pressedMouseMove: false,
       horzTouchDrag: true,
       vertTouchDrag: true,
     },

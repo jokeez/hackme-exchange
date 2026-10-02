@@ -84,4 +84,33 @@ describe("hub embed helpers", () => {
     if (desc) Object.defineProperty(window, "parent", desc);
     else Object.defineProperty(window, "parent", { value: window, configurable: true });
   });
+
+  it("postHubRoute syncs sanitized hash to parent", async () => {
+    const { postHubRoute, sanitizeExchangeRouteHash } = await import("./embed");
+    expect(sanitizeExchangeRouteHash("#spot/HMC_SUP/1m")).toBe("#spot/HMC_SUP/1m");
+    expect(sanitizeExchangeRouteHash("#spot/../evil")).toBeNull();
+    window.history.replaceState({}, "", "/?embed=hub");
+    Object.defineProperty(document, "referrer", {
+      value: "http://127.0.0.1:8080/",
+      configurable: true,
+    });
+    const posted: unknown[] = [];
+    const fakeParent = {
+      postMessage: (data: unknown, origin: string) => {
+        posted.push({ data, origin });
+      },
+    };
+    const desc = Object.getOwnPropertyDescriptor(window, "parent");
+    Object.defineProperty(window, "parent", { value: fakeParent, configurable: true });
+    expect(postHubRoute("#spot/HMC_SUP/1m")).toBe(true);
+    expect(posted).toEqual([
+      {
+        data: { type: "hackme-exchange", action: "route", hash: "#spot/HMC_SUP/1m" },
+        origin: "http://127.0.0.1:8080",
+      },
+    ]);
+    expect(postHubRoute("javascript:alert(1)")).toBe(false);
+    if (desc) Object.defineProperty(window, "parent", desc);
+    else Object.defineProperty(window, "parent", { value: window, configurable: true });
+  });
 });

@@ -394,7 +394,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
     },
     handleScroll: {
       mouseWheel: false,
-      pressedMouseMove: true,
+      pressedMouseMove: chartInteractionOptions().handleScroll.pressedMouseMove,
       horzTouchDrag: chartInteractionOptions().handleScroll.horzTouchDrag,
       vertTouchDrag: chartInteractionOptions().handleScroll.vertTouchDrag,
     },

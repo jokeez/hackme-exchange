@@ -48,11 +48,28 @@ describe("Settings → Wallet pane", () => {
     expect(html).toContain("Reconnect");
     expect(html).toContain("set-desk-export");
     expect(html).toContain("set-desk-import");
-    expect(html).toContain("Coming with withdraw");
-    expect(html).toMatch(/id="set-open-2fa"[^>]*disabled/);
+    expect(html).toContain("Open Account · 2FA");
+    expect(html).not.toMatch(/id="set-open-2fa"[^>]*disabled/);
     expect(html).toContain("HMC-abcdef0123456789");
     expect(html).toContain("settings-action-row");
     expect(html).not.toContain("<script>");
+  });
+
+  it("shows withdraw · on when edge health enables withdraw", () => {
+    const html = renderUnifiedSettingsModal(baseState(), LAYOUT_DEFAULTS, "hub", {
+      deskConnect: true,
+      deskSessionLabel: "HMC-abcdef0123456789",
+      deskAddress: "HMC-abcdef0123456789",
+      sessionLive: true,
+      labLoopback: false,
+      matching: "ok",
+      depositEnabled: true,
+      withdrawEnabled: true,
+    });
+    expect(html).toContain("withdraw · on");
+    expect(html).toContain("deposit · on");
+    expect(html).toContain("matching · ok");
+    expect(html).toContain("TOTP required on every withdraw");
   });
 
   it("opens a specific initial tab", () => {

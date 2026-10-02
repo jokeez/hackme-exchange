@@ -1,12 +1,19 @@
 import { escapeHtml } from "../sanitize";
 import { isMobileLayout } from "../mobile";
 import { isDeskConnectEnabled, isLabLoopbackApi } from "../config/integration";
+import { useDeskMatching, usePublicDeskBook } from "../adapters/labMatching";
 
 export type EmptySpotContext = "orders" | "positions" | "history" | "alerts";
 
 function spotModeBody(paperDefault: string): string {
   if (isDeskConnectEnabled()) {
-    return "Paper Spot while matching stays HOLD — Connect desk wallet on Account when you want a session.";
+    if (useDeskMatching()) {
+      return "Desk Spot — live matching session (soft-launch caps). Open orders sync from the server.";
+    }
+    if (usePublicDeskBook()) {
+      return "Desk matching is live — Connect desk wallet on Account, then place orders. Live L2 is on the book.";
+    }
+    return "Matching HOLD — Connect desk wallet on Account when you want a session. Spot stays local preview.";
   }
   if (isLabLoopbackApi()) {
     return "Lab Spot — connect fixture on Account for server matching; without a session this UI is paper preview.";
@@ -16,6 +23,8 @@ function spotModeBody(paperDefault: string): string {
 
 export function renderSpotEmptyState(ctx: EmptySpotContext): string {
   const mobile = typeof window !== "undefined" && isMobileLayout();
+  const deskLive = isDeskConnectEnabled() && useDeskMatching();
+  const deskBook = isDeskConnectEnabled() && usePublicDeskBook();
   const map: Record<EmptySpotContext, { title: string; body: string; cta?: string; href?: string }> = {
     orders: {
       title: "No open orders",
@@ -25,36 +34,46 @@ export function renderSpotEmptyState(ctx: EmptySpotContext): string {
     },
     positions: {
       title: "No spot inventory yet",
-      body: isDeskConnectEnabled()
-        ? "Spot fills update paper balances. Live ledger sync stays HOLD until matching GO."
-        : isLabLoopbackApi()
-          ? "Lab fills update the connected ledger. Without a session, paper balances stay local."
-          : "Spot fills update paper balances instantly. Track equity on Account.",
+      body: deskLive
+        ? "Spot fills update the desk ledger. Soft-launch caps apply until full GO."
+        : deskBook
+          ? "Connect + deposit HMC/SUP, then trade. Avbl is your exchange ledger — not Copy addr."
+          : isDeskConnectEnabled()
+            ? "Matching HOLD — paper balances stay local until Matching GO."
+            : isLabLoopbackApi()
+              ? "Lab fills update the connected ledger. Without a session, paper balances stay local."
+              : "Spot fills update paper balances instantly. Track equity on Account.",
       cta: "View Account",
       href: "#account",
     },
     history: {
       title: "No fills yet",
-      body: isDeskConnectEnabled()
-        ? "Paper fills and CSV export appear here. Public matching stays HOLD."
-        : isLabLoopbackApi()
-          ? "After your first lab (or paper) fill, history and CSV export appear here."
-          : "After your first paper fill, history and CSV export appear here.",
+      body: deskLive
+        ? "Server fills and CSV export appear here after your first desk trade."
+        : deskBook
+          ? "Connect desk wallet, then trade — fills appear here."
+          : isDeskConnectEnabled()
+            ? "Fills appear here after Matching GO + Connect."
+            : isLabLoopbackApi()
+              ? "After your first lab (or paper) fill, history and CSV export appear here."
+              : "After your first paper fill, history and CSV export appear here.",
     },
     alerts: {
       title: "No price alerts",
       body: mobile
-        ? "Long-press the chart (or Alert at mid) to arm a paper price alert."
-        : "Right-click the chart (or Alert at mid) to arm a paper price alert.",
+        ? "Long-press the chart (or Alert at mid) to arm a price alert."
+        : "Right-click the chart (or Alert at mid) to arm a price alert.",
       cta: "Alert at mid",
     },
   };
   const m = map[ctx];
   const cta =
-    m.cta && m.href
+    m.cta && m.href && ctx !== "orders"
       ? `<a class="btn-sm" href="${escapeHtml(m.href)}">${escapeHtml(m.cta)}</a>`
       : m.cta
-        ? `<button type="button" class="btn-sm" id="${ctx === "alerts" ? "btn-alert-at-mid" : ""}" data-empty-cta="${ctx}">${escapeHtml(m.cta)}</button>`
+        ? `<button type="button" class="btn-sm" id="${
+            ctx === "alerts" ? "btn-alert-at-mid" : ctx === "orders" ? "btn-focus-order-form" : ""
+          }" data-empty-cta="${ctx}">${escapeHtml(m.cta)}</button>`
         : "";
   return `<div class="bottom-empty act-empty product-empty" data-empty="${ctx}">
     <p class="empty-title">${escapeHtml(m.title)}</p>

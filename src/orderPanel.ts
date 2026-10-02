@@ -22,6 +22,10 @@ export type OrderPanelCtx = {
   labMmSeeded?: boolean;
   /** Fixture session connected to private lab matching. */
   labLive?: boolean;
+  /** Public desk matching edge GO (health) — show DESK chrome even before Connect. */
+  deskEdgeLive?: boolean;
+  /** Desk session CSRF connected. */
+  deskSession?: boolean;
 };
 
 const PRIMARY_TYPES: { id: OrderKind; label: string }[] = [
@@ -60,20 +64,33 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
     availQuote, availBase, payFeesInHmc, hmcDiscountPct, feeRole, feeBps, showTif,
     labMmSeeded = false,
     labLive = false,
+    deskEdgeLive = false,
+    deskSession = false,
   } = ctx;
   const midTick = tickInputValue(mid, pairId);
   /** Slightly off mid so default Limit rests on the book (shows under Open orders). Market still fills instantly. */
   const buyLimitTick = restingLimitPrice(mid, "buy", pairId);
   const sellLimitTick = restingLimitPrice(mid, "sell", pairId);
-  const showTpsl = (uiType === "market" || uiType === "limit") && !labLive;
+  const liveTrading = labLive || deskSession;
+  const showTpsl = (uiType === "market" || uiType === "limit") && !liveTrading;
   const advanced = isAdvancedOrderType(uiType);
   const mmBadge = labMmSeeded
     ? `<span class="demo-badge sm muted-badge" data-lab-mm-badge="1" title="Live book levels seeded by lab market-maker">LAB MM</span>`
     : "";
   const modeBadge = labLive
     ? `<span class="demo-badge sm meta-compact" title="Private lab matching — not production">LAB</span>`
-    : `<span class="demo-badge sm meta-compact" title="Simulated exchange — not real CEX">PAPER</span>`;
-  const execHint = labLive ? "lab matching demo" : "paper synthetic demo";
+    : deskSession
+      ? `<span class="demo-badge sm meta-compact" title="Desk matching session — soft-launch">DESK</span>`
+      : deskEdgeLive
+        ? `<span class="demo-badge sm meta-compact" title="Desk matching live — Connect wallet to trade">DESK</span>`
+        : `<span class="demo-badge sm meta-compact" title="Simulated exchange — not real CEX">PAPER</span>`;
+  const execHint = labLive
+    ? "lab matching"
+    : deskSession
+      ? "desk live"
+      : deskEdgeLive
+        ? "Connect desk wallet to trade"
+        : "paper synthetic";
 
   const sideCol = (side: "buy" | "sell") => {
     const isBuy = side === "buy";
@@ -147,7 +164,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
         </div>
       </div>
       <div class="tpsl-block field-tpsl ${showTpsl ? "" : "hidden"}">
-        <label class="fee-toggle mono tpsl-toggle"><input type="checkbox" id="${side}-tpsl" data-tpsl-side="${side}" ${labLive ? "disabled" : ""} /> TP/SL</label>
+        <label class="fee-toggle mono tpsl-toggle"><input type="checkbox" id="${side}-tpsl" data-tpsl-side="${side}" ${liveTrading ? "disabled" : ""} /> TP/SL</label>
         <div class="tpsl-fields hidden" id="${side}-tpsl-fields">
           ${fld("TP", pair.quote, `<input id="${side}-tp" class="inp mono" type="text" inputmode="decimal" value="${tpDefault}" />`)}
           ${fld("SL", pair.quote, `<input id="${side}-sl" class="inp mono" type="text" inputmode="decimal" value="${slDefault}" />`)}

@@ -1,6 +1,6 @@
 import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
 import { labSessionLabel } from "./adapters/exchangeApi";
-import { useLabMatching } from "./adapters/labMatching";
+import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { isHubEmbed, postHubGotoTab } from "./embed";
@@ -43,7 +43,14 @@ export type AccountPageOpts = {
   /** Optional node wallet snapshot for multi-wallet row. */
   nodeWallet?: { hmc: number; sup: number } | null;
   /** Last /health edge snapshot for desk HOLD badges. */
-  deskEdge?: { matching: string; depositEnabled: boolean; withdrawEnabled: boolean };
+  deskEdge?: {
+    matching: string;
+    depositEnabled: boolean;
+    withdrawEnabled: boolean;
+    maxOpenOrders?: number;
+    minNotional?: number;
+    priceBandBps?: number;
+  };
 };
 
 /** Read-only lab fee sink row — empty when address missing (graceful hide). */
@@ -76,7 +83,11 @@ export function labFeeWalletSection(feeWallet: string | null | undefined): strin
 
 function modeBlurb(): string {
   if (isLiveModeBlocked()) return "live blocked — paper/lab only";
-  if (isDeskConnectEnabled()) return "desk Connect · matching HOLD · paper Spot";
+  if (isDeskConnectEnabled()) {
+    if (useDeskMatching()) return "desk Connect · matching LIVE · soft-launch";
+    if (usePublicDeskBook()) return "desk Connect · matching live · Connect to trade";
+    return "desk Connect · matching HOLD · paper Spot";
+  }
   if (isLabLoopbackApi()) return useLabMatching() ? "lab ledger connected" : "LAB ready · connect fixture below";
   if (isLabApiEnabled()) return "API wired";
   if (isDemoMode()) return "paper wallet";
@@ -84,34 +95,104 @@ function modeBlurb(): string {
 }
 
 /** Shared TOTP UI (desk + lab) — same ids so wireLabApiButtons stays single-path. */
-function renderSecurity2faCard(sessionLive: boolean): string {
-  return `<article class="glass-inset account-card lab-api-card" id="acct-security-2fa">
-        <h4>Security · 2FA</h4>
-        <p class="muted small">Authenticator app (TOTP) — required on withdraw when enabled. Public withdraw stays HOLD.</p>
-        <p id="lab-2fa-status" class="mono small" role="status">Status: unknown</p>
-        <div id="lab-2fa-setup-panel" hidden>
-          <p class="muted small">Add to Google Authenticator / Authy:</p>
-          <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
-          <a id="lab-2fa-otpauth" class="btn-sm btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
-          <label class="lab-field">Confirm code
-            <input id="lab-2fa-confirm-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-          </label>
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-confirm">Enable 2FA</button>
+function renderSecurity2faCard(
+  sessionLive: boolean,
+  opts?: { withdrawEnabled?: boolean; deskMode?: boolean },
+): string {
+  const wdOn = !!opts?.withdrawEnabled;
+  const hint = opts?.deskMode
+    ? wdOn
+      ? "Authenticator (TOTP) is required for every withdraw request."
+      : "Enroll TOTP now — required before withdraw opens on this edge."
+    : wdOn
+      ? "Authenticator (TOTP) is required for every withdraw request."
+      : "Enroll TOTP now — required before lab withdraw.";
+  return `<article class="glass-inset account-card lab-api-card acct-2fa-card" id="acct-security-2fa">
+        <header class="acct-2fa-head">
+          <div>
+            <h4>Security · 2FA</h4>
+            <p class="muted small">${hint}</p>
+          </div>
+          <p id="lab-2fa-status" class="mono small acct-2fa-status" role="status">Status: …</p>
+        </header>
+        <div id="lab-2fa-setup-panel" class="acct-2fa-panel" hidden>
+          <p class="muted small acct-2fa-lead">On desktop: scan the QR with your phone authenticator. Or copy the secret manually.</p>
+          <div class="acct-2fa-setup-grid">
+            <div class="acct-2fa-qr-wrap">
+              <div id="lab-2fa-qr-host" class="acct-2fa-qr-host" hidden>
+                <img id="lab-2fa-qr" class="acct-2fa-qr" alt="Scan otpauth QR with authenticator app" width="180" height="180" />
+              </div>
+              <p class="muted small acct-2fa-qr-hint">Google Authenticator · Authy · 1Password</p>
+            </div>
+            <div class="acct-2fa-setup-side">
+              <ol class="acct-2fa-steps muted small">
+                <li>Scan QR (or copy secret below)</li>
+                <li>Enter the 6-digit code</li>
+                <li>Save recovery codes (shown once)</li>
+              </ol>
+              <label class="lab-field lab-field-wide">Manual secret
+                <div class="acct-2fa-secret-row">
+                  <p class="mono small lab-2fa-secret" id="lab-2fa-secret"></p>
+                  <button type="button" class="btn-sm" id="btn-lab-2fa-copy-secret">Copy</button>
+                </div>
+              </label>
+              <a id="lab-2fa-otpauth" class="btn-sm btn-secondary acct-2fa-otp-link" href="#" target="_blank" rel="noopener noreferrer">Open otpauth link</a>
+            </div>
+          </div>
+          <div class="acct-2fa-confirm-row">
+            <label class="lab-field lab-field-wide" for="lab-2fa-confirm-code">Confirm code
+              <input id="lab-2fa-confirm-code" class="mono acct-2fa-code-inp" type="text" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="6 digits" />
+            </label>
+            <button type="button" class="acct-2fa-btn-confirm" id="btn-lab-2fa-confirm">Confirm &amp; enable</button>
+          </div>
         </div>
-        <div id="lab-2fa-enabled-panel" hidden>
-          <p class="muted small" id="lab-2fa-recovery-left"></p>
-          <pre class="mono small lab-2fa-recovery" id="lab-2fa-recovery-codes" hidden></pre>
-          <label class="lab-field">Code to disable (TOTP or recovery)
-            <input id="lab-2fa-disable-code" class="mono" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or XXXX-XXXX-…" />
-          </label>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-2fa-disable">Disable 2FA</button>
-          <label class="lab-field">Rotate recovery (current TOTP)
-            <input id="lab-2fa-rotate-code" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits" />
-          </label>
-          <button type="button" class="btn-lab" id="btn-lab-2fa-rotate">Rotate recovery codes</button>
+        <div id="lab-2fa-enabled-panel" class="acct-2fa-panel acct-2fa-enabled" hidden>
+          <div class="acct-2fa-enabled-banner">
+            <span class="acct-2fa-enabled-icon" aria-hidden="true">✓</span>
+            <div>
+              <p class="acct-2fa-enabled-title">Authenticator active</p>
+              <p class="muted small acct-2fa-enabled-sub" id="lab-2fa-recovery-left"></p>
+            </div>
+          </div>
+          <section class="acct-2fa-recovery-block" id="lab-2fa-recovery-block" hidden>
+            <header class="acct-2fa-recovery-head">
+              <h5 class="acct-2fa-recovery-title">Recovery codes</h5>
+              <p class="muted small acct-2fa-recovery-once">Shown once — store offline</p>
+            </header>
+            <div class="acct-2fa-recovery-grid" id="lab-2fa-recovery-codes" role="list" hidden></div>
+            <textarea class="acct-2fa-recovery-copy-src" id="lab-2fa-recovery-copy-src" readonly hidden aria-hidden="true"></textarea>
+            <div class="acct-2fa-recovery-actions" id="lab-2fa-recovery-actions" hidden>
+              <button type="button" class="btn-sm btn-secondary" id="btn-lab-2fa-copy-recovery">Copy all codes</button>
+            </div>
+          </section>
+          <div class="acct-2fa-manage-grid">
+            <article class="acct-2fa-action-card acct-2fa-action-card--danger">
+              <h5 class="acct-2fa-action-title">Disable 2FA</h5>
+              <p class="muted small acct-2fa-action-hint">TOTP or one recovery code</p>
+              <label class="lab-field lab-field-wide" for="lab-2fa-disable-code">Code
+                <input id="lab-2fa-disable-code" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or XXXX-XXXX-…" />
+              </label>
+              <button type="button" class="acct-2fa-btn-secondary acct-2fa-btn-danger" id="btn-lab-2fa-disable">Disable 2FA</button>
+            </article>
+            <article class="acct-2fa-action-card">
+              <h5 class="acct-2fa-action-title">Rotate recovery codes</h5>
+              <p class="muted small acct-2fa-action-hint">Current 6-digit TOTP</p>
+              <label class="lab-field lab-field-wide" for="lab-2fa-rotate-code">TOTP
+                <input id="lab-2fa-rotate-code" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="6 digits" />
+              </label>
+              <button type="button" class="acct-2fa-btn-secondary" id="btn-lab-2fa-rotate">Rotate codes</button>
+            </article>
+          </div>
         </div>
-        <div id="lab-2fa-idle-panel">
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-2fa-setup"${sessionLive ? "" : " disabled"}>Enable 2FA</button>
+        <div id="lab-2fa-idle-panel" class="acct-2fa-panel">
+          <button type="button" class="acct-2fa-btn-confirm" id="btn-lab-2fa-setup"${sessionLive ? "" : " disabled"}${
+            sessionLive ? "" : ' title="Connect wallet first"'
+          }>Enable authenticator</button>
+          ${
+            !sessionLive
+              ? `<p class="muted small">Connect ${opts?.deskMode ? "desk wallet" : "session"} first to enroll.</p>`
+              : ""
+          }
         </div>
         <p id="lab-2fa-msg" class="muted small sync-msg" role="status"></p>
       </article>`;
@@ -121,20 +202,24 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const matching = formatDeskMatchingLabel(edge?.matching);
   const dep = !!edge?.depositEnabled;
   const wd = !!edge?.withdrawEnabled;
+  const live = isDeskMatchingLive(edge?.matching);
+  const caps: string[] = [];
+  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max open ${edge.maxOpenOrders}`);
+  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${edge.priceBandBps} bps`);
+  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min notional ${edge.minNotional}`);
+  const capsLine =
+    caps.length > 0
+      ? `<p class="muted small mono acct-desk-caps" title="Soft-launch caps from /health">${escapeHtml(caps.join(" · "))}</p>`
+      : live
+        ? `<p class="muted small acct-desk-caps">Soft-launch caps apply (see API health)</p>`
+        : "";
   return `<div class="settings-edge-card acct-desk-edge" aria-live="polite">
         <div class="settings-edge-top"><strong>Edge status</strong></div>
         <div class="settings-hold-row acct-desk-hold">
-        <span class="settings-hold-pill" data-on="${isDeskMatchingLive(edge?.matching) ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
+        <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
         <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${dep ? "on" : "HOLD"}</span>
         <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${wd ? "on" : "HOLD"}</span>
-      </div></div>`;
-}
-
-function renderDesk2faHoldNotice(): string {
-  return `<article class="glass-inset account-card" id="acct-security-2fa-hold">
-        <h4>Security · 2FA</h4>
-        <p class="muted small">Authenticator (TOTP) enroll ships with <strong>withdraw GO</strong>. Public withdraw stays HOLD — lab loopback can enroll today.</p>
-      </article>`;
+      </div>${capsLine}</div>`;
 }
 
 function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: number): string {
@@ -160,7 +245,14 @@ function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: numb
   </div>`;
 }
 
-function renderDepositCard(labOn: boolean, labLive: boolean, session: ReturnType<typeof labSessionLabel>): string {
+function renderDepositCard(
+  labOn: boolean,
+  labLive: boolean,
+  session: ReturnType<typeof labSessionLabel>,
+  deskEdge?: AccountPageOpts["deskEdge"],
+): string {
+  const deskCustodyOn = !labOn && isDeskConnectEnabled() && !!deskEdge?.depositEnabled;
+  const deskLive = !labOn && isDeskConnectEnabled() && session.live;
   return `
         <article class="acct-cash-card deposit">
           <div class="acct-cash-title">
@@ -189,28 +281,63 @@ function renderDepositCard(labOn: boolean, labLive: boolean, session: ReturnType
                 }</p>`
               : `<p class="muted small acct-cash-hint">Lab live · <strong>+100 HMC mint</strong> credits ledger via <code>POST /lab/deposit</code> · HMC address is on-chain deposit · USDT/BTC are paper stubs.</p>`
           }`
+              : deskCustodyOn
+                ? `<div class="acct-cash-actions">
+            <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-hmc"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show HMC deposit</button>
+            <button type="button" class="btn-sm" id="btn-desk-dep-sup"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show SUP deposit</button>
+          </div>
+          <div class="acct-dep-reveal" id="lab-deposit-reveal" hidden>
+            <label class="lab-field lab-field-wide" for="lab-deposit-addr">Deposit address <span class="muted">(send here)</span>
+              <input id="lab-deposit-addr" class="mono" type="text" readonly spellcheck="false" autocomplete="off" value="" />
+            </label>
+            <div class="lab-action-row">
+              <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy deposit address</button>
+            </div>
+          </div>
+          <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
+          <p class="muted small acct-cash-hint acct-dep-warn"><strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.</p>
+          ${
+            session.address
+              ? `<p class="muted small mono acct-cash-hint">Login only: <code>${escapeHtml(session.address)}</code></p>`
+              : `<p class="muted small acct-cash-hint">Connect desk wallet first, then show deposit address.</p>`
+          }`
               : `<div class="acct-cash-actions">
             <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Open Hub wallet" : "Open node wallet"}</a>
           </div>
           <p id="sync-node-msg" class="muted small sync-msg"></p>
-          <p class="muted small acct-cash-hint">Paper mode · balances live in this browser. Live deposit (personal <code>HMC-…</code> address → exchange ledger) stays <strong>HOLD</strong> on the public site. Sync pulls HMC/SUP from a local node wallet when one is running.</p>`
+          <p class="muted small acct-cash-hint">Paper mode · balances live in this browser. Live deposit stays <strong>HOLD</strong> until custody GO. Sync pulls HMC/SUP from a local node wallet when one is running.</p>`
           }
         </article>`;
 }
 
-function renderWithdrawCard(labOn: boolean, labLive: boolean): string {
+function renderWithdrawCard(
+  labOn: boolean,
+  labLive: boolean,
+  session: ReturnType<typeof labSessionLabel>,
+  deskEdge?: AccountPageOpts["deskEdge"],
+): string {
+  const deskWd = !labOn && isDeskConnectEnabled() && !!deskEdge?.withdrawEnabled;
+  const deskLive = deskWd && session.live;
+  const showForm = labOn || deskWd;
+  const enableBtns = labOn ? labLive : deskLive;
   return `
         <article class="acct-cash-card withdraw">
           <div class="acct-cash-title">
             <span class="acct-cash-ico withdraw" aria-hidden="true">↑</span>
             <div>
               <h4>Withdraw</h4>
-              <p class="muted small">Request only · complete via CLI</p>
+              <p class="muted small">${
+                deskWd
+                  ? "Request + TOTP · ops completes on-chain"
+                  : labOn
+                    ? "Request only · complete via CLI"
+                    : "Edge withdraw HOLD"
+              }</p>
             </div>
           </div>
           ${
-            labOn
+            showForm
               ? `<div class="lab-withdraw-form">
             <label class="lab-field">Asset
               <select id="lab-wd-asset" class="mono">
@@ -226,23 +353,37 @@ function renderWithdrawCard(labOn: boolean, labLive: boolean): string {
             <label class="lab-field lab-field-wide">Destination
               <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="paper-sup-ops-wallet-01" data-ph-usdt="paper-usdt-ops-wallet-01" data-ph-btc="lab-ops-btc-01" />
             </label>
-            <p class="muted small lab-wd-dest-hint">HMC → <code>HMC-</code>+16 hex · SUP/USDT/BTC → paper stubs e.g. <code>paper-usdt-ops-wallet-01</code> (not deposit addresses)</p>
-            <label class="lab-field">2FA
-              <input id="lab-wd-2fa" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="if enabled" />
+            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT/BTC paper stubs only</p>
+            <label class="lab-field">2FA code
+              <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or recovery" />
             </label>
           </div>
+          ${
+            deskWd
+              ? `<p class="muted small lab-wd-limits mono" id="lab-wd-limits">${escapeHtml(
+                  [
+                    deskEdge?.minNotional && deskEdge.minNotional > 0 ? `min notional ${deskEdge.minNotional}` : "",
+                    deskEdge?.maxOpenOrders && deskEdge.maxOpenOrders > 0 ? `max open ${deskEdge.maxOpenOrders}` : "",
+                    deskEdge?.priceBandBps && deskEdge.priceBandBps > 0 ? `±${deskEdge.priceBandBps} bps` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Limits from /health",
+                )}</p>`
+              : ""
+          }
           <p id="lab-wd-fee-quote" class="muted small lab-fee-quote" role="status">Fee quote appears after amount · GET /fees/custody</p>
           <p id="lab-custody-pause" class="muted small lab-pause-hint" hidden></p>
           <div class="lab-action-row">
-            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-wd-request"${labLive ? "" : " disabled title=\"Connect fixture first\""}>Request withdraw</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-refresh"${labLive ? "" : " disabled"}>↻ List</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-quote"${labLive ? "" : " disabled"}>Quote fee</button>
+            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-wd-request"${enableBtns ? "" : ` disabled title="${deskWd ? "Connect desk wallet first" : "Connect fixture first"}"`}>Request withdraw</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-refresh"${enableBtns ? "" : " disabled"}>↻ List</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-quote"${enableBtns ? "" : " disabled"}>Quote fee</button>
           </div>
           <p id="lab-wd-msg" class="muted small sync-msg" role="status"></p>
           <ul id="lab-wd-list" class="lab-wd-list mono small" aria-live="polite"><li class="dim">No withdraw requests yet</li></ul>`
-              : `<p class="muted small acct-cash-hint">Paper mode · on-chain withdraw from the exchange is <strong>HOLD</strong>. Move HMC/SUP via your node / Hub wallet for now.</p>
+              : `<p class="muted small acct-cash-hint">Withdraw stays <strong>HOLD</strong> on this edge. Enroll 2FA under Desk session so you're ready when it opens. Move HMC/SUP via node / Hub wallet for now.</p>
           <div class="acct-cash-actions">
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" target="_blank" rel="noopener noreferrer">Node wallet →</a>
+            <button type="button" class="btn-sm" id="btn-acct-jump-2fa">Open 2FA ↓</button>
           </div>`
           }
         </article>`;
@@ -255,15 +396,32 @@ function renderCashDock(
   opts?: AccountPageOpts,
 ): string {
   const deskOn = isDeskConnectEnabled();
-  const intro = labLive
-    ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
-    : labOn
-      ? "Connect fixture once, then deposit / withdraw here"
+  const deskCustodyOn = deskOn && !!opts?.deskEdge?.depositEnabled;
+  const deskWdOn = deskOn && !!opts?.deskEdge?.withdrawEnabled;
+  // Prefer labOn / deskCustodyOn over labLive — useLabMatching can be sticky in tests on localhost.
+  const intro = labOn
+    ? labLive
+      ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
+      : "Connect fixture once, then deposit / withdraw here"
+    : deskCustodyOn || deskWdOn
+      ? `Desk custody live — ${[
+          deskCustodyOn ? "deposit address below" : null,
+          deskWdOn ? "withdraw with TOTP" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}`
       : deskOn
         ? "Desk Connect · matching/deposit/withdraw HOLD — paper funds here; Connect for a session"
         : "Paper funds · live exchange deposit/withdraw on HOLD · optional node Sync for HMC/SUP";
+  const dockClass = [
+    labOn ? "lab-custody-card" : "",
+    deskOn && !labOn && !deskCustodyOn && !deskWdOn ? "desk-hold-card" : "",
+    deskCustodyOn || deskWdOn ? "desk-custody-live" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return `
-    <section class="acct-cash-dock glass-inset${labOn ? " lab-custody-card" : ""}${deskOn && !labOn ? " desk-hold-card" : ""}" id="acct-cash" aria-label="Deposit and withdraw">
+    <section class="acct-cash-dock glass-inset${dockClass ? ` ${dockClass}` : ""}" id="acct-cash" aria-label="Deposit and withdraw">
       <div class="acct-cash-tabs" role="tablist" aria-label="Funds">
         <button type="button" class="acct-cash-tab active" data-cash-tab="deposit" role="tab" aria-selected="true">Deposit</button>
         <button type="button" class="acct-cash-tab" data-cash-tab="withdraw" role="tab" aria-selected="false">Withdraw</button>
@@ -282,10 +440,10 @@ function renderCashDock(
           : ""
       }
       <div class="acct-cash-panel" data-cash-panel="deposit" id="acct-cash-deposit">
-        ${renderDepositCard(labOn, labLive, session)}
+        ${renderDepositCard(labOn, labLive, session, opts?.deskEdge)}
       </div>
       <div class="acct-cash-panel" data-cash-panel="withdraw" id="acct-cash-withdraw" hidden>
-        ${renderWithdrawCard(labOn, labLive)}
+        ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge)}
       </div>
       ${
         labOn
@@ -538,7 +696,8 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
   const denom = getEquityDenom();
   const eqView = equityInDenom(eq, market, denom);
   const assetRows = buildAssetPortfolioRows(state, market);
-  const hasSpotInventory = assetRows.some((r) => r.symbol !== "USDT" && r.usdtValue >= 1);
+  // Any positive free balance counts — USDT-only wallets are real inventory after deposit.
+  const hasSpotInventory = assetRows.some((r) => r.amount > 0 || r.usdtValue > 0);
   const acctTab = loadAcctTab();
   const hideSmall = loadAcctHideSmall();
 
@@ -573,8 +732,16 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <p class="acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
           <div id="acct-denom-host">${renderDenomRing(denom)}</div>
           <div class="acct-quick-actions">
-            <button type="button" class="acct-qa-btn primary" id="btn-acct-deposit" data-cash-tab="deposit">Deposit</button>
-            <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>
+            ${
+              labOn || (!!deskOn && (!!opts?.deskEdge?.depositEnabled || !!opts?.deskEdge?.withdrawEnabled))
+                ? labOn
+                  ? `<button type="button" class="acct-qa-btn primary" id="btn-acct-deposit" data-cash-tab="deposit">Deposit</button>
+            <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>`
+                  : `<button type="button" class="acct-qa-btn ${opts?.deskEdge?.depositEnabled ? "primary" : "muted"}" id="btn-acct-deposit" data-cash-tab="deposit"${opts?.deskEdge?.depositEnabled ? "" : ' title="Live deposit on HOLD"'}>${opts?.deskEdge?.depositEnabled ? "Deposit" : "Deposit · HOLD"}</button>
+            <button type="button" class="acct-qa-btn ${opts?.deskEdge?.withdrawEnabled ? "primary" : "muted"}" id="btn-acct-withdraw" data-cash-tab="withdraw"${opts?.deskEdge?.withdrawEnabled ? ' title="Requires TOTP / recovery"' : ' title="Live withdraw on HOLD"'}>${opts?.deskEdge?.withdrawEnabled ? "Withdraw" : "Withdraw · HOLD"}</button>`
+                : `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Live deposit on HOLD">Deposit · HOLD</button>
+            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Live withdraw on HOLD">Withdraw · HOLD</button>`
+            }
             <button type="button" class="acct-qa-btn" data-goto-view="convert">Convert</button>
             <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>
           </div>
@@ -697,30 +864,48 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
 
     ${
       deskOn
-        ? `<details class="acct-panel" id="acct-desk" open>
-      <summary>Desk session (HOLD)</summary>
-      <article class="glass-inset account-card lab-api-card">
+        ? (() => {
+            const custodyOn = !!opts?.deskEdge?.depositEnabled;
+            const wdOn = !!opts?.deskEdge?.withdrawEnabled;
+            const matchLive = isDeskMatchingLive(opts?.deskEdge?.matching);
+            const badge = custodyOn || matchLive ? "DESK · LIVE" : "DESK · HOLD";
+            const summary = custodyOn || matchLive ? "Desk session" : "Desk session (HOLD)";
+            return `<details class="acct-panel" id="acct-desk" open>
+      <summary>${summary}</summary>
+      <article class="glass-inset account-card lab-api-card acct-desk-card">
         <div class="acct-lab-status">
-          <span class="lab-badge">DESK · HOLD</span>
+          <span class="lab-badge">${badge}</span>
           <p class="muted small">Session: <strong class="mono" id="desk-session-addr">${escapeHtml(session.label)}</strong></p>
         </div>
         ${renderDeskHoldPills(opts?.deskEdge)}
-        <p class="muted small">Connect creates a browser-local <code>HMC-…</code> key (sessionStorage). Matching / deposit / withdraw stay <strong>HOLD</strong> — Spot stays paper.</p>
-        <div class="lab-action-grid lab-session-actions">
-          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">${session.live ? "Reconnect" : "Connect wallet"}</button>
-          <button type="button" class="btn-lab" id="btn-desk-copy-addr" ${session.address || session.live ? "" : "disabled"} title="Copy HMC address">Copy addr</button>
-          <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync ledger</button>
+        <div class="lab-action-row lab-session-primary">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">${session.live ? "Reconnect" : "Connect"}</button>
+          <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync</button>
+          <button type="button" class="btn-lab" id="btn-desk-copy-addr" ${session.address || session.live ? "" : "disabled"} title="${
+              custodyOn ? "Copy login address — NOT for deposits" : "Copy HMC address"
+            }">Copy login</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout" ${session.live ? "" : "disabled"}>Logout</button>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-export-seed" title="Download secret seed backup JSON">Export seed…</button>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>
-          <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear sessionStorage seed and create a new address">New desk wallet…</button>
-          <input type="file" id="desk-seed-import-file" accept="application/json,.json,.txt,text/plain" class="hidden" />
         </div>
+        <details class="acct-desk-advanced">
+          <summary>Backup &amp; advanced</summary>
+          <div class="lab-action-row">
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-export-seed" title="Download secret seed backup JSON">Export seed…</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear sessionStorage seed and create a new address">New wallet…</button>
+          </div>
+          <input type="file" id="desk-seed-import-file" accept="application/json,.json,.txt,text/plain" class="hidden" />
+          ${
+            custodyOn
+              ? `<p class="muted small acct-dep-warn"><strong>Copy login ≠ deposit.</strong> Use Deposit tab for the on-chain address.</p>`
+              : ""
+          }
+        </details>
         <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
       </article>
-      ${renderDesk2faHoldNotice()}
-    </details>`
+      ${renderSecurity2faCard(session.live, { withdrawEnabled: wdOn, deskMode: true })}
+    </details>`;
+          })()
         : ""
     }
 
@@ -748,7 +933,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         </div>
         <p id="sync-node-msg" class="muted small sync-msg"></p>
       </article>
-      ${renderSecurity2faCard(labLive)}
+      ${renderSecurity2faCard(labLive, { withdrawEnabled: true, deskMode: false })}
     </details>`
         : ""
     }
@@ -805,18 +990,20 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
     onUpdate();
   });
 
-  const list = document.getElementById("acct-ledger-list");
   const filters = document.getElementById("acct-ledger-filters");
-  if (list && filters) {
-    filters.querySelectorAll("[data-ledger-filter]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const f = (btn as HTMLElement).dataset.ledgerFilter || "all";
-        filters.querySelectorAll("[data-ledger-filter]").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        list.querySelectorAll("li").forEach((li) => {
-          const kind = (li as HTMLElement).dataset.ledgerKind || "other";
-          (li as HTMLElement).hidden = !(f === "all" || kind === f);
-        });
+  if (filters && filters.getAttribute("data-wired") !== "1") {
+    filters.setAttribute("data-wired", "1");
+    filters.addEventListener("click", (ev) => {
+      const btn = (ev.target as HTMLElement | null)?.closest?.("[data-ledger-filter]") as HTMLElement | null;
+      if (!btn || !filters.contains(btn)) return;
+      const f = btn.dataset.ledgerFilter || "all";
+      filters.querySelectorAll("[data-ledger-filter]").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const list = document.getElementById("acct-ledger-list");
+      if (!list) return;
+      list.querySelectorAll("li").forEach((li) => {
+        const kind = (li as HTMLElement).dataset.ledgerKind || "other";
+        (li as HTMLElement).hidden = !(f === "all" || kind === f);
       });
     });
   }
@@ -884,6 +1071,10 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
 
   document.getElementById("btn-acct-deposit")?.addEventListener("click", () => switchCashTab("deposit"));
   document.getElementById("btn-acct-withdraw")?.addEventListener("click", () => switchCashTab("withdraw"));
+  document.getElementById("btn-acct-jump-2fa")?.addEventListener("click", () => {
+    document.getElementById("acct-desk")?.setAttribute("open", "");
+    document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
   document.getElementById("btn-acct-history")?.addEventListener("click", () => {
     document.getElementById("acct-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
@@ -1083,4 +1274,18 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
 
   const sess = document.getElementById("lab-session-addr");
   if (sess) sess.textContent = labSessionLabel().label;
+
+  const fundsPanel = document.getElementById("account-funds");
+  if (fundsPanel) {
+    const hasInv = assetRows.some((r) => r.amount > 0 || r.usdtValue > 0);
+    let empty = fundsPanel.querySelector(".acct-positions-empty") as HTMLElement | null;
+    if (hasInv) {
+      empty?.remove();
+    } else if (!empty) {
+      empty = document.createElement("div");
+      empty.className = "acct-positions-empty";
+      empty.innerHTML = renderSpotEmptyState("positions");
+      fundsPanel.prepend(empty);
+    }
+  }
 }

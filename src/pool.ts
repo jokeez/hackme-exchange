@@ -2,7 +2,7 @@ import type { MarketSnapshot, PoolLive, PoolStats, WorkStats } from "./types";
 import { INTEGRATION } from "./config/integration";
 import { escapeHtml } from "./sanitize";
 import { formatGh, formatNum, formatPrice, formatRewardPerM, tickerFromMarket } from "./market";
-import { fetchWithTimeout } from "./fetchTimeout";
+import { fetchPoolStatsCached, fetchWorkStatsCached } from "./oracleFetch";
 import { oracleStatusKind, oracleStatusLabel, type OracleMeta } from "./oracleStatus";
 import { patchOracleTransparencyDom, renderOracleTransparencyPanel } from "./product/oraclePanel";
 import { renderWorkerLookupPanel } from "./product/poolWorker";
@@ -19,23 +19,7 @@ const PUBLIC_POOL_DOCS = "https://github.com/jokeez/hackme/blob/main/docs/SETUP.
 
 export async function fetchPoolLive(): Promise<PoolLive> {
   try {
-    // Pool is enough for "live"; work/stats is best-effort (vite proxy can stall mid-body).
-    const poolT = 4_000;
-    const workT = 6_000;
-    const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
-    const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
-    const p = await poolP;
-    if (!p.ok) throw new Error(`pool HTTP ${p.status}`);
-    const pool = (await p.json()) as PoolStats;
-    const w = await workP;
-    let work: WorkStats = {};
-    if (w?.ok) {
-      try {
-        work = (await w.json()) as WorkStats;
-      } catch {
-        work = {};
-      }
-    }
+    const [pool, work] = await Promise.all([fetchPoolStatsCached(), fetchWorkStatsCached()]);
     const poolGh = work.pool_hashrate_gh_s ?? (pool.hashrate ? pool.hashrate / 1e9 : 0);
     const workers = work.workers_online ?? work.workers_count ?? pool.workers ?? 0;
     return {
@@ -178,6 +162,31 @@ export function patchPoolLiveDom(
   }
 
   patchOracleTransparencyDom(meta, market, live, now);
+
+  // Soft-patch must clear first-paint pending chrome once live stats arrive.
+  const banner = document.querySelector(".pool-page .pool-status-banner");
+  if (banner) {
+    if (live.status === "ok") banner.remove();
+    else banner.outerHTML = poolStatusBanner(live);
+  } else if (live.status !== "ok") {
+    const head = document.querySelector(".pool-page > .pool-head");
+    if (head) head.insertAdjacentHTML("afterend", poolStatusBanner(live));
+  }
+
+  const emptyHint = document.querySelector(".pool-page .pool-empty-hint");
+  const showEmpty =
+    (live.status === "offline" || live.status === "pending") &&
+    live.poolGh === 0 &&
+    live.workers === 0 &&
+    live.blockHeight === 0;
+  if (emptyHint && !showEmpty) emptyHint.remove();
+  if (!emptyHint && showEmpty) {
+    const grid = document.querySelector(".pool-page .pool-stat-grid");
+    grid?.insertAdjacentHTML(
+      "beforebegin",
+      `<p class="muted small pool-empty-hint">No live stats yet — zeros below are placeholders, not a real empty pool.</p>`,
+    );
+  }
 }
 
 export function renderPoolPage(

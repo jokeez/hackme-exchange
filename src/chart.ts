@@ -257,8 +257,10 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   freeXh = mountFreeCrosshair(host);
   syncFreeCrosshairCapture();
 
-  let panLastX = 0;
-  let panLastY = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panStartLogical: { from: number; to: number } | null = null;
+  let panStartPrice: { from: number; to: number } | null = null;
   let panning = false;
   let ohlcRaf = 0;
   let ohlcX = 0;
@@ -298,26 +300,54 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
 
   const onMoveHair = (e: PointerEvent) => {
     if (!freeXh) return;
+    // Always stick the hair to the cursor (incl. mid-pan — pointer may be captured on overlay).
     const local = freeXh.move(e.clientX, e.clientY);
+    // Don't jitter OHLC while dragging the pane.
+    if (panning) return;
     ohlcX = local.x;
     ohlcY = local.y;
     if (!ohlcRaf) ohlcRaf = requestAnimationFrame(flushOhlc);
   };
 
   const onMovePan = (e: PointerEvent) => {
-    if (!panning || !chart) return;
-    const dx = e.clientX - panLastX;
-    panLastX = e.clientX;
-    panLastY = e.clientY;
-    if (Math.abs(dx) < 0.5) return;
+    if (!panning || !chart || !panStartLogical) return;
+    if (activeTool !== "cursor") return;
+    // Pointer is captured on free-xh — host move listener may not see this; keep hair glued.
+    freeXh?.move(e.clientX, e.clientY);
+    const dx = e.clientX - panStartX;
+    const dy = e.clientY - panStartY;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
     try {
       const ts = chart.timeScale();
-      const range = ts.getVisibleLogicalRange();
       const spacing = ts.options().barSpacing || 8;
-      if (range) ts.setVisibleLogicalRange(shiftLogicalRangeByPx(range, dx, spacing));
+      ts.setVisibleLogicalRange(shiftLogicalRangeByPx(panStartLogical, dx, spacing));
+      if (panStartPrice && Math.abs(dy) >= 1) {
+        const ps = chart.priceScale("right");
+        // Use plot pane height (free-xh insets exclude time/price scales) so dy maps 1:1.
+        const h = Math.max(
+          40,
+          Math.floor(
+            freeXh?.el.clientHeight ||
+              (hostEl?.querySelector(".chart-inner") as HTMLElement | null)?.clientHeight ||
+              hostEl?.clientHeight ||
+              400,
+          ),
+        );
+        const shifted = shiftPriceRangeByPx(panStartPrice, dy, h);
+        const ref = refClosePrice();
+        const next =
+          ref > 0 ? clampVisiblePriceRange(shifted, ref, h, { manual: true, freePan: true }) : shifted;
+        if (next.to > next.from) {
+          priceScaleManual = true;
+          ps.setAutoScale(false);
+          ps.setVisibleRange(next);
+        }
+      }
     } catch {
       /* ignore */
     }
+    e.preventDefault();
+    e.stopPropagation();
   };
 
   const onEnter = () => {
@@ -327,29 +357,53 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   };
   const onLeave = () => {
     freeXh?.hide();
+    freeXh?.setPanning(false);
     panning = false;
+    panStartLogical = null;
+    panStartPrice = null;
     setChartPointerBusy(false);
     lastOpts?.onCrosshair?.(null);
   };
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     if (!freeXh?.el.classList.contains("capturing")) return;
+    if (activeTool !== "cursor") return;
+    if (!chart) return;
+    const lr = chart.timeScale().getVisibleLogicalRange();
+    if (!lr) return;
+    let pr: { from: number; to: number } | null = null;
+    try {
+      pr = chart.priceScale("right").getVisibleRange();
+    } catch {
+      pr = null;
+    }
+    freeXh.refreshRect();
+    freeXh.move(e.clientX, e.clientY);
+    freeXh.setPanning(true);
     panning = true;
-    panLastX = e.clientX;
-    panLastY = e.clientY;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartLogical = { from: lr.from, to: lr.to };
+    panStartPrice = pr && pr.to > pr.from ? { from: pr.from, to: pr.to } : null;
     try {
       freeXh.el.setPointerCapture(e.pointerId);
     } catch {
       /* ignore */
     }
+    e.stopPropagation();
   };
   const onUp = (e: PointerEvent) => {
     panning = false;
+    panStartLogical = null;
+    panStartPrice = null;
+    freeXh?.setPanning(false);
+    freeXh?.move(e.clientX, e.clientY);
     try {
       freeXh?.el.releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
     }
+    e.stopPropagation();
   };
   const onWheel = (e: WheelEvent) => {
     if (!freeXh?.el.classList.contains("capturing") || !chart || !hostEl) return;
@@ -363,7 +417,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     syncFreeCrosshairCapture();
   };
 
-  freeXh.el.addEventListener("pointermove", onMovePan, { passive: true });
+  freeXh.el.addEventListener("pointermove", onMovePan, { passive: false });
   freeXh.el.addEventListener("pointerdown", onDown);
   freeXh.el.addEventListener("pointerup", onUp);
   freeXh.el.addEventListener("pointercancel", onUp);
@@ -1529,9 +1583,10 @@ export function clampVisiblePriceRange(
   range: { from: number; to: number },
   refPrice: number,
   chartHeightPx = 0,
-  clampOpts?: { manual?: boolean },
+  clampOpts?: { manual?: boolean; freePan?: boolean },
 ): { from: number; to: number } {
   const manual = clampOpts?.manual === true;
+  const freePan = clampOpts?.freePan === true;
   const ref = Number.isFinite(refPrice) && refPrice > 0 ? refPrice : 0;
   let from = range.from;
   let to = range.to;
@@ -1556,23 +1611,39 @@ export function clampVisiblePriceRange(
   const labelPx = 26;
   const maxLabels = chartHeightPx > 80 ? Math.max(5, Math.floor(chartHeightPx / labelPx)) : 10;
   const spanFromHeight = chartHeightPx > 0 ? (ref * 0.14) / Math.sqrt(maxLabels) : 0;
-  const autoMinSpan = Math.max(ref * 0.008, spanFromHeight, ref * 1e-5, 1e-12);
+  // Soft-MM spreads are often ~100–160 bps; a tighter floor makes every tip wick
+  // look like a full-pane spike forest even when OHLC is healthy.
+  const autoMinSpan = Math.max(ref * 0.02, spanFromHeight, ref * 1e-5, 1e-12);
   const manualMinSpan = Math.max(ref * 0.00006, ref * 1e-6, 1e-12);
   const minSpan = manual ? manualMinSpan : autoMinSpan;
   const maxSpan = ref * 3; // ~±150% around mid at worst
   span = Math.min(Math.max(span, minSpan), maxSpan);
 
   let mid = (from + to) / 2;
-  // If the window mid has flown away from the instrument, snap back.
-  if (!Number.isFinite(mid) || mid <= 0 || mid < ref * 1e-3 || mid > ref * 1e3) {
-    mid = ref;
+  // Free pan: keep the shifted window — do not spring mid back to ref (that fought the drag).
+  if (!freePan) {
+    if (!Number.isFinite(mid) || mid <= 0 || mid < ref * 1e-3 || mid > ref * 1e3) {
+      mid = ref;
+    } else {
+      // Soft pull: mid stays within ±100% of ref.
+      mid = Math.min(ref * 2, Math.max(ref * 0.25, mid));
+    }
+    from = mid - span / 2;
+    to = mid + span / 2;
   } else {
-    // Soft pull: mid stays within ±100% of ref.
-    mid = Math.min(ref * 2, Math.max(ref * 0.25, mid));
+    // Preserve drag translation; only re-apply span width around current mid if clamped.
+    const curSpan = to - from;
+    if (Math.abs(curSpan - span) > span * 1e-9) {
+      from = mid - span / 2;
+      to = mid + span / 2;
+    }
+    // Hard escape hatch only — absurd empties, not soft spring.
+    if (!Number.isFinite(mid) || mid <= 0 || mid < ref * 1e-4 || mid > ref * 1e4) {
+      mid = ref;
+      from = mid - span / 2;
+      to = mid + span / 2;
+    }
   }
-
-  from = mid - span / 2;
-  to = mid + span / 2;
 
   // Never let the floor collapse toward absolute zero while trading a real asset.
   const floor = ref * 1e-4;
@@ -1586,16 +1657,14 @@ export function clampVisiblePriceRange(
     from = Math.max(floor, to - span);
   }
 
-  // Keep the reference price on-screen (soft when user manually zoomed/panned).
-  if (ref < from || ref > to) {
-    const offScreen = manual ? ref < from - span || ref > to + span : true;
-    if (offScreen) {
-      from = ref - span / 2;
-      to = ref + span / 2;
-      if (from < floor) {
-        from = floor;
-        to = from + span;
-      }
+  // Auto-fit only: keep the reference price on-screen.
+  // Manual / freePan: soft mid bounds above already limit how far the window can drift.
+  if (!freePan && !manual && (ref < from || ref > to)) {
+    from = ref - span / 2;
+    to = ref + span / 2;
+    if (from < floor) {
+      from = floor;
+      to = from + span;
     }
   }
 
@@ -1705,7 +1774,7 @@ export function applyPriceWheelZoom(
   return clampVisiblePriceRange(next, refPrice, chartHeightPx, { manual: true });
 }
 
-/** Map vertical px drag to a price-range shift (mobile / axis pan). */
+/** Map vertical px drag to a price-range shift (content follows finger — TV/Binance). */
 export function shiftPriceRangeByPx(
   range: { from: number; to: number },
   dyPx: number,
@@ -1713,7 +1782,8 @@ export function shiftPriceRangeByPx(
 ): { from: number; to: number } {
   const span = range.to - range.from;
   const h = Math.max(40, chartHeightPx);
-  const shift = -(dyPx / h) * span;
+  // Drag down → higher prices enter from top (window shifts up). 1:1 with plot height.
+  const shift = (dyPx / h) * span;
   return { from: range.from + shift, to: range.to + shift };
 }
 
@@ -3162,47 +3232,67 @@ export function setupPortableChartPan(
     shell.removeEventListener("touchcancel", onTouchEnd);
   });
 
-  if (!chartInteractionOptions().handleScroll.horzTouchDrag) {
+  // Desktop + mobile: free plot pan (time + price) when cursor tool is active.
+  // LWC pressedMouseMove is horizontal-only — vertical drag must be custom.
+  {
     let panning = false;
     let decided = false;
     let startX = 0;
     let startY = 0;
     let startRange: { from: number; to: number } | null = null;
+    let startPrice: { from: number; to: number } | null = null;
     let pointerId = -1;
-    const DRAG_THRESH = 6;
-
+    const DRAG_THRESH = 5;
+    const chartH = () => {
+      // Prefer free-xh plot height (excludes time axis) so vertical pan matches finger.
+      const plot = freeXh?.el.clientHeight;
+      if (plot && plot > 40) return Math.floor(plot);
+      const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
+      return Math.max(40, Math.floor((inner?.clientHeight ?? shell.clientHeight) - 28));
+    };
     const cancelPan = () => {
       panning = false;
       decided = false;
       startRange = null;
+      startPrice = null;
       pointerId = -1;
+      noteChartPointerBusy(false);
     };
-
     const onDown = (e: PointerEvent) => {
-      if (e.pointerType === "mouse" || getTool() !== "cursor") return;
+      if (getTool() !== "cursor") return;
+      if (e.button != null && e.button !== 0) return;
+      // Free-crosshair capturing overlay owns plot pan — avoid double-apply.
+      if (freeXh?.el.classList.contains("capturing") && !isOverPriceScaleEl(e.clientX, e.clientY, shell)) {
+        return;
+      }
+      if (isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
       const rect = shell.getBoundingClientRect();
       if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
       const lr = chartApi.timeScale().getVisibleLogicalRange();
       if (!lr) return;
+      let pr: { from: number; to: number } | null = null;
+      try {
+        pr = chartApi.priceScale("right").getVisibleRange();
+      } catch {
+        pr = null;
+      }
       panning = true;
       decided = false;
       pointerId = e.pointerId;
       startX = e.clientX;
       startY = e.clientY;
       startRange = { from: lr.from, to: lr.to };
+      startPrice = pr && pr.to > pr.from ? { from: pr.from, to: pr.to } : null;
+      noteChartPointerBusy(true);
     };
-
     const onMove = (e: PointerEvent) => {
       if (!panning || !startRange || e.pointerId !== pointerId) return;
+      freeXh?.move(e.clientX, e.clientY);
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
       if (!decided) {
         if (Math.abs(dx) < DRAG_THRESH && Math.abs(dy) < DRAG_THRESH) return;
         decided = true;
-        if (Math.abs(dy) > Math.abs(dx)) {
-          cancelPan();
-          return;
-        }
         try {
           shell.setPointerCapture(e.pointerId);
         } catch {
@@ -3215,10 +3305,25 @@ export function setupPortableChartPan(
       } catch {
         /* ignore */
       }
+      if (startPrice && Math.abs(dy) >= 1) {
+        const shifted = shiftPriceRangeByPx(startPrice, dy, chartH());
+        const ref = refPrice();
+        const next =
+          ref > 0
+            ? clampVisiblePriceRange(shifted, ref, chartH(), { manual: true, freePan: true })
+            : shifted;
+        if (next.to > next.from) {
+          try {
+            markManual();
+            chartApi.priceScale("right").setAutoScale(false);
+            chartApi.priceScale("right").setVisibleRange(next);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       e.preventDefault();
-      e.stopPropagation();
     };
-
     const onUp = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
       try {
@@ -3226,46 +3331,49 @@ export function setupPortableChartPan(
       } catch {
         /* ignore */
       }
+      const was = decided;
       cancelPan();
+      if (was) scheduleHeal();
     };
-
     shell.addEventListener("pointerdown", onDown, { passive: true });
-    shell.addEventListener("pointermove", onMove, { passive: false, capture: true });
-    shell.addEventListener("pointerup", onUp, { capture: true });
-    shell.addEventListener("pointercancel", onUp, { capture: true });
+    shell.addEventListener("pointermove", onMove, { passive: false });
+    shell.addEventListener("pointerup", onUp);
+    shell.addEventListener("pointercancel", onUp);
     cleanups.push(() => {
       shell.removeEventListener("pointerdown", onDown);
-      shell.removeEventListener("pointermove", onMove, true);
-      shell.removeEventListener("pointerup", onUp, true);
-      shell.removeEventListener("pointercancel", onUp, true);
+      shell.removeEventListener("pointermove", onMove);
+      shell.removeEventListener("pointerup", onUp);
+      shell.removeEventListener("pointercancel", onUp);
       cancelPan();
     });
   }
 
-  if (isMobileLayout()) {
+  // Price-axis vertical pan (desktop + mobile) — LWC axis drag can collapse ticks.
+  {
     let axisPan = false;
     let axisStartY = 0;
     let axisStartRange: { from: number; to: number } | null = null;
     let axisPointerId = -1;
     const chartH = () => {
+      const plot = freeXh?.el.clientHeight;
+      if (plot && plot > 40) return Math.floor(plot);
       const inner = shell.querySelector(".chart-inner") as HTMLElement | null;
-      return Math.floor(inner?.clientHeight ?? shell.clientHeight);
+      return Math.max(40, Math.floor((inner?.clientHeight ?? shell.clientHeight) - 28));
     };
-
     const cancelAxisPan = () => {
       axisPan = false;
       axisStartRange = null;
       axisPointerId = -1;
+      noteChartPointerBusy(false);
     };
-
     const axisCell =
       shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr:first-child td:last-child") ??
       shell.querySelector<HTMLElement>(".tv-lightweight-charts table tr td:last-child") ??
       shell;
-
     const onAxisDown = (e: PointerEvent) => {
       if (getTool() !== "cursor") return;
-      if (!isOverPriceScaleEl(e.clientX, e.clientY, hostEl)) return;
+      if (e.button != null && e.button !== 0) return;
+      if (!isOverPriceScaleEl(e.clientX, e.clientY, shell)) return;
       const ps = chartApi.priceScale("right");
       let range = ps.getVisibleRange();
       if (!range || !(range.to > range.from)) return;
@@ -3274,6 +3382,7 @@ export function setupPortableChartPan(
       axisStartRange = { from: range.from, to: range.to };
       axisPointerId = e.pointerId;
       markManual();
+      noteChartPointerBusy(true);
       try {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       } catch {
@@ -3282,15 +3391,14 @@ export function setupPortableChartPan(
       e.preventDefault();
       e.stopPropagation();
     };
-
     const onAxisMove = (e: PointerEvent) => {
       if (!axisPan || !axisStartRange || e.pointerId !== axisPointerId) return;
       const dy = e.clientY - axisStartY;
-      if (Math.abs(dy) < 4) return;
+      if (Math.abs(dy) < 2) return;
       const h = chartH();
       const shifted = shiftPriceRangeByPx(axisStartRange, dy, h);
       const ref = refPrice();
-      const next = ref > 0 ? clampVisiblePriceRange(shifted, ref, h, { manual: true }) : shifted;
+      const next = ref > 0 ? clampVisiblePriceRange(shifted, ref, h, { manual: true, freePan: true }) : shifted;
       if (!(next.to > next.from)) return;
       try {
         chartApi.priceScale("right").setAutoScale(false);
@@ -3301,7 +3409,6 @@ export function setupPortableChartPan(
       e.preventDefault();
       e.stopPropagation();
     };
-
     const onAxisUp = (e: PointerEvent) => {
       if (e.pointerId !== axisPointerId) return;
       try {
@@ -3313,7 +3420,6 @@ export function setupPortableChartPan(
       cancelAxisPan();
       if (wasPan) scheduleHeal();
     };
-
     axisCell.addEventListener("pointerdown", onAxisDown, { passive: false, capture: true });
     axisCell.addEventListener("pointermove", onAxisMove, { passive: false, capture: true });
     axisCell.addEventListener("pointerup", onAxisUp, { capture: true });

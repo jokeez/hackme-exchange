@@ -211,7 +211,7 @@ describe("mobile layout helpers", () => {
         dispatchEvent: () => true,
       }) as MediaQueryList) as typeof window.matchMedia;
     const mobile = chartInteractionOptions();
-    expect(mobile.handleScale.axisPressedMouseMove.price).toBe(true);
+    expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
     expect(mobile.handleScale.axisDoubleClickReset.price).toBe(true);
     expect(mobile.handleScale.mouseWheel).toBe(false);
     expect(mobile.handleScale.pinch).toBe(true);
@@ -234,7 +234,7 @@ describe("mobile layout helpers", () => {
         dispatchEvent: () => true,
       }) as MediaQueryList) as typeof window.matchMedia;
     const desk = chartInteractionOptions();
-    expect(desk.handleScale.axisPressedMouseMove.price).toBe(true);
+    expect(desk.handleScale.axisPressedMouseMove.price).toBe(false);
     expect(desk.handleScroll.vertTouchDrag).toBe(true);
     expect(desk.handleScale.mouseWheel).toBe(false);
     expect(desk.handleScroll.mouseWheel).toBe(false);

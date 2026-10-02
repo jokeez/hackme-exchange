@@ -23,7 +23,7 @@ describe("Account desk session (HOLD)", () => {
     sessionStorage.clear();
   });
 
-  it("renders desk panel with HOLD pills, session actions, and 2FA HOLD notice", () => {
+  it("renders desk panel with HOLD pills, session actions, and enrollable 2FA", () => {
     const html = renderAccountPage(baseState(), sampleMarket(), {
       feeWallet: null,
       deskEdge: { matching: "disabled", depositEnabled: false, withdrawEnabled: false },
@@ -33,6 +33,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("matching · HOLD");
     expect(html).toContain("deposit · HOLD");
     expect(html).toContain("withdraw · HOLD");
+    expect(html).toContain("Deposit · HOLD");
+    expect(html).toContain("Withdraw · HOLD");
     expect(html).toContain("btn-desk-wallet-connect");
     expect(html).toContain("btn-desk-cash-connect");
     expect(html).toContain("btn-desk-jump-panel");
@@ -43,10 +45,11 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("btn-desk-new-key");
     expect(html).toContain("btn-desk-export-seed");
     expect(html).toContain("btn-desk-import-seed");
-    expect(html).toContain('id="acct-security-2fa-hold"');
-    expect(html).toContain("withdraw GO");
-    expect(html).not.toContain('id="acct-security-2fa"');
-    expect(html).not.toContain("btn-lab-2fa-setup");
+    expect(html).toContain('id="acct-security-2fa"');
+    expect(html).toContain("btn-lab-2fa-setup");
+    expect(html).toContain("Withdraw stays");
+    expect(html).toContain("HOLD");
+    expect(html).not.toContain('id="acct-security-2fa-hold"');
     expect(html).not.toContain('id="acct-lab"');
   });
 
@@ -59,6 +62,55 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("HMC-abcdef0123456789");
     expect(html).not.toMatch(/id="btn-desk-api-logout"[^>]*disabled/);
     expect(html).not.toMatch(/id="btn-desk-api-revoke"[^>]*disabled/);
-    expect(html).toContain('id="acct-security-2fa-hold"');
+    expect(html).toContain('id="acct-security-2fa"');
+    expect(html).not.toMatch(/id="btn-lab-2fa-setup"[^>]*disabled/);
+  });
+
+  it("renders soft-launch caps when health advertises them", () => {
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      feeWallet: null,
+      deskEdge: {
+        matching: "disabled",
+        depositEnabled: false,
+        withdrawEnabled: false,
+        maxOpenOrders: 20,
+        priceBandBps: 1500,
+        minNotional: 0.01,
+      },
+    });
+    expect(html).toContain("acct-desk-caps");
+    expect(html).toContain("max open 20");
+    expect(html).toContain("±1500 bps");
+  });
+
+  it("renders desk custody GO deposit buttons when deposit enabled", () => {
+    setLabSessionMeta("HMC-aaaaaaaaaaaaaaaa", "csrf-custody");
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      feeWallet: null,
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(html).toContain("btn-desk-dep-hmc");
+    expect(html).toContain("btn-desk-dep-sup");
+    expect(html).toContain("lab-deposit-reveal");
+    expect(html).toContain("Login addr ≠ deposit");
+    expect(html).toContain("Desk custody live");
+    expect(html).toContain("deposit · on");
+    expect(html).toContain("withdraw · on");
+    expect(html).toContain("DESK · LIVE");
+    expect(html).toContain("desk-custody-live");
+    expect(html).not.toContain("desk-hold-card");
+    expect(html).toContain('id="btn-acct-deposit"');
+    expect(html).toContain(">Withdraw<");
+    expect(html).not.toContain("Withdraw · HOLD");
+    expect(html).not.toContain("Deposit · HOLD");
+    expect(html).toContain("NOT for deposits");
+    expect(html).toContain('id="acct-security-2fa"');
+    expect(html).toContain("btn-lab-2fa-setup");
+    expect(html).toContain("Authenticator (TOTP) is required");
+    expect(html).not.toContain('id="acct-security-2fa-hold"');
+    // Withdraw form follows edge health when withdraw.enabled
+    expect(html).toContain("btn-lab-wd-request");
+    expect(html).toContain("lab-wd-2fa");
+    expect(html).toContain("acct-2fa-manage-grid");
   });
 });

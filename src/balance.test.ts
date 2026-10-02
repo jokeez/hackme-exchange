@@ -159,12 +159,72 @@ describe("100% pct sizing (buy + sell)", () => {
       feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
     });
     const price = 0.05;
-    const naive = Math.floor(freeBalance(s, "hmc", m));
+    const naive = freeBalance(s, "hmc", m);
     expect(assertOrderFunds(s, m, "HMC_USDT", "sell", naive, price, "market").ok).toBe(false);
     const amt = maxSellBaseAmount(s, m, "HMC_USDT", price, "market", 1, m.hmcUsdt);
     expect(amt).toBeGreaterThan(0);
     expect(amt).toBeLessThan(naive);
     expect(assertOrderFunds(s, m, "HMC_USDT", "sell", amt, price, "market").ok).toBe(true);
+  });
+
+  it("sell 100% of 1 HMC with payFeesInHmc still sizes (fractional, not floor→0)", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const s = baseState({
+      wallet: { usdt: 50, hmc: 1, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    const price = 0.2003;
+    expect(freeBalance(s, "hmc", m)).toBe(1);
+    // Whole-unit floor would return 0 and toast "Avbl 0 HMC" while chip shows 1.
+    const amt = maxSellBaseAmount(s, m, "HMC_SUP", price, "limit", 1, price);
+    expect(amt).toBeGreaterThan(0);
+    expect(amt).toBeLessThan(1);
+    expect(assertOrderFunds(s, m, "HMC_SUP", "sell", amt, price, "limit").ok).toBe(true);
+  });
+
+  it("buy 100% of ~0.199 SUP sizes fractionally (not floor→0)", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05, supUsdt: 0.05 });
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0, sup: 0.199, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const price = 0.2003;
+    expect(freeBalance(s, "sup", m)).toBeCloseTo(0.199, 6);
+    // Whole-unit floor(0.199/0.2003)=0 while Avbl chip shows 0.199 SUP.
+    const amt = maxBuyBaseAmount(s, m, "HMC_SUP", price, "market", 1, price);
+    expect(amt).toBeGreaterThan(0);
+    expect(amt).toBeLessThan(1);
+    expect(assertOrderFunds(s, m, "HMC_SUP", "buy", amt, price, "market").ok).toBe(true);
+  });
+
+  it("buy 100% of dust USDT still passes at slip-padded ask", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const s = baseState({
+      wallet: { usdt: 0.0495, hmc: 0, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const ask = 0.051;
+    const slip = ask * 1.02;
+    const amt = maxBuyBaseAmount(s, m, "HMC_USDT", slip, "market", 1, ask);
+    expect(amt).toBeGreaterThan(0);
+    expect(assertOrderFunds(s, m, "HMC_USDT", "buy", amt, slip, "market", true).ok).toBe(true);
+    // Best-ask-only size would overshoot once fee+slip apply.
+    const naive = maxBuyBaseAmount(s, m, "HMC_USDT", ask, "market", 1, ask);
+    expect(assertOrderFunds(s, m, "HMC_USDT", "buy", naive, slip, "market", true).ok).toBe(false);
+  });
+
+  it("buy with payFeesInHmc and 0 HMC returns 0 (fee blocker, not quote Avbl 0)", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05, supUsdt: 0.05 });
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0, sup: 0.199, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    const price = 0.2003;
+    const amt = maxBuyBaseAmount(s, m, "HMC_SUP", price, "market", 1, price);
+    expect(amt).toBe(0);
+    const probe = assertOrderFunds(s, m, "HMC_SUP", "buy", 0.5, price, "market");
+    expect(probe.ok).toBe(false);
+    if (!probe.ok) expect(probe.reason).toMatch(/HMC for fee/i);
   });
 
   it("maxOrderBaseAmount pct fractions stay within free funds", () => {

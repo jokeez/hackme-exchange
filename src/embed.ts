@@ -66,12 +66,45 @@ export function postHubGotoTab(tab: string): boolean {
     "hms-market",
   ]);
   if (!allowed.has(tab)) return false;
+  return postHubMessage({ type: "hackme-exchange", action: "goto-tab", tab });
+}
+
+/**
+ * Sanitize SPA deep-link hash for hub sync / iframe restore.
+ * Accepts #spot/PAIR/tf, #convert/…, #account/…, #pool/….
+ */
+export function sanitizeExchangeRouteHash(hash: string): string | null {
+  const raw = String(hash || "")
+    .replace(/^#/, "")
+    .trim();
+  if (!raw || raw.length > 160) return null;
+  if (
+    !/^(spot\/[A-Z0-9_]+\/[0-9A-Za-z]+|convert(\/[a-z]{2,8}){0,2}|account(\/[a-z]{2,16})?|pool(\/lookup\/[A-Za-z0-9_.:%-]+)?)$/.test(
+      raw,
+    )
+  ) {
+    return null;
+  }
+  return `#${raw}`;
+}
+
+/** Tell parent hub the current SPA route so Pop out / reload keep pair+TF. */
+export function postHubRoute(hash: string): boolean {
+  if (!isHubEmbed() || typeof window === "undefined" || !window.parent || window.parent === window) {
+    return false;
+  }
+  const safe = sanitizeExchangeRouteHash(hash);
+  if (!safe) return false;
+  return postHubMessage({ type: "hackme-exchange", action: "route", hash: safe });
+}
+
+function postHubMessage(data: Record<string, unknown>): boolean {
   const target = hubParentPostMessageOrigin(
     typeof document !== "undefined" ? document.referrer : undefined,
   );
   if (!target) return false;
   try {
-    window.parent.postMessage({ type: "hackme-exchange", action: "goto-tab", tab }, target);
+    window.parent.postMessage(data, target);
     return true;
   } catch {
     return false;

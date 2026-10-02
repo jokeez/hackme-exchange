@@ -25,7 +25,12 @@ export type MarketStreamHandlers = {
 export type MarketStreamOptions = {
   getActivePair: () => PairId;
   isSpotView: () => boolean;
-  useLab: () => boolean;
+  /** Live public L2 and/or session matching — polls /book without requiring Connect. */
+  useLiveBook: () => boolean;
+  /** CSRF session — sync fills/orders (requires Connect). */
+  useSession?: () => boolean;
+  /** @deprecated use useLiveBook */
+  useLab?: () => boolean;
   getState?: () => DemoState;
   getMarket?: () => MarketSnapshot | null;
   saveState?: () => void;
@@ -107,12 +112,20 @@ export class MarketStream {
     this.handlers.onEvent?.({ type: "transport", transport: t });
   }
 
+  private liveBookOn(): boolean {
+    return this.opts.useLiveBook?.() ?? this.opts.useLab?.() ?? false;
+  }
+
+  private sessionOn(): boolean {
+    return this.opts.useSession?.() ?? this.opts.useLab?.() ?? false;
+  }
+
   private async bootTransport(): Promise<void> {
     if (!this.opts.isSpotView()) {
       this.setTransport("idle");
       return;
     }
-    if (this.opts.useLab()) {
+    if (this.liveBookOn()) {
       const wsOk = await this.tryWebSocket();
       if (wsOk) return;
       this.startPoll();
@@ -242,11 +255,13 @@ export class MarketStream {
   };
 
   private async pollTick(): Promise<void> {
-    if (!this.running || !this.opts.isSpotView() || !this.opts.useLab()) return;
+    if (!this.running || !this.opts.isSpotView() || !this.liveBookOn()) return;
     const pairId = this.opts.getActivePair();
     const book = await refreshLabBook(pairId);
     if (book.changed) this.handlers.onEvent?.({ type: "book", pairId, changed: true });
 
+    // Fills/orders need Connect CSRF — skip when only public L2 is live.
+    if (!this.sessionOn()) return;
     this.fillTick += 1;
     if (this.fillTick % 3 === 0) {
       const changed = await this.syncFillsLight();

@@ -3,6 +3,14 @@ import { midForPair } from "./market";
 import { PAIRS } from "./pairs";
 import type { DemoState, MarketSnapshot, Order, OrderSide, PairId, Wallet } from "./types";
 
+/** Display qty precision (1e8 minors). Whole-unit floor broke small HMC sells when fees pay in HMC. */
+const QTY_SCALE = 1e8;
+
+function floorQty(n: number): number {
+  if (!(n > 0) || !Number.isFinite(n)) return 0;
+  return Math.floor(n * QTY_SCALE + 1e-12) / QTY_SCALE;
+}
+
 function balKey(asset: string): keyof Wallet {
   return asset.toLowerCase() as keyof Wallet;
 }
@@ -136,13 +144,18 @@ export function maxBuyBaseAmount(
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "buy", price, mid);
   let lo = 0;
-  let hi = Math.floor(budget / price);
-  while (lo < hi) {
-    const midAmt = Math.ceil((lo + hi + 1) / 2);
-    if (assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate).ok) lo = midAmt;
-    else hi = midAmt - 1;
+  let hi = floorQty(budget / price);
+  // Binary search on minor-scaled integers so small wallets still size.
+  let loU = 0;
+  let hiU = Math.floor(hi * QTY_SCALE + 1e-12);
+  while (loU < hiU) {
+    const midU = Math.ceil((loU + hiU + 1) / 2);
+    const midAmt = midU / QTY_SCALE;
+    if (assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate).ok) loU = midU;
+    else hiU = midU - 1;
   }
-  return lo;
+  lo = loU / QTY_SCALE;
+  return floorQty(lo);
 }
 
 /**
@@ -167,14 +180,15 @@ export function maxSellBaseAmount(
   const budget = freeBalance(state, baseK, m) * p;
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "sell", price, mid);
-  let lo = 0;
-  let hi = Math.floor(budget);
-  while (lo < hi) {
-    const midAmt = Math.ceil((lo + hi + 1) / 2);
-    if (assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate).ok) lo = midAmt;
-    else hi = midAmt - 1;
+  let loU = 0;
+  let hiU = Math.floor(floorQty(budget) * QTY_SCALE + 1e-12);
+  while (loU < hiU) {
+    const midU = Math.ceil((loU + hiU + 1) / 2);
+    const midAmt = midU / QTY_SCALE;
+    if (assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate).ok) loU = midU;
+    else hiU = midU - 1;
   }
-  return lo;
+  return floorQty(loU / QTY_SCALE);
 }
 
 /** Unified 100%/pct sizing for the dual order panel. */

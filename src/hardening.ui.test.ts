@@ -33,9 +33,32 @@ describe("hardening UI contracts", () => {
     expect(html).toContain("order-type-row");
     expect(html).toContain("order-head-meta");
     expect(html).toContain("trade-side-toggle");
-    expect(html).toContain('aria-label="Buy HMC — paper synthetic demo"');
+    expect(html).toContain('aria-label="Buy HMC — paper synthetic"');
     expect(html).toContain('aria-label="Fill best ask (BBO)"');
-    expect(html).toContain('aria-label="Sell HMC — paper synthetic demo"');
+    expect(html).toContain('aria-label="Sell HMC — paper synthetic"');
+  });
+
+  it("order panel shows DESK badge when desk edge live without session", () => {
+    const html = renderDualOrderPanel({
+      pair: pairById("HMC_USDT"),
+      pairId: "HMC_USDT",
+      mid: 0.00043,
+      uiType: "limit",
+      uiTif: "GTC",
+      uiPostOnly: false,
+      availQuote: 0,
+      availBase: 0,
+      payFeesInHmc: false,
+      hmcDiscountPct: 25,
+      feeRole: "maker",
+      feeBps: 8,
+      showTif: true,
+      deskEdgeLive: true,
+      deskSession: false,
+    });
+    expect(html).toContain(">DESK</span>");
+    expect(html).toContain('aria-label="Buy HMC — Connect desk wallet to trade"');
+    expect(html).not.toContain("PAPER");
   });
 
   it("order panel shows LAB badge when labLive", () => {
@@ -57,7 +80,7 @@ describe("hardening UI contracts", () => {
     });
     expect(html).toContain(">LAB</span>");
     expect(html).not.toContain(">PAPER</span>");
-    expect(html).toContain('aria-label="Buy HMC — lab matching demo"');
+    expect(html).toContain('aria-label="Buy HMC — lab matching"');
   });
 
   it("oracle status block includes retry and source hint", () => {

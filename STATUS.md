@@ -23,7 +23,7 @@
 | **Paper site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) |
 | **Private matching (C2)** | Loopback on same origin VPS — **HOLD** (matching / deposit / withdraw OFF) |
 | **Public desk API** | [exchange-api.hackme.tech](https://exchange-api.hackme.tech/health) — **HOLD** (`matching: disabled`; deposit/withdraw off) |
-| **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO |
+| **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO · SPA client path ready (`useDeskMatching` / `useServerMatching`) · soft-launch caps on slim health after edge redeploy |
 | **Real custody / withdrawals** | **HOLD** (none in the browser) |
 | **Live mode in SPA** | **Blocked** (paper Spot) |
 | **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD · seed export/import for multi-device · 2FA with withdraw GO |

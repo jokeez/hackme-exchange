@@ -4,7 +4,7 @@
  */
 
 import type { BookLevel, DemoState, MarketSnapshot, Order, OrderSide, PairId, Trade } from "../types";
-import { isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
+import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
 import {
   apiPairToId,
   apiPriceToDisplay,
@@ -29,6 +29,7 @@ import {
 import { activeVipTier } from "../fees";
 import { recordTradeLedger } from "../ledger";
 import { cancelOrder } from "../store";
+import { isDeskMatchingLive } from "../settingsModal";
 
 /**
  * True when loopback lab matching client is live (CSRF session).
@@ -36,6 +37,63 @@ import { cancelOrder } from "../store";
  */
 export function useLabMatching(): boolean {
   return isLabLoopbackApi() && getLabSessionMeta().hasCsrf;
+}
+
+/** Raw `/health.matching` from last desk/lab health poll (`ok` | `disabled` | …).
+ * `null` = not polled yet — desk builds should not paint a paper ladder before first health. */
+let deskMatchingRaw: string | null = null;
+
+/** Feed from health poll — do not pass UI labels like "HOLD".
+ * Pass `null` to reset to pre-health pending (tests / cold-start). */
+export function setDeskMatchingStatus(raw: string | undefined | null): void {
+  if (raw === null) {
+    deskMatchingRaw = null;
+    return;
+  }
+  const v = (raw ?? "").trim().toLowerCase();
+  deskMatchingRaw = v || "disabled";
+}
+
+export function getDeskMatchingStatus(): string {
+  return deskMatchingRaw ?? "disabled";
+}
+
+/** True until the first /health matching field arrives. */
+export function isDeskMatchingStatusPending(): boolean {
+  return deskMatchingRaw === null;
+}
+
+/**
+ * Public desk live matching — only when health says `ok` + Connect CSRF.
+ * Stays false on HOLD so Spot remains paper until Matching GO.
+ */
+export function useDeskMatching(): boolean {
+  return (
+    isDeskConnectEnabled() &&
+    isDeskMatchingLive(deskMatchingRaw ?? "") &&
+    getLabSessionMeta().hasCsrf
+  );
+}
+
+/**
+ * Public L2 book is available without a session when health advertises matching ok.
+ * Chart/book use this; placing orders still requires useDeskMatching().
+ * Before the first health poll, stay optimistic so cold load never flashes a demo ladder.
+ */
+export function usePublicDeskBook(): boolean {
+  if (!isDeskConnectEnabled()) return false;
+  if (deskMatchingRaw === null) return true;
+  return isDeskMatchingLive(deskMatchingRaw);
+}
+
+/** Lab loopback OR desk live matching (post Matching GO). */
+export function useServerMatching(): boolean {
+  return useLabMatching() || useDeskMatching();
+}
+
+/** Any live L2 source (session matching or public desk book). */
+export function useLiveBook(): boolean {
+  return useServerMatching() || usePublicDeskBook();
 }
 
 /** FE-M02: address remembered after reload but CSRF gone — freeze paper matching. */
@@ -53,21 +111,26 @@ export type LabBookCache = {
   fingerprint: string;
 };
 
-let labBookCache: LabBookCache | null = null;
+/** Per-pair L2 — public desk book is available without Connect; keep each pair warm. */
+const labBookByPair = new Map<PairId, LabBookCache>();
 
 export function getLabBookCache(pairId?: PairId): LabBookCache | null {
-  if (!labBookCache) return null;
-  if (pairId && labBookCache.pairId !== pairId) return null;
-  return labBookCache;
+  if (pairId) return labBookByPair.get(pairId) ?? null;
+  // Legacy: most recently written pair (tests / callers without pair).
+  let latest: LabBookCache | null = null;
+  for (const c of labBookByPair.values()) {
+    if (!latest || c.ts >= latest.ts) latest = c;
+  }
+  return latest;
 }
 
 export function clearLabBookCache(): void {
-  labBookCache = null;
+  labBookByPair.clear();
 }
 
 /** Test-only: seed L2 cache without HTTP. */
 export function seedLabBookCacheForTest(cache: LabBookCache): void {
-  labBookCache = cache;
+  labBookByPair.set(cache.pairId, cache);
 }
 
 /** Best bid/ask mid from cached lab L2 (0 if empty). Prefer this over pool-oracle mid for lab risk. */
@@ -76,8 +139,10 @@ export function labBookMid(pairId?: PairId): number {
   if (!book) return 0;
   const bid = book.bids[0]?.price ?? 0;
   const ask = book.asks[0]?.price ?? 0;
-  if (bid > 0 && ask > 0) return (bid + ask) / 2;
-  return bid > 0 ? bid : ask > 0 ? ask : 0;
+  // Require both sides — one-sided BBO during Soft-MM refresh jumps tip ±spread and paints spike forests.
+  if (!(bid > 0) || !(ask > 0)) return 0;
+  if (ask < bid) return 0;
+  return (bid + ask) / 2;
 }
 
 /**
@@ -120,16 +185,31 @@ export async function refreshLabBook(pairId: PairId): Promise<{ ok: boolean; cha
   if (!isExchangeApiWired()) return { ok: false, changed: false, note: "lab API not enabled" };
   const res = await fetchExchangeBook(pairIdToApi(pairId));
   if (!res.ok) return { ok: false, changed: false, note: res.message };
+  const bids = sortBookLevels(apiLevelsToBook(res.bids), "bids");
+  const asks = sortBookLevels(apiLevelsToBook(res.asks), "asks");
+  // Keep last good ladder on empty/partial Soft-MM blinks — empty wipe flash looks like "demo book".
+  if (!bids.length && !asks.length) {
+    const prev = labBookByPair.get(pairId);
+    if (prev && (prev.bids.length || prev.asks.length)) {
+      return { ok: true, changed: false, note: "kept prior book (empty poll)" };
+    }
+  }
   const fp = bookFingerprint(res.bids, res.asks);
-  const changed = !labBookCache || labBookCache.pairId !== pairId || labBookCache.fingerprint !== fp;
-  labBookCache = {
+  const prev = labBookByPair.get(pairId);
+  const changed = !prev || prev.fingerprint !== fp;
+  labBookByPair.set(pairId, {
     pairId,
-    bids: sortBookLevels(apiLevelsToBook(res.bids), "bids"),
-    asks: sortBookLevels(apiLevelsToBook(res.asks), "asks"),
+    bids,
+    asks,
     ts: res.ts ? Date.parse(res.ts) || Date.now() : Date.now(),
     fingerprint: fp,
-  };
+  });
   return { ok: true, changed };
+}
+
+/** Warm public L2 for soft-MM pairs (no session required). */
+export async function refreshLabBooks(pairIds: PairId[]): Promise<void> {
+  await Promise.all(pairIds.map((id) => refreshLabBook(id)));
 }
 
 function mapApiStatus(status: string): Order["status"] {
@@ -301,8 +381,13 @@ export async function placeLabOrder(
     payFeeInHmc?: boolean;
   },
 ): Promise<LabPlaceResult> {
-  if (!useLabMatching()) {
-    return { ok: false, reason: "Lab matching requires Connect DEMO/LAB fixture" };
+  if (!useServerMatching()) {
+    return {
+      ok: false,
+      reason: isDeskConnectEnabled()
+        ? "Public matching HOLD — Connect does not enable live book yet"
+        : "Lab matching requires Connect DEMO/LAB fixture",
+    };
   }
   const { market: marketSnap, payFeeInHmc, postOnly, timeInForce, ...placeOpts } = opts ?? {};
   const body = buildPlaceOrderBody(pairId, side, type, amountBase, priceDisplay, stopDisplay, {
@@ -365,7 +450,14 @@ export async function cancelLabOrder(
   state: DemoState,
   orderId: string,
 ): Promise<{ ok: true; note: string; syncPending?: boolean } | { ok: false; reason: string }> {
-  if (!useLabMatching()) return { ok: false, reason: "Lab session required" };
+  if (!useServerMatching()) {
+    return {
+      ok: false,
+      reason: isDeskConnectEnabled()
+        ? "Public matching HOLD — cannot cancel server orders"
+        : "Lab session required",
+    };
+  }
   // Short timeout — cancel UI must never wait on a hung DELETE.
   const res = await cancelExchangeOrder(orderId, 4_000);
   if (!res.ok) {
@@ -412,14 +504,28 @@ export async function syncLabBalancesAndBook(
   }
   const bal = await fetchExchangeBalances();
   if (!bal.ok) return bal;
-  state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+  // HOLD desk: never treat empty ledger as authoritative — keeps paper Spot funds.
+  const authoritative = useServerMatching();
+  state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], {
+    labAuthoritative: authoritative,
+  });
 
-  // Public desk HOLD: skip order/fill/book sync that hammers 503 matching.
-  if (!isLabLoopbackApi()) {
-    return {
-      ok: true,
-      note: `Desk sync · ${bal.address.slice(0, 14)}… · matching HOLD · paper Spot`,
-    };
+  // Public desk HOLD: balances probe only — skip order/fill that hammers 503.
+  // Still refresh public L2 when matching edge is GO (no CSRF required for /book).
+  if (!useServerMatching()) {
+    let bookNote = "";
+    if (usePublicDeskBook()) {
+      const bookRes = await refreshLabBook(state.activePair);
+      const book = getLabBookCache(state.activePair);
+      const depth = book ? book.bids.length + book.asks.length : 0;
+      bookNote = bookRes.ok ? ` · live book ${depth} lvl` : "";
+    }
+    const holdNote = isDeskConnectEnabled()
+      ? usePublicDeskBook()
+        ? `Desk sync · ${bal.address.slice(0, 14)}… · matching live · Connect to trade${bookNote}`
+        : `Desk sync · ${bal.address.slice(0, 14)}… · matching HOLD · paper Spot kept`
+      : `API sync · ${bal.address.slice(0, 14)}… · matching off`;
+    return { ok: true, note: holdNote };
   }
 
   const orders = await listExchangeOrders();
@@ -434,9 +540,10 @@ export async function syncLabBalancesAndBook(
   const openN = orders.ok ? orders.orders.length : 0;
   const book = getLabBookCache(state.activePair);
   const depth = book ? book.bids.length + book.asks.length : 0;
+  const lane = useDeskMatching() ? "Desk" : "Lab";
   return {
     ok: true,
-    note: `Lab sync · ${bal.address.slice(0, 14)}… · ${openN} open · +${added} fill(s) · book ${depth} lvl`,
+    note: `${lane} sync · ${bal.address.slice(0, 14)}… · ${openN} open · +${added} fill(s) · book ${depth} lvl`,
   };
 }
 
@@ -451,8 +558,22 @@ export async function syncLabOrdersFillsLight(
   if (!isExchangeApiWired()) {
     return { ok: false, status: 0, code: "disabled", message: "lab API not enabled" };
   }
-  if (!isLabLoopbackApi()) {
-    return { ok: true, note: "desk HOLD — skip matching stream", changed: false, bookChanged: false };
+  if (!useServerMatching()) {
+    if (usePublicDeskBook()) {
+      const bookRes = await refreshLabBook(state.activePair);
+      return {
+        ok: true,
+        note: bookRes.ok ? "desk public book" : "desk book refresh failed",
+        changed: false,
+        bookChanged: !!bookRes.changed,
+      };
+    }
+    return {
+      ok: true,
+      note: isDeskConnectEnabled() ? "desk HOLD — skip matching stream" : "matching off — skip stream",
+      changed: false,
+      bookChanged: false,
+    };
   }
   const account = getLabSessionMeta().address;
   const ordersBefore = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;
@@ -465,19 +586,28 @@ export async function syncLabOrdersFillsLight(
   let added = 0;
   if (fills.ok) added = mergeServerFills(state, fills.fills, account, market ?? null);
 
-  if (added > 0) {
-    const bal = await fetchExchangeBalances();
-    if (bal.ok) {
-      state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
-    }
+  // Always refresh balances — deposit credits (node-watch) land without fills.
+  const prevWallet = { ...state.wallet };
+  const bal = await fetchExchangeBalances();
+  let balChanged = false;
+  if (bal.ok) {
+    state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+    balChanged =
+      prevWallet.usdt !== state.wallet.usdt ||
+      prevWallet.hmc !== state.wallet.hmc ||
+      prevWallet.sup !== state.wallet.sup ||
+      prevWallet.btc !== state.wallet.btc;
   }
 
   const bookRes = await refreshLabBook(state.activePair);
   const ordersAfter = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;
-  const changed = ordersAfter !== ordersBefore || state.trades.length !== tradesBefore || added > 0;
+  const changed =
+    ordersAfter !== ordersBefore || state.trades.length !== tradesBefore || added > 0 || balChanged;
   return {
     ok: true,
-    note: `Lab stream · ${ordersAfter} open · +${added} fill(s)`,
+    note: balChanged
+      ? `Desk ledger · balances updated · ${ordersAfter} open · +${added} fill(s)`
+      : `Lab stream · ${ordersAfter} open · +${added} fill(s)`,
     changed,
     bookChanged: bookRes.changed,
   };

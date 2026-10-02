@@ -1,4 +1,5 @@
 import "./styles.css";
+import QRCode from "qrcode";
 import { patchAccountFundsDom, renderAccountPage, wireAccountFunding } from "./account";
 import { validateLabWithdrawDestination, validateLabWithdrawAmount } from "./labCustody";
 import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
@@ -8,6 +9,7 @@ import {
   applyMidToPairCandles,
   applyPaperClockToPairCandles,
   CANDLE_BASE_TF,
+  clampFillWickPx,
   deriveAllTimeframes,
   prependOlderCandles,
   stats24h,
@@ -56,6 +58,7 @@ import { closeChartContextMenu, showChartContextMenu, showObjectTreeModal } from
 import { closeQuickOrderPopup, showQuickOrderPopup, type QuickOrderValidation } from "./chartQuickOrder";
 import { hapticError, hapticLight, hapticSuccess } from "./haptic";
 import { applyBookFlashes, snapshotBookLevels, type BookLevelSnap } from "./bookFlash";
+import { bookLadderFingerprint, bookPriceSkeletonFingerprint, paintBookPreservingScroll, patchBookRowsInPlace, wireBookScrollIdle, type BookRowPatch } from "./bookDom";
 import {
   loadLayoutPrefs,
   saveLayoutPrefs,
@@ -111,9 +114,15 @@ import {
   mergeServerFills,
   placeLabOrder,
   refreshLabBook,
+  refreshLabBooks,
   runLabCounterpartyCross,
   syncLabBalancesAndBook,
   useLabMatching,
+  useDeskMatching,
+  useServerMatching,
+  usePublicDeskBook,
+  useLiveBook,
+  setDeskMatchingStatus,
   isLabSessionStale,
 } from "./adapters/labMatching";
 import {
@@ -124,7 +133,7 @@ import {
   type TradingGuards,
 } from "./tradingGuards";
 import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
-import { assertOrderFunds, freeBalance, maxOrderBaseAmount } from "./balance";
+import { assertOrderFunds, freeBalance, fundsImmediateFill, maxOrderBaseAmount } from "./balance";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
 import { markPerf, measurePerf, throttle } from "./perf";
@@ -238,6 +247,7 @@ import {
   loadState,
   needsCandleReseedForMarket,
   pnlPct,
+  repairStaleEquityBaseline,
   reseedCandlesFromMarket,
   resetDemo,
   saveState,
@@ -399,10 +409,20 @@ let labUser2faEnabled = false;
 let labDepositEnabled = true;
 let labWithdrawEnabled = true;
 /** Last /health edge snapshot for Settings → Wallet HOLD badges. */
-let deskEdgeSnap: { matching: string; depositEnabled: boolean; withdrawEnabled: boolean } = {
+let deskEdgeSnap: {
+  matching: string;
+  depositEnabled: boolean;
+  withdrawEnabled: boolean;
+  maxOpenOrders: number;
+  minNotional: number;
+  priceBandBps: number;
+} = {
   matching: "HOLD",
   depositEnabled: false,
   withdrawEnabled: false,
+  maxOpenOrders: 0,
+  minNotional: 0,
+  priceBandBps: 0,
 };
 const cvDeskInit = loadConvertDesk();
 /** Convert desk selection — survives re-render without form wipe. */
@@ -433,9 +453,13 @@ const PAPER_BADGE = `<span class="demo-badge" title="Paper desk — operator ref
 const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Paper desk — operator reference mid, not a live market price">PAPER</span>`;
 const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">DEMO/LAB · LIVE BOOK</span>`;
 const LAB_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from private lab matching engine">LAB</span>`;
+const DESK_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from public desk matching (Matching GO)">DESK · LIVE BOOK</span>`;
+const DESK_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from public desk matching (Matching GO)">DESK</span>`;
 
 function bookHeaderBadge(): string {
-  return useLabMatching() ? LAB_BOOK_BADGE_SM : PAPER_BADGE_SM;
+  if (useLabMatching()) return LAB_BOOK_BADGE_SM;
+  if (useDeskMatching() || usePublicDeskBook()) return DESK_BOOK_BADGE_SM;
+  return PAPER_BADGE_SM;
 }
 
 function renderPanelRail(
@@ -572,7 +596,9 @@ async function ensureAlertNotifications(): Promise<void> {
 }
 
 function ensurePublicTape(force = false): void {
-  if (useLabMatching()) return;
+  // Live L2 (public desk book or session matching): never seed fake prints —
+  // they clash with "Loading live book" and look like real Trades.
+  if (useLiveBook()) return;
   const tk = tickers[state.activePair] ?? (market ? tickerFromMarket(market, state.activePair) : null);
   if (!tk) return;
   if (force || !publicTape.some((t) => t.pairId === state.activePair)) {
@@ -586,25 +612,49 @@ function ensurePublicTape(force = false): void {
 function renderAnnounce(): string {
   if (announceDismissed) return "";
   const lab = useLabMatching();
+  const deskLive = useDeskMatching();
+  const deskBook = usePublicDeskBook();
   const desk = isDeskConnectEnabled();
   const label = modeChromeLabel();
   const bold = isLiveModeBlocked()
     ? "Live mode blocked — matching API not connected"
     : lab
       ? "Private lab matching — not production custody or real money"
-      : desk
-        ? "Desk Connect ready · matching / deposit / withdraw on HOLD"
-        : "Paper desk — simulated balances · matching API on HOLD";
+      : deskLive
+        ? "Desk matching live — soft-launch caps · use Deposit address (not Copy addr)"
+        : deskBook
+          ? "Desk matching live — Connect wallet to trade · Deposit ≠ Copy addr"
+          : desk && (deskEdgeSnap.depositEnabled || deskEdgeSnap.withdrawEnabled)
+            ? `Desk custody live — ${[
+                deskEdgeSnap.depositEnabled ? "Deposit ≠ Copy addr" : null,
+                deskEdgeSnap.withdrawEnabled ? "Withdraw + TOTP" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}`
+            : desk
+              ? "Desk Connect ready · matching / deposit / withdraw on HOLD"
+              : "Paper desk — simulated balances · matching API on HOLD";
   const detail = lab
     ? "lab ledger balances"
-    : desk
-      ? "browser HMC wallet via /desk-api · Spot stays paper"
-      : "reference mids · paper balances in localStorage";
+    : deskLive
+      ? "live L2 via /desk-api · session CSRF"
+      : deskBook
+        ? "live L2 on book · Connect to place orders"
+        : desk && (deskEdgeSnap.depositEnabled || deskEdgeSnap.withdrawEnabled)
+          ? [
+              deskEdgeSnap.depositEnabled ? "deposit on" : "deposit HOLD",
+              deskEdgeSnap.withdrawEnabled ? "withdraw on" : "withdraw HOLD",
+              "matching needs Connect",
+            ].join(" · ")
+          : desk
+            ? "browser HMC wallet via /desk-api · Spot stays paper"
+            : "reference mids · paper balances in localStorage";
+  const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
     · ${label}
     · ${detail}
-    ${lab ? LAB_BOOK_BADGE : PAPER_BADGE}
+    ${badge}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
   </div>`;
 }
@@ -641,7 +691,13 @@ function patchModeChrome(): void {
   }
   const tbSub = document.querySelector(".tb-sub");
   if (tbSub) {
-    tbSub.textContent = useLabMatching() ? "Lab book · DEMO matching" : "Pool oracle · paper demo";
+    tbSub.textContent = useLabMatching()
+      ? "Lab book · DEMO matching"
+      : useDeskMatching()
+        ? "Desk book · live matching"
+        : usePublicDeskBook()
+          ? "Desk book · Connect to trade"
+          : "Pool oracle · paper preview";
   }
   const bookTitle = document.querySelector(".col-book .col-title > span");
   if (bookTitle) {
@@ -653,6 +709,9 @@ function patchModeChrome(): void {
     if (useLabMatching()) {
       modeBadge.textContent = "LAB";
       modeBadge.setAttribute("title", "Private lab matching — not production");
+    } else if (useDeskMatching() || usePublicDeskBook()) {
+      modeBadge.textContent = "DESK";
+      modeBadge.setAttribute("title", "Public desk matching live — soft-launch");
     } else {
       modeBadge.textContent = "PAPER";
       modeBadge.setAttribute("title", "Simulated exchange — not real CEX");
@@ -716,6 +775,13 @@ function paperGuardsOrWarn(
   amountBase: number,
   price: number,
 ): boolean {
+  // Live public book without a CSRF session: do not paper-fill against the live L2.
+  if (usePublicDeskBook() && !useDeskMatching() && !useLabMatching()) {
+    const msg = "Connect desk wallet to trade on the live book";
+    setOrderMsg(side, msg, "err");
+    toast(msg, "warn");
+    return false;
+  }
   if (isLabSessionStale()) {
     const msg = "Lab session stale — reconnect fixture (paper matching frozen)";
     setOrderMsg(side, msg, "err");
@@ -724,7 +790,7 @@ function paperGuardsOrWarn(
   }
   const pair = pairById(state.activePair);
   const mid =
-    (useLabMatching() ? labBookMid(state.activePair) : 0) ||
+    (useServerMatching() ? labBookMid(state.activePair) : 0) ||
     (market ? midForPair(market, state.activePair) : activeTicker().mid);
   const check = validatePaperTradingGuards({
     side,
@@ -773,6 +839,7 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
   const prevSeeded = tradingGuards.labMmSeeded;
   const prevFee = labFeeWallet;
   const prevDisc = state.feeConfig.hmcDiscountPct;
+  const prevEdge = { ...deskEdgeSnap };
   try {
     const h = await exchangeHealth(2_000);
     if (!h.ok) {
@@ -782,14 +849,26 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
       return;
     }
     healthBackoffUntil = 0;
+    const rawMatching =
+      typeof h.matching === "string" && h.matching
+        ? h.matching
+        : useLabMatching()
+          ? "ok"
+          : "disabled";
+    setDeskMatchingStatus(rawMatching);
+    // Keep raw matching status ("ok" | "disabled" | …) — labels are derived at render time.
     deskEdgeSnap = {
-      matching: formatDeskMatchingLabel(
-        typeof h.matching === "string" && h.matching ? h.matching : useLabMatching() ? "ok" : "HOLD",
-      ),
+      matching: rawMatching,
       depositEnabled: h.deposit?.enabled === true,
       withdrawEnabled: h.withdraw?.enabled === true,
+      maxOpenOrders: 0,
+      minNotional: 0,
+      priceBandBps: 0,
     };
     tradingGuards = parseHealthTradingGuards(h);
+    deskEdgeSnap.maxOpenOrders = tradingGuards.maxOpenOrders;
+    deskEdgeSnap.minNotional = tradingGuards.minNotionalQuote;
+    deskEdgeSnap.priceBandBps = tradingGuards.priceBandBps;
     labFeeWallet = parseHealthFeeWallet(h);
     if (tradingGuards.hmcDiscountPctServer != null) {
       state.feeConfig.hmcDiscountPct = Math.min(
@@ -801,12 +880,30 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
     /* keep last / defaults */
   }
   if (state.feeConfig.hmcDiscountPct !== prevDisc) saveState(state);
+  const edgeChanged =
+    prevEdge.matching !== deskEdgeSnap.matching ||
+    prevEdge.depositEnabled !== deskEdgeSnap.depositEnabled ||
+    prevEdge.withdrawEnabled !== deskEdgeSnap.withdrawEnabled ||
+    prevEdge.maxOpenOrders !== deskEdgeSnap.maxOpenOrders ||
+    prevEdge.minNotional !== deskEdgeSnap.minNotional ||
+    prevEdge.priceBandBps !== deskEdgeSnap.priceBandBps;
   if (
-    (labFeeWallet !== prevFee || state.feeConfig.hmcDiscountPct !== prevDisc) &&
-    state.mainView === "account"
+    (labFeeWallet !== prevFee || state.feeConfig.hmcDiscountPct !== prevDisc || edgeChanged) &&
+    (state.mainView === "account" || state.mainView === "convert" || state.mainView === "spot")
   ) {
     render();
     return;
+  }
+  if (edgeChanged) {
+    patchModeChrome();
+    patchOpenSettingsWalletChrome();
+    if (usePublicDeskBook()) {
+      // Matching flipped to ok — start public L2 poll even without Connect.
+      startMarketStreamLoop();
+      void refreshLabBooks(["HMC_USDT", "HMC_SUP", "SUP_USDT"] as PairId[]).then(() => {
+        patchBookTapeDom();
+      });
+    }
   }
   if (tradingGuards.labMmSeeded === prevSeeded) return;
   const meta = document.getElementById("order-head-meta");
@@ -917,7 +1014,7 @@ function activeTicker(): Ticker {
 
 /** Spot mid for any pair — same source for toolbar, market rows, and chart HUD. */
 function spotMidForPair(pairId: PairId): number {
-  if (useLabMatching()) {
+  if (useServerMatching()) {
     const lab = labBookMid(pairId);
     if (lab > 0) return lab;
   }
@@ -1053,6 +1150,8 @@ function refreshOrderZone(): void {
     showTif,
     labMmSeeded: tradingGuards.labMmSeeded,
     labLive: useLabMatching(),
+    deskEdgeLive: usePublicDeskBook(),
+    deskSession: useDeskMatching(),
   });
   applyRestingLimitPrices(spotTradeMid(), state.activePair);
   wireOrderPanelEvents();
@@ -1144,7 +1243,7 @@ function wireOrderPanelEvents(): void {
       const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
       if (!amtInp) return;
       if (qs === "max") {
-        if (!confirm(`Set amount to MAX available ${side.toUpperCase()}? (Paper demo)`)) return;
+        if (!confirm(`Set amount to MAX available ${side.toUpperCase()}?`)) return;
         setAmountPct(side, 1);
         const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
         if (slider) slider.value = "100";
@@ -1168,10 +1267,10 @@ function wireOrderPanelEvents(): void {
     btn.addEventListener("click", () => {
       const side = (btn as HTMLElement).dataset.bbo as "buy" | "sell";
       const t = activeTicker();
-      const labLive = useLabMatching();
+      const labLive = useServerMatching();
       const lab = labLive ? getLabBookCache(state.activePair) : null;
       if (labLive && (!lab || (!lab.bids.length && !lab.asks.length))) {
-        toast("Lab book not ready", "warn");
+        toast("Live book not ready", "warn");
         return;
       }
       const ask = lab?.asks[0]?.price || t.ask;
@@ -1186,6 +1285,18 @@ function wireOrderPanelEvents(): void {
   });
 }
 
+function forcePaintBook(): void {
+  const book = document.getElementById("book");
+  if (!book) return;
+  delete book.dataset.bookFp;
+  delete book.dataset.bookSkel;
+  paintBookPreservingScroll(book, renderBook(), "force");
+  const { bids, asks, group } = activeBookLevels();
+  book.dataset.bookSkel = bookPriceSkeletonFingerprint(bids, asks, group, state.bookView);
+  book.dataset.bookFp = bookLadderFingerprint(bids, asks, group, state.bookView);
+  wireBookTabs();
+}
+
 function patchActivePairChrome(): void {
   patchTickerBar();
   patchRecentPairsStrip();
@@ -1195,10 +1306,7 @@ function patchActivePairChrome(): void {
   const alertsBtn = document.getElementById("btn-open-alerts");
   if (alertsBtn) alertsBtn.textContent = `Alerts${alertCount ? ` · ${alertCount}` : ""}`;
   const book = document.getElementById("book");
-  if (book) {
-    book.innerHTML = renderBook();
-    wireBookTabs();
-  }
+  if (book) forcePaintBook();
   const tape = document.getElementById("mobile-trade-tape");
   if (tape) tape.innerHTML = renderMobileTradeTape();
   const strip = document.getElementById("mining-strip");
@@ -1212,6 +1320,8 @@ function patchActivePairChrome(): void {
 function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): void {
   if (pairId === state.activePair) return;
   state.activePair = pairId;
+  paperBookAnchorMid = 0;
+  // Keep prior L2 until the new pair lands — multi-pair cache; never paint paper demo L2.
   pushRecentPair(pairId);
   saveState(state);
   syncRouteHash();
@@ -1234,14 +1344,21 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
 
   patchActivePairChrome();
 
-  if (useLabMatching()) {
-    void refreshLabBook(pairId).then(() => {
+  if (useLiveBook()) {
+    void refreshLabBook(pairId).then((r) => {
       const bookEl = document.getElementById("book");
       if (bookEl) {
         bookEl.innerHTML = renderBook();
         wireBookTabs();
       }
       throttledBookTapePatch();
+      patchMobileTradeTape();
+      // Re-seed limit prices from the live L2 mid once the book for this pair arrives.
+      if (r.ok && state.activePair === pairId && (uiType === "limit" || uiType === "stop_limit")) {
+        applyRestingLimitPrices(spotTradeMid(), pairId);
+        updatePreview();
+        resyncPctSizedAmounts();
+      }
     });
   }
 
@@ -1345,31 +1462,99 @@ function renderVolumeRatio(): string {
   </div>`;
 }
 
-function renderBook(): string {
+/** Paper ladder mid — hold until live mid moves enough (avoids 700ms thrash). */
+let paperBookAnchorMid = 0;
+const PAPER_BOOK_MID_REANCHOR = 0.00028; // ~2.8 bps
+
+let liveBookKickAt = 0;
+let liveBookKickPair: PairId | null = null;
+function kickLiveBookFetch(pairId: PairId): void {
+  const now = Date.now();
+  if (liveBookKickPair === pairId && now - liveBookKickAt < 400) return;
+  liveBookKickAt = now;
+  liveBookKickPair = pairId;
+  void refreshLabBook(pairId).then((r) => {
+    if (r.ok) patchBookTapeDom();
+  });
+}
+
+function tickerForPaperBook(t: Ticker): Ticker {
+  const mid = t.mid;
+  if (
+    !(paperBookAnchorMid > 0) ||
+    !Number.isFinite(mid) ||
+    mid <= 0 ||
+    Math.abs(mid - paperBookAnchorMid) / paperBookAnchorMid >= PAPER_BOOK_MID_REANCHOR
+  ) {
+    paperBookAnchorMid = mid > 0 && Number.isFinite(mid) ? mid : paperBookAnchorMid;
+  }
+  const a = paperBookAnchorMid > 0 ? paperBookAnchorMid : mid;
+  return { ...t, mid: a, bid: a * 0.999, ask: a * 1.001 };
+}
+
+function activeBookLevels(): {
+  bids: ReturnType<typeof aggregateBookLevels>;
+  asks: ReturnType<typeof aggregateBookLevels>;
+  labLive: boolean;
+  lab: ReturnType<typeof getLabBookCache>;
+  /** True when live L2 is expected but not yet in cache (empty — never paper demo). */
+  waitingLive: boolean;
+  t: Ticker;
+  group: number;
+} {
   const t = activeTicker();
   const group = bookGroupStep();
-  const labLive = useLabMatching();
+  const labLive = useLiveBook();
   const lab = labLive ? getLabBookCache(state.activePair) : null;
-  // Lab mode must never fall back to synthetic oracle book — empty until L2 arrives.
-  const raw = labLive
-    ? lab
-      ? { bids: lab.bids, asks: lab.asks }
-      : { bids: [], asks: [] }
-    : buildOrderBook(t, 24, { phase: bookPhase });
-  const bids = aggregateBookLevels(raw.bids, group, "bid");
-  const asks = aggregateBookLevels(raw.asks, group, "ask");
+  let waitingLive = false;
+  let raw: { bids: { price: number; amountBase: number; totalQuote: number }[]; asks: { price: number; amountBase: number; totalQuote: number }[] };
+  if (labLive) {
+    if (lab && (lab.bids.length || lab.asks.length)) {
+      raw = { bids: lab.bids, asks: lab.asks };
+    } else if (lab) {
+      // Health+poll succeeded but Soft-MM depth is empty — not "still fetching".
+      waitingLive = false;
+      raw = { bids: [], asks: [] };
+      kickLiveBookFetch(state.activePair);
+    } else {
+      // Public desk matching is live — never paint a synthetic paper ladder.
+      waitingLive = true;
+      raw = { bids: [], asks: [] };
+      kickLiveBookFetch(state.activePair);
+    }
+  } else {
+    raw = buildOrderBook(tickerForPaperBook(t), 24, { phase: bookPhase });
+  }
+  return {
+    bids: aggregateBookLevels(raw.bids, group, "bid"),
+    asks: aggregateBookLevels(raw.asks, group, "ask"),
+    labLive,
+    lab,
+    waitingLive,
+    t,
+    group,
+  };
+}
+
+function renderBook(): string {
+  const { bids, asks, labLive, lab, waitingLive, t } = activeBookLevels();
   const pair = pairById(state.activePair);
   const bookView = state.bookView;
   if (!bids.length && !asks.length) {
     const emptyHint = labLive
-      ? lab
-        ? "Lab book empty — place a limit or wait for resting depth"
-        : "Loading lab book…"
+      ? lab && !waitingLive
+        ? "Live book empty — place a limit or wait for resting depth"
+        : "Fetching live L2…"
       : "Waiting for oracle mid…";
+    const emptyTitle = labLive
+      ? lab && !waitingLive
+        ? "Live book empty"
+        : "Live book"
+      : "Order book unavailable";
     return `<div class="book-view-tabs segmented">
       <button type="button" class="bv ${bookView !== "depth" ? "active" : ""}" data-bv="book">Book</button>
       <button type="button" class="bv ${bookView === "depth" ? "active" : ""}" data-bv="depth">Depth</button>
-    </div><div class="markets-empty"><p class="empty-title">${labLive ? (lab ? "Lab book empty" : "Loading lab book") : "Order book unavailable"}</p><p class="muted small">${emptyHint}</p></div>`;
+    </div><div class="markets-empty"><p class="empty-title">${emptyTitle}</p><p class="muted small">${emptyHint}</p></div>`;
   }
   if (bookView === "depth") {
     return `<div class="book-view-tabs segmented">
@@ -1398,12 +1583,8 @@ function renderBook(): string {
   const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : lab ? bestBid || bestAsk || t.mid : t.mid;
   const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : Math.max(0, t.ask - t.bid);
   const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
-  const midHint = labLive
-    ? "Lab L2 mid"
-    : "Oracle · indicative";
-  const midTitle = labLive
-    ? "Lab L2 mid"
-    : "Oracle · indicative (not tradeable L2)";
+  const midHint = labLive ? "Live L2 mid" : "Oracle · indicative";
+  const midTitle = labLive ? "Live L2 mid" : "Oracle · indicative (not tradeable L2)";
   return `
     <div class="book-view-tabs segmented">
       <button type="button" class="bv active" data-bv="book">Book</button>
@@ -1418,29 +1599,32 @@ function renderBook(): string {
       </select>
     </div>
     <div class="ob-head"><span>Price (${pair.quote})</span><span>Amount (${pair.base})</span><span class="ob-total">Total</span></div>
-    <div class="ob-asks">${asks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
-    <div class="ob-mid" title="${midTitle}">
-      <div class="ob-mid-price">${formatPrice(midPx)}</div>
-      <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
-      <div class="ob-mid-src muted small">${midHint}</div>
-    </div>
-    <div class="ob-bids">${bids.map((l) => row(l, "bid")).join("")}</div>`;
+    <div class="book-ladder">
+      <div class="ob-asks-pane" data-book-pane="asks">${asks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
+      <div class="ob-mid" title="${midTitle}">
+        <div class="ob-mid-price">${formatPrice(midPx)}</div>
+        <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
+        <div class="ob-mid-src muted small">${midHint}</div>
+      </div>
+      <div class="ob-bids-pane" data-book-pane="bids">${bids.map((l) => row(l, "bid")).join("")}</div>
+    </div>`;
 }
 
 function renderTape(): string {
   ensurePublicTape();
-  const rows = useLabMatching()
+  const live = useLiveBook();
+  const rows = live
     ? mergeTapeRows(state.trades, [], state.activePair, 18)
     : mergeTapeRows(state.trades, publicTape, state.activePair, 18);
   if (!rows.length) {
     return `<div class="tape-empty">
       <p class="empty-title">No trades yet</p>
-      <p class="muted small">${useLabMatching() ? "Lab fills will appear here." : "Synthetic tape fills in as the oracle ticks."}</p>
+      <p class="muted small">${live ? "Fills appear here after you trade." : "Synthetic tape fills in as the oracle ticks."}</p>
     </div>`;
   }
   return rows
     .map(
-      (t) => `<div class="tape-row ${t.synthetic ? "syn" : "you"}" title="${t.synthetic ? "Synthetic public tape (simulated)" : useLabMatching() ? "Your lab fill" : "Your paper fill"}">
+      (t) => `<div class="tape-row ${t.synthetic ? "syn" : "you"}" title="${t.synthetic ? "Synthetic public tape (simulated)" : live ? "Your fill" : "Your paper fill"}">
         <span class="${t.side === "buy" ? "up" : "down"}">${formatPrice(t.price)}</span>
         <span class="mono">${formatNum(t.amountBase, 2)}</span>
         <span class="role-badge sm ${t.synthetic ? "syn-badge" : t.feeRole}">${t.synthetic ? "SYN" : t.feeRole === "maker" ? "M" : "T"}</span>
@@ -1452,7 +1636,8 @@ function renderTape(): string {
 
 function renderMobileTradeTape(): string {
   ensurePublicTape();
-  const rows = useLabMatching()
+  const live = useLiveBook();
+  const rows = live
     ? mergeTapeRows(state.trades, [], state.activePair, 8)
     : mergeTapeRows(state.trades, publicTape, state.activePair, 8);
   if (!rows.length) {
@@ -1632,12 +1817,22 @@ function renderConvert(): string {
   <section class="convert-page glass">
     <div class="convert-shell">
       <header class="convert-hero">
-        <p class="kicker">${isDeskConnectEnabled() ? "Instant swap · paper · desk HOLD" : isLabLoopbackApi() ? "Instant swap · lab" : "Instant swap · paper"}</p>
+        <p class="kicker">${
+          isDeskConnectEnabled()
+            ? isDeskMatchingLive(deskEdgeSnap.matching)
+              ? "Instant swap · paper · desk matching live"
+              : "Instant swap · paper · desk HOLD"
+            : isLabLoopbackApi()
+              ? "Instant swap · lab"
+              : "Instant swap · paper"
+        }</p>
         <h2>Convert</h2>
         <p class="muted convert-lead">Swap paper balances at mid · ${feeNote}. No book, no futures.</p>
         ${
           isDeskConnectEnabled()
-            ? `<p class="muted small convert-hold-banner" role="status">Public matching stays HOLD — Convert uses local paper balances (desk Connect does not enable live convert yet).</p>`
+            ? isDeskMatchingLive(deskEdgeSnap.matching)
+              ? `<p class="muted small convert-hold-banner" role="status">Desk matching is live for Spot — Convert stays on paper balances until convert GO. HMC→BTC quote uses oracle mid.</p>`
+              : `<p class="muted small convert-hold-banner" role="status">Matching HOLD on this edge — Convert uses local paper balances.</p>`
             : ""
         }
         <p class="muted small convert-fee-mode mono">${hmcPay}</p>
@@ -2352,6 +2547,7 @@ function renderSpot(): string {
   const ch = quote.changePct;
   const tone = quoteToneClass(quote.tone);
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
+  if (market && repairStaleEquityBaseline(state, market)) saveState(state);
   const pnl = market ? pnlPct(state, market) : 0;
   const av = availBalance(pair);
   const displayTip = state.chartMode === "heikin" ? (getDisplayedLastCandle() ?? candles.slice(-1)[0] ?? null) : (candles.slice(-1)[0] ?? null);
@@ -2404,7 +2600,13 @@ function renderSpot(): string {
         <div>
       <h1>${pair.label}</h1>
           <span class="tb-sub muted small">${
-            useLabMatching() ? "Lab book · DEMO matching" : "Pool oracle · paper demo"
+            useLabMatching()
+              ? "Lab book · DEMO matching"
+              : useDeskMatching()
+                ? "Desk book · live matching"
+                : usePublicDeskBook()
+                  ? "Desk book · Connect to trade"
+                  : "Pool oracle · paper preview"
           }</span>
     </div>
         <span class="tb-chev" aria-hidden="true">▾</span>
@@ -2539,6 +2741,8 @@ function renderSpot(): string {
           showTif,
           labMmSeeded: tradingGuards.labMmSeeded,
           labLive: useLabMatching(),
+          deskEdgeLive: usePublicDeskBook(),
+          deskSession: useDeskMatching(),
         })}
       </div>
     </section>
@@ -2620,12 +2824,18 @@ function render(): void {
   const brandTitle = embed ? "Exchange" : isMobileLayout() ? "HackMe" : "HackMe Exchange";
   const brandSub = embed
     ? isDeskConnectEnabled()
-      ? "hub embed · desk HOLD"
+      ? useDeskMatching() || usePublicDeskBook()
+        ? "hub embed · desk live"
+        : "hub embed · desk HOLD"
       : isLabLoopbackApi()
         ? "hub embed · lab"
         : "hub embed · paper"
     : isDeskConnectEnabled()
-      ? `Spot · ${INTEGRATION.mode} · desk HOLD`
+      ? useDeskMatching()
+        ? `Spot · ${INTEGRATION.mode} · desk live`
+        : usePublicDeskBook()
+          ? `Spot · ${INTEGRATION.mode} · desk Connect`
+          : `Spot · ${INTEGRATION.mode} · desk HOLD`
       : `Spot · ${INTEGRATION.mode}`;
   // Live oracle / lab sync used to remount the whole tree every few seconds and
   // collapse <details>, wipe withdraw fields, etc. Capture → restore after wire.
@@ -2659,7 +2869,7 @@ function render(): void {
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Hub wallet</a>`
               : `<a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Node wallet</a>
           <button type="button" class="sys-item" id="btn-sync-node-header" title="Local hackme-node on this device (127.0.0.1:8080) or Hub embed">↻ Sync HMC/SUP (local node)</button>
-          <a class="sys-link" href="https://hackme.tech/pool/coordinator" target="_blank" rel="noreferrer">Official pool</a>
+          <a class="sys-link" href="https://hackme.tech/pool/coordinator/api/pool/stats" target="_blank" rel="noreferrer">Official pool</a>
           <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>`
           }
           <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
@@ -2694,7 +2904,7 @@ function render(): void {
     applyPendingDeepLinks();
     if (isLabApiEnabled()) {
       void maybeAutoReconnectLabSession();
-      if (useLabMatching()) {
+      if (useServerMatching()) {
         void labFillsRefreshUi();
         void labWithdrawRefreshUi();
         void labWithdrawQuoteUi();
@@ -2989,6 +3199,7 @@ function patchAccountDomIfPresent(): void {
 }
 
 function refreshAfterLabTrade(): void {
+  if (market && repairStaleEquityBaseline(state, market)) saveState(state);
   saveState(state);
   patchModeChrome();
   patchLive();
@@ -3007,6 +3218,7 @@ function refreshAfterLabTrade(): void {
  */
 function refreshAccountAfterLab(): void {
   if (!market) return;
+  if (repairStaleEquityBaseline(state, market)) saveState(state);
   if (state.mainView === "account") {
     snapshotEquity(state, market);
     patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
@@ -3018,7 +3230,7 @@ function refreshAccountAfterLab(): void {
 
 /** Apply paper matching against live blended mids; refresh Orders + chart lines when anything fills/cancels. */
 function settleOpenOrdersFromTickers(showToast = false): string[] {
-  if (!market || useLabMatching()) return [];
+  if (!market || useServerMatching()) return [];
   const notes = processOpenOrders(state, market, tickers);
   if (!notes.length) return notes;
   saveState(state);
@@ -3071,7 +3283,10 @@ async function syncLabLedgerUi(): Promise<void> {
   saveState(state);
   if (msgEl) msgEl.textContent = res.note;
   if (desk && !isLabLoopbackApi()) {
-    toast("Desk ledger synced · matching HOLD", "info");
+    toast(
+      useServerMatching() ? "Desk ledger synced · live matching" : "Desk ledger synced · matching HOLD",
+      "info",
+    );
   } else {
     toast(res.note, "ok");
   }
@@ -3099,6 +3314,9 @@ function currentSettingsWalletChrome(): SettingsWalletChrome {
     matching: deskEdgeSnap.matching,
     depositEnabled: deskEdgeSnap.depositEnabled,
     withdrawEnabled: deskEdgeSnap.withdrawEnabled,
+    maxOpenOrders: deskEdgeSnap.maxOpenOrders,
+    minNotional: deskEdgeSnap.minNotional,
+    priceBandBps: deskEdgeSnap.priceBandBps,
   };
 }
 
@@ -3127,11 +3345,13 @@ async function syncNodeHmcSupUi(): Promise<void> {
     return;
   }
   cachedNodeWallet = { hmc: snap.hmc, sup: snap.sup };
-  if (useLabMatching() || isLabApiEnabled()) {
-    // FE-M-STALE: never overwrite lab/paper hybrid when lab API is opted in.
-    const note = useLabMatching()
-      ? `Node ${formatNum(snap.hmc, 4)} HMC / ${formatNum(snap.sup, 4)} SUP · Spot uses lab ledger — Sync balances`
-      : `Node online · lab API opted in — connect fixture (no paper merge)`;
+  if (useServerMatching() || isLabApiEnabled()) {
+    // FE-M-STALE: never overwrite lab/desk ledger when exchange API is opted in.
+    const note = useServerMatching()
+      ? `Node ${formatNum(snap.hmc, 4)} HMC / ${formatNum(snap.sup, 4)} SUP · Spot uses server ledger — Sync balances`
+      : isDeskConnectEnabled()
+        ? `Node online · desk Connect — Spot stays paper until matching GO (no paper merge)`
+        : `Node online · lab API opted in — connect fixture (no paper merge)`;
     if (msgEl) msgEl.textContent = note;
     toast(note, "info");
     if (isHubEmbed()) postHubGotoTab("wallet");
@@ -3182,22 +3402,40 @@ async function labFixtureConnectUi(): Promise<void> {
 async function deskWalletConnectUi(): Promise<void> {
   const msg = document.getElementById("desk-api-msg");
   if (msg) msg.textContent = "Connecting browser HMC wallet…";
+  const paperEq =
+    state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
+  if (paperEq > 0 && !useServerMatching()) {
+    if (
+      !window.confirm(
+        "Connect desk wallet?\n\nPaper Spot balances stay in this browser until matching is live. Desk Connect opens a session only — it will not wipe your paper funds.",
+      )
+    ) {
+      if (msg) msg.textContent = "Connect canceled";
+      return;
+    }
+  }
   const res = await deskWalletConnect();
   if (!res.ok) {
     if (msg) msg.textContent = res.message;
     toast(`Desk Connect: ${res.message}`, "warn");
     return;
   }
-  if (msg) msg.textContent = `Connected ${res.wallet.address} · matching HOLD`;
+  if (msg) msg.textContent = `Connected ${res.wallet.address} · ${useServerMatching() ? "matching live" : "matching HOLD"}`;
   toast(`Desk wallet connected · ${res.wallet.address.slice(0, 14)}…`, "ok");
-  // Balances sync is fine; do NOT enable lab matching / book poll.
-  const sync = await syncLabBalancesAndBook(state, market);
-  if (sync.ok) {
-    saveState(state);
-    if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
-  } else if (msg) {
-    msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
+  // HOLD: sync session/note only — do NOT overwrite paper balances with empty desk ledger.
+  if (useServerMatching()) {
+    const sync = await syncLabBalancesAndBook(state, market);
+    if (sync.ok) {
+      saveState(state);
+      if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
+    } else if (msg) {
+      msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
+    }
+  } else {
+    const sync = await syncLabBalancesAndBook(state, market);
+    if (sync.ok && msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
   }
+  if (market && repairStaleEquityBaseline(state, market)) saveState(state);
   if (state.mainView === "account") render();
   else {
     const addrEl = document.getElementById("desk-session-addr");
@@ -3221,6 +3459,15 @@ async function deskCopyAddressUi(): Promise<void> {
     return;
   }
   const ok = await copyTextToClipboard(addr);
+  if (deskEdgeSnap.depositEnabled) {
+    toast(
+      ok
+        ? `Copied Connect/login ${addr.slice(0, 14)}… — NOT for deposits. Use Account → Deposit → Show HMC deposit address`
+        : "Clipboard blocked",
+      ok ? "warn" : "warn",
+    );
+    return;
+  }
   toast(ok ? `Copied ${addr.slice(0, 18)}…` : "Clipboard blocked", ok ? "ok" : "warn");
 }
 
@@ -3363,13 +3610,7 @@ async function labApiLogoutUi(): Promise<void> {
       if (addrEl) addrEl.textContent = "not connected";
     }
     patchModeChrome();
-    if (state.mainView === "spot") {
-      const book = document.getElementById("book");
-      if (book) {
-        book.innerHTML = renderBook();
-        wireBookTabs();
-      }
-    }
+    if (state.mainView === "spot") forcePaintBook();
   }
   patchOpenSettingsWalletChrome();
 }
@@ -3402,9 +3643,15 @@ async function labRevokeAllUi(): Promise<void> {
   patchOpenSettingsWalletChrome();
 }
 
-async function labShowDepositAddr(asset: string): Promise<void> {
-  if (!useLabMatching()) {
-    toast("Connect DEMO/LAB fixture first", "warn");
+async function showDepositAddrUi(asset: string): Promise<void> {
+  const deskOk = isDeskConnectEnabled() && getLabSessionMeta().hasCsrf;
+  const labOk = useLabMatching();
+  if (!labOk && !deskOk) {
+    toast(isDeskConnectEnabled() ? "Connect desk wallet first" : "Connect DEMO/LAB fixture first", "warn");
+    return;
+  }
+  if (isDeskConnectEnabled() && !deskEdgeSnap.depositEnabled && !labOk) {
+    toast("Deposits are HOLD on this edge", "warn");
     return;
   }
   const msg = document.getElementById("lab-deposit-msg");
@@ -3414,12 +3661,73 @@ async function labShowDepositAddr(asset: string): Promise<void> {
     toast(res.message, "warn");
     return;
   }
-  const line = `${res.asset} · ${res.kind} · ${res.bridge_model ?? ""} · ${res.deposit_address}`;
-  if (msg) msg.textContent = `${line} — ${res.warning ?? ""}`;
-  toast(`${asset} deposit: ${res.deposit_address.slice(0, 22)}…`, "ok");
-  void copyTextToClipboard(res.deposit_address).then((ok) => {
-    if (ok) toast(`${asset} address copied`, "info");
+  const dep = res.deposit_address;
+  const connectAddr = getLabSessionMeta().address || (() => {
+    try {
+      return deskWalletIdentity().address;
+    } catch {
+      return "";
+    }
+  })();
+  if (connectAddr && dep.toLowerCase() === connectAddr.toLowerCase()) {
+    toast("Server returned Connect address as deposit — refuse (bug)", "warn");
+    return;
+  }
+  const reveal = document.getElementById("lab-deposit-reveal");
+  const addrInp = document.getElementById("lab-deposit-addr") as HTMLInputElement | null;
+  if (reveal) reveal.hidden = false;
+  if (addrInp) addrInp.value = dep;
+  if (msg) {
+    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · credits usually within ~30s after chain confirm${
+      res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
+    }`;
+  }
+  toast(`${asset} deposit: ${dep.slice(0, 22)}…`, "ok");
+  void copyTextToClipboard(dep).then((ok) => {
+    if (ok) toast(`${asset} deposit address copied`, "info");
   });
+  // Poll ledger briefly so on-chain → node-watch credits appear without a manual Sync.
+  void watchDeskBalancesAfterDeposit();
+}
+
+let depositWatchTimer: number | undefined;
+let depositWatchLeft = 0;
+
+async function watchDeskBalancesAfterDeposit(): Promise<void> {
+  if (depositWatchTimer) window.clearInterval(depositWatchTimer);
+  depositWatchLeft = 8; // ~8 × 8s ≈ 64s covers the ~30s credit window
+  const prev = { ...state.wallet };
+  const tick = async () => {
+    depositWatchLeft -= 1;
+    const sync = await syncLabBalancesAndBook(state, market);
+    if (sync.ok) {
+      saveState(state);
+      const grew =
+        state.wallet.usdt > prev.usdt ||
+        state.wallet.hmc > prev.hmc ||
+        state.wallet.sup > prev.sup ||
+        state.wallet.btc > prev.btc;
+      if (grew) {
+        toast("Deposit credited — balance updated", "ok");
+        refreshAccountAfterLab();
+        patchAvailChips();
+        if (depositWatchTimer) window.clearInterval(depositWatchTimer);
+        depositWatchTimer = undefined;
+        return;
+      }
+      if (state.mainView === "account") refreshAccountAfterLab();
+    }
+    if (depositWatchLeft <= 0 && depositWatchTimer) {
+      window.clearInterval(depositWatchTimer);
+      depositWatchTimer = undefined;
+    }
+  };
+  void tick();
+  depositWatchTimer = window.setInterval(() => void tick(), 8_000);
+}
+
+async function labShowDepositAddr(asset: string): Promise<void> {
+  await showDepositAddrUi(asset);
 }
 
 async function labMintHmcUi(displayAmt = 100): Promise<void> {
@@ -3527,8 +3835,14 @@ async function labWithdrawRefreshUi(): Promise<void> {
 
 async function labWithdrawRequestUi(): Promise<void> {
   const msg = document.getElementById("lab-wd-msg");
-  if (!useLabMatching()) {
-    toast("Connect DEMO/LAB fixture first", "warn");
+  const deskOk = isDeskConnectEnabled() && getLabSessionMeta().hasCsrf;
+  const labOk = useLabMatching();
+  if (!labOk && !deskOk) {
+    toast(isDeskConnectEnabled() ? "Connect desk wallet first" : "Connect DEMO/LAB fixture first", "warn");
+    return;
+  }
+  if (isDeskConnectEnabled() && !deskEdgeSnap.withdrawEnabled && !labOk) {
+    toast("Withdrawals are HOLD on this edge", "warn");
     return;
   }
   if (!labWithdrawEnabled) {
@@ -3554,13 +3868,12 @@ async function labWithdrawRequestUi(): Promise<void> {
     toast("Amount and destination required", "warn");
     return;
   }
-  if (!totp) {
-    // Edge always requires enrolled 2FA; lab may too once user enrolls.
-    if (labUser2faEnabled) {
-      toast("2FA code required — enter code from authenticator", "warn");
-      document.getElementById("lab-wd-2fa")?.focus();
-      return;
-    }
+  // Public desk always requires TOTP/recovery; lab requires once enrolled.
+  const deskNeeds2fa = deskOk && !labOk;
+  if (!totp && (labUser2faEnabled || deskNeeds2fa)) {
+    toast("2FA code required — enter TOTP or recovery code", "warn");
+    document.getElementById("lab-wd-2fa")?.focus();
+    return;
   }
   const selfAddr = getLabSessionMeta().address || "";
   const destCheck = validateLabWithdrawDestination(asset, destination, selfAddr);
@@ -3719,6 +4032,10 @@ async function labCounterpartyUi(): Promise<void> {
   refreshAfterLabTrade();
 }
 
+function canManage2fa(): boolean {
+  return useLabMatching() || (isDeskConnectEnabled() && getLabSessionMeta().hasCsrf);
+}
+
 function applyLab2faPanels(enabled: boolean, pending: boolean, recoveryLeft = 0): void {
   const status = document.getElementById("lab-2fa-status");
   const setupPanel = document.getElementById("lab-2fa-setup-panel");
@@ -3726,41 +4043,143 @@ function applyLab2faPanels(enabled: boolean, pending: boolean, recoveryLeft = 0)
   const idlePanel = document.getElementById("lab-2fa-idle-panel");
   const wd2fa = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
   if (status) {
-    status.textContent = enabled
-      ? `Status: enabled · recovery left ${recoveryLeft}`
-      : pending
-        ? "Status: pending — confirm below"
-        : "Status: off";
+    status.classList.remove("acct-2fa-status--on", "acct-2fa-status--pending", "acct-2fa-status--off");
+    if (enabled) {
+      status.classList.add("acct-2fa-status--on");
+      status.textContent = `On · ${recoveryLeft} recovery left`;
+    } else if (pending) {
+      status.classList.add("acct-2fa-status--pending");
+      status.textContent = "Pending confirm";
+    } else {
+      status.classList.add("acct-2fa-status--off");
+      status.textContent = "Off";
+    }
   }
   if (setupPanel) setupPanel.hidden = !pending;
   if (enabledPanel) enabledPanel.hidden = !enabled;
   if (idlePanel) idlePanel.hidden = enabled || pending;
+  if (!pending) clearTotpQr();
   const leftEl = document.getElementById("lab-2fa-recovery-left");
   if (leftEl) leftEl.textContent = enabled ? `Recovery codes remaining: ${recoveryLeft}` : "";
   if (wd2fa) {
-    wd2fa.placeholder = enabled ? "TOTP or recovery code" : "if enabled";
+    wd2fa.placeholder = enabled ? "TOTP or recovery code" : "enable 2FA first";
     wd2fa.inputMode = "text";
   }
   labUser2faEnabled = enabled;
 }
 
+function clearTotpQr(): void {
+  const img = document.getElementById("lab-2fa-qr") as HTMLImageElement | null;
+  const host = document.getElementById("lab-2fa-qr-host");
+  if (img) {
+    img.hidden = true;
+    img.removeAttribute("src");
+  }
+  if (host) host.hidden = true;
+}
+
+const PENDING_2FA_KEY = "hmc.desk.2fa.pending.v1";
+
+function savePending2faEnrollment(secret: string, otpauth: string): void {
+  try {
+    sessionStorage.setItem(PENDING_2FA_KEY, JSON.stringify({ secret, otpauth, ts: Date.now() }));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function loadPending2faEnrollment(): { secret: string; otpauth: string } | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_2FA_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { secret?: string; otpauth?: string };
+    if (!parsed.secret || !parsed.otpauth) return null;
+    return { secret: parsed.secret, otpauth: parsed.otpauth };
+  } catch {
+    return null;
+  }
+}
+
+function clearPending2faEnrollment(): void {
+  try {
+    sessionStorage.removeItem(PENDING_2FA_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function restorePending2faIntoDom(): Promise<boolean> {
+  const cached = loadPending2faEnrollment();
+  if (!cached) return false;
+  const secretEl = document.getElementById("lab-2fa-secret");
+  const linkEl = document.getElementById("lab-2fa-otpauth") as HTMLAnchorElement | null;
+  if (secretEl) secretEl.textContent = cached.secret;
+  if (linkEl) {
+    linkEl.href = cached.otpauth;
+    linkEl.textContent = "Open otpauth link";
+  }
+  await paintTotpQr(cached.otpauth);
+  return true;
+}
+
+async function paintTotpQr(otpauthUrl: string): Promise<void> {
+  const img = document.getElementById("lab-2fa-qr") as HTMLImageElement | null;
+  const host = document.getElementById("lab-2fa-qr-host");
+  if (!img || !otpauthUrl) return;
+  try {
+    // Static import (top-level) — CF part-loader breaks relative dynamic chunks.
+    img.src = await QRCode.toDataURL(otpauthUrl, {
+      width: 180,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: { dark: "#061018", light: "#ffffff" },
+    });
+    img.hidden = false;
+    if (host) host.hidden = false;
+  } catch {
+    clearTotpQr();
+  }
+}
+
 function showRecoveryCodesOnce(codes: string[] | undefined): void {
-  const box = document.getElementById("lab-2fa-recovery-codes");
-  if (!box) return;
+  const block = document.getElementById("lab-2fa-recovery-block");
+  const grid = document.getElementById("lab-2fa-recovery-codes");
+  const actions = document.getElementById("lab-2fa-recovery-actions");
+  const copySrc = document.getElementById("lab-2fa-recovery-copy-src") as HTMLTextAreaElement | null;
+  if (!grid) return;
   if (!codes?.length) {
-    box.hidden = true;
-    box.textContent = "";
+    if (block) block.hidden = true;
+    grid.hidden = true;
+    grid.replaceChildren();
+    if (copySrc) copySrc.value = "";
+    if (actions) actions.hidden = true;
     return;
   }
-  box.hidden = false;
-  box.textContent = "Store offline (shown once):\n" + codes.join("\n");
+  const plain = codes.join("\n");
+  if (copySrc) copySrc.value = plain;
+  if (block) block.hidden = false;
+  grid.hidden = false;
+  grid.replaceChildren(
+    ...codes.map((code) => {
+      const chip = document.createElement("code");
+      chip.className = "acct-2fa-recovery-chip mono";
+      chip.setAttribute("role", "listitem");
+      chip.textContent = code;
+      return chip;
+    }),
+  );
+  if (actions) actions.hidden = false;
 }
 
 async function lab2faRefreshUi(): Promise<void> {
   const msg = document.getElementById("lab-2fa-msg");
-  if (!useLabMatching()) {
+  if (!canManage2fa()) {
     applyLab2faPanels(false, false);
-    if (msg) msg.textContent = "Connect LAB session to manage 2FA";
+    if (msg) {
+      msg.textContent = isDeskConnectEnabled()
+        ? "Connect desk wallet to manage 2FA"
+        : "Connect LAB session to manage 2FA";
+    }
     return;
   }
   const res = await auth2faStatus();
@@ -3770,18 +4189,27 @@ async function lab2faRefreshUi(): Promise<void> {
   }
   applyLab2faPanels(res.enabled, res.pending, res.recovery_left ?? 0);
   if (msg) msg.textContent = res.note || "";
+  // Pending enrollment after reload — restore QR from cache or resume via setup.
+  if (res.pending && !res.enabled) {
+    if (await restorePending2faIntoDom()) return;
+    await lab2faSetupUi({ silent: true });
+  } else if (!res.pending) {
+    clearPending2faEnrollment();
+  }
 }
 
-async function lab2faSetupUi(): Promise<void> {
+async function lab2faSetupUi(opts?: { silent?: boolean }): Promise<void> {
   const msg = document.getElementById("lab-2fa-msg");
-  if (!useLabMatching()) {
-    toast("Connect DEMO/LAB fixture first", "warn");
+  if (!canManage2fa()) {
+    if (!opts?.silent) {
+      toast(isDeskConnectEnabled() ? "Connect desk wallet first" : "Connect DEMO/LAB fixture first", "warn");
+    }
     return;
   }
   const res = await auth2faSetup();
   if (!res.ok) {
     if (msg) msg.textContent = res.message;
-    toast(res.message, "warn");
+    if (!opts?.silent) toast(res.message, "warn");
     return;
   }
   const secretEl = document.getElementById("lab-2fa-secret");
@@ -3789,11 +4217,14 @@ async function lab2faSetupUi(): Promise<void> {
   if (secretEl) secretEl.textContent = res.secret_base32;
   if (linkEl) {
     linkEl.href = res.otpauth_url;
-    linkEl.textContent = "Open in authenticator app";
+    linkEl.textContent = "Open otpauth link";
   }
+  savePending2faEnrollment(res.secret_base32, res.otpauth_url);
   applyLab2faPanels(false, true);
-  if (msg) msg.textContent = res.note || "Scan QR or copy secret, then confirm";
-  toast("2FA setup started — confirm with a code", "ok");
+  await paintTotpQr(res.otpauth_url);
+  if (!opts?.silent) document.getElementById("lab-2fa-confirm-code")?.focus();
+  if (msg) msg.textContent = res.note || "Scan QR on phone → enter 6-digit code";
+  if (!opts?.silent) toast("2FA setup started — scan QR, then confirm", "ok");
 }
 
 async function lab2faConfirmUi(): Promise<void> {
@@ -3810,6 +4241,8 @@ async function lab2faConfirmUi(): Promise<void> {
     return;
   }
   showRecoveryCodesOnce(res.recovery_codes);
+  clearPending2faEnrollment();
+  clearTotpQr();
   if (msg) msg.textContent = res.note || "2FA enabled — save recovery codes now";
   toast(res.recovery_codes?.length ? "2FA enabled — save recovery codes" : "2FA enabled", "ok");
   await lab2faRefreshUi();
@@ -3829,6 +4262,8 @@ async function lab2faDisableUi(): Promise<void> {
     return;
   }
   showRecoveryCodesOnce(undefined);
+  clearPending2faEnrollment();
+  clearTotpQr();
   if (msg) msg.textContent = res.note || "2FA disabled";
   toast("2FA disabled", "ok");
   await lab2faRefreshUi();
@@ -3854,12 +4289,12 @@ async function lab2faRotateUi(): Promise<void> {
 }
 
 function applyLabCustodyPauseUi(): void {
-  const live = useLabMatching();
+  const live = useLabMatching() || (isDeskConnectEnabled() && getLabSessionMeta().hasCsrf);
   const gate = (
     id: string,
     allow: boolean,
     pausedTitle: string,
-    offlineTitle = "Connect fixture first",
+    offlineTitle = isDeskConnectEnabled() ? "Connect desk wallet first" : "Connect fixture first",
   ) => {
     const el = document.getElementById(id) as HTMLButtonElement | null;
     if (!el) return;
@@ -3868,10 +4303,29 @@ function applyLabCustodyPauseUi(): void {
     else if (!allow) el.title = pausedTitle;
     else el.removeAttribute("title");
   };
-  gate("btn-lab-wd-request", labWithdrawEnabled, "Withdrawals paused");
-  gate("btn-lab-mint-hmc", labDepositEnabled, "Deposits paused");
-  gate("btn-lab-bridge-usdt", labDepositEnabled, "Deposits paused");
-  gate("btn-lab-bridge-btc", labDepositEnabled, "Deposits paused");
+  const wdAllow = labWithdrawEnabled && (useLabMatching() || deskEdgeSnap.withdrawEnabled);
+  const depAllow = labDepositEnabled && (useLabMatching() || deskEdgeSnap.depositEnabled);
+  gate("btn-lab-wd-request", wdAllow, "Withdrawals paused");
+  gate("btn-lab-wd-refresh", wdAllow, "Withdrawals paused");
+  gate("btn-lab-wd-quote", wdAllow, "Withdrawals paused");
+  gate("btn-lab-mint-hmc", depAllow && useLabMatching(), "Deposits paused");
+  gate("btn-lab-dep-hmc", depAllow, "Deposits paused");
+  gate("btn-lab-dep-usdt", depAllow && useLabMatching(), "Deposits paused");
+  gate("btn-lab-bridge-usdt", depAllow && useLabMatching(), "Deposits paused");
+  gate("btn-lab-bridge-btc", depAllow && useLabMatching(), "Deposits paused");
+  const pause = document.getElementById("lab-custody-pause");
+  if (pause) {
+    const parts: string[] = [];
+    if (!labDepositEnabled) parts.push("Deposits paused (health deposit.enabled=false)");
+    if (!labWithdrawEnabled) parts.push("Withdrawals paused (health withdraw.enabled=false)");
+    if (parts.length) {
+      pause.hidden = false;
+      pause.textContent = parts.join(" · ");
+    } else {
+      pause.hidden = true;
+      pause.textContent = "";
+    }
+  }
 }
 
 function wireLabApiButtons(): void {
@@ -3929,6 +4383,18 @@ function wireLabApiButtons(): void {
   click("btn-lab-mint-hmc", () => void labMintHmcUi(100));
   click("btn-lab-dep-hmc", () => void labShowDepositAddr("HMC"));
   click("btn-lab-dep-usdt", () => void labShowDepositAddr("USDT"));
+  click("btn-desk-dep-hmc", () => void showDepositAddrUi("HMC"));
+  click("btn-desk-dep-sup", () => void showDepositAddrUi("SUP"));
+  click("btn-desk-dep-copy", () => {
+    const addr = (document.getElementById("lab-deposit-addr") as HTMLInputElement | null)?.value?.trim() || "";
+    if (!addr) {
+      toast("Reveal a deposit address first", "warn");
+      return;
+    }
+    void copyTextToClipboard(addr).then((ok) => {
+      toast(ok ? "Deposit address copied" : "Copy failed", ok ? "ok" : "warn");
+    });
+  });
   click("btn-lab-bridge-usdt", () => void labBridgeCreditUi("USDT", 10));
   click("btn-lab-bridge-btc", () => void labBridgeCreditUi("BTC", 0.01));
   click("btn-lab-wd-request", () => void labWithdrawRequestUi());
@@ -3939,6 +4405,32 @@ function wireLabApiButtons(): void {
   click("btn-lab-2fa-confirm", () => void lab2faConfirmUi());
   click("btn-lab-2fa-disable", () => void lab2faDisableUi());
   click("btn-lab-2fa-rotate", () => void lab2faRotateUi());
+  click("btn-lab-2fa-copy-secret", () => {
+    const secret = document.getElementById("lab-2fa-secret")?.textContent?.trim() || "";
+    if (!secret) {
+      toast("No secret yet — start Enable authenticator", "warn");
+      return;
+    }
+    void copyTextToClipboard(secret).then((ok) => {
+      toast(ok ? "2FA secret copied" : "Copy failed", ok ? "ok" : "warn");
+    });
+  });
+  click("btn-lab-2fa-copy-recovery", () => {
+    const copySrc = (document.getElementById("lab-2fa-recovery-copy-src") as HTMLTextAreaElement | null)?.value?.trim();
+    const fromGrid =
+      copySrc ||
+      [...document.querySelectorAll("#lab-2fa-recovery-codes .acct-2fa-recovery-chip")]
+        .map((el) => el.textContent?.trim() || "")
+        .filter(Boolean)
+        .join("\n");
+    if (!fromGrid) {
+      toast("No recovery codes on screen", "warn");
+      return;
+    }
+    void copyTextToClipboard(fromGrid).then((ok) => {
+      toast(ok ? "Recovery codes copied" : "Copy failed", ok ? "ok" : "warn");
+    });
+  });
   void lab2faRefreshUi();
   void labWithdrawQuoteUi();
   click("btn-lab-fee-wallet-copy", () => {
@@ -4033,7 +4525,7 @@ function quickPlaceFromChart(
     fillOrderPanelAtPrice(side, kind, price, pairId);
     return;
   }
-  if (useLabMatching()) {
+  if (useServerMatching()) {
     if (orderInFlight) {
       toast("Order already in progress", "info");
       return;
@@ -4160,7 +4652,7 @@ function toastChartScreenshot(): void {
 
 function quickOrderMid(pairId: PairId): number {
   return (
-    (useLabMatching() ? labBookMid(pairId) : 0) ||
+    (useServerMatching() ? labBookMid(pairId) : 0) ||
     (market ? midForPair(market, pairId) : activeTicker().mid)
   );
 }
@@ -4709,8 +5201,7 @@ function patchLive(): void {
   const quote = activePairQuote();
   patchTickerBar(quote);
   patchMarketRowsInPlace();
-  // Book/tape DOM is heavier — throttle like microTick (avoid full rewire every call).
-  throttledBookTapePatch();
+  // Order book is NOT patched here — chart ticks must stay smooth (see startBookLoop).
   if (chartMounted) {
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
     const opts = chartOpts();
@@ -4754,20 +5245,87 @@ function patchLive(): void {
 
 const throttledBookTapePatch = throttle(() => {
   patchBookTapeDom();
-}, 350);
+}, 1400);
+
+let bookLoopTimer: number | null = null;
+
+function startBookLoop(): void {
+  if (bookLoopTimer != null) return;
+  // Independent of chart 700ms tick — book never shares the candle paint frame.
+  bookLoopTimer = window.setInterval(() => {
+    if (state.mainView !== "spot") return;
+    if (isChartPointerBusy()) return;
+    if (document.hidden) return;
+    bookPhase += 0.18;
+    throttledBookTapePatch();
+  }, 1600);
+}
+
+function stopBookLoop(): void {
+  if (bookLoopTimer != null) {
+    clearInterval(bookLoopTimer);
+    bookLoopTimer = null;
+  }
+}
 
 function patchBookTapeDom(): void {
   const book = document.getElementById("book");
-  if (book) {
-    const prevSnap = snapshotBookLevels(book);
-    book.innerHTML = renderBook();
-    bookFlashSnap = applyBookFlashes(prevSnap.size ? prevSnap : bookFlashSnap, book);
-    book.dataset.bookTabsWired = "1";
-    wireBookTabs();
+  if (!book) return;
+  wireBookScrollIdle(book, () => {
+    if (book.dataset.bookPatchPending === "1") {
+      book.dataset.bookPatchPending = "0";
+      patchBookTapeDom();
+    }
+  });
+  if (book.dataset.bookScrolling === "1") {
+    book.dataset.bookPatchPending = "1";
+    return;
   }
-  const tape = document.getElementById("tape");
-  if (tape) tape.innerHTML = renderTape();
-  patchMobileTradeTape();
+
+  const { bids, asks, group } = activeBookLevels();
+  const fp = bookLadderFingerprint(bids, asks, group, state.bookView);
+  if (book.dataset.bookFp === fp && book.querySelector(".book-ladder, .depth-panel, .markets-empty")) {
+    return;
+  }
+
+  // Same row counts → update cells in place (prices+amounts). Never resets scroll panes.
+  if (state.bookView === "book" && book.querySelector(".book-ladder")) {
+    const max = Math.max(...bids.map((b) => b.amountBase), ...asks.map((a) => a.amountBase), 1);
+    const toPatch = (levels: typeof bids): BookRowPatch[] =>
+      levels.map((l) => ({
+        price: l.price,
+        amountBase: l.amountBase,
+        totalQuote: l.totalQuote,
+        priceLabel: formatPrice(l.price),
+        amountLabel: formatNum(l.amountBase, 0),
+        totalLabel: formatPrice(l.totalQuote),
+        barPct: (l.amountBase / max) * 100,
+      }));
+    if (patchBookRowsInPlace(book, toPatch(asks), toPatch(bids))) {
+      book.dataset.bookFp = fp;
+      book.dataset.bookSkel = bookPriceSkeletonFingerprint(bids, asks, group, state.bookView);
+      const bestBid = bids[0]?.price ?? 0;
+      const bestAsk = asks[0]?.price ?? 0;
+      const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : bestBid || bestAsk;
+      const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : 0;
+      const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
+      const midEl = book.querySelector(".ob-mid-price");
+      const spreadEl = book.querySelector(".ob-mid-spread");
+      const midTxt = formatPrice(midPx);
+      const spreadTxt = `Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%`;
+      if (midEl && midEl.textContent !== midTxt) midEl.textContent = midTxt;
+      if (spreadEl && spreadEl.textContent !== spreadTxt) spreadEl.textContent = spreadTxt;
+      return;
+    }
+  }
+
+  const prevSnap = snapshotBookLevels(book);
+  const painted = paintBookPreservingScroll(book, renderBook(), fp);
+  if (!painted) return;
+  book.dataset.bookSkel = bookPriceSkeletonFingerprint(bids, asks, group, state.bookView);
+  bookFlashSnap = applyBookFlashes(prevSnap.size ? prevSnap : bookFlashSnap, book);
+  book.dataset.bookTabsWired = "1";
+  wireBookTabs();
 }
 
 function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStreamEvent): void {
@@ -4795,7 +5353,8 @@ function startMarketStreamLoop(): void {
     {
       getActivePair: () => state.activePair,
       isSpotView: () => state.mainView === "spot",
-      useLab: () => useLabMatching(),
+      useLiveBook: () => useLiveBook(),
+      useSession: () => useServerMatching(),
       getState: () => state,
       getMarket: () => market,
       saveState: () => saveState(state),
@@ -4815,7 +5374,14 @@ function startLabSessionLoop(): void {
       if (msg) msg.textContent = note;
     },
     onReconnected: (note) => toast(note, "ok"),
-    onSync: () => {},
+    onSync: () => {
+      // Deposit credits + fills — refresh Account / Avbl without waiting for manual Sync.
+      if (state.mainView === "account") refreshAccountAfterLab();
+      else {
+        patchAvailChips();
+        patchLive();
+      }
+    },
     onBookRefresh: () => throttledBookTapePatch(),
   });
 }
@@ -4849,7 +5415,7 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
     setOrderPreview(side, `OCO TP ${formatPriceCompact(form.tp)} · SL ${formatPriceCompact(form.stop)}`);
     return;
   }
-  if (useLabMatching()) {
+  if (useServerMatching()) {
     const lab = getLabBookCache(state.activePair);
     if (!lab || (!lab.bids.length && !lab.asks.length)) {
       setOrderPreview(side, "Waiting for lab book…");
@@ -4899,29 +5465,70 @@ function submitOrder(side: "buy" | "sell"): void {
   const pair = pairById(state.activePair);
   if (form.amt <= 0) { setOrderMsg(side, "Enter amount", "err"); return; }
   const exitSide: "buy" | "sell" = side === "buy" ? "sell" : "buy";
-  if (useLabMatching() && form.tpslEnabled) {
+  if (useServerMatching() && form.tpslEnabled) {
     setOrderMsg(side, "TP/SL attachments are paper-only right now", "err");
     return;
   }
 
   if (uiType === "market") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       runLockedLabOrder(async () => {
         // Refresh L2 so slip hint tracks lab MM mid (not stale pool-oracle mid).
         await refreshLabBook(state.activePair);
         const t = activeTicker();
-        const slip = labMarketSlipHint(side, state.activePair, t.mid);
-        if (!paperGuardsOrWarn(side, "market", form.amt, slip || t.mid)) return;
-        const lab = await placeLabOrder(
+        const mid = labBookMid(state.activePair) || midForPair(market!, state.activePair) || t.mid;
+        const slip = labMarketSlipHint(side, state.activePair, mid, 0.05);
+        // Re-clamp to fee+slip safe size — avoids server "Insufficient balance" after 100% on best ask.
+        const safePx =
+          side === "buy"
+            ? Math.max(slip || t.ask, t.ask || 0) * 1.002
+            : Math.min(slip || t.bid || mid, t.bid || mid) * 0.998;
+        const maxAmt = maxOrderBaseAmount(state, market!, state.activePair, side, safePx, "market", 1, mid);
+        let amt = form.amt;
+        if (maxAmt > 0 && amt > maxAmt) {
+          amt = maxAmt;
+          const inp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
+          if (inp) inp.value = String(amt);
+        }
+        if (!paperGuardsOrWarn(side, "market", amt, slip || mid)) return;
+        let lab = await placeLabOrder(
           state,
           state.activePair,
           side,
           "market",
-          form.amt,
+          amt,
           slip,
           undefined,
           labOrderOpts(),
         );
+        // One shrink retry — server VWAP/fee rounding can still reject a borderline 100%.
+        if (!lab.ok && /insufficient.?balance/i.test(lab.reason) && amt > 0) {
+          const retry = maxOrderBaseAmount(
+            state,
+            market!,
+            state.activePair,
+            side,
+            safePx * (side === "buy" ? 1.01 : 0.99),
+            "market",
+            0.92,
+            mid,
+          );
+          if (retry > 0 && retry < amt) {
+            amt = retry;
+            const inp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
+            if (inp) inp.value = String(amt);
+            lab = await placeLabOrder(
+              state,
+              state.activePair,
+              side,
+              "market",
+              amt,
+              slip,
+              undefined,
+              labOrderOpts(),
+            );
+          }
+        }
         if (!lab.ok) {
           setOrderMsg(side, lab.reason, "err");
           toast(lab.reason, "warn");
@@ -4969,7 +5576,7 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 
   if (uiType === "limit") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       runLockedLabOrder(async () => {
         await refreshLabBook(state.activePair);
         if (!paperGuardsOrWarn(side, "limit", form.amt, form.price)) return;
@@ -5042,7 +5649,7 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 
   if (uiType === "stop_limit") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       runLockedLabOrder(async () => {
         if (!paperGuardsOrWarn(side, "stop_limit", form.amt, form.price)) return;
         const mid = labBookMid(state.activePair) || midForPair(market!, state.activePair);
@@ -5090,7 +5697,7 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 
   if (uiType === "stop_market") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       runLockedLabOrder(async () => {
         if (!paperGuardsOrWarn(side, "stop_market", form.amt, side === "buy" ? form.price : form.stop)) return;
         const lab = await placeLabOrder(
@@ -5125,7 +5732,7 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 
   if (uiType === "trailing_stop") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
     const t = activeTicker();
       runLockedLabOrder(async () => {
         const lab = await placeLabOrder(
@@ -5161,7 +5768,7 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 
   if (uiType === "oco") {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       runLockedLabOrder(async () => {
         if (!paperGuardsOrWarn(side, "oco", form.amt, form.tp)) return;
         if (form.slLimit > 0 && !paperGuardsOrWarn(side, "stop_limit", form.amt, form.slLimit)) return;
@@ -5197,12 +5804,28 @@ function submitOrder(side: "buy" | "sell"): void {
   }
 }
 
+function focusOrderFormUi(): void {
+  gotoMainView("spot");
+  const zone = document.getElementById("order-zone");
+  zone?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const buyAmt = document.getElementById("buy-amt") as HTMLInputElement | null;
+  const sellAmt = document.getElementById("sell-amt") as HTMLInputElement | null;
+  const target = buyAmt ?? sellAmt;
+  if (target) {
+    target.focus({ preventScroll: true });
+    target.select?.();
+  }
+}
+
 function wireAlertButtons(): void {
+  document.getElementById("btn-focus-order-form")?.addEventListener("click", () => {
+    focusOrderFormUi();
+  });
   document.getElementById("btn-alert-at-mid")?.addEventListener("click", () => {
     void ensureAlertNotifications();
     if (!market) return;
     const price =
-      (useLabMatching() ? labBookMid(state.activePair) : 0) || midForPair(market, state.activePair);
+      (useServerMatching() ? labBookMid(state.activePair) : 0) || midForPair(market, state.activePair);
     state.priceAlerts.push({
       id: uid(),
       pairId: state.activePair,
@@ -5325,7 +5948,7 @@ async function handleCancelOrderClick(btn: HTMLElement): Promise<void> {
   btn.classList.add("is-busy");
   btn.textContent = "Cancelling…";
   try {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       const local = state.orders.find((o) => o.id === id);
       const lab = await cancelLabOrder(state, id);
       if (lab.ok) {
@@ -5448,7 +6071,7 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
   const mid = midForPair(market, state.activePair);
   const t = activeTicker();
   let price = side === "buy" ? t.ask : t.bid;
-  if (useLabMatching()) {
+  if (useLiveBook()) {
     const lab = getLabBookCache(state.activePair);
     if (side === "buy" && lab?.asks[0]?.price) price = lab.asks[0].price;
     if (side === "sell" && lab?.bids[0]?.price) price = lab.bids[0].price;
@@ -5457,14 +6080,71 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
     const fromInp = Number((document.getElementById(`${side}-price`) as HTMLInputElement)?.value ?? price);
     if (fromInp > 0) price = fromInp;
   }
+  // Market: size against slip ceiling/floor so 100% survives server VWAP + fee (not just best ask).
+  if (uiType === "market") {
+    const slip = labMarketSlipHint(side, state.activePair, mid || t.mid, 0.05);
+    if (slip > 0) {
+      price = side === "buy" ? Math.max(price, slip) : Math.min(price || slip, slip);
+    } else if (side === "buy" && price > 0) {
+      price *= 1.05;
+    } else if (side === "sell" && price > 0) {
+      price *= 0.95;
+    }
+  }
   if (!(price > 0)) {
     amtInp.value = "0";
     return;
   }
-  // Fee-aware + reserve-aware: 100%/MAX never exceeds free balance (buy quote fee / sell HMC fee).
-  amtInp.value = String(
-    maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid),
-  );
+  const sized = maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid);
+  amtInp.value = sized > 0 ? String(sized) : "0";
+  if (pct > 0 && sized <= 0) {
+    const pair = pairById(state.activePair);
+    const need = side === "buy" ? pair.quote : pair.base;
+    const needKey = need.toLowerCase() as keyof typeof state.wallet;
+    const free = freeBalance(state, needKey, market);
+    const hmcFree = freeBalance(state, "hmc", market);
+    const probeAmt =
+      side === "buy"
+        ? Math.max((free / Math.max(price, 1e-12)) * 0.5, 1e-8)
+        : Math.max(free * 0.5, 1e-8);
+    const probe = assertOrderFunds(
+      state,
+      market,
+      state.activePair,
+      side,
+      probeAmt,
+      price,
+      uiType,
+      fundsImmediateFill(uiType, side, price, mid),
+    );
+    let hint: string;
+    if (!probe.ok && /HMC for fee/i.test(probe.reason)) {
+      hint =
+        hmcFree > 0
+          ? `Leave HMC for fees (Avbl ${formatNum(hmcFree, 4)} HMC) — or turn off Pay fees in HMC`
+          : `Need HMC for fees (Avbl 0 HMC) — deposit HMC or turn off Pay fees in HMC`;
+    } else if (usePublicDeskBook() && !useDeskMatching() && free <= 0) {
+      hint = `Avbl 0 ${need} — Connect desk wallet + deposit first`;
+    } else if (free > 0) {
+      hint =
+        state.feeConfig.payFeesInHmc && need === "HMC"
+          ? `Leave a little HMC for fees (Avbl ${formatNum(free, 4)} ${need})`
+          : `Balance too small after fees/reserves (Avbl ${formatNum(free, 4)} ${need})`;
+    } else {
+      hint = `Avbl 0 ${need} — deposit or free reserved balance first`;
+    }
+    toastAvailHint(hint);
+  }
+}
+
+let lastAvailToastAt = 0;
+let lastAvailToastMsg = "";
+function toastAvailHint(msg: string): void {
+  const now = Date.now();
+  if (msg === lastAvailToastMsg && now - lastAvailToastAt < 2_500) return;
+  lastAvailToastMsg = msg;
+  lastAvailToastAt = now;
+  toast(msg, "warn");
 }
 
 /** Re-apply pct slider sizing after price / fee-mode changes so 100% stays valid. */
@@ -5559,12 +6239,9 @@ function showSettings(opts?: { tab?: SettingsTabId }): void {
         void syncFromNode();
       },
       onOpenAccountSecurity: () => {
-        if (!isLabLoopbackApi()) {
-          toast("2FA enroll ships with withdraw GO (lab can enroll today)", "info");
-          return;
-        }
         gotoMainView("account");
         requestAnimationFrame(() => {
+          document.getElementById("acct-desk")?.setAttribute("open", "");
           document.getElementById("acct-lab")?.setAttribute("open", "");
           document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });
@@ -6007,7 +6684,7 @@ function wireEvents(): void {
   document.getElementById("btn-mobile-tools")?.addEventListener("click", () => setMobileToolsOpen());
 
   document.getElementById("btn-reset")?.addEventListener("click", () => {
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       toast("Reset blocked during lab session — logout first (avoids ledger desync)", "warn");
       return;
     }
@@ -6033,7 +6710,7 @@ function wireEvents(): void {
   document.getElementById("import-demo-file")?.addEventListener("change", async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    if (useLabMatching()) {
+    if (useServerMatching()) {
       toast("Import blocked during lab session — logout first (avoids ledger desync)", "warn");
       (e.target as HTMLInputElement).value = "";
       return;
@@ -6333,8 +7010,7 @@ function wireEvents(): void {
   document.getElementById("book-group-select")?.addEventListener("change", (e) => {
     state.bookGrouping = Number((e.target as HTMLSelectElement).value);
     saveState(state);
-    document.getElementById("book")!.innerHTML = renderBook();
-    wireBookTabs();
+    forcePaintBook();
   });
 
   wireBookTabs();
@@ -6428,17 +7104,17 @@ function wireBookTabs(): void {
       if (!btn || !book.contains(btn)) return;
       state.bookView = btn.dataset.bv as "book" | "depth";
       saveState(state);
-      book.innerHTML = renderBook();
+      forcePaintBook();
       wireBookClicks();
     });
     book.addEventListener("change", (ev) => {
       const sel = ev.target as HTMLElement | null;
       if (!sel || sel.id !== "book-group-select") return;
       state.bookGrouping = Number((sel as HTMLSelectElement).value);
-        saveState(state);
-      book.innerHTML = renderBook();
-        wireBookClicks();
-      });
+      saveState(state);
+      forcePaintBook();
+      wireBookClicks();
+    });
   }
   wireBookClicks();
 }
@@ -6687,25 +7363,65 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-function upsertAllCandles(mid: number): void {
+function upsertAllCandles(fillPx: number): void {
   // Paper desk: tip is shared-clock only — never fork OHLC from fill prints.
-  if (!useLabMatching()) return;
-  if (!state.candles[state.activePair]) return;
-  const prev = prevMids[state.activePair];
-  const next = applyMidToPairCandles(state.candles[state.activePair]!, state.activePair, mid, prev);
-  state.candles[state.activePair] = next;
-  prevMids[state.activePair] = mid;
+  if (!useServerMatching()) return;
+  const pairId = state.activePair;
+  if (!state.candles[pairId]) return;
+  const bookMid = labBookMid(pairId);
+  const prev = prevMids[pairId];
+  // Soft-MM bid/ask can sit ~100–160 bps off mid. Pushing tip close to the fill
+  // then re-anchoring to L2 mid on the next tick looks like a spike + snap-back.
+  const anchor = bookMid > 0 ? bookMid : prev && prev > 0 ? prev : fillPx;
+  if (!(anchor > 0) || !Number.isFinite(anchor)) return;
+  let next = applyMidToPairCandles(state.candles[pairId]!, pairId, anchor, prev);
+  // Bounded wick toward fill only — close stays on L2 mid.
+  if (fillPx > 0 && Number.isFinite(fillPx)) {
+    const wickPx = clampFillWickPx(anchor, fillPx, 25);
+    for (const tf of Object.keys(next) as Timeframe[]) {
+      const series = next[tf];
+      if (!series?.length) continue;
+      const tip = { ...series[series.length - 1]! };
+      tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
+      tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
+      series[series.length - 1] = tip;
+    }
+  }
+  state.candles[pairId] = next;
+  prevMids[pairId] = anchor;
 }
 
-let wasLabMatching = false;
+/**
+ * Advance candle tip for one pair. Live desk: always applyMid (never paper-reseed),
+ * so buy/sell / L2 flicker cannot replace lived OHLC with a synthetic path.
+ */
+function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean): void {
+  if (!state.candles[pairId]) state.candles[pairId] = {};
+  const prev = prevMids[pairId];
+  if (labLive) {
+    // Never fall through to paper-oracle mid while live L2 is on — that snap
+    // rewrites tip close across Soft-MM ↔ oracle and looks like a reset spike.
+    const raw = displayMid > 0 ? displayMid : 0;
+    const mid = raw > 0 ? raw : prev && prev > 0 ? prev : 0;
+    if (!(mid > 0)) return;
+    // Soft-MM BBO mid jitters inside the spread; EMA the tip so wicks stay CEX-calm.
+    const smoothed =
+      prev && prev > 0 && raw > 0 ? prev * 0.72 + raw * 0.28 : mid;
+    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, smoothed, prev);
+    prevMids[pairId] = smoothed;
+    return;
+  }
+  state.candles[pairId] = applyPaperClockToPairCandles(state.candles[pairId]!, pairId);
+  if (displayMid > 0) prevMids[pairId] = displayMid;
+}
 
 function microTickPrices(): void {
   if (!market) return;
+  if (document.hidden) return;
   // Shared paper mids always — Convert/Account must not lag Spot ticker.
   market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
 
   // Scrubbing: do NOT run applyPaperClock×all pairs / series.update / DOM.
-  // That 700ms spike was the remaining freeze under the free crosshair.
   if (state.mainView === "spot" && isChartPointerBusy()) {
     liveTickN += 1;
     const mid = midForPair(market, state.activePair);
@@ -6722,7 +7438,6 @@ function microTickPrices(): void {
     return;
   }
 
-  // Alerts + order settle off Spot too (mids already updated).
   if (state.mainView !== "spot") {
     for (const p of PAIRS) {
       if (tickers[p.id]) {
@@ -6735,66 +7450,51 @@ function microTickPrices(): void {
     evaluatePriceAlerts(midForPair(market, state.activePair));
     return;
   }
-  let changed = false;
-  bookPhase += 0.38;
   liveTickN += 1;
-  // Shared paper clock — canonical D0 refs (not per-device Settings anchor / EMA).
-  const labLive = useLabMatching();
-  // Lab → paper: hard reseed so lab tip extremes / path never stick.
-  if (wasLabMatching && !labLive) {
-  for (const p of PAIRS) {
-      state.candles[p.id] = applyPaperClockToPairCandles({}, p.id);
-      prevMids[p.id] = midForPair(market, p.id);
-    }
-    chartNeedsFullReplace = true;
-  }
-  wasLabMatching = labLive;
-  for (const p of PAIRS) {
+  const labLive = useLiveBook();
+
+  // Active pair every tick; rotate other pairs — avoids ~200ms setInterval violations.
+  for (let i = 0; i < PAIRS.length; i++) {
+    const p = PAIRS[i]!;
     const oracleTarget = midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
-    const displayMid = labMid > 0 ? labMid : oracleTarget;
-    if (!state.candles[p.id]) state.candles[p.id] = {};
-    if (labMid > 0) {
-      const prev = prevMids[p.id] ?? displayMid;
-      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, displayMid, prev);
-    } else {
-      state.candles[p.id] = applyPaperClockToPairCandles(state.candles[p.id]!, p.id);
+    // Live book: tip only from L2 mid (0 keeps previous). Never mix oracle into live OHLC.
+    const displayMid = labLive ? labMid : oracleTarget;
+    const isActive = p.id === state.activePair;
+    const rotate = liveTickN % PAIRS.length === i;
+    if (isActive || rotate || chartNeedsFullReplace) {
+      tipCandlesForPair(p.id, displayMid, labLive);
+    } else if (displayMid > 0) {
+      prevMids[p.id] = displayMid;
     }
-    prevMids[p.id] = displayMid;
     if (tickers[p.id]) {
       if (labLive && labMid > 0) {
-        tickers[p.id] = { ...tickers[p.id]!, mid: labMid };
+        const book = getLabBookCache(p.id);
+        const bid = book?.bids[0]?.price ?? labMid * 0.999;
+        const ask = book?.asks[0]?.price ?? labMid * 1.001;
+        tickers[p.id] = { ...tickers[p.id]!, mid: labMid, bid, ask };
       } else {
         tickers[p.id] = { ...tickers[p.id]!, mid: displayMid, bid: displayMid * 0.9995, ask: displayMid * 1.0005 };
       }
     }
-    changed = true;
   }
-  if (!labLive && liveTickN % 2 === 0) {
+  if (!labLive && liveTickN % 3 === 0) {
     publicTape = appendSyntheticTrade(publicTape, activeTicker());
   }
-  // Match resting paper orders against live blended mids every ~1.4s.
-  if (changed && liveTickN % 2 === 0) {
-    const notes = settleOpenOrdersFromTickers(true);
-    if (notes.length) {
-      /* activity + chart already refreshed */
-    }
-  }
-  if (!changed || !chartMounted) return;
+  if (liveTickN % 2 === 0) settleOpenOrdersFromTickers(true);
+  if (!chartMounted) return;
 
-    const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
-    const last = candles[candles.length - 1];
-    const opts = chartOpts();
+  const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
+  const last = candles[candles.length - 1];
+  const opts = chartOpts();
   const scrubbing = isChartPointerBusy();
-  // Tip series.update is deferred inside updateLastCandle while scrubbing.
-  // Full replace (gap / new bucket) still paints — rare vs 700ms tip ticks.
   if (chartNeedsFullReplace || !last) {
     setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
     chartNeedsFullReplace = false;
   } else if (!updateLastCandle(last, opts)) {
     setCandleData(candles, opts, { preserveLogicalRange: true });
   }
-  if (!scrubbing && state.multiChartLayout !== "1") {
+  if (!scrubbing && state.multiChartLayout !== "1" && liveTickN % 2 === 0) {
     const n = state.multiChartLayout === "4" ? 4 : 2;
     for (let i = 2; i <= n; i++) {
       const hostId = `chart-host-${i}`;
@@ -6809,17 +7509,16 @@ function microTickPrices(): void {
   evaluatePriceAlerts(quote.mid);
   if (scrubbing) return;
   patchTickerBar(quote);
-  const tape = document.getElementById("tape");
-  if (tape) tape.innerHTML = renderTape();
-  patchMobileTradeTape();
-  // Book DOM — paper synthetic via local stream (lab uses marketStream poll/ws).
-  if (!useLabMatching() && liveTickN % 3 === 0) {
+  if (liveTickN % 3 === 0) {
+    const tape = document.getElementById("tape");
+    if (tape) tape.innerHTML = renderTape();
+    patchMobileTradeTape();
+  }
+  if (!useServerMatching() && liveTickN % 3 === 0) {
     marketStream?.notifyLocalBookTape();
   }
-  if (liveTickN % 2 === 0) {
-    patchMarketRowsInPlace();
-  }
-  if (liveTickN % 30 === 0) {
+  if (liveTickN % 4 === 0) patchMarketRowsInPlace();
+  if (liveTickN % 40 === 0) {
     const list = document.getElementById("markets-list");
     if (list) {
       list.innerHTML = renderMarketsList();
@@ -6861,10 +7560,12 @@ async function refresh(): Promise<void> {
 
   const marketP = fetchMarket(DEFAULT_REFERENCE_MID);
   const liveP = fetchPoolLive();
+  // Keep race tight — paper mids continue via microTick; stale pool GH is fine for a beat.
   const [mRes, liveRes] = warming
     ? await Promise.all([marketP, liveP])
-    : await Promise.all([raceMs(marketP, 2_500), raceMs(liveP, 2_500)]);
+    : await Promise.all([raceMs(marketP, 1_600), raceMs(liveP, 1_600)]);
 
+  markPerf("oracle-refresh-net-end");
   if (myGen !== refreshGen) return;
 
   if (mRes) {
@@ -6918,8 +7619,10 @@ async function refresh(): Promise<void> {
     tk.high24h = s.high;
     tk.low24h = s.low;
     tk.volume24hBase = s.vol;
-    const labMid = useLabMatching() ? labBookMid(p.id) : 0;
-    const displayMid = labMid > 0 ? labMid : midForPair(market, p.id);
+    const labMid = useLiveBook() ? labBookMid(p.id) : 0;
+    const live = useLiveBook();
+    // Live: tip only from L2 mid. Oracle mid here would snap OHLC on every poll miss.
+    const displayMid = live ? labMid : midForPair(market, p.id);
     if (labMid > 0) {
       // Preserve lab L2 mid/bid/ask if we already have a book; only refresh 24h stats fields.
       const prevTk = tickers[p.id];
@@ -6934,17 +7637,15 @@ async function refresh(): Promise<void> {
         tickers[p.id] = { ...tk, mid: labMid };
       }
     } else {
-    tickers[p.id] = tk;
+      tickers[p.id] = tk;
     }
-    const mid = displayMid;
-    const prev = prevMids[p.id];
-    if (!state.candles[p.id]) state.candles[p.id] = {};
-    if (labMid > 0) {
-      state.candles[p.id] = applyMidToPairCandles(state.candles[p.id]!, p.id, mid, prev);
+    // Candle tip updates belong to microTickPrices — rebuilding every pair here
+    // caused ~500ms longtasks every oracle poll. Only sync active (or lab) tip.
+    if (p.id === state.activePair || labMid > 0 || chartNeedsFullReplace) {
+      tipCandlesForPair(p.id, displayMid, live);
     } else {
-      state.candles[p.id] = applyPaperClockToPairCandles(state.candles[p.id]!, p.id);
+      prevMids[p.id] = displayMid;
     }
-    prevMids[p.id] = mid;
   }
   settleOpenOrdersFromTickers(true);
   ensurePublicTape();
@@ -6960,8 +7661,11 @@ async function refresh(): Promise<void> {
   } else {
     patchNonSpotChrome();
   }
-  const ms = measurePerf("oracle-refresh", "oracle-refresh-start", "oracle-refresh-end");
-  if (ms != null && ms > 100) console.debug(`[perf] oracle refresh ${ms.toFixed(0)}ms (${source})`);
+  markPerf("oracle-refresh-end");
+  const netMs = measurePerf("oracle-refresh-net", "oracle-refresh-start", "oracle-refresh-net-end");
+  const cpuMs = measurePerf("oracle-refresh-cpu", "oracle-refresh-net-end", "oracle-refresh-end");
+  if (cpuMs != null && cpuMs > 32) console.debug(`[perf] oracle cpu ${cpuMs.toFixed(0)}ms`);
+  if (netMs != null && netMs > 400) console.debug(`[perf] oracle net ${netMs.toFixed(0)}ms (${source})`);
   })();
   try {
     await refreshInFlight;
@@ -7030,6 +7734,7 @@ export async function boot(): Promise<void> {
   maybeShowTour();
   maybeShowTourV2();
   startMarketStreamLoop();
+  startBookLoop();
   startLabSessionLoop();
   void refreshTradingGuardsFromHealth();
   pollTimer = window.setInterval(async () => {
@@ -7079,8 +7784,13 @@ export async function boot(): Promise<void> {
     saveState(state);
     ensurePublicTape(true);
     if (state.mainView === "spot" && prevView === "spot") {
-      if (state.activePair !== prevPair) switchActivePair(state.activePair);
-      else if (state.activeTf !== prevTf) setPaneTf(1, state.activeTf);
+      if (state.activePair !== prevPair) {
+        // applyHash already set activePair — restore prev so switchActivePair can run
+        // (it early-returns when pairId === state.activePair).
+        const nextPair = state.activePair;
+        state.activePair = prevPair;
+        switchActivePair(nextPair);
+      } else if (state.activeTf !== prevTf) setPaneTf(1, state.activeTf);
     } else {
       chartMounted = false;
       render();
@@ -7144,28 +7854,35 @@ function maybeShowTour(): void {
     return;
   }
   const labOn = isLabApiEnabled();
+  const deskOn = isDeskConnectEnabled();
   const steps = [
     {
       t: "Welcome · 60s tour",
-      d: labOn
-        ? "HackMe Spot can run as paper or private DEMO/LAB matching. Connect a fixture on Account for live L2 — still not production custody."
-        : "HackMe Spot is a paper demo. Spot mids are shared paper references (±drift) — not a live CEX matching engine.",
+      d: deskOn
+        ? "Desk soft-launch: Connect wallet on Account, deposit to the deposit address (not Copy addr), then trade live L2. Soft-launch caps apply."
+        : labOn
+          ? "HackMe Spot can run as paper or private DEMO/LAB matching. Connect a fixture on Account for live L2 — still not production custody."
+          : "HackMe Spot is a paper preview. Spot mids are shared references (±drift) — not a live CEX matching engine.",
     },
     { t: "Chart · quick order", d: isMobileLayout()
         ? "Quick order is on — tap the chart to buy or sell at a price. Pinch to zoom; double-tap resets the view."
-        : "Quick order is on — click the chart to place buy/sell at a price. Use the ruler for measurements." },
+        : "Quick order is on — click the chart to place buy or sell at a price. Use the ruler for measurements." },
     { t: "Chart · tools", d: "Ruler: click-drag for Δprice / % / bars / time. Cursor: drag handles or whole object. Delete removes selected; lock freezes edits." },
     {
       t: "Trade",
-      d: labOn
-        ? "Market/Limit hit the lab book when connected; otherwise paper fills. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker."
-        : "Use Market/Limit on the dual panel. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker.",
+      d: deskOn
+        ? "After Connect, Market/Limit hit the live desk book. Use % of Avbl for size. Deposit first if Avbl is 0."
+        : labOn
+          ? "Market/Limit hit the lab book when connected; otherwise paper fills. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker."
+          : "Use Market/Limit on the dual panel. Alerts: long-press/right-click chart or the Alerts tab. VIP fees show on the ticker.",
     },
     {
       t: "Convert & Pool",
-      d: labOn
-        ? "Convert uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
-        : "Convert both ways (HMC/SUP/USDT/BTC). Pool page shows live hashrate as telemetry — it does not feed spot mids.",
+      d: deskOn
+        ? "Convert stays paper until convert GO — quotes use oracle mid. Pool shows live hashrate telemetry only."
+        : labOn
+          ? "Convert uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
+          : "Convert both ways (HMC/SUP/USDT/BTC). Pool page shows live hashrate as telemetry — it does not feed spot mids.",
     },
   ];
   let i = 0;
@@ -7177,11 +7894,13 @@ function maybeShowTour(): void {
     } catch {
       sessionStorage.setItem("hackme-ex-tour-v1", "1");
     }
+    // Skip = done with all tours (no second overlay). Completing "Next" through end may still offer v2.
+    markTourV2Done();
     window.removeEventListener("keydown", onKey);
     bd.remove();
+    document.querySelectorAll(".tour-backdrop, #tour-v2-backdrop").forEach((el) => el.remove());
     if (doneToast) toast("You're set — try a market buy", "ok");
     scheduleChartTapHint({ delayMs: 600 });
-    maybeShowTourV2();
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") dismiss();
@@ -7222,6 +7941,7 @@ function maybeShowTourV2(): void {
   if (localStorage.getItem("hackme-ex-tour-v1") !== "1" && sessionStorage.getItem("hackme-ex-tour-v1") !== "1") return;
 
   let i = 0;
+  let paintTimer = 0;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -7230,7 +7950,8 @@ function maybeShowTourV2(): void {
   };
   const dismiss = () => {
     markTourV2Done();
-    document.getElementById("tour-v2-backdrop")?.remove();
+    if (paintTimer) window.clearTimeout(paintTimer);
+    document.querySelectorAll(".tour-backdrop, #tour-v2-backdrop, .tour-v2-backdrop").forEach((el) => el.remove());
     window.removeEventListener("keydown", onKey);
   };
   const paint = () => {
@@ -7257,7 +7978,7 @@ function maybeShowTourV2(): void {
     wrap.innerHTML = renderTourV2Overlay(step, i, TOUR_V2_STEPS.length);
     const bd = wrap.firstElementChild as HTMLElement;
     document.body.appendChild(bd);
-    bd.querySelector("#tour-v2-skip")?.addEventListener("click", dismiss);
+    bd.querySelector("#tour-v2-skip")?.addEventListener("click", () => dismiss());
     bd.querySelector("#tour-v2-next")?.addEventListener("click", () => {
       if (i + 1 >= TOUR_V2_STEPS.length) {
         dismiss();
@@ -7272,13 +7993,14 @@ function maybeShowTourV2(): void {
     });
   };
   window.addEventListener("keydown", onKey);
-  window.setTimeout(paint, 800);
+  paintTimer = window.setTimeout(paint, 800);
 }
 
 window.addEventListener("beforeunload", () => {
   if (pollTimer) clearInterval(pollTimer);
   if (tickTimer) clearInterval(tickTimer);
   if (oracleAgeTimer) clearInterval(oracleAgeTimer);
+  stopBookLoop();
   marketStream?.stop();
   stopLabGuard?.();
   stopLabSessionGuard();

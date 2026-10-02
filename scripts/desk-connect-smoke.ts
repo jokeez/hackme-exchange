@@ -40,10 +40,28 @@ async function main() {
     deposit?: { enabled?: boolean };
     withdraw?: { enabled?: boolean };
   };
-  if (hj.matching !== "disabled") throw new Error(`matching not HOLD: ${hj.matching}`);
-  if (hj.deposit?.enabled) throw new Error("deposit enabled");
-  if (hj.withdraw?.enabled) throw new Error("withdraw enabled");
-  console.log("PASS  health HOLD (matching/deposit/withdraw)");
+  const matchingGo = process.env.EX_MATCHING_GO === "1" || hj.matching === "ok";
+  // Custody GO only when explicitly requested — health flags alone must not flip smoke to "ON".
+  const custodyGo = process.env.EX_CUSTODY_GO === "1";
+  if (matchingGo) {
+    if (hj.matching !== "ok") throw new Error(`matching GO: want ok got ${hj.matching}`);
+  } else if (hj.matching !== "disabled") {
+    throw new Error(`matching not HOLD: ${hj.matching}`);
+  }
+  if (!custodyGo) {
+    if (hj.deposit?.enabled) throw new Error("deposit enabled (set EX_CUSTODY_GO=1 only after Custody GO)");
+    if (hj.withdraw?.enabled) throw new Error("withdraw enabled (set EX_CUSTODY_GO=1 only after Custody GO)");
+  } else {
+    if (hj.deposit?.enabled !== true) throw new Error("custody GO: deposit want enabled");
+    if (hj.withdraw?.enabled !== true) throw new Error("custody GO: withdraw want enabled");
+  }
+  console.log(
+    matchingGo
+      ? custodyGo
+        ? "PASS  health matching=ok · deposit/withdraw ON"
+        : "PASS  health matching=ok · deposit/withdraw OFF"
+      : "PASS  health HOLD (matching/deposit/withdraw)",
+  );
 
   const chRes = await fetch(`${BASE}/auth/challenge`, {
     method: "POST",
@@ -81,7 +99,6 @@ async function main() {
   console.log("PASS  balances");
 
   const bookRes = await fetch(`${BASE}/book?pair=HMC/USDT`);
-  const matchingGo = process.env.EX_MATCHING_GO === "1";
   if (matchingGo) {
     if (bookRes.status !== 200) throw new Error(`matching GO: book want 200 got ${bookRes.status}`);
     console.log("PASS  book 200 (EX_MATCHING_GO=1)");

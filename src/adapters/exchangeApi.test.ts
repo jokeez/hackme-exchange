@@ -116,7 +116,31 @@ describe("exchangeApi mapping", () => {
 });
 
 describe("labMatching mappers", () => {
-  it("labBookMid / labMarketSlipHint prefer book mid and stay inside ±15% band", () => {
+  it("refreshLabBook keeps per-pair caches independent", async () => {
+    clearLabBookCache();
+    seedLabBookCacheForTest({
+      pairId: "HMC_USDT",
+      bids: [{ price: 0.05, amountBase: 10, totalQuote: 0.5 }],
+      asks: [{ price: 0.051, amountBase: 10, totalQuote: 0.51 }],
+      ts: 1,
+      fingerprint: "a",
+    });
+    seedLabBookCacheForTest({
+      pairId: "HMC_SUP",
+      bids: [{ price: 0.2, amountBase: 5, totalQuote: 1 }],
+      asks: [{ price: 0.21, amountBase: 5, totalQuote: 1.05 }],
+      ts: 2,
+      fingerprint: "b",
+    });
+    expect(getLabBookCache("HMC_USDT")?.bids[0]?.price).toBe(0.05);
+    expect(getLabBookCache("HMC_SUP")?.asks[0]?.price).toBe(0.21);
+    expect(labBookMid("HMC_USDT")).toBeCloseTo(0.0505, 6);
+    expect(labBookMid("HMC_SUP")).toBeCloseTo(0.205, 6);
+    clearLabBookCache();
+    expect(getLabBookCache("HMC_USDT")).toBeNull();
+  });
+
+  it("labMarketSlipHint / labBookMid prefer book mid and stay inside ±15% band", () => {
     clearLabBookCache();
     expect(labBookMid("HMC_USDT")).toBe(0);
     expect(labMarketSlipHint("buy", "HMC_USDT", 0.00055, 0.02)).toBeCloseTo(0.00055 * 1.02, 10);
@@ -135,6 +159,19 @@ describe("labMatching mappers", () => {
     expect(sell).toBeCloseTo(mid * 0.98, 10);
     expect(buy).toBeLessThanOrEqual(mid * 1.15);
     expect(sell).toBeGreaterThanOrEqual(mid * 0.85);
+    clearLabBookCache();
+  });
+
+  it("labBookMid returns 0 on one-sided book (no tip jump to bid-only)", () => {
+    clearLabBookCache();
+    seedLabBookCacheForTest({
+      pairId: "HMC_SUP",
+      bids: [{ price: 0.1992, amountBase: 10, totalQuote: 1.992 }],
+      asks: [],
+      ts: Date.now(),
+      fingerprint: "bid-only",
+    });
+    expect(labBookMid("HMC_SUP")).toBe(0);
     clearLabBookCache();
   });
 

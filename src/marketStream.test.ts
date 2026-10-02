@@ -21,7 +21,7 @@ describe("marketStream", () => {
       {
         getActivePair: () => "HMC_USDT",
         isSpotView: () => true,
-        useLab: () => false,
+        useLiveBook: () => false,
       },
     );
     stream.start();

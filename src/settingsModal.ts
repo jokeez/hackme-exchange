@@ -44,6 +44,9 @@ export type SettingsWalletChrome = {
   matching?: string;
   depositEnabled?: boolean;
   withdrawEnabled?: boolean;
+  maxOpenOrders?: number;
+  minNotional?: number;
+  priceBandBps?: number;
 };
 
 /** Server may say `disabled` — UI shows HOLD until matching is truly `ok`. */
@@ -87,9 +90,9 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   setDisabled("set-desk-import", !deskOn);
   const twoFa = root.querySelector("#set-open-2fa") as HTMLButtonElement | null;
   if (twoFa) {
-    const lab = !!wallet.labLoopback;
-    twoFa.disabled = !lab;
-    twoFa.textContent = lab ? "Open Account · 2FA" : "Coming with withdraw";
+    const canOpen = !!wallet.labLoopback || !!wallet.deskConnect;
+    twoFa.disabled = !canOpen;
+    twoFa.textContent = canOpen ? "Open Account · 2FA" : "Unavailable";
   }
   const matching = formatDeskMatchingLabel(wallet.matching);
   const vals = [
@@ -103,6 +106,15 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
     el.setAttribute("data-on", v.on ? "1" : "0");
     el.textContent = v.text;
   });
+  const capsEl = root.querySelector("#set-desk-caps");
+  if (capsEl) {
+    const caps: string[] = [];
+    if (wallet.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max open ${wallet.maxOpenOrders}`);
+    if (wallet.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${wallet.priceBandBps} bps`);
+    if (wallet.minNotional && wallet.minNotional > 0) caps.push(`min notional ${wallet.minNotional}`);
+    capsEl.textContent = caps.length ? caps.join(" · ") : "";
+    (capsEl as HTMLElement).hidden = caps.length === 0;
+  }
 }
 
 function switchRow(id: string, title: string, hint: string, checked: boolean, disabled = false): string {
@@ -212,7 +224,11 @@ export function renderUnifiedSettingsModal(
         <div class="modal-pane${walletP.active}" id="pane-wallet" role="tabpanel"${walletP.hidden}>
           <header class="settings-pane-head">
             <h4>Security &amp; wallet</h4>
-            <p class="muted small">Paper Spot stays local. Desk matching / deposit / withdraw stay HOLD.</p>
+            <p class="muted small">${
+              isDeskMatchingLive(wallet?.matching)
+                ? "Desk matching live · deposit/withdraw follow edge badges below."
+                : "Paper Spot stays local. Edge badges show matching / deposit / withdraw status."
+            }</p>
           </header>
           <div class="settings-edge-card" id="set-desk-hold" aria-live="polite">
             <div class="settings-edge-top">
@@ -224,6 +240,15 @@ export function renderUnifiedSettingsModal(
               <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
               <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
             </div>
+            <p class="muted small mono" id="set-desk-caps"${
+              wallet?.maxOpenOrders || wallet?.priceBandBps || wallet?.minNotional ? "" : " hidden"
+            }>${(() => {
+              const caps: string[] = [];
+              if (wallet?.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max open ${wallet.maxOpenOrders}`);
+              if (wallet?.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${wallet.priceBandBps} bps`);
+              if (wallet?.minNotional && wallet.minNotional > 0) caps.push(`min notional ${wallet.minNotional}`);
+              return escapeHtml(caps.join(" · "));
+            })()}</p>
           </div>
           <div class="settings-action-list">
             <div class="settings-action-row is-primary">
@@ -264,10 +289,16 @@ export function renderUnifiedSettingsModal(
             <div class="settings-action-row">
               <div class="settings-action-meta">
                 <strong>2FA</strong>
-                <p class="muted small">TOTP for withdraw GO. Public withdraw stays HOLD.</p>
+                <p class="muted small">${
+                  wallet?.withdrawEnabled
+                    ? "TOTP required on every withdraw request."
+                    : "TOTP for withdraw — enroll now before edge opens."
+                }</p>
               </div>
               <div class="settings-action-btns">
-                <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback ? "" : "disabled"}>${wallet?.labLoopback ? "Open Account · 2FA" : "Coming with withdraw"}</button>
+                <button type="button" class="btn-sm" id="set-open-2fa" ${wallet?.labLoopback || wallet?.deskConnect ? "" : "disabled"}>${
+                  wallet?.labLoopback || wallet?.deskConnect ? "Open Account · 2FA" : "Unavailable"
+                }</button>
               </div>
             </div>
             <div class="settings-action-row">
@@ -538,6 +569,7 @@ export function showUnifiedSettingsModal(
     actions.onImportClick();
   });
   bd.querySelector("#set-reset-demo")?.addEventListener("click", () => {
+    if (!window.confirm("Reset demo balances, orders, and local chart state? This cannot be undone.")) return;
     actions.onResetDemo();
     close();
   });

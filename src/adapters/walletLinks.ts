@@ -1,17 +1,26 @@
 import { INTEGRATION } from "../config/integration";
 import type { WalletAssetId } from "./assets";
 import { assetById } from "./assets";
-import { sanitizeHttpUrl } from "../sanitize";
+import { isLoopbackOrigin, sanitizeHttpUrl } from "../sanitize";
 
-/** Build deep links into hackme-node dashboard (dashboard.html hash routes). */
+/**
+ * Deep links into hackme-node / hub wallet.
+ * On public desk builds never emit 127.0.0.1 — use hub origin instead.
+ */
 export function nodeWalletUrl(coin?: WalletAssetId): string {
-  const base = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+  const raw = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+  const base =
+    typeof window !== "undefined" &&
+    !isLoopbackOrigin(window.location.origin) &&
+    isLoopbackOrigin(raw)
+      ? INTEGRATION.hubOrigin.replace(/\/$/, "")
+      : raw;
   const hash = coin ? assetById(coin).walletHash ?? "wallet" : "wallet";
   return `${base}/#${hash}`;
 }
 
 export function nodeTransferUrl(asset: WalletAssetId): string {
-  const base = INTEGRATION.nodeOrigin.replace(/\/$/, "");
+  const base = nodeWalletUrl().replace(/#.*$/, "");
   return `${base}/#wallet?focus=transfer&asset=${assetById(asset).symbol.toLowerCase()}`;
 }
 

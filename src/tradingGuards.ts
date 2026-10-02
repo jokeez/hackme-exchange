@@ -17,6 +17,8 @@ export const DEFAULT_PRICE_BAND_BPS = 1500;
 export type TradingGuards = {
   minNotionalQuote: number;
   priceBandBps: number;
+  /** Soft-launch per-address open order cap from health (0 = unknown / paper default). */
+  maxOpenOrders: number;
   /** True only when health/API explicitly reports lab MM seed active. */
   labMmSeeded: boolean;
   /** Raw health flag for lab MM enabled (optional). */
@@ -32,6 +34,7 @@ export type TradingGuards = {
 export const DEFAULT_TRADING_GUARDS: TradingGuards = {
   minNotionalQuote: DEFAULT_MIN_NOTIONAL_QUOTE,
   priceBandBps: DEFAULT_PRICE_BAND_BPS,
+  maxOpenOrders: 0,
   labMmSeeded: false,
   labMmEnabled: false,
   convertFeeServer: false,
@@ -109,6 +112,14 @@ export function parseHealthTradingGuards(health: HealthResponse | Record<string,
     num(h.band_bps);
   if (band !== undefined && band >= 0) {
     out.priceBandBps = Math.floor(band);
+  }
+
+  const maxOpen =
+    num(trading?.max_open_orders) ??
+    num(risk?.max_open_orders) ??
+    num(h.max_open_orders);
+  if (maxOpen !== undefined && maxOpen > 0) {
+    out.maxOpenOrders = Math.floor(maxOpen);
   }
 
   // MM seeded: only when an explicit flag is present (never invent when absent).

@@ -559,6 +559,18 @@ export function prependOlderCandles(
   return [...older, ...existing];
 }
 
+/**
+ * Soft-MM fills print at bid/ask (often 100–160 bps off mid). Chart tip close must
+ * stay on L2 mid; only allow a tiny wick toward the fill so small orders don't spike.
+ */
+export function clampFillWickPx(anchorMid: number, fillPx: number, maxBps = 25): number {
+  if (!(anchorMid > 0) || !Number.isFinite(anchorMid)) return fillPx;
+  if (!(fillPx > 0) || !Number.isFinite(fillPx)) return anchorMid;
+  const lo = anchorMid * (1 - maxBps / 10_000);
+  const hi = anchorMid * (1 + maxBps / 10_000);
+  return Math.min(hi, Math.max(lo, fillPx));
+}
+
 export function upsertTick(
   candles: Candle[],
   tf: Timeframe,

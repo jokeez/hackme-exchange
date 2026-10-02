@@ -94,8 +94,21 @@ function sanitizeChartOverlays(raw: unknown): DemoState["chartOverlays"] {
   });
 }
 
+const DESK_PUBLIC =
+  String((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_PUBLIC_DESK_CONNECT ?? "")
+    .trim()
+    .toLowerCase() === "1" ||
+  String((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_PUBLIC_DESK_CONNECT ?? "")
+    .trim()
+    .toLowerCase() === "true";
+
+/** Desk public builds start empty — Connect + deposit credits the real ledger. Paper seed only for pure paper/lab. */
+const DEFAULT_WALLET: Wallet = DESK_PUBLIC
+  ? { usdt: 0, hmc: 0, sup: 0, btc: 0 }
+  : { usdt: 10_000, hmc: 50_000, sup: 8_000, btc: 0.15 };
+
 const DEFAULT: DemoState = {
-  wallet: { usdt: 10_000, hmc: 50_000, sup: 8_000, btc: 0.15 },
+  wallet: { ...DEFAULT_WALLET },
   orders: [],
   trades: [],
   ledger: [],
@@ -281,6 +294,21 @@ export function loadState(): DemoState {
     }
     if (s.stateVersion < STATE_VERSION) {
       s.candles = {};
+      // Desk public: drop legacy paper seed (exact 10k/50k/8k/0.15) so new sessions start empty.
+      if (
+        DESK_PUBLIC &&
+        s.wallet.usdt === 10_000 &&
+        s.wallet.hmc === 50_000 &&
+        s.wallet.sup === 8_000 &&
+        Math.abs(s.wallet.btc - 0.15) < 1e-12
+      ) {
+        s.wallet = { usdt: 0, hmc: 0, sup: 0, btc: 0 };
+        s.orders = [];
+        s.trades = [];
+        s.ledger = [];
+        s.equitySnapshots = [];
+        s.initialEquityUsdt = 0;
+      }
       s.stateVersion = STATE_VERSION;
     }
     return mergeChartPrefsOnLoad(s);
@@ -535,4 +563,53 @@ export function syncEquityBaseline(state: DemoState, m: MarketSnapshot): void {
   state.initialEquityUsdt = walletEquityFromMarket(state.wallet, m);
   state.equityBaselineV = 2;
   saveState(state);
+}
+
+/**
+ * Repair paper→desk baseline skew that shows PnL ≈ −100% after empty desk
+ * connect / deposit (legacy paper seed still in localStorage).
+ * Returns true when baseline was rewritten.
+ */
+export function repairStaleEquityBaseline(state: DemoState, m: MarketSnapshot): boolean {
+  const eq = walletEquityFromMarket(state.wallet, m);
+  const base = state.initialEquityUsdt;
+  const snapMax = state.equitySnapshots.reduce(
+    (mx, s) => (s.equityUsdt > mx ? s.equityUsdt : mx),
+    0,
+  );
+  /** Paper→empty/dust desk: equity collapsed vs baseline → PnL ≈ −100%.
+   * Threshold starts at $1 so ~7 USDT paper seeds still repair (was ref>=10). */
+  const cliffDown =
+    (ref: number) => ref >= 1 && eq >= 0 && eq / ref < 0.05 && ref - eq > 0.5;
+  /** Dust→deposit/credit: equity exploded vs tiny baseline → PnL +thousands%. */
+  const cliffUp =
+    (ref: number) =>
+      ref > 0 && eq >= 1 && eq / ref >= 20 && eq - ref > 1;
+
+  let changed = false;
+  if (!(base > 0)) {
+    if (eq > 0) {
+      state.initialEquityUsdt = eq;
+      state.equityBaselineV = 2;
+      changed = true;
+    }
+  } else if (cliffDown(base) || cliffUp(base)) {
+    state.initialEquityUsdt = Math.max(eq, 0);
+    state.equityBaselineV = 2;
+    changed = true;
+  }
+
+  // Paper-era sparkline points (or a zeroed connect) paint a fake crash even after baseline repair.
+  if (cliffDown(snapMax) || cliffUp(snapMax) || (changed && state.equitySnapshots.length > 1)) {
+    state.equitySnapshots = eq > 0 ? [{ ts: Date.now(), equityUsdt: eq }] : [];
+    changed = true;
+  } else if (eq > 0 && state.equitySnapshots.some((s) => s.equityUsdt <= 0)) {
+    // Drop zero/empty connect blips that squash the y-axis against real balances.
+    state.equitySnapshots = state.equitySnapshots.filter((s) => s.equityUsdt > 0);
+    if (!state.equitySnapshots.length) {
+      state.equitySnapshots = [{ ts: Date.now(), equityUsdt: eq }];
+    }
+    changed = true;
+  }
+  return changed;
 }

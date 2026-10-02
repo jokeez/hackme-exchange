@@ -65,7 +65,9 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
   const out: DayPnl[] = [];
   const now = new Date();
   now.setHours(12, 0, 0, 0);
-  let prevClose = state.initialEquityUsdt;
+  // Do not seed prevClose from initialEquity — a stale paper baseline paints one
+  // giant red cliff day after Connect/sync to a dust/empty desk ledger.
+  let prevClose: number | null = null;
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
@@ -73,7 +75,16 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
     const entry = byDay.get(key);
     let pnl = 0;
     if (entry) {
-      pnl = entry.last - prevClose;
+      // Prefer intraday change; fall back to overnight vs prior close when we have one.
+      if (prevClose != null && Number.isFinite(prevClose)) {
+        pnl = entry.last - prevClose;
+      } else {
+        pnl = entry.last - entry.first;
+      }
+      // Drop absurd cliffs from paper→desk resets (same heuristic as equity repair).
+      if (prevClose != null && prevClose >= 1 && entry.last / prevClose < 0.05 && prevClose - entry.last > 0.5) {
+        pnl = entry.last - entry.first;
+      }
       prevClose = entry.last;
     }
     out.push({
@@ -82,7 +93,6 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
       pnl,
     });
   }
-  // Do not synthesize fake day deltas — empty calendar is honest for paper.
   return out;
 }
 

@@ -18,6 +18,18 @@ describe("tradingGuards", () => {
     expect(g.labMmSeeded).toBe(false);
   });
 
+  it("parses max_open_orders soft-launch cap from health", () => {
+    const g = parseHealthTradingGuards({
+      ok: true,
+      max_open_orders: 20,
+      min_notional: 1_000_000,
+      price_band_bps: 1500,
+    });
+    expect(g.maxOpenOrders).toBe(20);
+    expect(g.minNotionalQuote).toBe(0.01);
+    expect(g.priceBandBps).toBe(1500);
+  });
+
   it("parses health overrides without inventing MM seed", () => {
     const g = parseHealthTradingGuards({
       ok: true,
@@ -27,6 +39,7 @@ describe("tradingGuards", () => {
     });
     expect(g.minNotionalQuote).toBe(2);
     expect(g.priceBandBps).toBe(1000);
+    expect(g.maxOpenOrders).toBe(0);
     expect(g.labMmEnabled).toBe(true);
     // bare boolean lab_mm=true does not imply seeded badge
     expect(g.labMmSeeded).toBe(false);

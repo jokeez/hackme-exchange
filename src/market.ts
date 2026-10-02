@@ -3,6 +3,7 @@ import type { MarketSnapshot, PairId, PoolStats, SupEconomics, Ticker, WorkStats
 import { INTEGRATION } from "./config/integration";
 import { computeAssetUsd, midForPairId } from "./registry";
 import { fetchWithTimeout } from "./fetchTimeout";
+import { fetchPoolStatsCached, fetchWorkStatsCached } from "./oracleFetch";
 
 export {
   formatPrice,
@@ -228,26 +229,13 @@ export async function fetchMarket(
   source: "live" | "fallback";
 }> {
   try {
-    // Pool is required; work/sup/btc are best-effort — flaky proxy must not zero the desk.
-    const poolT = 4_000;
-    const workT = 6_000;
-    const poolP = fetchWithTimeout(`${poolBase()}/api/pool/stats`, {}, poolT);
-    const workP = fetchWithTimeout(`${poolBase()}/api/work/stats`, {}, workT).catch(() => null);
-    const supP = fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, poolT).catch(() => null);
-    // Paper BTC pin — do not fork HMC_BTC/SUP_BTC across devices via Binance reachability.
-    const poolRes = await poolP;
-    if (!poolRes.ok) throw new Error("pool");
-    const pool = (await poolRes.json()) as PoolStats;
-    const workRes = await workP;
-    let work: WorkStats = {};
-    if (workRes?.ok) {
-      try {
-        work = (await workRes.json()) as WorkStats;
-      } catch {
-        work = {};
-      }
-    }
-    const supRes = await supP;
+    // Pool required; work/sup best-effort with short timeouts (shared cache with fetchPoolLive).
+    const poolP = fetchPoolStatsCached();
+    const workP = fetchWorkStatsCached();
+    const supP = fetchWithTimeout(`${hubBase()}/api/sup/economics`, {}, 1_200).catch(() => null);
+    const pool = await poolP;
+    const work = await workP;
+    const [supRes] = await Promise.all([supP]);
     let sup: SupEconomics = {};
     if (supRes?.ok) {
       try {

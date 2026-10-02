@@ -65,6 +65,19 @@ async function main() {
   if (hj.withdraw?.enabled) fail("withdraw enabled on HOLD edge");
   else pass("withdraw.enabled=false");
 
+  // Soft-launch caps advertised on public slim health (SPA chrome). Optional until edge redeploy.
+  if (typeof (hj as { max_open_orders?: number }).max_open_orders === "number") {
+    pass(`health max_open_orders=${(hj as { max_open_orders: number }).max_open_orders}`);
+  } else {
+    console.log("WARN  health max_open_orders missing — redeploy edge after Matching GO caps PR");
+  }
+  if (typeof (hj as { price_band_bps?: number }).price_band_bps === "number") {
+    pass(`health price_band_bps=${(hj as { price_band_bps: number }).price_band_bps}`);
+  }
+  if (typeof (hj as { min_notional?: number }).min_notional === "number") {
+    pass(`health min_notional=${(hj as { min_notional: number }).min_notional}`);
+  }
+
   // --- 2. Book 503 HOLD ---
   const book = await fetch(`${BASE}/book?pair=HMC/USDT`);
   const bookBody = await book.json().catch(() => ({}));

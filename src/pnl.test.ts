@@ -26,6 +26,39 @@ describe("pnlPct / pnlWindows", () => {
     expect(pnlPct(s, market)).toBe(0);
   });
 
+  it("repairStaleEquityBaseline resets paper→desk −100% skew", async () => {
+    const { repairStaleEquityBaseline } = await import("./store");
+    const s = baseState({
+      wallet: { usdt: 0.05, hmc: 0, sup: 0, btc: 0 },
+      initialEquityUsdt: 10_000,
+      equitySnapshots: [
+        { ts: Date.now() - 86_400_000, equityUsdt: 10_000 },
+        { ts: Date.now() - 3_600_000, equityUsdt: 9_800 },
+      ],
+    });
+    expect(pnlPct(s, market)).toBeLessThan(-99);
+    expect(repairStaleEquityBaseline(s, market)).toBe(true);
+    expect(pnlPct(s, market)).toBeCloseTo(0, 5);
+    expect(s.equitySnapshots).toHaveLength(1);
+    expect(s.equitySnapshots[0]!.equityUsdt).toBeCloseTo(0.05, 8);
+  });
+
+  it("repairStaleEquityBaseline resets dust→deposit surge (+thousands% PnL)", async () => {
+    const { repairStaleEquityBaseline } = await import("./store");
+    const s = baseState({
+      wallet: { usdt: 500, hmc: 5_000, sup: 200, btc: 0 },
+      initialEquityUsdt: 7.5,
+      equitySnapshots: [
+        { ts: Date.now() - 60_000, equityUsdt: 7.5 },
+        { ts: Date.now(), equityUsdt: 800 },
+      ],
+    });
+    expect(pnlPct(s, market)).toBeGreaterThan(1_000);
+    expect(repairStaleEquityBaseline(s, market)).toBe(true);
+    expect(pnlPct(s, market)).toBeCloseTo(0, 5);
+    expect(s.equitySnapshots).toHaveLength(1);
+  });
+
   it("pnlWindows returns 24h/7d/30d", () => {
     const s = baseState();
     const now = Date.now();

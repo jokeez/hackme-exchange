@@ -438,6 +438,9 @@ describe("visual CSS tokens & critical rules", () => {
     expect(css).toContain("scrollbar-width: thin");
     expect(css).toContain(".order-zone");
     expect(css).toContain("#book");
+    expect(css).toContain(".book-ladder");
+    expect(css).toContain(".ob-asks-pane");
+    expect(css).toContain(".ob-bids-pane");
   });
 
   it("order-book mid band fits price+spread+source without fixed 28px clip", () => {

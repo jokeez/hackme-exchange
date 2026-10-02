@@ -1,3 +1,4 @@
+import { isHubEmbed, postHubRoute } from "./embed";
 import type { MainView, PairId, Timeframe, Wallet } from "./types";
 import { PAIRS } from "./pairs";
 import { TIMEFRAMES } from "./types";
@@ -37,16 +38,44 @@ function parseWalletKey(raw: string | undefined): keyof Wallet | undefined {
   return undefined;
 }
 
-/** Parse `#spot/HMC_USDT/15m`, `#convert/hmc/usdt`, `#pool/lookup/HMC-…`, `#account/deposit`. */
+/** Aliases used by hub / marketing links → SPA main views. */
+const VIEW_ALIASES: Record<string, MainView> = {
+  wallet: "account",
+  login: "account",
+  hub: "account",
+  settings: "account",
+  funds: "account",
+  deposit: "account",
+  withdraw: "account",
+  trade: "spot",
+  market: "spot",
+  swap: "convert",
+};
+
+/** Parse `#spot/HMC_USDT/15m`, `#convert/hmc/usdt`, `#pool/lookup/HMC-…`, `#account/deposit`, `#wallet`. */
 export function parseRouteHash(hash: string): RouteHash {
   const raw = (hash || "").replace(/^#/, "").trim();
   if (!raw) return {};
-  const parts = raw.split("/").filter(Boolean);
+  // Strip query (?focus=…) — hub wallet links sometimes append params.
+  const pathOnly = raw.split("?")[0] ?? raw;
+  const parts = pathOnly.split("/").filter(Boolean);
   const out: RouteHash = {};
   let i = 0;
+  const head = parts[0]?.toLowerCase() ?? "";
   if (parts[0] && VIEWS.has(parts[0] as MainView)) {
     out.view = parts[0] as MainView;
     i = 1;
+  } else if (head && VIEW_ALIASES[head]) {
+    out.view = VIEW_ALIASES[head]!;
+    i = 1;
+    // #deposit / #withdraw / #wallet/deposit → account section
+    if (head === "deposit" || head === "withdraw" || head === "funds") {
+      out.section = head === "funds" ? "deposit" : head;
+    } else if (parts[1] && ACCOUNT_SECTIONS.has(parts[1]!)) {
+      out.section = parts[1];
+    } else if (head === "login" || head === "hub" || head === "wallet" || head === "settings") {
+      out.section = "deposit";
+    }
   }
 
   if (out.view === "convert") {
@@ -123,4 +152,6 @@ export function writeRouteHash(ctx: RouteHashWriteContext): void {
   if (location.hash !== next) {
     history.replaceState(null, "", next);
   }
+  // Hub iframe: keep parent Pop out / restore in sync with pair+TF.
+  if (isHubEmbed()) postHubRoute(next);
 }

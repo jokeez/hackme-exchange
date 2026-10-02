@@ -102,6 +102,7 @@ export type HealthResponse = {
   min_notional?: number;
   min_notional_quote?: number;
   price_band_bps?: number;
+  max_open_orders?: number;
   band_bps?: number;
   lab_mm?: boolean | string | number | { enabled?: boolean; seeded?: boolean; on?: boolean; active?: boolean; seed?: boolean };
   mm_seeded?: boolean | string | number;
@@ -111,6 +112,7 @@ export type HealthResponse = {
     min_notional?: number;
     min_notional_quote?: number;
     price_band_bps?: number;
+    max_open_orders?: number;
     lab_mm?: boolean | string | number;
     mm_seeded?: boolean | string | number;
     seeded?: boolean | string | number;
@@ -119,6 +121,7 @@ export type HealthResponse = {
     min_notional?: number;
     price_band_bps?: number;
     band_bps?: number;
+    max_open_orders?: number;
   };
   /** Optional live market stream endpoints (WebSocket URL or path template with {pair}). */
   streams?: {
@@ -340,9 +343,9 @@ export function formatExchangeReject(err: ExchangeApiError): string {
     post_only: "Post-only would take liquidity",
     fok_unfilled: "FOK cannot be fully filled",
     unsupported_type: "Order type not supported on lab API",
-    csrf_failed: "Session CSRF failed — reconnect DEMO/LAB",
-    session_revoked: "Session revoked — reconnect DEMO/LAB",
-    unauthorized: "Unauthorized — reconnect or check credentials",
+    csrf_failed: "Session expired — reconnect desk wallet",
+    session_revoked: "Session revoked — reconnect desk wallet",
+    unauthorized: "Unauthorized — reconnect desk wallet",
     rate_limited: "Rate limited — retry shortly",
     convert_failed: "Convert rejected",
     convert_inventory: "Convert inventory low — try smaller size or Spot",
@@ -1196,9 +1199,9 @@ function csrfHeaders(json = false): Record<string, string> {
  * POST /orders — lab matching (limit/market). Requires session + CSRF.
  * Body uses integer minors: qty = base×1e8, price = quote-minor per 1 whole base.
  */
-export async function postExchangeOrder(
+async function postExchangeOrderOnce(
   body: OrderSubmitBody,
-  timeoutMs = 5_000,
+  timeoutMs: number,
   baseOverride?: string,
 ): Promise<(PlaceOrderResponse & { status: number }) | ExchangeApiError> {
   const url = apiUrl("/orders", baseOverride);
@@ -1235,6 +1238,23 @@ export async function postExchangeOrder(
       message: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+/**
+ * POST /orders — lab/desk matching. On csrf_failed, restore CSRF from httpOnly
+ * session cookie once and retry (Connect memory CSRF can desync after remount).
+ */
+export async function postExchangeOrder(
+  body: OrderSubmitBody,
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<(PlaceOrderResponse & { status: number }) | ExchangeApiError> {
+  const first = await postExchangeOrderOnce(body, timeoutMs, baseOverride);
+  if (first.ok) return first;
+  if (first.code !== "csrf_failed" && first.status !== 403) return first;
+  const restored = await authSessionRestore(timeoutMs, baseOverride);
+  if (!("ok" in restored) || !restored.ok || !restored.csrf_token) return first;
+  return postExchangeOrderOnce(body, timeoutMs, baseOverride);
 }
 
 export async function listExchangeOrders(

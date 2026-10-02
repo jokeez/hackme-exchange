@@ -118,8 +118,10 @@ describe("Account view XSS / DOM sinks", () => {
     expect(addr?.textContent).toContain("<");
     expect(addr?.innerHTML).toContain("&lt;");
     for (const img of document.querySelectorAll("img")) {
+      // Deferred TOTP QR is mounted without src until paintTotpQr runs.
+      if (img.id === "lab-2fa-qr" && (!(img as HTMLImageElement).src || img.hidden)) continue;
       const src = img.getAttribute("src") ?? "";
-      expect(src).toMatch(/^\/(logo-hex\.png|assets\/coins\/)/);
+      expect(src).toMatch(/^(\/(logo-hex\.png|assets\/coins\/)|data:image\/png;base64,)/);
     }
   });
 

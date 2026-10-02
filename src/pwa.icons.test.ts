@@ -16,6 +16,7 @@ describe("PWA icons", () => {
 
   it("logo-hex.png ships in public for HMC badge + PWA", () => {
     expect(existsSync(join(ROOT, "public/logo-hex.png"))).toBe(true);
+    expect(existsSync(join(ROOT, "public/assets/coins/hmc.png"))).toBe(true);
     expect(existsSync(join(ROOT, "public/icons/apple-touch-icon.png"))).toBe(true);
     expect(existsSync(join(ROOT, "public/icons/icon-512.png"))).toBe(true);
     expect(existsSync(join(ROOT, "public/icons/favicon.ico"))).toBe(true);

@@ -11,18 +11,18 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to HackMe Exchange",
-    body: "Open-source paper Spot — simulated balances, shared reference mids (±drift). Pool stats are telemetry only. Not real money, not custody.",
+    body: "Desk soft-launch: Connect on Account, send to your deposit address (not Copy addr), then trade. Soft-launch caps apply — not full production custody.",
   },
   {
     id: "chart",
     title: "Spot chart",
-    body: "Tap the chart for quick order. Long-press (or right-click on desktop) to set a price alert. Pair and timeframe persist.",
+    body: "Candles follow the live book mid when matching is on. Tap the chart for quick order; long-press (or right-click) for alerts.",
     selector: "#chart-wrap",
   },
   {
     id: "convert",
     title: "Convert desk",
-    body: "Open Convert in the top nav to swap paper balances at mid with a fee preview.",
+    body: "Convert quotes at oracle mid (paper until convert GO). Spot uses the live book after Connect.",
   },
   {
     id: "pool",
@@ -31,8 +31,8 @@ export const TOUR_V2_STEPS: TourStep[] = [
   },
   {
     id: "account",
-    title: "Account & PnL",
-    body: "Open Account for paper equity, VIP fee tier, and dust convert shortcuts.",
+    title: "Account & deposit",
+    body: "Connect, then Deposit → Show HMC address. Never send coins to Copy addr (login only).",
   },
   {
     id: "pwa",

@@ -66,10 +66,11 @@ export const Ico = {
 } as const;
 
 /** Bump when coin art changes — busts CDN cache on exchange.hackme.tech. */
-const COIN_ICON_REV = 4;
+const COIN_ICON_REV = 7;
 
 const COIN_ICON_SRC: Record<string, string> = {
-  HMC: `/logo-hex.png?v=${COIN_ICON_REV}`,
+  // Brand hex mark (resized badge from logo-hex.png — not the placeholder hmc.svg).
+  HMC: `/assets/coins/hmc.png?v=${COIN_ICON_REV}`,
   USDT: `/assets/coins/usdt.png?v=${COIN_ICON_REV}`,
   BTC: `/assets/coins/btc.png?v=${COIN_ICON_REV}`,
   SUP: `/assets/coins/sup.svg?v=${COIN_ICON_REV}`,
@@ -87,7 +88,8 @@ function coinLogoBadge(symbol: string, src: string, extraClass = "", size = 16):
   const cls = COIN_ICON_CLASS[key] ?? "asset-unk asset-coin-logo";
   const lg = extraClass.includes("asset-ico-lg");
   const px = lg ? 32 : size;
-  return `<span class="asset-ico ${cls} ${extraClass}" title="${escapeHtml(key)}" aria-hidden="true"><img src="${src}" alt="" width="${px}" height="${px}" decoding="async" loading="lazy" /></span>`;
+  // eager: tiny badges in the terminal must not lazy-pop after paint.
+  return `<span class="asset-ico ${cls} ${extraClass}" title="${escapeHtml(key)}" aria-hidden="true"><img src="${src}" alt="" width="${px}" height="${px}" decoding="async" loading="eager" /></span>`;
 }
 
 /** Markets list: one badge for the base asset only (no USDT/BTC stack). */

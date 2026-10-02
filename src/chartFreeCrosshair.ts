@@ -10,6 +10,7 @@ export type FreeCrosshairHandle = {
   hide: () => void;
   refreshRect: () => void;
   setCapturing: (on: boolean) => void;
+  setPanning: (on: boolean) => void;
   setPlotInsets: (rightPx: number, bottomPx: number) => void;
   destroy: () => void;
   el: HTMLDivElement;
@@ -30,16 +31,27 @@ export function mountFreeCrosshair(host: HTMLElement): FreeCrosshairHandle {
   let left = 0;
   let top = 0;
   const refreshRect = () => {
-    const r = host.getBoundingClientRect();
-    left = r.left;
-    top = r.top;
+    // Prefer the overlay box so inset (price/time scales) stays pixel-true.
+    const r = el.getBoundingClientRect();
+    if (r.width > 1 && r.height > 1) {
+      left = r.left;
+      top = r.top;
+      return;
+    }
+    const hr = host.getBoundingClientRect();
+    left = hr.left;
+    top = hr.top;
   };
   refreshRect();
 
   const move = (clientX: number, clientY: number) => {
+    // Re-measure each move — layout/scroll must not drift the hair off the cursor.
+    refreshRect();
     const x = clientX - left;
     const y = clientY - top;
     if (el.hidden) el.hidden = false;
+    v.style.visibility = "";
+    h.style.visibility = "";
     // Sync transform — no rAF; compositor-only so the hair never trails the cursor.
     v.style.transform = `translate3d(${x}px,0,0)`;
     h.style.transform = `translate3d(0,${y}px,0)`;
@@ -47,11 +59,21 @@ export function mountFreeCrosshair(host: HTMLElement): FreeCrosshairHandle {
   };
 
   const hide = () => {
-    el.hidden = true;
+    // Keep the capturing hit-layer mounted (display:none would steal pan from us
+    // while shell also skips — dead zone). Only tuck the hair lines away.
+    v.style.visibility = "hidden";
+    h.style.visibility = "hidden";
+    if (!el.classList.contains("capturing")) el.hidden = true;
   };
 
   const setCapturing = (on: boolean) => {
     el.classList.toggle("capturing", on);
+    if (on) el.hidden = false;
+    else el.classList.remove("panning");
+  };
+
+  const setPanning = (on: boolean) => {
+    el.classList.toggle("panning", on);
   };
 
   const setPlotInsets = (rightPx: number, bottomPx: number) => {
@@ -65,5 +87,5 @@ export function mountFreeCrosshair(host: HTMLElement): FreeCrosshairHandle {
     el.remove();
   };
 
-  return { move, hide, refreshRect, setCapturing, setPlotInsets, destroy, el };
+  return { move, hide, refreshRect, setCapturing, setPanning, setPlotInsets, destroy, el };
 }
