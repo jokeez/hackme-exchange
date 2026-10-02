@@ -125,17 +125,31 @@ function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
 }
 
 /**
- * Per-bar RMS vol for the deterministic walk (~CEX soft-launch tape).
- * Kept small so 1m bodies stay readable, not full-pane blocks.
+ * Per-bar RMS vol for the deterministic walk — CEX soft-launch tape.
+ * ~12–18 bps typical 1m body energy (not the prior ~3 bps “ruler line”).
  */
 function walkVol(tf: Timeframe): number {
-  return 0.00055 * Math.sqrt(Math.max(1, TF_SEC[tf] / 60));
+  const minScale = Math.sqrt(Math.max(1, TF_SEC[tf] / 60));
+  // Soft-launch HMC is quiet vs BTC majors, but still needs visible bodies.
+  return 0.00125 * minScale;
+}
+
+/** One bar's log-return: fat tails + short persistence (chop, not a straight line). */
+function barReturn(pairId: PairId, tf: Timeframe, boundarySec: number): number {
+  const vol = walkVol(tf);
+  const u = stableSigned([pairId, tf, boundarySec, "cex-rw"], 0.5);
+  const fatU = stableSigned([pairId, tf, boundarySec, "cex-fat"], 0.5);
+  const prev = stableSigned([pairId, tf, boundarySec - TF_SEC[tf], "cex-rw"], 0.5);
+  // Mix current shock with previous sign → short runs, then flip (CEX chop).
+  const mixed = u * 0.68 + prev * 0.32;
+  // Fat tail: ~15% of bars 2.5–4×; rest mildly amplified.
+  const fat = Math.abs(fatU) > 0.4 ? 2.4 + Math.abs(fatU) * 2.2 : 1 + Math.abs(fatU) * 0.9;
+  return mixed * vol * 2.6 * fat;
 }
 
 /**
  * Deterministic CEX-like price at `atSec`, pinned so `anchorSec` prints `anchorPx`.
- * Random-walk (not multi-sine): sine mean-reversion made every open sit on the mid
- * and painted a histogram-from-baseline instead of real OHLC candles.
+ * Random-walk with fat tails — not multi-sine (histogram-from-mid) and not a ruler line.
  */
 function walkPriceAt(
   pairId: PairId,
@@ -148,17 +162,14 @@ function walkPriceAt(
   if (atSec === anchorSec) return anchorPx;
   const step = TF_SEC[tf];
   if (!(step > 0)) return anchorPx;
-  const vol = walkVol(tf) * 2.2;
   let logPx = Math.log(anchorPx);
   if (atSec < anchorSec) {
     for (let t = anchorSec; t > atSec; t -= step) {
-      const ret = stableSigned([pairId, tf, t, "cex-rw"], 0.5) * vol;
-      logPx -= ret;
+      logPx -= barReturn(pairId, tf, t);
     }
   } else {
     for (let t = anchorSec; t < atSec; t += step) {
-      const ret = stableSigned([pairId, tf, t + step, "cex-rw"], 0.5) * vol;
-      logPx += ret;
+      logPx += barReturn(pairId, tf, t + step);
     }
   }
   const px = Math.exp(logPx);
@@ -167,7 +178,7 @@ function walkPriceAt(
 
 /**
  * Exchange-like intra-bar extremes — always both wicks (Binance/TV look).
- * Wicks track the body + modest mid-relative noise; never a one-sided comb.
+ * Range is usually 1.4–2.6× the body so candles are not flat ticks.
  */
 function wickSpread(
   open: number,
@@ -178,19 +189,23 @@ function wickSpread(
 ): { high: number; low: number } {
   const bodyHigh = Math.max(open, close);
   const bodyLow = Math.min(open, close);
-  const body = bodyHigh - bodyLow;
+  const body = Math.max(bodyHigh - bodyLow, (bodyHigh + bodyLow) * 0.00015);
   const mid = (open + close) / 2 || bodyHigh || 1;
-  const microBps = pairId.includes("BTC") ? 1.6 : pairId === "SUP_USDT" ? 1.2 : 1.0;
-  const micro = mid * (microBps / 10_000);
   const hiSeed = stableUnit([pairId, tf, t, "wick-high"]);
   const loSeed = stableUnit([pairId, tf, t, "wick-low"]);
-  // Always some wick beyond the body (15–90% of cap); body-relative add-on for larger bars.
+  const spike = stableUnit([pairId, tf, t, "wick-spike"]);
   const cap = mid * maxWickFracForTf(tf);
-  const hiBeyond = Math.min(cap, micro * (0.4 + hiSeed * 1.1) + body * (0.08 + hiSeed * 0.45));
-  const loBeyond = Math.min(cap, micro * (0.4 + loSeed * 1.1) + body * (0.08 + loSeed * 0.45));
+  // Upper/lower wicks often unequal — like real books.
+  let hiBeyond = body * (0.25 + hiSeed * 1.1) + mid * (0.00008 + hiSeed * 0.00035);
+  let loBeyond = body * (0.25 + loSeed * 1.1) + mid * (0.00008 + loSeed * 0.00035);
+  if (spike > 0.88) {
+    // Occasional longer wick (~CEX stop-run look).
+    if (hiSeed > loSeed) hiBeyond *= 1.8 + spike;
+    else loBeyond *= 1.8 + spike;
+  }
   return {
-    high: bodyHigh + Math.max(hiBeyond, micro * 0.35),
-    low: bodyLow - Math.max(loBeyond, micro * 0.35),
+    high: bodyHigh + Math.min(hiBeyond, cap),
+    low: bodyLow - Math.min(loBeyond, cap),
   };
 }
 
@@ -338,8 +353,10 @@ export function seedCandles(
       const t = now - (closedN - i) * sec;
       times.push(t);
       if (i === 0) continue;
-      const ret = stableSigned([pairId, tf, t, "cex-rw"], 0.5) * walkVol(tf) * 2.2;
-      raw.push(raw[i - 1]! * (1 + ret));
+      // Fat-tail shock + soft pull toward 1.0 so 24h change stays CEX-mild after tip pin.
+      const shock = barReturn(pairId, tf, t);
+      const revert = -0.12 * Math.log(Math.max(1e-9, raw[i - 1]!));
+      raw.push(raw[i - 1]! * (1 + shock + revert));
     }
     const tipRaw = raw[raw.length - 1] || 1;
     const scale = tipRaw > 0 ? tipOpen / tipRaw : tipOpen;
@@ -350,7 +367,7 @@ export function seedCandles(
       const open =
         out.length > 0
           ? out[out.length - 1]!.close
-          : close * (1 + stableSigned([pairId, tf, t, "o0"], 0.5) * walkVol(tf));
+          : close * (1 + barReturn(pairId, tf, t) * 0.35);
       out.push(makeBar(pairId, t, open, close, tf));
     }
     // Contiguity into tip open.
@@ -448,6 +465,7 @@ export function seedAllTimeframes(
  * Forming tip OHLC from shared walk — tip close prints exactly `tipMid`.
  * Pure function of (pair, tf, bucket, nowMs, tipMid) so late-joining clients match.
  * Open = walk at bucket start pinned as if the bar closes at tipMid (not ticker sine).
+ * Intrabar probes give real H/L even while Soft-MM mid is quiet.
  */
 export function tipBarFromPaperClock(
   pairId: PairId,
@@ -461,20 +479,37 @@ export function tipBarFromPaperClock(
   const sec = TF_SEC[tf];
   // End-of-bucket pin: identical tipMid → identical open on every device.
   const open = walkPriceAt(pairId, tf, bucketT, bucketT + sec, tipMid);
-  const bar = makeBar(pairId, bucketT, open, tipMid, tf);
-  bar.close = tipMid;
-  bar.open = open;
-  bar.high = Math.max(bar.high, bar.open, tipMid);
-  bar.low = Math.min(bar.low, bar.open, tipMid);
-  // Forming bar: wick pad scales with elapsed time (same nowMs → same pad).
   const elapsed = Math.min(1, Math.max(0, (nowMs / 1000 - bucketT) / sec));
-  if (elapsed > 0.05 && elapsed < 1) {
-    const midPx = (open + tipMid) / 2 || tipMid;
-    const pad = midPx * maxWickFracForTf(tf) * (0.25 + 0.5 * elapsed);
-    bar.high = Math.max(bar.high, Math.max(open, tipMid) + pad * 0.35);
-    bar.low = Math.min(bar.low, Math.min(open, tipMid) - pad * 0.35);
+  // Sample a few intrabar marks between open → tipMid so H/L are not body-only.
+  let high = Math.max(open, tipMid);
+  let low = Math.min(open, tipMid);
+  const probes = 6;
+  for (let i = 1; i <= probes; i++) {
+    const frac = (i / (probes + 1)) * Math.max(elapsed, 0.15);
+    const base = open + (tipMid - open) * frac;
+    const shock =
+      barReturn(pairId, tf, bucketT + Math.floor(frac * sec)) * (0.35 + 0.4 * (1 - frac));
+    const px = base * (1 + shock * 0.45);
+    if (px > 0 && Number.isFinite(px)) {
+      high = Math.max(high, px);
+      low = Math.min(low, px);
+    }
   }
-  return bar;
+  const wick = wickSpread(open, tipMid, pairId, tf, bucketT);
+  high = Math.max(high, wick.high);
+  low = Math.min(low, wick.low);
+  return constrainBarToOpen(
+    {
+      time: bucketT,
+      open,
+      high,
+      low,
+      close: tipMid,
+      volume: candleVolume(pairId, tf, bucketT),
+    },
+    maxBodyFracForTf(tf),
+    maxWickFracForTf(tf),
+  );
 }
 
 /** Closed paper bar = walk open→close across the bucket (CEX-contiguous). */
@@ -543,6 +578,13 @@ export function applyPaperClockToPairCandles(
       }
     }
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
+    const prevClose = nextBase[nextBase.length - 1]?.close;
+    if (prevClose && prevClose > 0) {
+      // CEX contiguity across the rollover boundary.
+      tip.open = prevClose;
+      tip.high = Math.max(tip.high, tip.open, tip.close);
+      tip.low = Math.min(tip.low, tip.open, tip.close);
+    }
     nextBase = [...nextBase, tip].slice(-MAX_CANDLES);
   }
 
@@ -585,16 +627,35 @@ export function prependOlderCandles(
   const n = Math.min(count, room, maxAdd);
   if (n <= 0) return existing;
 
-  // Pin walk so the bar that ends at `first.time` opens into `first.open`.
-  const tipBucket = first.time;
+  // Pin walk so older bars open into `first.open` without O(n²) walkPriceAt scans.
   const tipMid = first.open > 0 ? first.open : paperPairMid(pairId, first.time * 1000);
   const older: Candle[] = [];
+  const raw: number[] = [1];
+  const times: number[] = [];
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    older.push(closedBarFromPaperClock(pairId, tf, t, tipBucket, tipMid));
+    times.push(t);
   }
-  if (!older.length) return existing;
+  if (!times.length) return existing;
+  for (let i = 0; i < times.length; i++) {
+    if (i === 0) continue;
+    const t = times[i]!;
+    const shock = barReturn(pairId, tf, t);
+    const revert = -0.12 * Math.log(Math.max(1e-9, raw[i - 1]!));
+    raw.push(raw[i - 1]! * (1 + shock + revert));
+  }
+  const tipRaw = raw[raw.length - 1] || 1;
+  const scale = tipRaw > 0 ? tipMid / tipRaw : tipMid;
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i]!;
+    const close = raw[i]! * scale;
+    const open =
+      older.length > 0
+        ? older[older.length - 1]!.close
+        : close * (1 + barReturn(pairId, tf, t) * 0.35);
+    older.push(makeBar(pairId, t, open, close, tf));
+  }
   // Contiguity: last older close → first.open
   const lastOlder = older[older.length - 1]!;
   if (lastOlder && first.open > 0) {

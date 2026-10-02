@@ -755,16 +755,18 @@ function makeRobustAutoscaleProvider() {
       const { fromIdx, toIdx } = logicalRangeToIndices(lr.from, lr.to, currentCandles.length);
       const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
       if (!robust) return original();
-      // Floor the window so quiet Soft-MM tape does not zoom until every body
-      // looks like a full-pane histogram around the mid line.
+      // Pad the robust window slightly — do NOT force a huge empty floor that
+      // flattens lively tape into a thin ruler line in the middle of the pane.
       const mid = (robust.minValue + robust.maxValue) / 2;
-      const span = Math.max(robust.maxValue - robust.minValue, mid > 0 ? mid * 0.012 : 0);
+      const rawSpan = robust.maxValue - robust.minValue;
+      const minSpan = mid > 0 ? mid * 0.0045 : 0; // ~45 bps floor
+      const span = Math.max(rawSpan * 1.12, minSpan);
       return {
         priceRange: {
           minValue: mid - span / 2,
           maxValue: mid + span / 2,
         },
-        margins: { above: 10, below: 12 },
+        margins: { above: 8, below: 10 },
       };
     } catch {
       return original();

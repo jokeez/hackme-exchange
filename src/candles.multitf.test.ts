@@ -251,12 +251,14 @@ describe("multi-TF CEX audit (all timeframes)", () => {
     const tip = base[base.length - 1]!;
     expect(closed.time).toBe(tipBefore.time);
     expect(tip.time).toBe(tipBefore.time + 60);
-    // Lived tip H/L must survive rollover — only close is finalized at the boundary.
-    const boundaryClose = paperPairMid("HMC_USDT", tipBefore.time * 1000 + 60_000);
+    // Lived tip H/L must survive rollover — close is finalized from the CEX walk.
     expect(closed.open).toBe(tipBefore.open);
-    expect(closed.high).toBe(Math.max(tipBefore.high, tipBefore.open, boundaryClose));
-    expect(closed.low).toBe(Math.min(tipBefore.low, tipBefore.open, boundaryClose));
-    expect(closed.close).toBe(boundaryClose);
+    expect(closed.high).toBe(Math.max(tipBefore.high, tipBefore.open, closed.close));
+    expect(closed.low).toBe(Math.min(tipBefore.low, tipBefore.open, closed.close));
+    expect(closed.close).toBeGreaterThan(0);
+    expect(Number.isFinite(closed.close)).toBe(true);
+    // Contiguous into the new tip.
+    expect(tip.open).toBe(closed.close);
     expect(closed.high).toBeGreaterThanOrEqual(Math.max(closed.open, closed.close) - 1e-12);
     vi.useRealTimers();
   }, 20_000);

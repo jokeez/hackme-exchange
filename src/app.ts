@@ -12,6 +12,7 @@ import {
   clampFillWickPx,
   deriveAllTimeframes,
   prependOlderCandles,
+  seedAllTimeframes,
   stats24h,
 } from "./candles";
 import {
@@ -7689,8 +7690,8 @@ async function refresh(): Promise<void> {
   market = m!;
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
-  // Only reseed when oracle scale actually diverges — never wipe history on every page load.
-  // Live desk: never reseed / paper-clock candles from oracle (would snap chart to ~0.05 sine).
+  // Live desk: seed CEX-like walk around L2 mid (not empty / not oracle sine).
+  // Tip close still tracks live BBO via tipCandlesForPair every tick.
   if (!useLiveBook()) {
     if (needsCandleReseedForMarket(state, market)) {
       reseedCandlesFromMarket(state, market);
@@ -7699,9 +7700,20 @@ async function refresh(): Promise<void> {
       ensureCandles(state, market);
     }
   } else {
-    // Ensure map keys exist; tip updates come only from L2 via tipCandlesForPair.
     for (const p of PAIRS) {
       if (!state.candles[p.id]) state.candles[p.id] = {};
+      const labMid = labBookMid(p.id);
+      if (!(labMid > 0)) continue;
+      const base = state.candles[p.id]![CANDLE_BASE_TF] ?? [];
+      const tipClose = base[base.length - 1]?.close ?? 0;
+      const empty = base.length < 8;
+      const cliff =
+        tipClose > 0 && (labMid / tipClose > 1.08 || labMid / tipClose < 0.92);
+      if (empty || cliff) {
+        state.candles[p.id] = seedAllTimeframes(p.id, labMid);
+        prevMids[p.id] = labMid;
+        chartNeedsFullReplace = true;
+      }
     }
   }
   seedEquitySnapshots(state, market);

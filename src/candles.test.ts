@@ -83,9 +83,10 @@ describe("seedCandles", () => {
     const candles = seedCandles("HMC_USDT", "15m", mid, 200);
     const s = stats24h(candles, "15m");
     expect(candles[candles.length - 1]!.close).toBeCloseTo(mid, 12);
-    expect(Math.abs(s.changePct)).toBeLessThan(5);
-    expect(s.high / mid).toBeLessThan(1.08);
-    expect(s.low / mid).toBeGreaterThan(0.92);
+    // Soft-launch CEX walk: lively but not a fake crash dump.
+    expect(Math.abs(s.changePct)).toBeLessThan(8);
+    expect(s.high / mid).toBeLessThan(1.12);
+    expect(s.low / mid).toBeGreaterThan(0.88);
   });
 
   it("is deterministic for the same pair/tf/time/mid", () => {
