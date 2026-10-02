@@ -122,7 +122,7 @@ describe("price scale wheel helpers", () => {
   });
 
   it("uses wider bar spacing on phone-width panes", () => {
-    expect(barSpacingForWidth(360, "15m")).toBeGreaterThanOrEqual(9);
+    expect(barSpacingForWidth(360, "15m")).toBeGreaterThanOrEqual(8);
     expect(barSpacingForWidth(360, "15m")).toBeGreaterThan(barSpacingForWidth(1200, "15m"));
   });
 
@@ -239,9 +239,11 @@ describe("secondary multi-chart slots", () => {
 });
 
 describe("candlestick rendering style", () => {
-  it("uses solid Binance-style bodies (border off so thin bars still fill)", () => {
+  it("uses Binance-style filled bodies with matching borders", () => {
     const style = buildCandlestickStyle(baseState().chartSettings);
-    expect(style.borderVisible).toBe(false);
+    expect(style.borderVisible).toBe(true);
+    expect(style.borderUpColor).toBeTruthy();
+    expect(style.borderDownColor).toBeTruthy();
     expect(style.wickVisible).toBe(true);
     expect(style.wickUpColor).toBe(style.upColor);
     expect(style.wickDownColor).toBe(style.downColor);

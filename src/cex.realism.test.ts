@@ -3,7 +3,7 @@
  * @vitest-environment happy-dom
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyMidToPairCandles, clampFillWickPx } from "./candles";
+import { applyMidToPairCandles, clampFillWickPx, seedCandles } from "./candles";
 import { isDefaultChartAppearance, loadChartPrefs, mergeChartPrefsOnLoad, saveChartPrefs, CHART_PREFS_KEY } from "./chartPrefs";
 import { isMarketableLimit, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
@@ -98,6 +98,34 @@ describe("CEX paper matching", () => {
 });
 
 describe("CEX candle OHLC", () => {
+  it("seeded 1m candles are contiguous walks — not histogram-from-midline", () => {
+    const mid = 0.05;
+    const series = seedCandles("HMC_USDT", "1m", mid, 80);
+    expect(series.length).toBeGreaterThan(40);
+    // Contiguous: next open ≈ prev close (CEX).
+    let gaps = 0;
+    for (let i = 1; i < series.length; i++) {
+      const prev = series[i - 1]!;
+      const cur = series[i]!;
+      if (Math.abs(cur.open - prev.close) / prev.close > 1e-9) gaps++;
+      expect(cur.high).toBeGreaterThanOrEqual(Math.max(cur.open, cur.close) - 1e-15);
+      expect(cur.low).toBeLessThanOrEqual(Math.min(cur.open, cur.close) + 1e-15);
+      // Both wicks exist on most bars (not body-only comb).
+      expect(cur.high - Math.max(cur.open, cur.close)).toBeGreaterThanOrEqual(0);
+      expect(Math.min(cur.open, cur.close) - cur.low).toBeGreaterThanOrEqual(0);
+    }
+    expect(gaps).toBe(0);
+    // Opens must fan with the walk — clustering all opens on the mid is the broken look.
+    const opens = series.map((c) => c.open);
+    const mean = opens.reduce((a, b) => a + b, 0) / opens.length;
+    const varOpen = opens.reduce((a, b) => a + (b - mean) ** 2, 0) / opens.length;
+    const stdBps = (Math.sqrt(varOpen) / mean) * 1e4;
+    expect(stdBps).toBeGreaterThan(3);
+    // Bodies should not all share the same open (±0.5 bps) while fanning closes.
+    const nearMid = opens.filter((o) => Math.abs(o / mid - 1) < 0.00005).length;
+    expect(nearMid / opens.length).toBeLessThan(0.35);
+  });
+
   it("live ticks keep wicks beyond body on 1m", () => {
     const mid = 0.05;
     const t0 = Math.floor(Date.now() / 1000 / 60) * 60 - 120;

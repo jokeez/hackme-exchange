@@ -633,13 +633,17 @@ function schemeColors(s: ChartSettings) {
   return { up: cs.bullBody || base.up, down: cs.bearBody || base.down };
 }
 
-/** Binance-style solid bodies: border off so LWC always fills the candle (thin bars skip bodies when bordered). */
+/** Binance/TV-style candles: filled body + matching border + distinct wick. */
 function candlestickSeriesOptions(s: ChartSettings) {
   const colors = schemeColors(s);
+  const upBorder = s.candleStyle?.bullBorder || colors.up;
+  const downBorder = s.candleStyle?.bearBorder || colors.down;
   return {
     upColor: colors.up,
     downColor: colors.down,
-    borderVisible: false as const,
+    borderVisible: true as const,
+    borderUpColor: upBorder,
+    borderDownColor: downBorder,
     wickVisible: true as const,
     wickUpColor: s.candleStyle?.bullWick || colors.up,
     wickDownColor: s.candleStyle?.bearWick || colors.down,
@@ -751,8 +755,15 @@ function makeRobustAutoscaleProvider() {
       const { fromIdx, toIdx } = logicalRangeToIndices(lr.from, lr.to, currentCandles.length);
       const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
       if (!robust) return original();
+      // Floor the window so quiet Soft-MM tape does not zoom until every body
+      // looks like a full-pane histogram around the mid line.
+      const mid = (robust.minValue + robust.maxValue) / 2;
+      const span = Math.max(robust.maxValue - robust.minValue, mid > 0 ? mid * 0.012 : 0);
       return {
-        priceRange: robust,
+        priceRange: {
+          minValue: mid - span / 2,
+          maxValue: mid + span / 2,
+        },
         margins: { above: 10, below: 12 },
       };
     } catch {
@@ -1988,11 +1999,12 @@ export function visibleBarBudget(hostWidth: number, barSpacing: number): number 
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
+  // Slightly tighter than before — Binance/TV leave a hair of gap between bodies.
   const base =
-    tf === "30s" ? 8.5 : tf === "1m" ? 8 : tf === "3m" || tf === "5m" ? 7.5 : tf === "1D" || tf === "1W" ? 9 : 8;
-  if (hostWidth < 400) return Math.max(9.5, base + 2);
-  if (hostWidth < 640) return Math.max(8.5, base + 1);
-  if (hostWidth < 720) return Math.max(7.5, base);
+    tf === "30s" ? 7.5 : tf === "1m" ? 7 : tf === "3m" || tf === "5m" ? 6.5 : tf === "1D" || tf === "1W" ? 8 : 7;
+  if (hostWidth < 400) return Math.max(8.5, base + 1.5);
+  if (hostWidth < 640) return Math.max(7.5, base + 1);
+  if (hostWidth < 720) return Math.max(6.5, base);
   if (hostWidth > 1600) return base;
   return base;
 }

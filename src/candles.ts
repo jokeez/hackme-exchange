@@ -125,9 +125,49 @@ function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
 }
 
 /**
- * Exchange-like intra-bar extremes for paper seed bars.
- * Wicks track the body (CEX look) + tiny mid-relative micro-noise —
- * never a fixed ±bps forest that dwarfs small bodies.
+ * Per-bar RMS vol for the deterministic walk (~CEX soft-launch tape).
+ * Kept small so 1m bodies stay readable, not full-pane blocks.
+ */
+function walkVol(tf: Timeframe): number {
+  return 0.00055 * Math.sqrt(Math.max(1, TF_SEC[tf] / 60));
+}
+
+/**
+ * Deterministic CEX-like price at `atSec`, pinned so `anchorSec` prints `anchorPx`.
+ * Random-walk (not multi-sine): sine mean-reversion made every open sit on the mid
+ * and painted a histogram-from-baseline instead of real OHLC candles.
+ */
+function walkPriceAt(
+  pairId: PairId,
+  tf: Timeframe,
+  atSec: number,
+  anchorSec: number,
+  anchorPx: number,
+): number {
+  if (!(anchorPx > 0) || !Number.isFinite(anchorPx)) return Math.max(anchorPx, 1e-12);
+  if (atSec === anchorSec) return anchorPx;
+  const step = TF_SEC[tf];
+  if (!(step > 0)) return anchorPx;
+  const vol = walkVol(tf) * 2.2;
+  let logPx = Math.log(anchorPx);
+  if (atSec < anchorSec) {
+    for (let t = anchorSec; t > atSec; t -= step) {
+      const ret = stableSigned([pairId, tf, t, "cex-rw"], 0.5) * vol;
+      logPx -= ret;
+    }
+  } else {
+    for (let t = anchorSec; t < atSec; t += step) {
+      const ret = stableSigned([pairId, tf, t + step, "cex-rw"], 0.5) * vol;
+      logPx += ret;
+    }
+  }
+  const px = Math.exp(logPx);
+  return px > 0 && Number.isFinite(px) ? px : anchorPx;
+}
+
+/**
+ * Exchange-like intra-bar extremes — always both wicks (Binance/TV look).
+ * Wicks track the body + modest mid-relative noise; never a one-sided comb.
  */
 function wickSpread(
   open: number,
@@ -140,18 +180,17 @@ function wickSpread(
   const bodyLow = Math.min(open, close);
   const body = bodyHigh - bodyLow;
   const mid = (open + close) / 2 || bodyHigh || 1;
-  // ~0.6–1.4 bps micro tape noise; BTC pairs slightly wider.
-  const microBps = pairId.includes("BTC") ? 1.4 : pairId === "SUP_USDT" ? 1.1 : 0.85;
+  const microBps = pairId.includes("BTC") ? 1.6 : pairId === "SUP_USDT" ? 1.2 : 1.0;
   const micro = mid * (microBps / 10_000);
-  const hiSeed = stableUnit([tf, t, "wick-high"]);
-  const loSeed = stableUnit([tf, t, "wick-low"]);
-  // Body-relative: often 5–70% of body beyond the close/open (some bars nearly closed).
-  const hiBeyond = micro * (0.25 + hiSeed * 0.9) + body * (0.04 + hiSeed * 0.55);
-  const loBeyond = micro * (0.25 + loSeed * 0.9) + body * (0.04 + loSeed * 0.55);
+  const hiSeed = stableUnit([pairId, tf, t, "wick-high"]);
+  const loSeed = stableUnit([pairId, tf, t, "wick-low"]);
+  // Always some wick beyond the body (15–90% of cap); body-relative add-on for larger bars.
   const cap = mid * maxWickFracForTf(tf);
+  const hiBeyond = Math.min(cap, micro * (0.4 + hiSeed * 1.1) + body * (0.08 + hiSeed * 0.45));
+  const loBeyond = Math.min(cap, micro * (0.4 + loSeed * 1.1) + body * (0.08 + loSeed * 0.45));
   return {
-    high: bodyHigh + Math.min(hiBeyond, cap),
-    low: bodyLow - Math.min(loBeyond, cap),
+    high: bodyHigh + Math.max(hiBeyond, micro * 0.35),
+    low: bodyLow - Math.max(loBeyond, micro * 0.35),
   };
 }
 
@@ -269,9 +308,9 @@ export function expandToFinerTf(
 }
 
 /**
- * Seed OHLC from the shared paper clock (`paperPairMid` at each bucket).
+ * Seed OHLC from a deterministic CEX-like random walk (not the ticker sine).
  * Same wall-clock + tip mid → identical series on every device (no local path fork).
- * `mid` scales the native clock path so tip close prints exactly `mid`.
+ * Tip close prints exactly `mid`; each bar opens at the previous close.
  */
 export function seedCandles(
   pairId: PairId,
@@ -285,23 +324,45 @@ export function seedCandles(
   const genesis = genesisBucket(tf, Math.floor(nowMs / 1000));
   const maxN = Math.max(1, Math.floor((now - genesis) / sec) + 1);
   const n = Math.min(count ?? barCountForTf(tf, nowMs), maxN, MAX_CANDLES);
-  const out: Candle[] = [];
-  const nativeTip = paperPairMid(pairId, nowMs);
-  const scale = nativeTip > 0 && Number.isFinite(nativeTip) ? mid / nativeTip : 1;
+  if (!(mid > 0) || !Number.isFinite(mid) || n < 1) return [];
 
-  for (let i = n - 1; i >= 0; i--) {
-    const t = now - i * sec;
-    if (t < genesis) continue;
-    const isTip = i === 0;
-    if (isTip) {
-      // Same tip builder as live paper clock — identical H/L across seed vs micro-tick.
-      out.push(tipBarFromPaperClock(pairId, tf, t, nowMs, mid));
-      continue;
+  // Closed bars: forward walk affine-pinned so the last CLOSED close meets tip open.
+  // Tip bar always comes from tipBarFromPaperClock (late-join == early-join).
+  const closedN = Math.max(0, n - 1);
+  const out: Candle[] = [];
+  if (closedN > 0) {
+    const tipOpen = walkPriceAt(pairId, tf, now, now + sec, mid);
+    const raw: number[] = [1];
+    const times: number[] = [];
+    for (let i = 0; i < closedN; i++) {
+      const t = now - (closedN - i) * sec;
+      times.push(t);
+      if (i === 0) continue;
+      const ret = stableSigned([pairId, tf, t, "cex-rw"], 0.5) * walkVol(tf) * 2.2;
+      raw.push(raw[i - 1]! * (1 + ret));
     }
-    // Closed bars: same path sampler as live tips (finalized at bucket end).
-    out.push(closedBarFromPaperClock(pairId, tf, t, scale));
+    const tipRaw = raw[raw.length - 1] || 1;
+    const scale = tipRaw > 0 ? tipOpen / tipRaw : tipOpen;
+    for (let i = 0; i < closedN; i++) {
+      const t = times[i]!;
+      if (t < genesis) continue;
+      const close = raw[i]! * scale;
+      const open =
+        out.length > 0
+          ? out[out.length - 1]!.close
+          : close * (1 + stableSigned([pairId, tf, t, "o0"], 0.5) * walkVol(tf));
+      out.push(makeBar(pairId, t, open, close, tf));
+    }
+    // Contiguity into tip open.
+    if (out.length) {
+      const last = out[out.length - 1]!;
+      last.close = tipOpen;
+      last.high = Math.max(last.high, last.open, tipOpen);
+      last.low = Math.min(last.low, last.open, tipOpen);
+    }
   }
-  return out;
+  out.push(tipBarFromPaperClock(pairId, tf, now, nowMs, mid));
+  return out.filter((c) => c.time >= genesis).slice(-MAX_CANDLES);
 }
 
 /** Recompute all TFs from a 1m base series.
@@ -384,9 +445,9 @@ export function seedAllTimeframes(
 }
 
 /**
- * Forming tip OHLC from shared clock only — never accumulate path-dependent H/L.
- * Samples paperPairMid on a fixed grid inside the open bucket (step scales with TF).
- * `tipMid` scales the native path so tip close prints exactly `tipMid`.
+ * Forming tip OHLC from shared walk — tip close prints exactly `tipMid`.
+ * Pure function of (pair, tf, bucket, nowMs, tipMid) so late-joining clients match.
+ * Open = walk at bucket start pinned as if the bar closes at tipMid (not ticker sine).
  */
 export function tipBarFromPaperClock(
   pairId: PairId,
@@ -394,65 +455,42 @@ export function tipBarFromPaperClock(
   bucketT: number,
   nowMs: number,
   tipMid: number,
-  sampleStepMs?: number,
+  _sampleStepMs?: number,
 ): Candle {
-  const nativeTip = paperPairMid(pairId, nowMs);
-  const scale = nativeTip > 0 && Number.isFinite(nativeTip) ? tipMid / nativeTip : 1;
-  const open = paperPairMid(pairId, bucketT * 1000) * scale;
+  void _sampleStepMs;
   const sec = TF_SEC[tf];
-  const endMs = Math.min(nowMs, (bucketT + sec) * 1000 - 1);
-  let high = Math.max(open, tipMid);
-  let low = Math.min(open, tipMid);
-  // Live tip: dense 700ms. Seed/closed: coarser so 1m×1600 seed stays fast.
-  const stepMs =
-    sampleStepMs ??
-    (sec <= 60 ? 700 : sec <= 900 ? 5_000 : sec <= 3_600 ? 30_000 : sec <= 14_400 ? 120_000 : 600_000);
-  for (let ms = bucketT * 1000; ms <= endMs; ms += stepMs) {
-    const px = paperPairMid(pairId, ms) * scale;
-    high = Math.max(high, px);
-    low = Math.min(low, px);
-  }
-  const tipSample = paperPairMid(pairId, endMs) * scale;
-  high = Math.max(high, tipSample, tipMid);
-  low = Math.min(low, tipSample, tipMid);
-  const bar = constrainBarToOpen(
-    {
-      time: bucketT,
-      open,
-      high,
-      low,
-      close: tipMid,
-      volume: candleVolume(pairId, tf, bucketT),
-    },
-    maxBodyFracForTf(tf),
-    maxWickFracForTf(tf),
-  );
+  // End-of-bucket pin: identical tipMid → identical open on every device.
+  const open = walkPriceAt(pairId, tf, bucketT, bucketT + sec, tipMid);
+  const bar = makeBar(pairId, bucketT, open, tipMid, tf);
   bar.close = tipMid;
   bar.open = open;
   bar.high = Math.max(bar.high, bar.open, tipMid);
   bar.low = Math.min(bar.low, bar.open, tipMid);
+  // Forming bar: wick pad scales with elapsed time (same nowMs → same pad).
+  const elapsed = Math.min(1, Math.max(0, (nowMs / 1000 - bucketT) / sec));
+  if (elapsed > 0.05 && elapsed < 1) {
+    const midPx = (open + tipMid) / 2 || tipMid;
+    const pad = midPx * maxWickFracForTf(tf) * (0.25 + 0.5 * elapsed);
+    bar.high = Math.max(bar.high, Math.max(open, tipMid) + pad * 0.35);
+    bar.low = Math.min(bar.low, Math.min(open, tipMid) - pad * 0.35);
+  }
   return bar;
 }
 
-/** Closed paper bar = full-bucket tip sample (same path as live tip, finalized). */
+/** Closed paper bar = walk open→close across the bucket (CEX-contiguous). */
 function closedBarFromPaperClock(
   pairId: PairId,
   tf: Timeframe,
   bucketT: number,
-  scale: number,
-  /** Override sample grid; default is coarse (fast seed). Live rollover passes 700. */
-  sampleStepMs?: number,
+  tipBucket: number,
+  tipMid: number,
+  _sampleStepMs?: number,
 ): Candle {
+  void _sampleStepMs;
   const sec = TF_SEC[tf];
-  // Close at next-bucket open so series stay CEX-contiguous across devices.
-  const boundaryMs = (bucketT + sec) * 1000;
-  const close = paperPairMid(pairId, boundaryMs) * scale;
-  const endMs = boundaryMs - 1;
-  // Seed/history: coarser so 1m×1600 stays fast. Live rollover should pass 700.
-  const step =
-    sampleStepMs ??
-    (sec <= 60 ? 2_500 : sec <= 900 ? 15_000 : sec <= 3_600 ? 60_000 : sec <= 14_400 ? 240_000 : 900_000);
-  return tipBarFromPaperClock(pairId, tf, bucketT, endMs, close, step);
+  const open = walkPriceAt(pairId, tf, bucketT, tipBucket, tipMid);
+  const close = walkPriceAt(pairId, tf, bucketT + sec, tipBucket, tipMid);
+  return makeBar(pairId, bucketT, open, close, tf);
 }
 
 /**
@@ -483,15 +521,15 @@ export function applyPaperClockToPairCandles(
 
   let nextBase: Candle[];
   if (tipTime === t) {
+    // Full tip rebuild — pure clock (late-join == early-join; heals poisoned H/L).
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
     nextBase = [...prevBase.slice(0, -1), tip];
   } else {
-    // Multi-bucket walk: keep lived tip H/L (path samples), only finalize close at boundary.
+    // Multi-bucket walk: finalize close at boundary from the CEX walk (not ticker sine).
     nextBase = prevBase.slice(0, -1);
     for (let bt = tipTime; bt < t; bt += baseSec) {
       const prior = prevBase.find((c) => c.time === bt) ?? nextBase[nextBase.length - 1];
-      const boundaryMs = (bt + baseSec) * 1000;
-      const close = paperPairMid(pairId, boundaryMs);
+      const close = walkPriceAt(pairId, CANDLE_BASE_TF, bt + baseSec, t, mid);
       if (prior && prior.time === bt) {
         nextBase.push({
           ...prior,
@@ -501,7 +539,7 @@ export function applyPaperClockToPairCandles(
           volume: candleVolume(pairId, CANDLE_BASE_TF, bt),
         });
       } else {
-        nextBase.push(closedBarFromPaperClock(pairId, CANDLE_BASE_TF, bt, 1, 700));
+        nextBase.push(closedBarFromPaperClock(pairId, CANDLE_BASE_TF, bt, t, mid));
       }
     }
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
@@ -547,15 +585,23 @@ export function prependOlderCandles(
   const n = Math.min(count, room, maxAdd);
   if (n <= 0) return existing;
 
-  const nativeFirst = paperPairMid(pairId, first.time * 1000);
-  const scale = nativeFirst > 0 ? first.open / nativeFirst : 1;
+  // Pin walk so the bar that ends at `first.time` opens into `first.open`.
+  const tipBucket = first.time;
+  const tipMid = first.open > 0 ? first.open : paperPairMid(pairId, first.time * 1000);
   const older: Candle[] = [];
   for (let i = n; i >= 1; i--) {
     const t = first.time - i * sec;
     if (t < genesis) continue;
-    older.push(closedBarFromPaperClock(pairId, tf, t, scale));
+    older.push(closedBarFromPaperClock(pairId, tf, t, tipBucket, tipMid));
   }
   if (!older.length) return existing;
+  // Contiguity: last older close → first.open
+  const lastOlder = older[older.length - 1]!;
+  if (lastOlder && first.open > 0) {
+    lastOlder.close = first.open;
+    lastOlder.high = Math.max(lastOlder.high, lastOlder.open, first.open);
+    lastOlder.low = Math.min(lastOlder.low, lastOlder.open, first.open);
+  }
   return [...older, ...existing];
 }
 
