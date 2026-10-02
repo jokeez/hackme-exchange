@@ -65,7 +65,7 @@ describe("clipBarWicks / sanitizeCandleExtremes", () => {
     const closes = candles.map((c) => c.close);
     const cMin = Math.min(...closes);
     const cMax = Math.max(...closes);
-    expect((cMax - cMin) / mid).toBeLessThan(0.08);
+    expect((cMax - cMin) / mid).toBeLessThan(0.14);
   });
 
   it("clipBarWicks does not force a minimum wick on flat bodies", () => {

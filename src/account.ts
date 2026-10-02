@@ -296,6 +296,7 @@ function renderDepositCard(
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
           <p class="muted small acct-cash-hint acct-dep-warn"><strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.</p>
+          <p class="muted small acct-cash-hint">HMC/SUP credits after on-chain transfer are applied by ops node-watch (not instant). USDT/BTC real custody is still HOLD — stub addresses reject mainnet funds.</p>
           ${
             session.address
               ? `<p class="muted small mono acct-cash-hint">Login only: <code>${escapeHtml(session.address)}</code></p>`

@@ -3590,6 +3590,33 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
     toast(`Import failed: ${parsed.message}`, "warn");
     return;
   }
+  const paperEq =
+    state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
+  if (paperEq > 0 && useServerMatching()) {
+    if (
+      !window.confirm(
+        `Import seed ${parsed.address.slice(0, 14)}…?\n\n` +
+          `This browser still shows paper Spot balances (~${paperEq.toFixed(2)} units).\n` +
+          `After Connect, Account shows the DESK ledger for this seed — usually 0 until you deposit.\n` +
+          `Paper demo funds are NOT moved to the desk. Continue?`,
+      )
+    ) {
+      return;
+    }
+  }
+  // Snapshot paper wallet so import doesn't silently erase local demo funds forever.
+  try {
+    localStorage.setItem(
+      "hackme.paper.wallet.snapshot.v1",
+      JSON.stringify({
+        at: new Date().toISOString(),
+        wallet: { ...state.wallet },
+        note: "Saved before desk seed import — paper only, not desk custody",
+      }),
+    );
+  } catch {
+    /* ignore quota */
+  }
   if (labSessionLabel().live) {
     await authLogout();
     clearLabBookCache();
@@ -3597,6 +3624,13 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
   persistDeskSeed(parsed.seedHex);
   toast(`Seed imported · ${parsed.address.slice(0, 14)}… — connecting…`, "info");
   await deskWalletConnectUi();
+  const deskEq = state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
+  if (useServerMatching() && deskEq <= 0 && paperEq > 0) {
+    toast(
+      "Desk ledger is 0 for this seed — paper snapshot kept in browser. Deposit HMC/SUP (Account → Deposit) to fund the desk.",
+      "warn",
+    );
+  }
   patchOpenSettingsWalletChrome();
 }
 

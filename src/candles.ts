@@ -142,8 +142,8 @@ function candleVolume(pairId: PairId, tf: Timeframe, t = 0): number {
  */
 function walkVol(tf: Timeframe): number {
   const minScale = Math.sqrt(Math.max(1, TF_SEC[tf] / 60));
-  // Soft-launch HMC is quiet vs BTC majors, but still needs visible bodies.
-  return 0.00125 * minScale;
+  // Soft-launch HMC mid is quiet — history still needs CEX bodies without wild cliffs.
+  return 0.0017 * minScale;
 }
 
 /** One bar's log-return: fat tails + short persistence (chop, not a straight line). */
@@ -749,7 +749,8 @@ export function upsertTick(
     tip.high = Math.max(tip.high, safeMid);
     tip.low = Math.min(tip.low, safeMid);
     tip.volume += tickVol;
-    return finish(tip);
+    // Soft-MM sticky mid → paint walk texture so tip isn't a flat tick.
+    return textureLiveBar(pairId, tf, finish(tip), safeMid);
   };
 
   if (prevMid !== undefined && last && last.time === t) {
@@ -759,9 +760,9 @@ export function upsertTick(
 
   if (!last || last.time < t) {
     if (last && last.time + sec < t) {
-      const bridgePx = last.close;
+      const bridgePx = last.close > 0 ? last.close : safeMid;
       for (let bt = last.time + sec; bt < t; bt += sec) {
-        copy.push(flatGapBar(bt, bridgePx));
+        copy.push(walkGapBar(pairId, tf, bt, bridgePx));
         if (copy.length >= MAX_CANDLES) break;
       }
     }
@@ -769,14 +770,19 @@ export function upsertTick(
     const open = copy[copy.length - 1]?.close ?? last?.close ?? safeMid;
     const close = clampTickMid(safeMid, open, maxBody);
     copy.push(
-      finish({
-        time: t,
-        open,
-        high: Math.max(open, close),
-        low: Math.min(open, close),
-        close,
-        volume: tickVol,
-      }),
+      textureLiveBar(
+        pairId,
+        tf,
+        finish({
+          time: t,
+          open,
+          high: Math.max(open, close),
+          low: Math.min(open, close),
+          close,
+          volume: tickVol,
+        }),
+        safeMid,
+      ),
     );
     return copy.slice(-MAX_CANDLES);
   }
@@ -912,6 +918,55 @@ function finiteMid(n: number | undefined): n is number {
 
 function flatGapBar(t: number, px: number): Candle {
   return { time: t, open: px, high: px, low: px, close: px, volume: 0 };
+}
+
+/**
+ * Live Soft-MM mids often move &lt;3 bps — raw tip close=mid looks like a ruler.
+ * Keep close on L2 mid (honest), but paint deterministic walk open/wicks so
+ * the chart stays CEX-lively when the book is sticky.
+ */
+export function textureLiveBar(
+  pairId: PairId,
+  tf: Timeframe,
+  bar: Candle,
+  tipMid: number,
+): Candle {
+  const mid = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : bar.close;
+  if (!(mid > 0)) return bar;
+  const sec = TF_SEC[tf];
+  const openWalk = walkPriceAt(pairId, tf, bar.time, bar.time + sec, mid);
+  // Prefer prior continuity when we already have a real open; else walk open.
+  let open = bar.open > 0 ? bar.open : openWalk;
+  const bodyBps = (Math.abs(mid - open) / mid) * 10_000;
+  if (bodyBps < 2.5) {
+    // Nudge open away from mid with walk so the body is visible (~4–12 bps).
+    const nudge = openWalk - mid || mid * barReturn(pairId, tf, bar.time) * 0.85;
+    open = mid + Math.sign(nudge || 1) * Math.max(Math.abs(nudge), mid * 0.00035);
+  }
+  const close = mid;
+  const wick = wickSpread(open, close, pairId, tf, bar.time);
+  return constrainBarToOpen(
+    {
+      time: bar.time,
+      open,
+      high: Math.max(wick.high, open, close, Number.isFinite(bar.high) ? bar.high : 0),
+      low: Math.min(wick.low, open, close, Number.isFinite(bar.low) ? bar.low : Infinity),
+      close,
+      volume: bar.volume > 0 ? bar.volume : candleVolume(pairId, tf, bar.time),
+    },
+    maxBodyFracForTf(tf),
+    maxWickFracForTf(tf),
+  );
+}
+
+/** Walk-fill idle gaps instead of flat doji rulers (tab background / slow poll). */
+function walkGapBar(pairId: PairId, tf: Timeframe, t: number, tipMid: number): Candle {
+  return textureLiveBar(
+    pairId,
+    tf,
+    { time: t, open: tipMid, high: tipMid, low: tipMid, close: tipMid, volume: 0 },
+    tipMid,
+  );
 }
 
 /** Close ÷ tip close — shared silhouette check across pairs (scale-invariant). */

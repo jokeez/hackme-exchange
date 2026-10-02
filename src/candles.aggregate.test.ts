@@ -8,6 +8,7 @@ import {
   prependOlderCandles,
   seedAllTimeframes,
   seedCandles,
+  textureLiveBar,
 } from "./candles";
 import { TIMEFRAMES, type Timeframe } from "./types";
 
@@ -15,6 +16,17 @@ describe("chartAnchorMid", () => {
   it("quantizes so tiny L2 noise does not fork history", () => {
     expect(chartAnchorMid(0.04953409)).toBe(chartAnchorMid(0.04953411));
     expect(chartAnchorMid(0.04953409)).toBeGreaterThan(0);
+  });
+});
+
+describe("textureLiveBar", () => {
+  it("keeps tip close on sticky Soft-MM mid but paints a visible body/wicks", () => {
+    const mid = 0.0507;
+    const flat = { time: 1_700_000_000, open: mid, high: mid, low: mid, close: mid, volume: 10 };
+    const textured = textureLiveBar("HMC_USDT", "1m", flat, mid);
+    expect(textured.close).toBeCloseTo(mid, 10);
+    expect(textured.high).toBeGreaterThan(textured.low);
+    expect(Math.abs(textured.close - textured.open)).toBeGreaterThan(mid * 0.0002);
   });
 });
 
