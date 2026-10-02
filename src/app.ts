@@ -12,6 +12,7 @@ import {
   chartAnchorMid,
   clampFillWickPx,
   deriveAllTimeframes,
+  nudgeCloseTowardFill,
   prependOlderCandles,
   seedAllTimeframes,
   stats24h,
@@ -4713,7 +4714,11 @@ function quickPlaceFromChart(
           return;
         }
         toast(lab.note, "ok");
-        if (lab.fillCount === 0) toast("Resting on book — use Counterparty bot (Account) to fill", "info");
+        if (lab.fillCount > 0) {
+          upsertAllCandles(lab.order.price || labBookMid(pairId) || price);
+        } else {
+          toast("Resting on book — use Counterparty bot (Account) to fill", "info");
+        }
         refreshAfterLabTrade();
         return;
       }
@@ -4759,6 +4764,7 @@ function quickPlaceFromChart(
       const res = executeFill(state, market, pairId, side, price, amt, quote, "limit", false, true);
       if (!res.ok) { toast(res.reason, "warn"); return; }
       toast(`${side.toUpperCase()} filled @ ${formatPrice(price)} · ${previewFeeLabel(fee, pair.quote)}`, "ok");
+      upsertAllCandles(price);
       saveState(state);
       patchLive();
       document.getElementById("activity-body")!.innerHTML = renderActivityBody();
@@ -5521,6 +5527,12 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
     return;
   }
   if (ev.type === "trades") {
+    // Session fills (own + counterparty) — paint tip immediately from latest trade.
+    const last = state.trades[0];
+    if (last?.pairId === state.activePair && last.price > 0) {
+      upsertAllCandles(last.price);
+      if (state.mainView === "spot") patchLive();
+    }
     refreshActivityPanel();
     throttledBookTapePatch();
   }
@@ -7568,43 +7580,88 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/** Paint a fill/print onto the active pair tip — immediate chart reaction. */
 function upsertAllCandles(fillPx: number): void {
-  // Paper desk: tip is shared-clock only — never fork OHLC from fill prints.
-  if (!useServerMatching()) return;
   const pairId = state.activePair;
   if (!state.candles[pairId]) return;
   const bookMid = labBookMid(pairId);
+  const tapeMid = lastPublicMid(pairId);
   const prev = prevMids[pairId];
-  // Soft-MM bid/ask can sit ~100–160 bps off mid. Pushing tip close to the fill
-  // then re-anchoring to L2 mid on the next tick looks like a spike + snap-back.
-  const anchor = bookMid > 0 ? bookMid : prev && prev > 0 ? prev : fillPx;
+  // Soft-MM bid/ask can sit ~100–160 bps off mid. Keep tip near L2 mid, but
+  // nudge close + wick toward the fill so own trades paint instantly.
+  const anchor =
+    bookMid > 0
+      ? bookMid
+      : tapeMid > 0
+        ? tapeMid
+        : prev && prev > 0
+          ? prev
+          : fillPx;
   if (!(anchor > 0) || !Number.isFinite(anchor)) return;
-  let next = applyMidToPairCandles(state.candles[pairId]!, pairId, anchor, prev);
-  // Bounded wick toward fill only — close stays on L2 mid.
+
+  if (useServerMatching() || useLiveBook()) {
+    let next = applyMidToPairCandles(state.candles[pairId]!, pairId, anchor, prev);
+    if (fillPx > 0 && Number.isFinite(fillPx)) {
+      const wickPx = clampFillWickPx(anchor, fillPx, 45);
+      const tipClose = nudgeCloseTowardFill(anchor, fillPx, 12);
+      for (const tf of Object.keys(next) as Timeframe[]) {
+        const series = next[tf];
+        if (!series?.length) continue;
+        const tip = { ...series[series.length - 1]! };
+        tip.close = tipClose;
+        tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
+        tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
+        tip.volume = (tip.volume || 0) + Math.max(80, Math.abs(fillPx) * 0.01);
+        series[series.length - 1] = tip;
+      }
+    }
+    state.candles[pairId] = next;
+    prevMids[pairId] = tipCloseOr(anchor, fillPx);
+    return;
+  }
+
+  // Paper: advance shared clock, then wick/nudge tip toward fill.
+  let next = applyPaperClockToPairCandles(state.candles[pairId]!, pairId);
   if (fillPx > 0 && Number.isFinite(fillPx)) {
-    const wickPx = clampFillWickPx(anchor, fillPx, 25);
+    const paperAnchor = prev && prev > 0 ? prev : fillPx;
+    const wickPx = clampFillWickPx(paperAnchor, fillPx, 45);
+    const tipClose = nudgeCloseTowardFill(paperAnchor, fillPx, 18);
     for (const tf of Object.keys(next) as Timeframe[]) {
       const series = next[tf];
       if (!series?.length) continue;
       const tip = { ...series[series.length - 1]! };
+      tip.close = tipClose;
       tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
       tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
+      tip.volume = (tip.volume || 0) + 120;
       series[series.length - 1] = tip;
     }
   }
   state.candles[pairId] = next;
-  prevMids[pairId] = anchor;
+  if (fillPx > 0) prevMids[pairId] = fillPx;
+}
+
+function tipCloseOr(anchor: number, fillPx: number): number {
+  if (fillPx > 0 && Number.isFinite(fillPx)) return nudgeCloseTowardFill(anchor, fillPx, 12);
+  return anchor;
 }
 
 /**
- * Advance candle tip for one pair. Live desk: tip = L2 mid exactly (no client EMA),
- * so every device paints the same close from the same book.
+ * Advance candle tip for one pair. Live desk: tip ≈ L2 mid (with tape fallback),
+ * so every device paints from the same book; always roll time even if mid is sticky.
  */
 function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean): void {
   if (!state.candles[pairId]) state.candles[pairId] = {};
   const prev = prevMids[pairId];
   if (labLive) {
-    const mid = displayMid > 0 ? displayMid : prev && prev > 0 ? prev : 0;
+    const mid =
+      displayMid > 0
+        ? displayMid
+        : lastPublicMid(pairId) > 0
+          ? lastPublicMid(pairId)
+          : prev && prev > 0
+            ? prev
+            : 0;
     if (!(mid > 0)) return;
     state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev);
     prevMids[pairId] = mid;
@@ -7616,8 +7673,17 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
 
 function microTickPrices(): void {
   if (!market) return;
-  if (document.hidden) return;
   const labLive = useLiveBook();
+  // Hidden tab: still roll candle time with last known mid so new bars appear.
+  if (document.hidden) {
+    for (const p of PAIRS) {
+      const mid = labLive
+        ? labBookMid(p.id) || lastPublicMid(p.id) || prevMids[p.id] || 0
+        : midForPair(market, p.id);
+      if (mid > 0) tipCandlesForPair(p.id, mid, labLive);
+    }
+    return;
+  }
   // Paper sine-walk around 0.05 — ONLY when desk L2 is off.
   if (!labLive) {
     market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
@@ -7683,8 +7749,10 @@ function microTickPrices(): void {
     const p = PAIRS[i]!;
     const oracleTarget = labLive ? 0 : midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
-    // Live book: tip only from L2 mid (0 keeps previous). Never mix oracle into live OHLC.
-    const displayMid = labLive ? labMid : oracleTarget;
+    // Live book: tip from L2 mid; fall back to last tape / prev so sticky Soft-MM still rolls.
+    const displayMid = labLive
+      ? labMid || lastPublicMid(p.id) || prevMids[p.id] || 0
+      : oracleTarget;
     const isActive = p.id === state.activePair;
     const rotate = liveTickN % PAIRS.length === i;
     if (isActive || rotate || chartNeedsFullReplace) {

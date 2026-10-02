@@ -682,9 +682,19 @@ export function prependOlderCandles(
 
 /**
  * Soft-MM fills print at bid/ask (often 100–160 bps off mid). Chart tip close must
- * stay on L2 mid; only allow a tiny wick toward the fill so small orders don't spike.
+ * stay near L2 mid; allow a visible wick + small close nudge toward the fill so
+ * own trades paint immediately (not only on the next Soft-MM breathe).
  */
-export function clampFillWickPx(anchorMid: number, fillPx: number, maxBps = 25): number {
+export function clampFillWickPx(anchorMid: number, fillPx: number, maxBps = 45): number {
+  if (!(anchorMid > 0) || !Number.isFinite(anchorMid)) return fillPx;
+  if (!(fillPx > 0) || !Number.isFinite(fillPx)) return anchorMid;
+  const lo = anchorMid * (1 - maxBps / 10_000);
+  const hi = anchorMid * (1 + maxBps / 10_000);
+  return Math.min(hi, Math.max(lo, fillPx));
+}
+
+/** Nudge tip close toward a fill (capped) so the candle tip reacts instantly. */
+export function nudgeCloseTowardFill(anchorMid: number, fillPx: number, maxBps = 12): number {
   if (!(anchorMid > 0) || !Number.isFinite(anchorMid)) return fillPx;
   if (!(fillPx > 0) || !Number.isFinite(fillPx)) return anchorMid;
   const lo = anchorMid * (1 - maxBps / 10_000);
@@ -924,33 +934,43 @@ function flatGapBar(t: number, px: number): Candle {
  * Live Soft-MM mids often move &lt;3 bps — raw tip close=mid looks like a ruler.
  * Keep close on L2 mid (honest), but paint deterministic walk open/wicks so
  * the chart stays CEX-lively when the book is sticky.
+ * Intra-bar phase (seconds into the bucket) must evolve — otherwise tip is frozen
+ * for the whole minute when Soft-MM mid does not move.
  */
 export function textureLiveBar(
   pairId: PairId,
   tf: Timeframe,
   bar: Candle,
   tipMid: number,
+  nowMs = Date.now(),
 ): Candle {
   const mid = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : bar.close;
   if (!(mid > 0)) return bar;
   const sec = TF_SEC[tf];
-  const openWalk = walkPriceAt(pairId, tf, bar.time, bar.time + sec, mid);
+  const elapsedSec = Math.max(0, Math.min(sec, nowMs / 1000 - bar.time));
+  // Advance walk endpoint through the bucket so open/wicks breathe every second.
+  const phaseEnd = bar.time + Math.max(1, Math.floor(elapsedSec) || 1);
+  const openWalk = walkPriceAt(pairId, tf, bar.time, phaseEnd, mid);
   // Prefer prior continuity when we already have a real open; else walk open.
-  let open = bar.open > 0 ? bar.open : openWalk;
+  // Once the bar has aged past the first second, keep the painted open stable.
+  let open = bar.open > 0 && elapsedSec >= 1 ? bar.open : openWalk;
+  if (!(open > 0)) open = mid;
   const bodyBps = (Math.abs(mid - open) / mid) * 10_000;
-  if (bodyBps < 2.5) {
+  if (bodyBps < 2.5 && elapsedSec < 1) {
     // Nudge open away from mid with walk so the body is visible (~4–12 bps).
     const nudge = openWalk - mid || mid * barReturn(pairId, tf, bar.time) * 0.85;
     open = mid + Math.sign(nudge || 1) * Math.max(Math.abs(nudge), mid * 0.00035);
   }
   const close = mid;
-  const wick = wickSpread(open, close, pairId, tf, bar.time);
+  // Wick seed includes phase second so high/low expand while mid is sticky.
+  const wick = wickSpread(open, close, pairId, tf, phaseEnd);
+  const breath = mid * (0.00004 + 0.00012 * stableUnit([pairId, tf, phaseEnd, "breath"]));
   return constrainBarToOpen(
     {
       time: bar.time,
       open,
-      high: Math.max(wick.high, open, close, Number.isFinite(bar.high) ? bar.high : 0),
-      low: Math.min(wick.low, open, close, Number.isFinite(bar.low) ? bar.low : Infinity),
+      high: Math.max(wick.high, open, close, Number.isFinite(bar.high) ? bar.high : 0, close + breath),
+      low: Math.min(wick.low, open, close, Number.isFinite(bar.low) ? bar.low : Infinity, close - breath),
       close,
       volume: bar.volume > 0 ? bar.volume : candleVolume(pairId, tf, bar.time),
     },

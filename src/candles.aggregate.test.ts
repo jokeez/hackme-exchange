@@ -23,10 +23,39 @@ describe("textureLiveBar", () => {
   it("keeps tip close on sticky Soft-MM mid but paints a visible body/wicks", () => {
     const mid = 0.0507;
     const flat = { time: 1_700_000_000, open: mid, high: mid, low: mid, close: mid, volume: 10 };
-    const textured = textureLiveBar("HMC_USDT", "1m", flat, mid);
+    const textured = textureLiveBar("HMC_USDT", "1m", flat, mid, 1_700_000_000_000);
     expect(textured.close).toBeCloseTo(mid, 10);
     expect(textured.high).toBeGreaterThan(textured.low);
     expect(Math.abs(textured.close - textured.open)).toBeGreaterThan(mid * 0.0002);
+  });
+
+  it("evolves tip wicks within the same 1m bucket when Soft-MM mid is sticky", () => {
+    const mid = 0.0507;
+    const t0 = 1_700_000_000;
+    const flat = { time: t0, open: mid, high: mid, low: mid, close: mid, volume: 10 };
+    const a = textureLiveBar("HMC_USDT", "1m", flat, mid, t0 * 1000 + 1_000);
+    const b = textureLiveBar("HMC_USDT", "1m", a, mid, t0 * 1000 + 25_000);
+    expect(a.close).toBeCloseTo(mid, 10);
+    expect(b.close).toBeCloseTo(mid, 10);
+    // High/low or open should breathe as the minute progresses.
+    const changed =
+      Math.abs(a.high - b.high) > 1e-12 ||
+      Math.abs(a.low - b.low) > 1e-12 ||
+      Math.abs(a.open - b.open) > 1e-12;
+    expect(changed).toBe(true);
+  });
+});
+
+describe("nudgeCloseTowardFill", () => {
+  it("nudges tip close toward fill within bps cap", async () => {
+    const { nudgeCloseTowardFill, clampFillWickPx } = await import("./candles");
+    const mid = 0.05;
+    const fill = 0.0508; // +160 bps
+    const nudged = nudgeCloseTowardFill(mid, fill, 12);
+    expect(nudged).toBeGreaterThan(mid);
+    expect(nudged).toBeLessThanOrEqual(mid * 1.0012 + 1e-12);
+    const wick = clampFillWickPx(mid, fill, 45);
+    expect(wick).toBeGreaterThan(nudged);
   });
 });
 
