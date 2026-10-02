@@ -1,4 +1,4 @@
-import type { DemoState, MarketSnapshot, Trade } from "./types";
+import type { DemoState, LedgerEntry, MarketSnapshot, Trade } from "./types";
 import { walletEquityFromMarket } from "./store";
 
 export type PnlWindow = { label: string; pct: number; abs: number };
@@ -6,7 +6,13 @@ export type PnlWindow = { label: string; pct: number; abs: number };
 export type DayPnl = {
   dateKey: string;
   label: string;
+  /** Day-of-month number for calendar cell. */
+  dayNum: number;
   pnl: number;
+  /** True when this cell is today. */
+  isToday?: boolean;
+  /** True when we have any snapshot/ledger signal for the day. */
+  hasData?: boolean;
 };
 
 export function snapshotEquity(state: DemoState, m: MarketSnapshot): void {
@@ -41,7 +47,27 @@ export function seedEquitySnapshots(state: DemoState, m: MarketSnapshot): void {
   // Honest baseline only — never invent a sine-wave equity history.
   if (state.equitySnapshots.length > 0) return;
   const eq = walletEquityFromMarket(state.wallet, m);
-  state.equitySnapshots = [{ ts: Date.now(), equityUsdt: eq }];
+  state.equitySnapshots = [{ ts: nowSafe(), equityUsdt: eq }];
+}
+
+function nowSafe(): number {
+  return Date.now();
+}
+
+function dayKeyFromTs(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Fee / withdrawal / deposit USDT flow per calendar day (not full mark-to-market). */
+export function ledgerDayCashflow(ledger: LedgerEntry[]): Map<string, number> {
+  const byDay = new Map<string, number>();
+  for (const e of ledger) {
+    if (e.kind === "trade") continue; // trade usdtValue is notional, not PnL
+    const key = dayKeyFromTs(e.ts);
+    byDay.set(key, (byDay.get(key) ?? 0) + (Number.isFinite(e.usdtValue) ? e.usdtValue : 0));
+  }
+  return byDay;
 }
 
 /** Last ~28 calendar days of net equity day-change for heat map. */
@@ -50,11 +76,10 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
   const snaps = [...state.equitySnapshots].sort((a, b) => a.ts - b.ts);
   if (!snaps.length) {
     const eq = walletEquityFromMarket(state.wallet, m);
-    snaps.push({ ts: Date.now(), equityUsdt: eq });
+    snaps.push({ ts: nowSafe(), equityUsdt: eq });
   }
   for (const s of snaps) {
-    const d = new Date(s.ts);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const key = dayKeyFromTs(s.ts);
     const cur = byDay.get(key);
     if (!cur) byDay.set(key, { first: s.equityUsdt, last: s.equityUsdt, ts: s.ts });
     else {
@@ -62,19 +87,24 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
       cur.ts = s.ts;
     }
   }
+  const cashflow = ledgerDayCashflow(state.ledger);
   const out: DayPnl[] = [];
   const now = new Date();
   now.setHours(12, 0, 0, 0);
+  const todayKey = dayKeyFromTs(now.getTime());
   // Do not seed prevClose from initialEquity — a stale paper baseline paints one
   // giant red cliff day after Connect/sync to a dust/empty desk ledger.
   let prevClose: number | null = null;
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const key = dayKeyFromTs(d.getTime());
     const entry = byDay.get(key);
+    const flow = cashflow.get(key) ?? 0;
     let pnl = 0;
+    let hasData = false;
     if (entry) {
+      hasData = true;
       // Prefer intraday change; fall back to overnight vs prior close when we have one.
       if (prevClose != null && Number.isFinite(prevClose)) {
         pnl = entry.last - prevClose;
@@ -85,12 +115,23 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
       if (prevClose != null && prevClose >= 1 && entry.last / prevClose < 0.05 && prevClose - entry.last > 0.5) {
         pnl = entry.last - entry.first;
       }
+      // Flat equity snap but fees/deposits today — surface cashflow.
+      if (Math.abs(pnl) < 1e-9 && Math.abs(flow) > 1e-9) {
+        pnl = flow;
+      }
       prevClose = entry.last;
+    } else if (Math.abs(flow) > 1e-9) {
+      // No equity snapshot that day — show fee/deposit/withdraw cashflow as soft signal.
+      hasData = true;
+      pnl = flow;
     }
     out.push({
       dateKey: key,
       label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      dayNum: d.getDate(),
       pnl,
+      isToday: key === todayKey,
+      hasData,
     });
   }
   return out;
@@ -114,24 +155,54 @@ export function volumeRatio5m(
   return { buyPct, sellPct: 100 - buyPct, buyVol, sellVol };
 }
 
+function formatCalPnl(pnl: number): string {
+  const a = Math.abs(pnl);
+  const sign = pnl >= 0 ? "+" : "-";
+  if (a >= 1) return `${sign}${a.toFixed(2)}`;
+  if (a >= 0.01) return `${sign}${a.toFixed(4)}`;
+  if (a >= 0.0001) return `${sign}${a.toFixed(6)}`;
+  if (a < 1e-12) return "+0.00";
+  return `${sign}${a.toExponential(1)}`;
+}
+
 export function renderPnlCalendarHtml(days: DayPnl[]): string {
-  const maxAbs = Math.max(...days.map((d) => Math.abs(d.pnl)), 1);
+  const maxAbs = Math.max(...days.map((d) => Math.abs(d.pnl)), 1e-9);
   const hasAny = days.some((d) => Math.abs(d.pnl) > 1e-9);
+  const periodTotal = days.reduce((s, d) => s + d.pnl, 0);
+  const weekdays = ["M", "T", "W", "T", "F", "S", "S"];
+  // Align first cell to Monday of the first day in the window.
+  const first = days[0];
+  let pad = 0;
+  if (first) {
+    const dow = new Date(first.dateKey + "T12:00:00").getDay(); // 0=Sun
+    pad = dow === 0 ? 6 : dow - 1;
+  }
+  const pads = Array.from({ length: pad }, () => `<div class="pnl-cal-cell pad" aria-hidden="true"></div>`).join("");
   return `<div class="pnl-calendar">
-    <h4>Daily PnL · last ${days.length}d</h4>
+    <div class="pnl-cal-head">
+      <h4>Daily PnL · last ${days.length}d</h4>
+      <span class="pnl-cal-total mono ${periodTotal >= 0 ? "up" : "down"}">${formatCalPnl(periodTotal)} USDT</span>
+    </div>
     <p class="muted small pnl-cal-note">${
       hasAny
-        ? "Paper equity day-change · local snapshots"
-        : "Paper equity · no day history yet (trade or wait for snapshots)"
+        ? "Equity day-change · local snapshots (+ fees/deposits when no snap)"
+        : "Tracking starts after trades or a longer session — cells fill as equity moves"
     }</p>
+    <div class="pnl-cal-weekdays" aria-hidden="true">${weekdays.map((w) => `<span>${w}</span>`).join("")}</div>
     <div class="pnl-cal-grid">
+      ${pads}
       ${days.map((d) => {
         const strong = Math.abs(d.pnl) / maxAbs > 0.55;
-        const cls = d.pnl > 0.01 ? `pos${strong ? " strong" : ""}` : d.pnl < -0.01 ? `neg${strong ? " strong" : ""}` : "";
-        const sign = d.pnl >= 0 ? "+" : "";
-        return `<div class="pnl-cal-cell ${cls}" title="${d.label}: ${sign}${d.pnl.toFixed(2)} USDT"></div>`;
+        const cls = [
+          d.pnl > 1e-6 ? `pos${strong ? " strong" : ""}` : d.pnl < -1e-6 ? `neg${strong ? " strong" : ""}` : "flat",
+          d.isToday ? "today" : "",
+          d.hasData ? "has-data" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<div class="pnl-cal-cell ${cls}" title="${d.label}: ${formatCalPnl(d.pnl)} USDT" data-day="${d.dateKey}"><span class="pnl-cal-daynum">${d.dayNum}</span></div>`;
       }).join("")}
     </div>
-    <div class="pnl-cal-legend"><span class="pos">Profit</span><span class="neg">Loss</span></div>
+    <div class="pnl-cal-legend"><span class="pos">Profit</span><span class="flat">Flat</span><span class="neg">Loss</span></div>
   </div>`;
 }

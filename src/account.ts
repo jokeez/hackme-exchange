@@ -575,13 +575,22 @@ function renderActivityBlock(
   calHtml: string,
   labLive: boolean,
   session: ReturnType<typeof labSessionLabel>,
+  fillsLabel = "Lab fills",
 ): string {
   const rows = ledger.slice(0, 24);
+  const listItems = rows.length
+    ? rows
+        .map((r) => {
+          const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
+          return `<li data-ledger-kind="${bucket}"><span class="${r.amount >= 0 ? "up" : "down"}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.asset)} <strong>${formatNum(r.amount, 4)}</strong> <span class="dim">${escapeHtml(r.note || "")}</span></li>`;
+        })
+        .join("")
+    : `<li class="ledger-empty-row" data-ledger-kind="other" hidden><span class="muted">No history yet</span></li>`;
   return `
     <section class="acct-activity-block" id="acct-activity">
       <header class="acct-block-head">
         <h3>Activity</h3>
-        <p class="muted small">Ledger · lab fills · 28-day PnL calendar</p>
+        <p class="muted small">Ledger · fills · 28-day PnL calendar</p>
       </header>
       <div class="acct-activity-grid">
         <article class="glass-inset account-card acct-ledger-card" id="account-ledger">
@@ -594,16 +603,13 @@ function renderActivityBlock(
               <button type="button" class="acct-chip" data-ledger-filter="other">Other</button>
             </div>
           </div>
+          <ul class="pool-list mono ledger-mini" id="acct-ledger-list"${rows.length ? "" : ` data-empty="1"`}>
+            ${listItems}
+          </ul>
+          <p class="muted small ledger-filter-empty" id="acct-ledger-filter-empty" hidden>No rows in this filter</p>
           ${
             rows.length
-              ? `<ul class="pool-list mono ledger-mini" id="acct-ledger-list">
-            ${rows
-              .map((r) => {
-                const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
-                return `<li data-ledger-kind="${bucket}"><span class="${r.amount >= 0 ? "up" : "down"}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.asset)} <strong>${formatNum(r.amount, 4)}</strong> <span class="dim">${escapeHtml(r.note || "")}</span></li>`;
-              })
-              .join("")}
-          </ul>`
+              ? ""
               : `<div class="acct-empty-state">
             <p class="muted">No history yet</p>
             <p class="muted small">Trades, converts, and deposits appear here.</p>
@@ -612,7 +618,7 @@ function renderActivityBlock(
         </article>
         <article class="glass-inset account-card" id="account-lab-fills">
           <div class="acct-card-title-row">
-            <h4>Lab fills</h4>
+            <h4>${escapeHtml(fillsLabel)}</h4>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-fills-refresh"${labLive ? "" : " disabled"}>↻ Sync</button>
           </div>
           <p class="muted small">Server SQLite · GET /fills</p>
@@ -621,8 +627,8 @@ function renderActivityBlock(
             labLive
               ? "Tap Sync after trading."
               : session.address
-                ? "Reconnect fixture to load lab fills."
-                : "Connect LAB session to load fills."
+                ? "Reconnect to load fills."
+                : "Connect desk wallet to load fills."
           }</p>
         </article>
         <article class="glass-inset account-card acct-cal-card">
@@ -949,7 +955,13 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         : ""
     }
 
-    ${renderActivityBlock(state.ledger, calHtml, labLive, session)}
+    ${renderActivityBlock(
+      state.ledger,
+      calHtml,
+      labLive,
+      session,
+      deskOn ? "Desk fills" : "Lab fills",
+    )}
 
     ${renderRoadmapBlock()}
   </section>`;
@@ -1004,18 +1016,37 @@ export function wireAccountFunding(state: DemoState, market: MarketSnapshot, onU
   const filters = document.getElementById("acct-ledger-filters");
   if (filters && filters.getAttribute("data-wired") !== "1") {
     filters.setAttribute("data-wired", "1");
+    const applyLedgerFilter = (f: string) => {
+      filters.querySelectorAll("[data-ledger-filter]").forEach((b) => {
+        const on = ((b as HTMLElement).dataset.ledgerFilter || "all") === f;
+        b.classList.toggle("active", on);
+      });
+      const list = document.getElementById("acct-ledger-list");
+      const emptyHint = document.getElementById("acct-ledger-filter-empty");
+      if (!list) return;
+      let visible = 0;
+      list.querySelectorAll("li").forEach((li) => {
+        const el = li as HTMLElement;
+        if (el.classList.contains("ledger-empty-row")) {
+          el.hidden = true;
+          return;
+        }
+        const kind = el.dataset.ledgerKind || "other";
+        const show = f === "all" || kind === f;
+        el.hidden = !show;
+        if (show) visible += 1;
+      });
+      list.classList.toggle("is-filter-empty", visible === 0);
+      if (emptyHint) {
+        emptyHint.hidden = visible !== 0;
+        emptyHint.textContent =
+          f === "all" ? "No rows yet" : `No ${f === "trade" ? "trades" : f === "fee" ? "fees" : "other rows"} in this slice`;
+      }
+    };
     filters.addEventListener("click", (ev) => {
       const btn = (ev.target as HTMLElement | null)?.closest?.("[data-ledger-filter]") as HTMLElement | null;
       if (!btn || !filters.contains(btn)) return;
-      const f = btn.dataset.ledgerFilter || "all";
-      filters.querySelectorAll("[data-ledger-filter]").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const list = document.getElementById("acct-ledger-list");
-      if (!list) return;
-      list.querySelectorAll("li").forEach((li) => {
-        const kind = (li as HTMLElement).dataset.ledgerKind || "other";
-        (li as HTMLElement).hidden = !(f === "all" || kind === f);
-      });
+      applyLedgerFilter(btn.dataset.ledgerFilter || "all");
     });
   }
 

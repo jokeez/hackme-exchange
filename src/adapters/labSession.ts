@@ -39,8 +39,13 @@ export function startLabSessionGuard(opts: LabSessionGuardOpts): () => void {
             const sync = await syncLabOrdersFillsLight(opts.getState(), opts.getMarket());
             if (sync.ok) {
               opts.saveState();
-              const via = res.via === "session" ? "session restored" : "fixture re-signed";
-              opts.onReconnected(`Lab reconnected (${via}) · ${res.address.slice(0, 14)}…`);
+              const via =
+                res.via === "session"
+                  ? "session restored"
+                  : res.via === "desk"
+                    ? "desk re-signed"
+                    : "fixture re-signed";
+              opts.onReconnected(`Reconnected (${via}) · ${res.address.slice(0, 14)}…`);
               opts.onSync(sync.note);
               opts.onBookRefresh?.();
             }

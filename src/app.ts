@@ -107,7 +107,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, parseDeskSeedImport, persistDeskSeed } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -3330,12 +3330,17 @@ function settleOpenOrdersFromTickers(showToast = false): string[] {
   return notes;
 }
 
-/** Reconnect when address survived reload but CSRF did not — session probe first, then fixture. */
+/** Reconnect when address/seed survived reload but CSRF did not — cookie first, then desk/lab re-sign. */
 async function maybeAutoReconnectLabSession(): Promise<void> {
   const meta = getLabSessionMeta();
-  if (meta.hasCsrf || !meta.address) return;
-  const msg = document.getElementById("lab-api-msg");
-  if (msg) msg.textContent = "Session address present — restoring session…";
+  if (meta.hasCsrf) return;
+  if (!meta.address && !(isDeskConnectEnabled() && hasDeskSeed())) return;
+  const desk = isDeskConnectEnabled();
+  const msg =
+    document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
+    document.getElementById("lab-api-msg") ||
+    document.getElementById("desk-api-msg");
+  if (msg) msg.textContent = "Restoring desk session…";
   const res = await labSessionRestoreOrConnect();
   if (!res.ok) {
     if (msg) msg.textContent = res.message;
@@ -3344,12 +3349,21 @@ async function maybeAutoReconnectLabSession(): Promise<void> {
   const sync = await syncLabBalancesAndBook(state, market);
   if (sync.ok) {
     saveState(state);
-    const note = res.via === "session" ? "Session restored from cookie" : "Fixture re-signed";
+    const note =
+      res.via === "session"
+        ? "Session restored from cookie"
+        : res.via === "desk"
+          ? "Desk wallet reconnected"
+          : "Fixture re-signed";
     if (msg) msg.textContent = `${note} · ${res.address.slice(0, 14)}…`;
     toast(note, "ok");
     refreshAccountAfterLab();
+    patchOpenSettingsWalletChrome();
   } else if (msg) {
     msg.textContent = sync.message;
+    if (isHubEmbed() && isSessionRequiredError(sync)) {
+      toast(hubEmbedSessionBlockedHint(), "warn");
+    }
   }
 }
 
@@ -7997,6 +8011,8 @@ export async function boot(): Promise<void> {
   startMarketStreamLoop();
   startBookLoop();
   startLabSessionLoop();
+  // Restore desk/lab CSRF as early as boot (not only when Account is open).
+  if (isLabApiEnabled()) void maybeAutoReconnectLabSession();
   void refreshTradingGuardsFromHealth();
   pollTimer = window.setInterval(async () => {
     try {

@@ -93,12 +93,13 @@ describe("snapshotEquity / dailyPnlCalendar", () => {
 
   it("renderPnlCalendarHtml includes cells", () => {
     const html = renderPnlCalendarHtml([
-      { dateKey: "2026-01-01", label: "Jan 1", pnl: 10 },
-      { dateKey: "2026-01-02", label: "Jan 2", pnl: -5 },
+      { dateKey: "2026-01-01", label: "Jan 1", dayNum: 1, pnl: 10, hasData: true },
+      { dateKey: "2026-01-02", label: "Jan 2", dayNum: 2, pnl: -5, hasData: true },
     ]);
     expect(html).toContain("pnl-calendar");
     expect(html).toContain("pnl-cal-cell");
-    expect(html).toContain("Paper equity");
+    expect(html).toContain("pnl-cal-weekdays");
+    expect(html).toMatch(/Equity day-change|Tracking starts/);
   });
 
   it("empty calendar does not invent a sine-wave history", () => {
@@ -108,7 +109,28 @@ describe("snapshotEquity / dailyPnlCalendar", () => {
     s.initialEquityUsdt = eq;
     const days = dailyPnlCalendar(s, market, 14);
     expect(days.every((d) => Math.abs(d.pnl) < 1e-9)).toBe(true);
-    expect(renderPnlCalendarHtml(days)).toContain("no day history yet");
+    expect(renderPnlCalendarHtml(days)).toMatch(/Tracking starts|no day history/i);
+  });
+
+  it("ledger fees paint calendar day when no equity snapshot", () => {
+    const s = baseState();
+    s.equitySnapshots = [];
+    const now = Date.now();
+    s.ledger = [
+      {
+        id: "f1",
+        kind: "fee",
+        asset: "USDT",
+        amount: -0.01,
+        usdtValue: -0.01,
+        note: "taker fee",
+        ts: now,
+      },
+    ];
+    const days = dailyPnlCalendar(s, market, 7);
+    const today = days[days.length - 1]!;
+    expect(today.pnl).toBeCloseTo(-0.01, 8);
+    expect(today.hasData).toBe(true);
   });
 });
 

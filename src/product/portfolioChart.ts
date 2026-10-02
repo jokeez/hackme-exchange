@@ -1,5 +1,6 @@
 import {
   equityInDenom,
+  formatFloatingPnlDisplay,
   getEquityDenom,
   type EquityDenom,
   maskBalance,
@@ -48,7 +49,10 @@ export function equityDailySeries(snapshots: EquitySnapshot[]): EquitySnapshot[]
   return [...byDay.values()].sort((a, b) => a.ts - b.ts);
 }
 
-/** Build display series: daily snapshots, raw points, or initial→current interpolation. */
+/**
+ * Build display series from real snapshots only.
+ * Never invent a decorative +0.3% ramp — that desynced % vs USDT footer.
+ */
 export function chartEquitySeries(
   snapshots: EquitySnapshot[],
   initialEquityUsdt: number,
@@ -66,21 +70,28 @@ export function chartEquitySeries(
   if (raw.length >= 2) return raw;
   const current = raw[raw.length - 1]?.equityUsdt ?? initialEquityUsdt;
   const start = initialEquityUsdt > 0 ? initialEquityUsdt : current;
-  if (Math.abs(current - start) < 1e-9 && raw.length === 1) {
-    // Flat balance — gentle 30d ramp (no jagged noise).
-    const anchor = current || start || 1;
-    const now = Date.now();
-    return Array.from({ length: 30 }, (_, i) => ({
-      ts: now - (29 - i) * MS_DAY,
-      equityUsdt: anchor * (0.997 + (i / 29) * 0.003),
-    }));
-  }
   const now = Date.now();
-  const days = 30;
-  return Array.from({ length: days }, (_, i) => ({
-    ts: now - (days - 1 - i) * MS_DAY,
-    equityUsdt: start + ((current - start) * i) / (days - 1),
-  }));
+  if (!(current > 0) && !(start > 0)) return [];
+  // Honest flat (or real start→current) — two points only, no synthetic 30d noise.
+  if (Math.abs(current - start) < 1e-9) {
+    const anchor = current || start;
+    return [
+      { ts: now - MS_DAY, equityUsdt: anchor },
+      { ts: now, equityUsdt: anchor },
+    ];
+  }
+  return [
+    { ts: now - MS_DAY, equityUsdt: start },
+    { ts: now, equityUsdt: current },
+  ];
+}
+
+/** Footer delta — keep micro USDT moves visible (matches asset floating PnL). */
+export function formatChartDeltaUsdt(chgAbs: number, hidden = false): string {
+  const full = formatFloatingPnlDisplay(chgAbs, 0);
+  const absPart = full.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const withUnit = /USDT|BTC|HMC|RUB/i.test(absPart) ? absPart : `${absPart} USDT`;
+  return maskBalance(withUnit, hidden);
 }
 
 export function formatChartDayLabel(ts: number): string {
@@ -110,7 +121,7 @@ function chartPoints(rows: EquitySnapshot[]): PortfolioChartPoint[] {
   const vals = rows.map((r) => r.equityUsdt);
   let min = Math.min(...vals);
   let max = Math.max(...vals);
-  const span = max - min || Math.max(max * 0.02, 1);
+  const span = max - min || Math.max(Math.abs(max) * 0.02, 0.01);
   min -= span * 0.1;
   max += span * 0.06;
   const innerW = CHART_W - PAD.l - PAD.r;
@@ -181,11 +192,14 @@ export function portfolioEquityChart30d(
   const maxLabel = formatBalance(maxEq, { ...opts, hidden: opts.hidden });
   const minLabel = formatBalance(minEq, { ...opts, hidden: opts.hidden });
   const showMinY = minLabel !== maxLabel;
-  const rangeLabel =
-    formatChartDayLabel(first.ts) === formatChartDayLabel(last.ts)
-      ? "30d"
+  const flatSeries = Math.abs(chgAbs) < 1e-9;
+  const rangeLabel = flatSeries
+    ? "session"
+    : formatChartDayLabel(first.ts) === formatChartDayLabel(last.ts)
+      ? "Today"
       : `${formatChartDayLabel(first.ts)}→now`;
   const nowLabel = formatBalance(last.equityUsdt, opts);
+  const deltaLabel = formatChartDeltaUsdt(chgAbs, opts.hidden);
 
   return `<div class="portfolio-30d ${cls}" data-portfolio-chart="1" data-points="${dataJson}" data-chart-denom="${chartDenom}"${marketAttrs}>
     <div class="portfolio-30d-head">
@@ -196,7 +210,7 @@ export function portfolioEquityChart30d(
       <p class="portfolio-30d-date muted small" id="portfolio-30d-date">${formatChartDayLabel(last.ts)} · ${rangeLabel}</p>
     </div>
     <div class="portfolio-30d-stage" id="portfolio-30d-stage">
-      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="30-day equity ${nowLabel}">
+      <svg class="portfolio-30d-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Equity ${nowLabel}">
         <defs>
           <linearGradient id="${uid}-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="currentColor" stop-opacity="0.42" />
@@ -232,7 +246,7 @@ export function portfolioEquityChart30d(
       </svg>
     </div>
     <div class="portfolio-30d-foot muted small">
-      <span id="portfolio-30d-delta">${chgSign}${formatBalance(Math.abs(chgAbs), opts)} · 30d</span>
+      <span id="portfolio-30d-delta">${deltaLabel} · ${flatSeries ? "flat" : "vs start"}</span>
     </div>
   </div>`;
 }
@@ -286,9 +300,11 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
   const chartPts = chartPoints(rawPts.map((p) => ({ ts: p.ts, equityUsdt: p.eq })));
   const first = chartPts[0]!;
   const lastPt = chartPts[chartPts.length - 1]!;
-  const rangeLabel =
-    formatChartDayLabel(first.ts) === formatChartDayLabel(lastPt.ts)
-      ? "30d"
+  const flatSeries = Math.abs(lastPt.equityUsdt - first.equityUsdt) < 1e-9;
+  const rangeLabel = flatSeries
+    ? "session"
+    : formatChartDayLabel(first.ts) === formatChartDayLabel(lastPt.ts)
+      ? "Today"
       : `${formatChartDayLabel(first.ts)}→now`;
   const x0 = first.x;
   const x1 = lastPt.x;
@@ -328,8 +344,9 @@ export function wirePortfolioEquityChart(root: ParentNode): void {
       chgEl.classList.toggle("down", chgPct < 0);
     }
     if (deltaEl) {
-      const absLabel = formatBalance(Math.abs(chgAbs), fmtOpts());
-      deltaEl.textContent = `${chgSign}${absLabel} · ${hovering ? "vs start" : "30d"}`;
+      deltaEl.textContent = `${formatChartDeltaUsdt(chgAbs, isBalanceHidden())} · ${
+        hovering ? "vs start" : flatSeries ? "flat" : "vs start"
+      }`;
     }
   };
 

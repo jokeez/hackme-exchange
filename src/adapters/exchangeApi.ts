@@ -211,8 +211,17 @@ let sessionCsrf = "";
 let sessionAddress = "";
 
 export function getLabSessionMeta(): { address: string; hasCsrf: boolean } {
-  if (typeof sessionStorage !== "undefined") {
-    if (!sessionAddress) sessionAddress = sessionStorage.getItem(ADDR_STORAGE_KEY) ?? "";
+  if (typeof sessionStorage !== "undefined" || typeof localStorage !== "undefined") {
+    if (!sessionAddress) {
+      try {
+        sessionAddress =
+          sessionStorage.getItem(ADDR_STORAGE_KEY) ??
+          (typeof localStorage !== "undefined" ? localStorage.getItem(ADDR_STORAGE_KEY) : null) ??
+          "";
+      } catch {
+        sessionAddress = "";
+      }
+    }
     // CSRF stays memory-only; clear any legacy stored CSRF from older builds.
     try {
       sessionStorage.removeItem(CSRF_STORAGE_KEY);
@@ -248,9 +257,14 @@ export function clearLabSessionMeta(): void {
   } catch {
     /* ignore */
   }
+  try {
+    localStorage.removeItem(ADDR_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
-/** Memory CSRF + address (tests / reconnect helpers). CSRF never written to sessionStorage. */
+/** Memory CSRF + address (tests / reconnect helpers). CSRF never written to storage. */
 export function setLabSessionMeta(address: string, csrf: string): void {
   persistSession(address, csrf);
 }
@@ -259,9 +273,14 @@ function persistSession(address: string, csrf: string): void {
   sessionAddress = address;
   sessionCsrf = csrf;
   try {
-    // Address only — never persist CSRF in sessionStorage (XSS→credentialed lab API).
+    // Address survives reload/tab close; CSRF stays memory-only (XSS→API).
     sessionStorage.setItem(ADDR_STORAGE_KEY, address);
     sessionStorage.removeItem(CSRF_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem(ADDR_STORAGE_KEY, address);
   } catch {
     /* ignore */
   }

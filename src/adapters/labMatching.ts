@@ -5,6 +5,7 @@
 
 import type { BookLevel, DemoState, MarketSnapshot, Order, OrderSide, PairId, Trade } from "../types";
 import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
+import { hasDeskSeed } from "./deskWallet";
 import {
   apiPairToId,
   apiPriceToDisplay,
@@ -96,11 +97,13 @@ export function useLiveBook(): boolean {
   return useServerMatching() || usePublicDeskBook();
 }
 
-/** FE-M02: address remembered after reload but CSRF gone — freeze paper matching. */
+/** FE-M02: address (or desk seed) remembered after reload but CSRF gone. */
 export function isLabSessionStale(): boolean {
-  if (!isLabLoopbackApi()) return false;
+  if (!isExchangeApiWired()) return false;
   const m = getLabSessionMeta();
-  return !!m.address && !m.hasCsrf;
+  if (m.hasCsrf) return false;
+  if (m.address) return true;
+  return isDeskConnectEnabled() && hasDeskSeed();
 }
 
 export type LabBookCache = {

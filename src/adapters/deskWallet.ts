@@ -36,13 +36,34 @@ export function normalizeDeskSeedHex(raw: string): string | null {
   return h;
 }
 
-export function loadOrCreateDeskSeed(): string {
+function readStoredDeskSeed(): string | null {
   try {
-    const existing = normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "");
-    if (existing) return existing;
+    const fromLocal = normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "");
+    if (fromLocal) return fromLocal;
   } catch {
     /* ignore */
   }
+  try {
+    const fromSession = normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "");
+    if (fromSession) {
+      // Migrate session → local so reload/tab-close keeps the wallet.
+      persistDeskSeed(fromSession);
+      return fromSession;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** True when a desk seed is stored (localStorage preferred). */
+export function hasDeskSeed(): boolean {
+  return !!readStoredDeskSeed();
+}
+
+export function loadOrCreateDeskSeed(): string {
+  const existing = readStoredDeskSeed();
+  if (existing) return existing;
   const seed = new Uint8Array(32);
   crypto.getRandomValues(seed);
   const hex = bytesToHex(seed);
@@ -52,22 +73,33 @@ export function loadOrCreateDeskSeed(): string {
 
 export function clearDeskSeed(): void {
   try {
+    localStorage.removeItem(SEED_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
     sessionStorage.removeItem(SEED_KEY);
   } catch {
     /* ignore */
   }
 }
 
-/** Replace sessionStorage seed (does not connect). */
+/** Persist desk seed to localStorage (survives reload + tab close). */
 export function persistDeskSeed(seedHex: string): string {
   const n = normalizeDeskSeedHex(seedHex);
   if (!n) throw new Error("seed must be 32-byte hex");
   // Prove it is a valid Ed25519 seed before writing.
   ed.getPublicKey(hexToBytes(n));
   try {
-    sessionStorage.setItem(SEED_KEY, n);
+    localStorage.setItem(SEED_KEY, n);
   } catch {
     /* ignore quota */
+  }
+  try {
+    // Keep session copy for older code paths / same-tab races.
+    sessionStorage.setItem(SEED_KEY, n);
+  } catch {
+    /* ignore */
   }
   return n;
 }
