@@ -252,8 +252,14 @@ export class MarketStream {
     this.ws = null;
   }
 
+  /** Backoff when GET /book returns 429 — do not stampede the soft-launch cap. */
+  private bookBackoffUntil = 0;
+  private bookPollMs = 1_500;
+
   private pollIntervalMs(): number {
-    return document.visibilityState === "visible" ? 220 : 900;
+    // Soft-launch book cap is per-IP; 220ms polling burned the budget and blanked L2/tape.
+    const base = document.visibilityState === "visible" ? this.bookPollMs : Math.max(this.bookPollMs * 2, 4_000);
+    return Math.max(800, base);
   }
 
   private startPoll(): void {
@@ -272,16 +278,34 @@ export class MarketStream {
     void this.pollTick();
   };
 
+  private reschedulePoll(): void {
+    if (!this.pollTimer || !this.running) return;
+    clearInterval(this.pollTimer);
+    this.pollTimer = window.setInterval(() => void this.pollTick(), this.pollIntervalMs());
+  }
+
   private async pollTick(): Promise<void> {
     if (!this.running || !this.opts.isSpotView() || !this.liveBookOn()) return;
     const pairId = this.opts.getActivePair();
-    const book = await refreshLabBook(pairId);
-    if (book.changed) this.handlers.onEvent?.({ type: "book", pairId, changed: true });
+    const now = Date.now();
 
-    // Public market tape for guests + connected users (not session /fills).
+    // Public tape every tick (cheap, not on BookLimit) — guests must see prints.
     this.fillTick += 1;
-    if (this.fillTick % 2 === 0) {
-      await this.syncPublicTrades(pairId);
+    await this.syncPublicTrades(pairId);
+
+    if (now >= this.bookBackoffUntil) {
+      const book = await refreshLabBook(pairId);
+      if (!book.ok && /rate.?limit|too many book/i.test(book.note ?? "")) {
+        this.bookPollMs = Math.min(6_000, Math.max(2_000, this.bookPollMs * 1.5));
+        this.bookBackoffUntil = now + this.bookPollMs;
+        this.reschedulePoll();
+      } else if (book.ok) {
+        if (this.bookPollMs > 1_500) {
+          this.bookPollMs = Math.max(1_500, this.bookPollMs * 0.85);
+          this.reschedulePoll();
+        }
+        if (book.changed) this.handlers.onEvent?.({ type: "book", pairId, changed: true });
+      }
     }
 
     // Session fills/orders need Connect CSRF.

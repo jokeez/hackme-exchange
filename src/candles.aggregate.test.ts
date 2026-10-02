@@ -3,12 +3,20 @@ import {
   aggregateCandles,
   applyMidToPairCandles,
   CANDLE_BASE_TF,
+  chartAnchorMid,
   deriveAllTimeframes,
   prependOlderCandles,
   seedAllTimeframes,
   seedCandles,
 } from "./candles";
 import { TIMEFRAMES, type Timeframe } from "./types";
+
+describe("chartAnchorMid", () => {
+  it("quantizes so tiny L2 noise does not fork history", () => {
+    expect(chartAnchorMid(0.04953409)).toBe(chartAnchorMid(0.04953411));
+    expect(chartAnchorMid(0.04953409)).toBeGreaterThan(0);
+  });
+});
 
 describe("multi-TF aggregation (one market)", () => {
   it("seedAllTimeframes: every TF tip close ≈ mid", () => {

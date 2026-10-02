@@ -155,8 +155,9 @@ describe("labMatching mappers", () => {
     expect(mid).toBeCloseTo(0.00055, 10);
     const buy = labMarketSlipHint("buy", "HMC_USDT", 0.0007, 0.02);
     const sell = labMarketSlipHint("sell", "HMC_USDT", 0.0007, 0.02);
-    expect(buy).toBeCloseTo(mid * 1.02, 10);
-    expect(sell).toBeCloseTo(mid * 0.98, 10);
+    // Buy ceiling from best ask; sell floor from best bid — then ±slip, clamped to band.
+    expect(buy).toBeCloseTo(0.000552 * 1.02, 10);
+    expect(sell).toBeCloseTo(0.000548 * 0.98, 10);
     expect(buy).toBeLessThanOrEqual(mid * 1.15);
     expect(sell).toBeGreaterThanOrEqual(mid * 0.85);
     clearLabBookCache();

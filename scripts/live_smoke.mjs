@@ -46,7 +46,9 @@ async function httpCheck() {
   else {
     const hj = await deskHealth.json();
     const matchingGo = process.env.EX_MATCHING_GO === "1" || hj.matching === "ok";
-    const custodyGo = process.env.EX_CUSTODY_GO === "1";
+    const custodyGo =
+      process.env.EX_CUSTODY_GO === "1" ||
+      (hj.deposit?.enabled === true && hj.withdraw?.enabled === true);
     if (!hj?.ok) fail("desk-api/health ok≠true");
     else if (matchingGo) {
       if (hj.matching !== "ok") fail(`desk matching want ok got ${hj.matching}`);

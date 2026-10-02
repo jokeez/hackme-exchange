@@ -31,9 +31,10 @@ describe("depth", () => {
     expect(html).toContain("Spread");
   });
 
-  it("renderDepthPanel lab note when labLive", () => {
+  it("renderDepthPanel protects pair codes from translators", () => {
     const html = renderDepthPanel(bids, asks, "HMC", "USDT", { labLive: true });
-    expect(html).toContain("lab matching L2");
+    expect(html).toContain('class="notranslate" translate="no">HMC/USDT</span>');
+    expect(html).toContain("live L2");
   });
 
   it("empty lab depth copy", () => {

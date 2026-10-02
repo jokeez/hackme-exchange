@@ -29,6 +29,18 @@ export const CANDLE_BASE_TF: Timeframe = "1m";
 export const CHART_GENESIS_ISO = "2026-05-18T00:00:00.000Z";
 export const CHART_GENESIS_UNIX = Math.floor(Date.parse(CHART_GENESIS_ISO) / 1000);
 
+/**
+ * Quantize mid before seeding history so every device/TF sees the same walk.
+ * Micro L2 differences (0.04953409 vs 0.04953411) must not fork the whole chart.
+ */
+export function chartAnchorMid(mid: number): number {
+  if (!(mid > 0) || !Number.isFinite(mid)) return 0;
+  // 6 significant digits — enough for soft-launch HMC (~0.05) and BTC pairs.
+  const abs = Math.abs(mid);
+  const digits = abs >= 1 ? 6 : abs >= 0.01 ? 6 : 5;
+  return Number(mid.toPrecision(digits));
+}
+
 function stableHash(parts: Array<string | number>): number {
   let h = 2166136261;
   for (const part of parts) {
@@ -432,16 +444,18 @@ export function seedAllTimeframes(
   mid: number,
   nowMs = Date.now(),
 ): Partial<Record<Timeframe, Candle[]>> {
+  // Closed history walk anchors to quantized mid so clients converge across devices.
+  // Forming tip uses tipBarFromPaperClock(tipMid) so late-join matches early-join.
+  const tipMid = mid > 0 && Number.isFinite(mid) ? mid : 0;
+  const anchor = chartAnchorMid(tipMid) || tipMid;
   const base = sanitizeCandlesForChart(
-    seedCandles(pairId, CANDLE_BASE_TF, mid, barCountForTf(CANDLE_BASE_TF, nowMs), nowMs),
+    seedCandles(pairId, CANDLE_BASE_TF, anchor, barCountForTf(CANDLE_BASE_TF, nowMs), nowMs),
     pairId,
     CANDLE_BASE_TF,
   );
-  if (base.length) {
-    const tip = base[base.length - 1]!;
-    tip.close = mid;
-    tip.high = Math.max(tip.high, tip.open, mid);
-    tip.low = Math.min(tip.low, tip.open, mid);
+  if (base.length && tipMid > 0) {
+    const tipBucket = base[base.length - 1]!.time;
+    base[base.length - 1] = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, tipBucket, nowMs, tipMid);
   }
   const all = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, all[CANDLE_BASE_TF] ?? base);
@@ -452,11 +466,11 @@ export function seedAllTimeframes(
   // Re-pin tip close after finalize/reagg so every TF prints the live mid.
   for (const tf of Object.keys(all) as Timeframe[]) {
     const series = all[tf];
-    if (!series?.length) continue;
+    if (!series?.length || !(tipMid > 0)) continue;
     const tip = series[series.length - 1]!;
-    tip.close = mid;
-    tip.high = Math.max(tip.high, tip.open, mid);
-    tip.low = Math.min(tip.low, tip.open, mid);
+    tip.close = tipMid;
+    tip.high = Math.max(tip.high, tip.open, tipMid);
+    tip.low = Math.min(tip.low, tip.open, tipMid);
   }
   return all;
 }

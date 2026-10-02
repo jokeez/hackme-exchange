@@ -9,6 +9,7 @@ import {
   applyMidToPairCandles,
   applyPaperClockToPairCandles,
   CANDLE_BASE_TF,
+  chartAnchorMid,
   clampFillWickPx,
   deriveAllTimeframes,
   prependOlderCandles,
@@ -112,6 +113,8 @@ import {
   getLabBookCache,
   labBookMid,
   labMarketSlipHint,
+  lastPublicMid,
+  setLastPublicMid,
   mergeServerFills,
   placeLabOrder,
   refreshLabBook,
@@ -179,6 +182,7 @@ import { lookupWorkersByAddress, renderWorkerLookupResult } from "./product/pool
 import { renderOracleTransparencyPanel, patchOracleTransparencyDom } from "./product/oraclePanel";
 import { TOUR_V2_STEPS, markTourV2Done, renderTourV2Overlay, tourV2Done } from "./product/tourV2";
 import { renderDepthPanel, renderDepthSvg } from "./depth";
+import { markNoTranslate, noTranslateText } from "./notranslate";
 import { applyFirstVisitPrefs, scheduleChartTapHint } from "./onboarding";
 import { createMarketStream, type MarketStream } from "./adapters/marketStream";
 import { startLabSessionGuard, stopLabSessionGuard } from "./adapters/labSession";
@@ -453,10 +457,10 @@ let custodyInFlight = false;
 
 const PAPER_BADGE = `<span class="demo-badge" title="Paper desk — operator reference mid, not a live market price">PAPER · REF MID</span>`;
 const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Paper desk — operator reference mid, not a live market price">PAPER</span>`;
-const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">DEMO/LAB · LIVE BOOK</span>`;
+const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">LAB · LIVE BOOK</span>`;
 const LAB_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from private lab matching engine">LAB</span>`;
-const DESK_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from public desk matching (Matching GO)">DESK · LIVE BOOK</span>`;
-const DESK_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from public desk matching (Matching GO)">DESK</span>`;
+const DESK_BOOK_BADGE = `<span class="demo-badge" title="Live matching soft-launch — public L2 + tape">SPOT · LIVE</span>`;
+const DESK_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live matching soft-launch">LIVE</span>`;
 
 function bookHeaderBadge(): string {
   if (useLabMatching()) return LAB_BOOK_BADGE_SM;
@@ -617,7 +621,7 @@ function liveSpreadPct(t: Ticker = activeTicker()): number {
     const bid = book?.bids[0]?.price ?? t.bid;
     const ask = book?.asks[0]?.price ?? t.ask;
     const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : t.mid;
-    if (bid > 0 && ask > 0 && mid > 0) return ((ask - bid) / mid) * 100;
+    if (bid > 0 && ask > 0 && mid > 0 && ask >= bid) return ((ask - bid) / mid) * 100;
     return 0;
   }
   return (t.spreadBps || 0) / 100;
@@ -650,9 +654,9 @@ function renderAnnounce(): string {
     : lab
       ? "Private lab matching — not production custody"
       : deskLive
-        ? "Desk matching live — soft-launch caps · Deposit address ≠ Copy addr"
+        ? "Soft-launch Spot — live matching · deposit/withdraw on"
         : deskBook
-          ? "Desk book live — Connect to trade · Deposit ≠ Copy addr"
+          ? "Soft-launch Spot — live book · Connect to trade"
           : desk
             ? "Desk Connect — paper Spot until you connect"
             : "Paper Spot — simulated balances · reference mids";
@@ -928,8 +932,8 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
     const span = document.createElement("span");
     span.className = "demo-badge sm muted-badge";
     span.dataset.labMmBadge = "1";
-    span.title = "Live book levels seeded by lab market-maker";
-    span.textContent = "LAB MM";
+    span.title = "Soft-MM liquidity on the live book";
+    span.textContent = "SOFT MM";
     const fee = meta.querySelector("#fee-row");
     meta.insertBefore(span, fee ?? null);
   } else if (!tradingGuards.labMmSeeded && existing) {
@@ -1067,31 +1071,49 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
   const icons = document.querySelector(".tb-pair-icons");
   if (icons) icons.innerHTML = pairAssetIcons(pair.base, pair.quote);
   const pairTitle = document.querySelector(".tb-pair h1");
-  if (pairTitle) pairTitle.textContent = pair.label;
+  if (pairTitle) {
+    pairTitle.textContent = pair.label;
+    markNoTranslate(pairTitle);
+  }
   const priceEl = document.querySelector(".tb-price");
   const chgEl = document.querySelector(".tb-chg");
   const fiatEl = document.querySelector("[data-tb-usdt]") as HTMLElement | null;
   const statsEl = document.querySelector(".tb-stats");
   if (priceEl) {
     priceEl.textContent = formatPrice(quote.mid);
-    priceEl.className = `tb-price ${tone}`;
+    priceEl.className = `tb-price notranslate ${tone}`;
+    priceEl.setAttribute("translate", "no");
   }
   if (chgEl) {
     chgEl.textContent = formatPct(quote.changePct);
-    chgEl.className = `tb-chg ${tone}`;
+    chgEl.className = `tb-chg notranslate ${tone}`;
+    chgEl.setAttribute("translate", "no");
   }
   if (fiatEl && market && pair.quote !== "USDT") {
     const fx = pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1;
     fiatEl.textContent = `≈ ${formatPrice(quote.mid * fx)} USDT`;
+    markNoTranslate(fiatEl);
   }
   if (statsEl) {
     const spans = statsEl.querySelectorAll("span.mono");
     const live = useLiveBook();
     const vol = live ? deskVol24hBase() : quote.vol24h;
-    if (spans[0] && quote.high24h > 0) spans[0].textContent = formatPrice(quote.high24h);
-    if (spans[1] && quote.low24h > 0) spans[1].textContent = formatPrice(quote.low24h);
-    if (spans[2]) spans[2].textContent = live && !(vol > 0) ? "—" : formatVolBase(vol, pair.base);
-    if (spans[3]) spans[3].textContent = `${formatNum(liveSpreadPct(), 3)}%`;
+    if (spans[0] && quote.high24h > 0) {
+      spans[0].textContent = formatPrice(quote.high24h);
+      markNoTranslate(spans[0]);
+    }
+    if (spans[1] && quote.low24h > 0) {
+      spans[1].textContent = formatPrice(quote.low24h);
+      markNoTranslate(spans[1]);
+    }
+    if (spans[2]) {
+      spans[2].textContent = live && !(vol > 0) ? "—" : formatVolBase(vol, pair.base);
+      markNoTranslate(spans[2]);
+    }
+    if (spans[3]) {
+      spans[3].textContent = `${formatNum(liveSpreadPct(), 3)}%`;
+      markNoTranslate(spans[3]);
+    }
   }
 }
 
@@ -1438,11 +1460,11 @@ function renderMarketsList(): string {
       <button type="button" class="market-row ${active}" data-pair="${p.id}">
       <div class="mr-left">
         ${pairAssetIcons(p.base, p.quote)}
-        <span class="mr-sym" title="${p.label}"><strong>${p.base}</strong><span class="muted">/${p.quote}</span></span>
+        <span class="mr-sym notranslate" translate="no" title="${p.label}"><strong>${p.base}</strong><span class="muted">/${p.quote}</span></span>
       </div>
       <div class="mr-right">
-        <span class="mono mr-px">${q.mid > 0 ? formatPriceCompact(q.mid) : "—"}</span>
-        <span class="mono mr-chg ${quoteToneClass(q.tone)}">${formatPct(q.changePct)}</span>
+        <span class="mono mr-px notranslate" translate="no">${q.mid > 0 ? formatPriceCompact(q.mid) : "—"}</span>
+        <span class="mono mr-chg notranslate ${quoteToneClass(q.tone)}" translate="no">${formatPct(q.changePct)}</span>
       </div>
     </button></div>`;
   };
@@ -1495,7 +1517,8 @@ let liveBookKickAt = 0;
 let liveBookKickPair: PairId | null = null;
 function kickLiveBookFetch(pairId: PairId): void {
   const now = Date.now();
-  if (liveBookKickPair === pairId && now - liveBookKickAt < 400) return;
+  // Don't stampede BookLimit — pair switch / empty cache kicks at most ~1.2s.
+  if (liveBookKickPair === pairId && now - liveBookKickAt < 1_200) return;
   liveBookKickAt = now;
   liveBookKickPair = pairId;
   void refreshLabBook(pairId).then((r) => {
@@ -1536,6 +1559,15 @@ function activeBookLevels(): {
   if (labLive) {
     if (lab && (lab.bids.length || lab.asks.length)) {
       raw = { bids: lab.bids, asks: lab.asks };
+      // Crossed L2 (STP leftovers): hide impossible top of book so mid/spread aren't nonsense.
+      const bestBid = raw.bids[0]?.price ?? 0;
+      const bestAsk = raw.asks[0]?.price ?? 0;
+      if (bestBid > 0 && bestAsk > 0 && bestBid >= bestAsk) {
+        raw = {
+          bids: raw.bids.filter((l) => l.price < bestAsk),
+          asks: raw.asks.filter((l) => l.price > bestBid),
+        };
+      }
     } else if (lab) {
       // Health+poll succeeded but Soft-MM depth is empty — not "still fetching".
       waitingLive = false;
@@ -2635,7 +2667,7 @@ function renderSpot(): string {
       <button type="button" class="tb-pair tb-pair-btn" id="btn-mobile-pair" aria-label="Switch trading pair">
         <span class="tb-pair-icons">${pairAssetIcons(pair.base, pair.quote)}</span>
         <div>
-      <h1>${pair.label}</h1>
+      <h1 class="notranslate" translate="no">${pair.label}</h1>
           <span class="tb-sub muted small">${
             useLabMatching()
               ? "Lab book · live matching"
@@ -2649,11 +2681,11 @@ function renderSpot(): string {
         <span class="tb-chev" aria-hidden="true">▾</span>
       </button>
       <div class="tb-quote">
-        <span class="tb-price ${tone}">${formatPrice(tradeMid)}</span>
-        <span class="tb-chg ${tone}">${formatPct(ch)}</span>
+        <span class="tb-price notranslate ${tone}" translate="no">${formatPrice(tradeMid)}</span>
+        <span class="tb-chg notranslate ${tone}" translate="no">${formatPct(ch)}</span>
         ${
           pair.quote !== "USDT" && market
-            ? `<span class="tb-fiat muted small" data-tb-usdt="1">≈ ${formatPrice(
+            ? `<span class="tb-fiat muted small notranslate" translate="no" data-tb-usdt="1">≈ ${formatPrice(
                 tradeMid *
                   (pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1),
               )} USDT</span>`
@@ -2662,16 +2694,16 @@ function renderSpot(): string {
       </div>
     </div>
     <div class="tb-stats">
-      <div><label>24h High</label><span class="mono">${formatPrice(s24.high24h || t.high24h)}</span></div>
-      <div><label>24h Low</label><span class="mono">${formatPrice(s24.low24h || t.low24h)}</span></div>
-      <div><label>24h Vol (${pair.base})</label><span class="mono">${
+      <div><label>24h High</label><span class="mono notranslate" translate="no">${formatPrice(s24.high24h || t.high24h)}</span></div>
+      <div><label>24h Low</label><span class="mono notranslate" translate="no">${formatPrice(s24.low24h || t.low24h)}</span></div>
+      <div><label>24h Vol (${noTranslateText(pair.base)})</label><span class="mono notranslate" translate="no">${
         useLiveBook()
           ? deskVol24hBase() > 0
             ? formatVolBase(deskVol24hBase(), pair.base)
             : "—"
           : formatVolBase(s24.vol24h || t.volume24hBase, pair.base)
       }</span></div>
-      <div><label>Spread</label><span class="mono">${formatNum(liveSpreadPct(t), 3)}%</span></div>
+      <div><label>Spread</label><span class="mono notranslate" translate="no">${formatNum(liveSpreadPct(t), 3)}%</span></div>
     </div>
     <div class="tb-right">
       <div class="vip-badge mono" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">
@@ -2693,8 +2725,8 @@ function renderSpot(): string {
           .map((p) => {
             const meta = pairById(p);
             const mid = pairQuote(p).mid;
-            return `<button type="button" class="recent-pair" data-recent-pair="${escapeHtml(p)}"><span>${escapeHtml(meta.label)}</span>${
-              mid ? `<span class="mono muted">${formatPrice(mid)}</span>` : ""
+            return `<button type="button" class="recent-pair" data-recent-pair="${escapeHtml(p)}"><span class="notranslate" translate="no">${escapeHtml(meta.label)}</span>${
+              mid ? `<span class="mono muted notranslate" translate="no">${formatPrice(mid)}</span>` : ""
             }</button>`;
           })
           .join("")}</div>`
@@ -2907,7 +2939,13 @@ function render(): void {
         <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false" aria-label="System menu">⚙ <span class="sys-label">System</span></button>
         <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
         <div class="sys-drop hidden" id="sys-drop" role="menu">
-          <p class="muted small">Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}</p>
+          <p class="muted small">${
+            useDeskMatching() || usePublicDeskBook()
+              ? `Soft-launch Spot · ${modeChromeLabel()}`
+              : useLabMatching()
+                ? `Lab · ${modeChromeLabel()}`
+                : `Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}`
+          }</p>
           <button type="button" class="sys-item" id="btn-settings">${Ico.settings()} Settings</button>
           <button type="button" class="sys-item" id="btn-settings-wallet" data-settings-tab="wallet">${Ico.wallet()} Wallet &amp; security</button>
           ${
@@ -5388,6 +5426,8 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
       ...publicTape.filter((t) => t.pairId !== ev.pairId),
       ...ev.prints,
     ].slice(0, 120);
+    const newest = ev.prints[0];
+    if (newest?.price && newest.price > 0) setLastPublicMid(ev.pairId, newest.price);
     const tape = document.getElementById("tape");
     if (tape) tape.innerHTML = renderTape();
     patchMobileTradeTape();
@@ -5546,13 +5586,28 @@ function submitOrder(side: "buy" | "sell"): void {
         // Refresh L2 so slip hint tracks lab MM mid (not stale pool-oracle mid).
         await refreshLabBook(state.activePair);
         const t = activeTicker();
-        const mid = labBookMid(state.activePair) || midForPair(market!, state.activePair) || t.mid;
-        const slip = labMarketSlipHint(side, state.activePair, mid, 0.05);
+        const book = getLabBookCache(state.activePair);
+        const mid =
+          labBookMid(state.activePair) ||
+          lastPublicMid(state.activePair) ||
+          midForPair(market!, state.activePair) ||
+          t.mid;
+        let slip = labMarketSlipHint(side, state.activePair, mid, 0.05);
+        // Hard fallback: never POST market buy without a ceiling (API used to → invalid_order).
+        if (side === "buy" && !(slip > 0)) {
+          const ask = book?.asks[0]?.price || t.ask || 0;
+          const anchor = ask > 0 ? ask : mid;
+          if (anchor > 0) slip = anchor * 1.05;
+        }
+        if (side === "buy" && !(slip > 0)) {
+          setOrderMsg(side, "Market buy needs live L2 — wait for book, then retry", "err");
+          return;
+        }
         // Re-clamp to fee+slip safe size — avoids server "Insufficient balance" after 100% on best ask.
         const safePx =
           side === "buy"
-            ? Math.max(slip || t.ask, t.ask || 0) * 1.002
-            : Math.min(slip || t.bid || mid, t.bid || mid) * 0.998;
+            ? Math.max(slip || book?.asks[0]?.price || t.ask || 0, book?.asks[0]?.price || t.ask || 0) * 1.002
+            : Math.min(slip || book?.bids[0]?.price || t.bid || mid, book?.bids[0]?.price || t.bid || mid) * 0.998;
         const maxAmt = maxOrderBaseAmount(state, market!, state.activePair, side, safePx, "market", 1, mid);
         let amt = form.amt;
         if (maxAmt > 0 && amt > maxAmt) {
@@ -5567,7 +5622,7 @@ function submitOrder(side: "buy" | "sell"): void {
           side,
           "market",
           amt,
-          slip,
+          side === "buy" ? slip : slip > 0 ? slip : undefined,
           undefined,
           labOrderOpts(),
         );
@@ -7690,7 +7745,7 @@ async function refresh(): Promise<void> {
   market = m!;
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
-  // Live desk: seed CEX-like walk around L2 mid (not empty / not oracle sine).
+  // Live desk: seed CEX-like walk around shared anchor (last print / L2), not per-tab noise.
   // Tip close still tracks live BBO via tipCandlesForPair every tick.
   if (!useLiveBook()) {
     if (needsCandleReseedForMarket(state, market)) {
@@ -7702,15 +7757,16 @@ async function refresh(): Promise<void> {
   } else {
     for (const p of PAIRS) {
       if (!state.candles[p.id]) state.candles[p.id] = {};
-      const labMid = labBookMid(p.id);
+      const labMid = labBookMid(p.id) || lastPublicMid(p.id);
       if (!(labMid > 0)) continue;
+      const seedMid = chartAnchorMid(labMid) || labMid;
       const base = state.candles[p.id]![CANDLE_BASE_TF] ?? [];
       const tipClose = base[base.length - 1]?.close ?? 0;
       const empty = base.length < 8;
       const cliff =
-        tipClose > 0 && (labMid / tipClose > 1.08 || labMid / tipClose < 0.92);
+        tipClose > 0 && (seedMid / tipClose > 1.08 || seedMid / tipClose < 0.92);
       if (empty || cliff) {
-        state.candles[p.id] = seedAllTimeframes(p.id, labMid);
+        state.candles[p.id] = seedAllTimeframes(p.id, seedMid);
         prevMids[p.id] = labMid;
         chartNeedsFullReplace = true;
       }
@@ -7736,11 +7792,16 @@ async function refresh(): Promise<void> {
       const prevTk = tickers[p.id];
       if (labMid > 0) {
         const book = getLabBookCache(p.id);
+        const bid = book?.bids[0]?.price ?? prevTk?.bid ?? labMid * 0.999;
+        const ask = book?.asks[0]?.price ?? prevTk?.ask ?? labMid * 1.001;
+        const spreadBps =
+          bid > 0 && ask > 0 && labMid > 0 ? ((ask - bid) / labMid) * 10_000 : prevTk?.spreadBps ?? 0;
         tickers[p.id] = {
           ...(prevTk ?? tk),
           mid: labMid,
-          bid: book?.bids[0]?.price ?? prevTk?.bid ?? labMid * 0.999,
-          ask: book?.asks[0]?.price ?? prevTk?.ask ?? labMid * 1.001,
+          bid,
+          ask,
+          spreadBps,
           change24hPct: s.changePct,
           high24h: s.high,
           low24h: s.low,

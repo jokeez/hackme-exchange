@@ -1565,7 +1565,8 @@ export function buildPlaceOrderBody(
     if (priceDisplay != null && priceDisplay > 0) {
       body.price = displayPriceToApi(priceDisplay);
     }
-  } else if (side === "buy") {
+  } else if (type === "market" && side === "buy") {
+    // Always send a slip ceiling. Server also synthesizes one if omitted — belt+suspenders.
     const price = displayPriceToApi(priceDisplay ?? 0);
     if (price <= 0) return { error: "market buy needs price ceiling" };
     body.price = price;

@@ -99,11 +99,11 @@ describe("orderPanel HTML & controls", () => {
     expect(html.indexOf("pay-fees-hmc")).toBeLessThan(html.indexOf("order-type-row"));
   });
 
-  it("shows LAB MM badge only when labMmSeeded is true", () => {
+  it("shows SOFT MM badge only when labMmSeeded is true", () => {
     const off = renderDualOrderPanel(orderCtx({ labMmSeeded: false }));
-    expect(off).not.toContain("LAB MM");
+    expect(off).not.toContain("SOFT MM");
     const on = renderDualOrderPanel(orderCtx({ labMmSeeded: true }));
-    expect(on).toContain("LAB MM");
+    expect(on).toContain("SOFT MM");
     expect(on).toContain("data-lab-mm-badge");
   });
 

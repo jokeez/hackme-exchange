@@ -14,9 +14,13 @@ export type DepthStats = {
 export function depthStats(bids: BookLevel[], asks: BookLevel[]): DepthStats {
   const bestBid = bids[0]?.price ?? 0;
   const bestAsk = asks[0]?.price ?? 0;
-  const mid = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : bestBid || bestAsk || 0;
-  const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : 0;
-  const spreadPct = mid > 0 ? (spreadAbs / mid) * 100 : 0;
+  const crossed = bestBid > 0 && bestAsk > 0 && bestBid >= bestAsk;
+  const mid =
+    bestBid > 0 && bestAsk > 0 && !crossed
+      ? (bestBid + bestAsk) / 2
+      : bestBid || bestAsk || 0;
+  const spreadAbs = bestBid > 0 && bestAsk > 0 && !crossed ? bestAsk - bestBid : 0;
+  const spreadPct = mid > 0 && spreadAbs > 0 ? (spreadAbs / mid) * 100 : 0;
   return {
     bestBid,
     bestAsk,
@@ -43,6 +47,13 @@ export function renderDepthSvgSized(bids: BookLevel[], asks: BookLevel[], width:
   if (!(stats.mid > 0) || (!bids.length && !asks.length)) {
     return `<svg class="depth-svg depth-svg-empty" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"></svg>`;
   }
+  // Crossed L2: don't paint a nonsense V — mid label only.
+  if (stats.bestBid > 0 && stats.bestAsk > 0 && stats.bestBid >= stats.bestAsk) {
+    return `<svg class="depth-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Depth crossed">
+      <line class="depth-mid-line" x1="${midX}" y1="${pad}" x2="${midX}" y2="${pad + h}" />
+      <text class="depth-mid-label" x="${midX}" y="${pad + 10}" text-anchor="middle">${formatPrice(stats.mid)}</text>
+    </svg>`;
+  }
 
   const bidPrices = bids.map((b) => b.price);
   const askPrices = asks.map((a) => a.price);
@@ -53,35 +64,42 @@ export function renderDepthSvgSized(bids: BookLevel[], asks: BookLevel[], width:
 
   const xForBid = (price: number) => pad + ((stats.mid - price) / leftSpan) * (w / 2);
   const xForAsk = (price: number) => midX + ((price - stats.mid) / rightSpan) * (w / 2);
+  const maxTot = Math.max(stats.bidTotal, stats.askTotal, 1);
+  const yForCum = (cum: number) => pad + h - (cum / maxTot) * h * 0.92;
 
+  // Stepped cumulative depth (CEX): horizontal → vertical at each level (not diagonal).
   let bidCum = 0;
-  const bidPts: string[] = [];
-  const sortedBids = [...bids].sort((a, b) => b.price - a.price);
-  for (let i = 0; i < sortedBids.length; i++) {
-    const b = sortedBids[i];
+  let bidY = pad + h;
+  const bidPts: string[] = [`M${midX.toFixed(1)},${bidY.toFixed(1)}`];
+  const sortedBids = [...bids].filter((b) => b.price < stats.mid || stats.spreadAbs === 0).sort((a, b) => b.price - a.price);
+  for (const b of sortedBids) {
+    if (!(b.amountBase > 0)) continue;
     bidCum += b.amountBase;
-    const x = xForBid(b.price);
-    const y = pad + h - (bidCum / Math.max(stats.bidTotal, stats.askTotal, 1)) * h * 0.92;
-    bidPts.push(`${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`);
+    const x = Math.max(pad, Math.min(midX, xForBid(b.price)));
+    const y = yForCum(bidCum);
+    bidPts.push(`L${x.toFixed(1)},${bidY.toFixed(1)}`);
+    bidPts.push(`L${x.toFixed(1)},${y.toFixed(1)}`);
+    bidY = y;
   }
-  if (bidPts.length) {
-    const firstX = xForBid(sortedBids[0].price);
-    bidPts.push(`L${midX},${pad + h} L${firstX},${pad + h} Z`);
+  if (bidPts.length > 1) {
+    bidPts.push(`L${pad},${bidY.toFixed(1)} L${pad},${pad + h} L${midX.toFixed(1)},${pad + h} Z`);
   }
 
   let askCum = 0;
-  const askPts: string[] = [];
-  const sortedAsks = [...asks].sort((a, b) => a.price - b.price);
-  for (let i = 0; i < sortedAsks.length; i++) {
-    const a = sortedAsks[i];
+  let askY = pad + h;
+  const askPts: string[] = [`M${midX.toFixed(1)},${askY.toFixed(1)}`];
+  const sortedAsks = [...asks].filter((a) => a.price > stats.mid || stats.spreadAbs === 0).sort((a, b) => a.price - b.price);
+  for (const a of sortedAsks) {
+    if (!(a.amountBase > 0)) continue;
     askCum += a.amountBase;
-    const x = xForAsk(a.price);
-    const y = pad + h - (askCum / Math.max(stats.bidTotal, stats.askTotal, 1)) * h * 0.92;
-    askPts.push(`${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`);
+    const x = Math.max(midX, Math.min(pad + w, xForAsk(a.price)));
+    const y = yForCum(askCum);
+    askPts.push(`L${x.toFixed(1)},${askY.toFixed(1)}`);
+    askPts.push(`L${x.toFixed(1)},${y.toFixed(1)}`);
+    askY = y;
   }
-  if (askPts.length) {
-    const lastX = xForAsk(sortedAsks[sortedAsks.length - 1].price);
-    askPts.push(`L${lastX},${pad + h} L${midX},${pad + h} Z`);
+  if (askPts.length > 1) {
+    askPts.push(`L${(pad + w).toFixed(1)},${askY.toFixed(1)} L${(pad + w).toFixed(1)},${pad + h} L${midX.toFixed(1)},${pad + h} Z`);
   }
 
   const midLabelY = pad + 10;
@@ -95,12 +113,13 @@ export function renderDepthSvgSized(bids: BookLevel[], asks: BookLevel[], width:
 
 function depthHeader(stats: DepthStats, quote: string, labLive: boolean): string {
   const spread = stats.spreadAbs > 0 ? `${formatPrice(stats.spreadAbs)} (${formatNum(stats.spreadPct, 3)}%)` : "—";
-  const src = labLive ? "Lab L2" : "Oracle";
+  const src = labLive ? "Live L2" : "Oracle";
+  const q = `<span class="notranslate" translate="no">${quote}</span>`;
   return `<div class="depth-summary" aria-label="Depth summary">
-    <div class="depth-stat"><span class="dim">Bid</span><span class="ok mono">${stats.bestBid > 0 ? formatPrice(stats.bestBid) : "—"}</span></div>
-    <div class="depth-stat depth-stat-mid"><span class="dim">Mid · ${src}</span><span class="mono">${stats.mid > 0 ? formatPrice(stats.mid) : "—"}</span></div>
-    <div class="depth-stat"><span class="dim">Ask</span><span class="sell mono">${stats.bestAsk > 0 ? formatPrice(stats.bestAsk) : "—"}</span></div>
-    <div class="depth-stat depth-stat-spread"><span class="dim">Spread</span><span class="mono">${spread} ${quote}</span></div>
+    <div class="depth-stat"><span class="dim">Bid</span><span class="ok mono notranslate" translate="no">${stats.bestBid > 0 ? formatPrice(stats.bestBid) : "—"}</span></div>
+    <div class="depth-stat depth-stat-mid"><span class="dim">Mid · ${src}</span><span class="mono notranslate" translate="no">${stats.mid > 0 ? formatPrice(stats.mid) : "—"}</span></div>
+    <div class="depth-stat"><span class="dim">Ask</span><span class="sell mono notranslate" translate="no">${stats.bestAsk > 0 ? formatPrice(stats.bestAsk) : "—"}</span></div>
+    <div class="depth-stat depth-stat-spread"><span class="dim">Spread</span><span class="mono notranslate" translate="no">${spread} ${q}</span></div>
   </div>`;
 }
 
@@ -131,9 +150,10 @@ export function renderDepthPanel(
     return { ...a, cum: askCum };
   });
   const maxCum = Math.max(bidCum, askCum, 1);
+  const pairLit = `<span class="notranslate" translate="no">${base}/${quote}</span>`;
   const note = labLive
-    ? `Cumulative market depth · ${base}/${quote} · lab matching L2`
-    : `Cumulative market depth · ${base}/${quote} · demo liquidity from pool oracle`;
+    ? `Cumulative market depth · ${pairLit} · live L2`
+    : `Cumulative market depth · ${pairLit} · demo liquidity from pool oracle`;
 
   return `
   <div class="depth-panel">
@@ -141,7 +161,7 @@ export function renderDepthPanel(
     <div class="depth-chart-lg">${renderDepthSvgSized(bids, asks, 480, 160)}</div>
     <div class="depth-tables">
       <div class="depth-side">
-        <div class="depth-head"><span>Bids</span><span>Cum ${base}</span></div>
+        <div class="depth-head"><span>Bids</span><span>Cum <span class="notranslate" translate="no">${base}</span></span></div>
         ${bidRows
           .slice()
           .reverse()
@@ -156,7 +176,7 @@ export function renderDepthPanel(
           .join("")}
       </div>
       <div class="depth-side">
-        <div class="depth-head"><span>Asks</span><span>Cum ${base}</span></div>
+        <div class="depth-head"><span>Asks</span><span>Cum <span class="notranslate" translate="no">${base}</span></span></div>
         ${askRows
           .map(
             (r) => `<div class="depth-row ask" data-book-price="${r.price}" data-book-side="ask" role="button" tabindex="0">

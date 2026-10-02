@@ -9,10 +9,10 @@ export function modeChromeLabel(): string {
   if (isStagingMode() && useLabMatching()) return "D1 staging · loopback ledger (local only)";
   if (isStagingMode()) return "D1 staging — connect fixture to loopback API";
   if (useLabMatching()) return "Lab matching (loopback) — DEMO/LAB only";
-  if (useDeskMatching()) return "Desk matching live — soft-launch · session connected";
-  if (usePublicDeskBook()) return "Desk matching live — Connect wallet to trade (soft-launch)";
+  if (useDeskMatching()) return "Soft-launch Spot — session connected";
+  if (usePublicDeskBook()) return "Soft-launch Spot — Connect wallet to trade";
   if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) {
-    return "Desk matching live — Connect wallet to trade (soft-launch)";
+    return "Soft-launch Spot — Connect wallet to trade";
   }
   if (isDeskConnectEnabled()) return "Desk Connect · paper Spot until session";
   switch (INTEGRATION.mode) {

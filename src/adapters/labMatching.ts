@@ -145,19 +145,47 @@ export function labBookMid(pairId?: PairId): number {
   return (bid + ask) / 2;
 }
 
+/** Last public print mid per pair — shared tape tip for candles when L2 flickers. */
+const lastPublicMidByPair = new Map<PairId, number>();
+
+export function setLastPublicMid(pairId: PairId, mid: number): void {
+  if (mid > 0 && Number.isFinite(mid)) lastPublicMidByPair.set(pairId, mid);
+}
+
+export function lastPublicMid(pairId: PairId): number {
+  return lastPublicMidByPair.get(pairId) ?? 0;
+}
+
 /**
- * Market slip ceiling (buy) / floor (sell) anchored to lab book mid.
- * Pool-oracle mid can sit outside the API ±price_band of lab MM ref — that rejects market orders.
+ * Market slip ceiling (buy) / floor (sell) anchored to live BBO (ask/bid), not oracle.
+ * Clamped inside ±bandFrac so we never trip API price_band (±15% soft-launch).
+ * Pool-oracle mid alone can sit outside the band → invalid_order / price_band rejects.
  */
 export function labMarketSlipHint(
   side: OrderSide,
   pairId: PairId,
   fallbackMid: number,
-  slipFrac = 0.02,
+  slipFrac = 0.05,
+  bandFrac = 0.14,
 ): number {
-  const mid = labBookMid(pairId) || fallbackMid;
+  const book = getLabBookCache(pairId);
+  const bid = book?.bids[0]?.price ?? 0;
+  const ask = book?.asks[0]?.price ?? 0;
+  const mid =
+    bid > 0 && ask > 0
+      ? (bid + ask) / 2
+      : labBookMid(pairId) || lastPublicMid(pairId) || fallbackMid;
   if (!(mid > 0) || !(slipFrac >= 0)) return 0;
-  return side === "buy" ? mid * (1 + slipFrac) : mid * (1 - slipFrac);
+  const slip = Math.max(slipFrac, 0.01);
+  const band = Math.min(Math.max(bandFrac, 0.02), 0.149);
+  if (side === "buy") {
+    const anchor = ask > 0 ? ask : mid;
+    const ceil = anchor * (1 + slip);
+    return Math.min(ceil, mid * (1 + band));
+  }
+  const anchor = bid > 0 ? bid : mid;
+  const floor = anchor * (1 - slip);
+  return Math.max(floor, mid * (1 - band));
 }
 
 function apiLevelsToBook(levels: ApiBookLevel[]): BookLevel[] {
@@ -184,7 +212,10 @@ function bookFingerprint(bids: ApiBookLevel[], asks: ApiBookLevel[]): string {
 export async function refreshLabBook(pairId: PairId): Promise<{ ok: boolean; changed: boolean; note?: string }> {
   if (!isExchangeApiWired()) return { ok: false, changed: false, note: "lab API not enabled" };
   const res = await fetchExchangeBook(pairIdToApi(pairId));
-  if (!res.ok) return { ok: false, changed: false, note: res.message };
+  if (!res.ok) {
+    const note = res.code === "rate_limited" || res.status === 429 ? "rate_limited: too many book requests" : res.message;
+    return { ok: false, changed: false, note };
+  }
   const bids = sortBookLevels(apiLevelsToBook(res.bids), "bids");
   const asks = sortBookLevels(apiLevelsToBook(res.asks), "asks");
   // Keep last good ladder on empty/partial Soft-MM blinks — empty wipe flash looks like "demo book".

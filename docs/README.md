@@ -7,8 +7,8 @@ Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT/BTC
 | Project | Link |
 |---------|------|
 | HackMe hub | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| Paper SPA | [exchange.hackme.tech](https://exchange.hackme.tech) · [../README.md](../README.md) |
-| Matching API | Private sibling [`hackme-exchange-api`](https://github.com/jokeez/hackme-exchange-api) (lab / VPS loopback only) |
+| Desk SPA | [exchange.hackme.tech](https://exchange.hackme.tech) · [../README.md](../README.md) |
+| Matching API | Private sibling [`hackme-exchange-api`](https://github.com/jokeez/hackme-exchange-api) · public via same-origin `/desk-api` |
 
 > GitHub repo name: **`jokeez/hackme-exchange`**. Local checkouts are often named `hackme-exchange-demo`.
 
@@ -38,4 +38,10 @@ Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT/BTC
 |-----|---------|
 | [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
 
-**Rule:** Public edge ships **static paper UI** only. Public matching / custody is a separate gate — see [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md).
+**Rule:** Public edge ships the desk SPA + same-origin `/desk-api` soft-launch. USDT/BTC real custody stays HOLD — see [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md) and sibling API docs.
+
+## UI polish notes
+
+- Tickers / pairs / prices use `translate="no"` + `.notranslate` so browser translators do not rewrite `HMC/USDT`.
+- Mobile layout: chart / trade / markets / orders panels + safe-area bottom nav.
+- Desktop: quieter kbd-hint / announce chrome; trading surface stays primary.

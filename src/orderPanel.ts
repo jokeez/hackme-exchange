@@ -3,6 +3,7 @@ import { formatBps, type LiquidityRole } from "./fees";
 import { formatNum } from "./market";
 import { tickInputValue } from "./tick";
 import { loadMobileTradeSide } from "./mobile";
+import { noTranslateText } from "./notranslate";
 
 export type OrderPanelCtx = {
   pair: PairMeta;
@@ -75,21 +76,21 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
   const showTpsl = (uiType === "market" || uiType === "limit") && !liveTrading;
   const advanced = isAdvancedOrderType(uiType);
   const mmBadge = labMmSeeded
-    ? `<span class="demo-badge sm muted-badge" data-lab-mm-badge="1" title="Live book levels seeded by lab market-maker">LAB MM</span>`
+    ? `<span class="demo-badge sm muted-badge" data-lab-mm-badge="1" title="Soft-MM liquidity on the live book">SOFT MM</span>`
     : "";
   const modeBadge = labLive
     ? `<span class="demo-badge sm meta-compact" title="Private lab matching — not production">LAB</span>`
     : deskSession
-      ? `<span class="demo-badge sm meta-compact" title="Desk matching session — soft-launch">DESK</span>`
+      ? `<span class="demo-badge sm meta-compact" title="Soft-launch session connected">LIVE</span>`
       : deskEdgeLive
-        ? `<span class="demo-badge sm meta-compact" title="Desk matching live — Connect wallet to trade">DESK</span>`
+        ? `<span class="demo-badge sm meta-compact" title="Soft-launch live book — Connect to trade">LIVE</span>`
         : `<span class="demo-badge sm meta-compact" title="Simulated exchange — not real CEX">PAPER</span>`;
   const execHint = labLive
     ? "lab matching"
     : deskSession
-      ? "desk live"
+      ? "soft-launch live"
       : deskEdgeLive
-        ? "Connect desk wallet to trade"
+        ? "Connect to trade · live book"
         : "paper synthetic";
 
   const sideCol = (side: "buy" | "sell") => {
@@ -108,12 +109,12 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
     const hideStop = uiType !== "stop_limit" && uiType !== "oco" && uiType !== "stop_market";
     const priceLabel =
       uiType === "stop_market" && isBuy
-        ? `Ceiling (${pair.quote})`
-        : `Price (${pair.quote})`;
+        ? `Ceiling (${noTranslateText(pair.quote)})`
+        : `Price (${noTranslateText(pair.quote)})`;
     return `<div class="order-col ${side}">
       <div class="order-col-head">
-        <h4 class="${side}">${isBuy ? "Buy" : "Sell"} ${pair.base}</h4>
-        <button type="button" class="avail-chip mono" data-avail-side="${side}" title="Use 100%">Avbl <b>${formatNum(avail, isBuy ? 4 : 2)} ${availAsset}</b></button>
+        <h4 class="${side}">${isBuy ? "Buy" : "Sell"} ${noTranslateText(pair.base)}</h4>
+        <button type="button" class="avail-chip mono" data-avail-side="${side}" title="Use 100%">Avbl <b class="notranslate" translate="no">${formatNum(avail, isBuy ? 4 : 2)} ${availAsset}</b></button>
       </div>
       ${fld(
         priceLabel,
@@ -125,7 +126,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       )}
       ${fld(
         "Stop",
-        pair.quote,
+        noTranslateText(pair.quote),
         `<input id="${side}-stop" class="inp mono" type="text" inputmode="decimal" value="${stopVal}" />`,
         `field-stop ${hideStop ? "hidden" : ""}`,
       )}
@@ -136,12 +137,12 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
         `field-trail ${uiType !== "trailing_stop" ? "hidden" : ""}`,
       )}
       <div class="field-oco ${uiType !== "oco" ? "hidden" : ""}">
-        ${fld("TP limit", pair.quote, `<input id="${side}-oco-tp" class="inp mono" type="text" inputmode="decimal" value="${tpVal}" />`)}
-        ${fld("SL limit", pair.quote, `<input id="${side}-oco-sl" class="inp mono" type="text" inputmode="decimal" value="${slLim}" />`)}
+        ${fld("TP limit", noTranslateText(pair.quote), `<input id="${side}-oco-tp" class="inp mono" type="text" inputmode="decimal" value="${tpVal}" />`)}
+        ${fld("SL limit", noTranslateText(pair.quote), `<input id="${side}-oco-sl" class="inp mono" type="text" inputmode="decimal" value="${slLim}" />`)}
       </div>
       ${fld(
-        `Amount (${pair.base})`,
-        pair.base,
+        `Amount (${noTranslateText(pair.base)})`,
+        noTranslateText(pair.base),
         `<input id="${side}-amt" class="inp mono" type="number" value="1000" min="0" />`,
       )}
       <div class="quick-size">
@@ -166,12 +167,12 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       <div class="tpsl-block field-tpsl ${showTpsl ? "" : "hidden"}">
         <label class="fee-toggle mono tpsl-toggle"><input type="checkbox" id="${side}-tpsl" data-tpsl-side="${side}" ${liveTrading ? "disabled" : ""} /> TP/SL</label>
         <div class="tpsl-fields hidden" id="${side}-tpsl-fields">
-          ${fld("TP", pair.quote, `<input id="${side}-tp" class="inp mono" type="text" inputmode="decimal" value="${tpDefault}" />`)}
-          ${fld("SL", pair.quote, `<input id="${side}-sl" class="inp mono" type="text" inputmode="decimal" value="${slDefault}" />`)}
+          ${fld("TP", noTranslateText(pair.quote), `<input id="${side}-tp" class="inp mono" type="text" inputmode="decimal" value="${tpDefault}" />`)}
+          ${fld("SL", noTranslateText(pair.quote), `<input id="${side}-sl" class="inp mono" type="text" inputmode="decimal" value="${slDefault}" />`)}
         </div>
       </div>
       <p class="preview mono" id="${side}-preview" hidden></p>
-      <button type="button" id="btn-${side}" class="exec ${side}" aria-label="${isBuy ? "Buy" : "Sell"} ${pair.base} — ${execHint}">${isBuy ? "Buy" : "Sell"} ${pair.base}</button>
+      <button type="button" id="btn-${side}" class="exec ${side}" aria-label="${isBuy ? "Buy" : "Sell"} ${pair.base} — ${execHint}">${isBuy ? "Buy" : "Sell"} ${noTranslateText(pair.base)}</button>
       <p id="${side}-msg" class="msg" hidden></p>
     </div>`;
   };

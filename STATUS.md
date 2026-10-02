@@ -21,7 +21,7 @@
 |-------|--------|
 | **This repo (source)** | Open (AGPL) — Spot SPA (paper + desk Connect) |
 | **Paper / desk site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) + same-origin `/desk-api` |
-| **Desk matching** | **GO (soft-launch)** — `matching: ok` · caps `max_open_orders=20` · `price_band_bps=1500` · `min_notional=1e6` |
+| **Desk matching** | **GO (soft-launch)** — `matching: ok` · caps `max_open_orders` (default 20, prod may raise) · `price_band_bps=1500` · `min_notional=1e6` · book **600**/min |
 | **Desk deposit** | **GO** — HMC/SUP deposit addresses (`hmc_ed25519` / `sup_ed25519`); Connect addr ≠ deposit |
 | **Desk withdraw** | **GO** — request + **per-user TOTP/recovery**; ops completes via loopback admin (`:18445`) |
 | **USDT / BTC custody** | **HOLD** — paper stubs / lab bridge only until partner bridge |

@@ -7214,6 +7214,81 @@ html.mobile-layout[data-embed="hub"] .chart-inner {
 .tour-v2-card { max-width: 420px; width: 100%; padding: 1rem 1.1rem; border-radius: 14px; }
 .tour-v2-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
 
+/* Soft-launch polish — browsers / phones / translator-safe tickers */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.notranslate,
+[translate="no"] {
+  /* Keep machine labels (HMC/USDT, OHLC) literal across GT / Safari translate */
+  unicode-bidi: isolate;
+}
+@media (min-width: 1025px) {
+  /* Desktop declutter: quieter chrome, keep trading surface primary */
+  .kbd-hint {
+    opacity: 0.45;
+    font-size: 0.68rem;
+    pointer-events: none;
+  }
+  .announce {
+    max-width: min(52rem, 100%);
+    margin-inline: auto;
+  }
+  .tb-right .pnl-chip {
+    opacity: 0.9;
+  }
+  .mining-strip {
+    font-size: 0.72rem;
+    opacity: 0.85;
+  }
+  .layout-chip-row {
+    gap: 0.25rem;
+  }
+}
+@media (max-width: 1024px) {
+  html.mobile-layout {
+    overscroll-behavior-y: contain;
+  }
+  html.mobile-layout .tb-price {
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  html.mobile-layout .tb-pair h1 {
+    letter-spacing: -0.01em;
+  }
+  html.mobile-layout .mobile-bottom-nav button,
+  html.mobile-layout .mobile-panel-tabs button,
+  html.mobile-layout .mctb {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  html.mobile-layout .order-col-head h4 {
+    font-size: 0.95rem;
+  }
+  html.mobile-layout .avail-chip {
+    font-size: 0.68rem;
+    max-width: 100%;
+  }
+  html.mobile-layout .pwa-install-banner {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(var(--mobile-nav-h, 3.1rem) + 0.45rem);
+  }
+}
+@media (max-width: 390px) {
+  html.mobile-layout .tb-stats > div:nth-child(n + 3) {
+    display: none;
+  }
+  html.mobile-layout .tb-price {
+    font-size: 1.05rem;
+  }
+  html.mobile-layout .mobile-ohlc-bar {
+    font-size: 0.62rem;
+    gap: 0.35rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
