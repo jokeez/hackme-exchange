@@ -3597,14 +3597,13 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
       !window.confirm(
         `Import seed ${parsed.address.slice(0, 14)}…?\n\n` +
           `This browser still shows paper Spot balances (~${paperEq.toFixed(2)} units).\n` +
-          `After Connect, Account shows the DESK ledger for this seed — usually 0 until you deposit.\n` +
+          `After Connect, Account shows the DESK ledger for this seed (server balances).\n` +
           `Paper demo funds are NOT moved to the desk. Continue?`,
       )
     ) {
       return;
     }
   }
-  // Snapshot paper wallet so import doesn't silently erase local demo funds forever.
   try {
     localStorage.setItem(
       "hackme.paper.wallet.snapshot.v1",
@@ -3622,15 +3621,31 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
     clearLabBookCache();
   }
   persistDeskSeed(parsed.seedHex);
-  toast(`Seed imported · ${parsed.address.slice(0, 14)}… — connecting…`, "info");
+  toast(`Seed imported · ${parsed.address.slice(0, 14)}… — syncing desk ledger…`, "info");
   await deskWalletConnectUi();
+  // Second sync — first paint can race CSRF/session; ensure ledger lands in UI.
+  if (useServerMatching()) {
+    const sync = await syncLabBalancesAndBook(state, market);
+    if (sync.ok) {
+      saveState(state);
+      toast(
+        `Desk ledger · ${formatNum(state.wallet.hmc, 4)} HMC · ${formatNum(state.wallet.usdt, 2)} USDT · ${formatNum(state.wallet.sup, 4)} SUP`,
+        "ok",
+      );
+    } else {
+      toast(`Connected but ledger sync failed: ${sync.message} — tap Reconnect desk`, "warn");
+    }
+  }
   const deskEq = state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
-  if (useServerMatching() && deskEq <= 0 && paperEq > 0) {
+  if (useServerMatching() && deskEq <= 0) {
     toast(
-      "Desk ledger is 0 for this seed — paper snapshot kept in browser. Deposit HMC/SUP (Account → Deposit) to fund the desk.",
+      "Desk ledger is 0 for this seed — use Account → Deposit (not Connect addr). Paper snapshot kept if you had demo funds.",
       "warn",
     );
   }
+  // Remount Account so asset table / empty-state aren't stuck on pre-sync zeros.
+  if (state.mainView === "account") render();
+  else patchOpenSettingsWalletChrome();
   patchOpenSettingsWalletChrome();
 }
 
@@ -5461,7 +5476,15 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
       ...ev.prints,
     ].slice(0, 120);
     const newest = ev.prints[0];
-    if (newest?.price && newest.price > 0) setLastPublicMid(ev.pairId, newest.price);
+    if (newest?.price && newest.price > 0) {
+      setLastPublicMid(ev.pairId, newest.price);
+      // 1m tip must react to tape prints — Soft-MM mid alone is often sticky.
+      if (ev.pairId === state.activePair && useLiveBook()) {
+        upsertAllCandles(newest.price);
+        tipCandlesForPair(ev.pairId, labBookMid(ev.pairId) || newest.price, true);
+        if (state.mainView === "spot") patchLive();
+      }
+    }
     const tape = document.getElementById("tape");
     if (tape) tape.innerHTML = renderTape();
     patchMobileTradeTape();

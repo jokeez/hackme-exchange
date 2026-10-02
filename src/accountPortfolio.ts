@@ -159,6 +159,13 @@ export function formatPnlAbsInDenom(
 ): { amount: string; unit: string } {
   const sign = absUsdt >= 0 ? "+" : "-";
   const abs = Math.abs(absUsdt);
+  const fmtTiny = (n: number, digits = 2): string => {
+    if (n >= 1) return formatNum(n, digits);
+    if (n >= 0.01) return formatNum(n, 4);
+    if (n >= 0.0001) return formatNum(n, 6);
+    if (n < 1e-12) return "0.00";
+    return n.toExponential(2);
+  };
   switch (denom) {
     case "BTC": {
       const btc = market.btcUsd > 0 ? abs / market.btcUsd : 0;
@@ -166,12 +173,12 @@ export function formatPnlAbsInDenom(
     }
     case "HMC": {
       const hmc = market.hmcUsdt > 0 ? abs / market.hmcUsdt : 0;
-      return { amount: `${sign}${formatNum(hmc, 2)}`, unit: "HMC" };
+      return { amount: `${sign}${fmtTiny(hmc)}`, unit: "HMC" };
     }
     case "RUB":
-      return { amount: `${sign}${formatNum(abs * FIAT_USDT_RUB, 2)}`, unit: "₽" };
+      return { amount: `${sign}${fmtTiny(abs * FIAT_USDT_RUB)}`, unit: "₽" };
     default:
-      return { amount: `${sign}${formatNum(abs, 2)}`, unit: "USDT" };
+      return { amount: `${sign}${fmtTiny(abs)}`, unit: "USDT" };
   }
 }
 
@@ -260,6 +267,19 @@ export function buildAssetPortfolioRows(state: DemoState, market: MarketSnapshot
       floatingPnlPct,
     };
   });
+}
+
+/** Absolute floating PnL that doesn't collapse tiny USDT moves to "+0". */
+export function formatFloatingPnlDisplay(absUsdt: number, pct: number): string {
+  const sign = absUsdt >= 0 ? "+" : "-";
+  const a = Math.abs(absUsdt);
+  let absStr: string;
+  if (a >= 1) absStr = formatNum(a, 2);
+  else if (a >= 0.01) absStr = formatNum(a, 4);
+  else if (a >= 0.0001) absStr = formatNum(a, 6);
+  else if (a < 1e-12) absStr = "0.00";
+  else absStr = a.toExponential(2);
+  return `${sign}${absStr} (${formatPct(pct)})`;
 }
 
 export function equitySparklineSvg(snapshots: EquitySnapshot[], w = 200, h = 72): string {
@@ -369,7 +389,7 @@ export function renderAssetTableRows(
       const valueStr = formatNum(r.usdtValue, 2);
       const costStr = formatNum(r.costBasisUsdt, 2);
       const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
-      const pnlStr = `${r.floatingPnl >= 0 ? "+" : ""}${formatNum(r.floatingPnl, 2)} (${formatPct(r.floatingPnlPct)})`;
+      const pnlStr = formatFloatingPnlDisplay(r.floatingPnl, r.floatingPnlPct);
       const allocPct = eq > 0 ? (r.usdtValue / eq) * 100 : 0;
       return `<tr class="acct-asset-row" data-asset="${r.symbol}" data-usdt-value="${r.usdtValue.toFixed(4)}">
         <td class="acct-asset-cell">

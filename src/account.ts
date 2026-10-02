@@ -13,6 +13,7 @@ import { Ico, assetBadgeLg } from "./icons";
 import {
   buildAssetPortfolioRows,
   equityInDenom,
+  formatFloatingPnlDisplay,
   formatPnlAbsInDenom,
   formatTodayPnlHtml,
   formatTxTime,
@@ -92,6 +93,15 @@ function modeBlurb(): string {
   if (isLabApiEnabled()) return "API wired";
   if (isDemoMode()) return "paper wallet";
   return "paper Spot";
+}
+
+/** Build mode label — never append misleading Vite mode "paper" when desk matching is live. */
+function modeSubtitle(): string {
+  const blurb = modeBlurb();
+  if (isDeskConnectEnabled() && (useDeskMatching() || usePublicDeskBook())) {
+    return `${blurb} · desk ledger`;
+  }
+  return `${blurb} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span>`;
 }
 
 /** Shared TOTP UI (desk + lab) — same ids so wireLabApiButtons stays single-path. */
@@ -708,7 +718,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <div>
         <p class="kicker">Wallet</p>
         <h2>Account</h2>
-        <p class="muted small acct-sub">${modeBlurb()} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span></p>
+        <p class="muted small acct-sub">${modeSubtitle()}</p>
       </div>
       <div class="acct-vip-pill" title="Demo VIP from local trade history">
         <span class="vip-badge"><span class="vip-name">${vip.name}</span></span>
@@ -1126,7 +1136,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     const priceStr = r.symbol === "USDT" ? "1.00" : formatPrice(r.price);
     const valueStr = formatNum(r.usdtValue, 2);
     const costStr = formatNum(r.costBasisUsdt, 2);
-    const pnlStr = `${r.floatingPnl >= 0 ? "+" : ""}${formatNum(r.floatingPnl, 2)} (${formatPct(r.floatingPnlPct)})`;
+    const pnlStr = formatFloatingPnlDisplay(r.floatingPnl, r.floatingPnlPct);
     const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
     const reservedStr = formatNum(r.reserved, decimals);
     const availStr = formatNum(Math.max(0, r.amount - r.reserved), decimals);

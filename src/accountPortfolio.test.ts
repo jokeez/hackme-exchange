@@ -2,7 +2,13 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { equityInDenom, setEquityDenom, syncDenomRingDom, DENOM_ORB_SEL } from "./accountPortfolio";
+import {
+  equityInDenom,
+  formatFloatingPnlDisplay,
+  setEquityDenom,
+  syncDenomRingDom,
+  DENOM_ORB_SEL,
+} from "./accountPortfolio";
 import { sampleMarket } from "./testFixtures";
 
 describe("accountPortfolio", () => {
@@ -19,6 +25,12 @@ describe("accountPortfolio", () => {
     expect(view.unit).toBe("HMC");
     expect(view.primary).toMatch(/2,000/);
     expect(view.secondary).toContain("USDT");
+  });
+
+  it("formatFloatingPnlDisplay does not collapse tiny USDT PnL to +0", () => {
+    expect(formatFloatingPnlDisplay(0.0007, 0.24)).toMatch(/\+0\.0007/);
+    expect(formatFloatingPnlDisplay(0.0007, 0.24)).toContain("0.24");
+    expect(formatFloatingPnlDisplay(1.25, 10)).toBe("+1.25 (+10.00%)");
   });
 
   it("syncDenomRingDom highlights active denom orb", () => {
