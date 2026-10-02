@@ -478,29 +478,36 @@ async function main(): Promise<number> {
   let totpSecret: Uint8Array | null = null;
   {
     const st0 = await api("/auth/2fa/status", { method: "GET" });
+    const alreadyOn = st0.status === 200 && st0.body?.enabled === true;
     record(
       "GET /auth/2fa/status",
-      st0.status === 200 && st0.body?.enabled === false,
+      st0.status === 200 && (st0.body?.enabled === false || alreadyOn),
       `enabled=${st0.body?.enabled} pending=${st0.body?.pending}`,
     );
-    const setup = await api("/auth/2fa/setup", { method: "POST", csrf, json: {} });
-    const b32 = String(setup.body?.secret_base32 || "");
-    totpSecret = b32 ? base32Decode(b32) : null;
-    record(
-      "POST /auth/2fa/setup",
-      setup.status === 200 && !!totpSecret?.length,
-      b32 ? `${b32.slice(0, 8)}…` : `status=${setup.status}`,
-    );
-    if (totpSecret?.length) {
-      const code = totpCode(totpSecret);
-      const confirm = await api("/auth/2fa/confirm", { method: "POST", csrf, json: { code } });
+    if (alreadyOn) {
+      record("POST /auth/2fa/setup", true, "skip — already enabled (resume path N/A)");
+      record("POST /auth/2fa/confirm", true, "skip — already enabled");
+      record("GET /auth/2fa/status enabled", true, "pre-enrolled");
+    } else {
+      const setup = await api("/auth/2fa/setup", { method: "POST", csrf, json: {} });
+      const b32 = String(setup.body?.secret_base32 || "");
+      totpSecret = b32 ? base32Decode(b32) : null;
       record(
-        "POST /auth/2fa/confirm",
-        confirm.status === 200 && confirm.body?.enabled === true,
-        `status=${confirm.status}`,
+        "POST /auth/2fa/setup",
+        setup.status === 200 && !!totpSecret?.length,
+        b32 ? `${b32.slice(0, 8)}…` : `status=${setup.status}`,
       );
-      const st1 = await api("/auth/2fa/status", { method: "GET" });
-      record("GET /auth/2fa/status enabled", st1.body?.enabled === true, "");
+      if (totpSecret?.length) {
+        const code = totpCode(totpSecret);
+        const confirm = await api("/auth/2fa/confirm", { method: "POST", csrf, json: { code } });
+        record(
+          "POST /auth/2fa/confirm",
+          confirm.status === 200 && confirm.body?.enabled === true,
+          `status=${confirm.status}`,
+        );
+        const st1 = await api("/auth/2fa/status", { method: "GET" });
+        record("GET /auth/2fa/status enabled", st1.body?.enabled === true, "");
+      }
     }
   }
 

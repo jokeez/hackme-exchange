@@ -2,11 +2,11 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-10-01 · **Source:** public · **Product:** paper SPA · **Matching / custody:** **HOLD**
+**Updated:** 2026-10-02 · **Source:** public · **Product:** paper SPA + soft-launch desk · **Matching / HMC·SUP custody:** **GO**
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
-[![Matching](https://img.shields.io/badge/matching_API-HOLD-ff6b9d?style=for-the-badge)](docs/SCOPE.md)
+[![Matching](https://img.shields.io/badge/matching_API-soft--launch_GO-39ff14?style=for-the-badge)](docs/MATCHING_GO_CHECKLIST.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/jokeez/hackme-exchange/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/jokeez/hackme-exchange/actions)
 
 **[🏠 Main HackMe](https://github.com/jokeez/hackme)** · **[hackme.tech](https://hackme.tech)** · **[README](README.md)** · **[Docs](docs/README.md)**
@@ -19,24 +19,26 @@
 
 | Layer | Status |
 |-------|--------|
-| **This repo (source)** | Open (AGPL) — paper Spot SPA |
-| **Paper site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) |
-| **Private matching (C2)** | Loopback on same origin VPS — **HOLD** (matching / deposit / withdraw OFF) |
-| **Public desk API** | [exchange-api.hackme.tech](https://exchange-api.hackme.tech/health) — **HOLD** (`matching: disabled`; deposit/withdraw off) |
-| **Public matching** | **HOLD** — desk exists; book/orders return 503 until GO · SPA client path ready (`useDeskMatching` / `useServerMatching`) · soft-launch caps on slim health after edge redeploy |
-| **Real custody / withdrawals** | **HOLD** (none in the browser) |
-| **Live mode in SPA** | **Blocked** (paper Spot) |
-| **Desk Connect** | Opt-in `VITE_PUBLIC_DESK_CONNECT` → same-origin `/desk-api` · matching still HOLD · seed export/import for multi-device · 2FA with withdraw GO |
+| **This repo (source)** | Open (AGPL) — Spot SPA (paper + desk Connect) |
+| **Paper / desk site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) + same-origin `/desk-api` |
+| **Desk matching** | **GO (soft-launch)** — `matching: ok` · caps `max_open_orders=20` · `price_band_bps=1500` · `min_notional=1e6` |
+| **Desk deposit** | **GO** — HMC/SUP deposit addresses (`hmc_ed25519` / `sup_ed25519`); Connect addr ≠ deposit |
+| **Desk withdraw** | **GO** — request + **per-user TOTP/recovery**; ops completes via loopback admin (`:18445`) |
+| **USDT / BTC custody** | **HOLD** — paper stubs / lab bridge only until partner bridge |
+| **Live mode in SPA** | **Blocked** (no `VITE_INTEGRATION_MODE=live` on public) |
+| **Desk Connect** | `VITE_PUBLIC_DESK_CONNECT=1` → `/desk-api` · seed export/import · 2FA enroll |
 
-Balances are simulated (`localStorage`). Not financial advice. Not a licensed exchange.
+Hub iframe (`hackme` `#exchange`) embeds **Public** desk only (Local Vite embed removed).
+
+Balances on paper Spot without Connect stay in `localStorage`. Desk balances are ledger-backed after Connect. Not financial advice. Not a licensed exchange.
 
 ## Ecosystem
 
 | Project | Link |
 |---------|------|
 | **HackMe hub** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) · [hackme.tech](https://hackme.tech) |
-| **Paper SPA** | [exchange.hackme.tech](https://exchange.hackme.tech) · this repo (`jokeez/hackme-exchange`) |
-| **Matching API** | Private sibling — loopback C2 + public desk HOLD (`exchange-api`) |
+| **Paper / desk SPA** | [exchange.hackme.tech](https://exchange.hackme.tech) · this repo (`jokeez/hackme-exchange`) |
+| **Desk API** | Same-origin `/desk-api` on exchange origin (staging loopback behind Caddy) |
 
 ## Messaging
 
@@ -44,10 +46,9 @@ Own HMC market desk — **not** a third-party listing claim:
 
 | Phase | What |
 |-------|------|
-| **Now (D0)** | Open-source paper UI + live static site |
-| **Private C2** | Staging API under PRE_PUBLIC HOLD (ops pack) |
-| **Later** | Matching / custody only after explicit security gates |
-| **Foreign CEX** | Not part of soft paper launch |
+| **Now** | Soft-launch: matching + HMC/SUP deposit/withdraw + TOTP |
+| **Next** | Partner USDT/BTC bridge · raise soft-launch caps after soak |
+| **Foreign CEX** | Not part of soft launch |
 
 Pool: useful-PoW → [hackme.tech](https://hackme.tech/). No ROI promises.
 
@@ -55,40 +56,40 @@ Pool: useful-PoW → [hackme.tech](https://hackme.tech/). No ROI promises.
 
 | Mode | Meaning |
 |------|---------|
-| **paper** (default) | localStorage · reference mids — **not** custody |
-| **lab** | Loopback API for contributors — still not public |
+| **paper** (default build) | Desk Connect optional · reference mids when offline |
+| **lab** | Loopback API for contributors |
 | **live** | Blocked until an explicit product go-live |
 
-## Pricing (paper)
+## Pricing (reference)
 
 | Asset | Reference | Notes |
 |-------|-----------|-------|
-| HMC/USDT | **0.05** | Mild drift; **not** scaled by pool GH |
-| SUP/USDT | **0.25** | Same |
-| HMC/SUP | **0.2** | Cross = HMC÷SUP |
+| HMC/USDT | **~0.05** | Soft-launch mid; not pool-GH scaled |
+| SUP/USDT | **~0.25** | Same |
+| HMC/SUP | **~0.2** | Cross = HMC÷SUP |
 
 See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
 ## What this is NOT
 
 - Not a licensed exchange · not financial advice  
-- Not real USDT/BTC custody in the browser  
-- Not public matching / withdrawals on `exchange.hackme.tech`  
+- Not real USDT/BTC on-chain custody yet  
+- Not unlimited withdraw (soft-launch caps + ops complete)  
 - Not a promise of foreign CEX listing  
 
-## Roadmap (aspirational)
+## Roadmap
 
 | Gate | Intent |
 |------|--------|
-| **D0 Paper** | Static SPA, PAPER only — **shipped** |
-| **D1 private** | Loopback staging rails — **shipped under HOLD** |
-| **Public desk (no matching)** | `exchange-api.hackme.tech` — **shipped under HOLD** |
-| **Public matching** | After [MATCHING_GO_CHECKLIST](docs/MATCHING_GO_CHECKLIST.md) + explicit GO |
-| **Custody** | Sidecar + caps — after matching GO |
+| **D0 Paper** | Static SPA — **shipped** |
+| **Soft-launch matching** | Caps + desk book/orders — **GO** |
+| **HMC/SUP custody** | Deposit addr + withdraw+2FA + ops complete — **GO** |
+| **USDT/BTC custody** | Partner bridge — **HOLD** |
+| **Full GO** | Raise/remove soft-launch caps after soak |
 
 ## Docs
 
 - [`docs/README.md`](docs/README.md) — index  
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/SCOPE.md`](docs/SCOPE.md) · [`docs/ECONOMICS.md`](docs/ECONOMICS.md) · [`docs/SECURITY.md`](docs/SECURITY.md)  
+- [`docs/MATCHING_GO_CHECKLIST.md`](docs/MATCHING_GO_CHECKLIST.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/SCOPE.md`](docs/SCOPE.md)  
 
-No public withdrawal support until custody ships.
+Operator smokes: `npm run smoke:desk` · `smoke:matching-go` · `smoke:operator` · `smoke:lab` (with `EX_MATCHING_GO=1 EX_CUSTODY_GO=1` on public).

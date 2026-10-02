@@ -18,6 +18,7 @@
     "smoke:desk": "npx tsx scripts/desk-connect-smoke.ts",
     "smoke:matching-sec": "npx tsx scripts/matching_go_security_probe.ts",
     "smoke:matching-go": "npx tsx scripts/matching_go_acceptance_smoke.ts",
+    "smoke:operator": "npx tsx scripts/operator_soft_launch_smoke.ts",
     "dev:d1": "bash scripts/d1-local-dev.sh",
     "smoke:d1": "npx tsx scripts/d1-smoke.ts",
     "smoke:lab": "npx tsx scripts/lab-smoke.ts",

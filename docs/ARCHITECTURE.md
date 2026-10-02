@@ -1,6 +1,6 @@
-# Architecture — paper SPA
+# Architecture — paper + soft-launch desk
 
-Topology sketch for the **open-source paper desk**. Matching / custody stay off the public edge until an explicit GO.
+Topology for the open-source SPA + public soft-launch matching. USDT/BTC real custody remains HOLD until partner bridge.
 
 ```text
 ┌────────────────────────────┐     read-only oracle
@@ -11,11 +11,11 @@ Topology sketch for the **open-source paper desk**. Matching / custody stay off 
              ▼                                     │
 ┌────────────────────────────┐                     │
 │  exchange.hackme.tech      │  CF → 89.150.41.40  │
-│  static paper SPA (Caddy)  │  /desk-api → desk   │
-│                            │  (Connect HOLD)     │
+│  static SPA (Caddy)        │  /desk-api → desk   │
+│  Desk Connect + matching   │  (soft-launch GO)   │
 └────────────────────────────┘                     │
                                                    │
-Public desk HOLD (matching OFF)                    │
+Public desk soft-launch (matching ON)              │
 ┌────────────────────────────┐                     │
 │  exchange-api.hackme.tech  │  CF → Caddy →       │
 │  (api.exchange fallback)   │  127.0.0.1:18444    │
@@ -35,13 +35,14 @@ Private C2 (SSH / loopback) — same VPS             │
 └────────────────────────────┘                     │
 ```
 
-**Desk Connect (HOLD):** opt-in `VITE_PUBLIC_DESK_CONNECT` uses same-origin `/desk-api` for auth/session cookies. Matching / deposit / withdraw stay server HOLD. Hub VPS must not run the exchange edge.
+**Desk Connect (soft-launch GO):** `VITE_PUBLIC_DESK_CONNECT` + same-origin `/desk-api`. Matching / HMC·SUP deposit / withdraw ON (TOTP + ops). Hub VPS must not run the exchange edge.
 
 ## Modes
 
 | Mode | Where UI talks | Balances |
 |------|----------------|----------|
-| **paper** (default / public) | nowhere for matching | `localStorage` |
+| **paper** (offline) | nowhere for matching | `localStorage` |
+| **desk** (public soft-launch) | `/desk-api` when Connect + health `ok` | server ledger |
 | **lab / staging** (contributor) | loopback API `:18443` or tunnel | server ledger |
 | **live** | blocked in SPA | — |
 
@@ -51,5 +52,5 @@ Private C2 (SSH / loopback) — same VPS             │
 |-----|------|
 | [SCOPE.md](SCOPE.md) | Boundaries vs hub |
 | [LAB_API.md](LAB_API.md) | SPA ↔ loopback wiring |
-| [SECURITY.md](SECURITY.md) | Paper threat checklist |
-| [../STATUS.md](../STATUS.md) | Product HOLD board |
+| [SECURITY.md](SECURITY.md) | Threat checklist |
+| [../STATUS.md](../STATUS.md) | Product GO/HOLD board |

@@ -11,14 +11,14 @@
 
 # HackMe Exchange
 
-### Open-source paper Spot terminal for the HackMe ecosystem
+### Soft-launch Spot terminal for the HackMe ecosystem
 
-**PAPER ONLY** — simulated balances in `localStorage`. Not a licensed exchange. Not financial advice. No real custody or public matching API.
+**Soft-launch GO** — matching + HMC/SUP custody on public desk (TOTP withdraw, soft-launch caps). USDT/BTC real custody **HOLD**. Not a licensed exchange. Not financial advice.
 
 <br/>
 
-[![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
-[![Matching API](https://img.shields.io/badge/matching_API-HOLD-ff6b9d?style=for-the-badge)](STATUS.md)
+[![Paper site](https://img.shields.io/badge/desk-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
+[![Matching API](https://img.shields.io/badge/matching_API-soft--launch_GO-39ff14?style=for-the-badge)](STATUS.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/jokeez/hackme-exchange/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/jokeez/hackme-exchange/actions)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
 [![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.25-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
@@ -44,7 +44,7 @@ HackMe’s pool and chain live in the **[main HackMe repository](https://github.
 | **Pool** | Read-only oracle telemetry from [hackme.tech](https://hackme.tech) |
 
 > Own HMC market desk — **not** a third-party CEX listing claim.  
-> Live site: [exchange.hackme.tech](https://exchange.hackme.tech) (static paper SPA).
+> Live site: [exchange.hackme.tech](https://exchange.hackme.tech) (soft-launch desk).
 
 ---
 
@@ -52,7 +52,8 @@ HackMe’s pool and chain live in the **[main HackMe repository](https://github.
 
 | Mode | Meaning |
 |------|---------|
-| **paper** (default) | localStorage wallet · shared reference mids — **not** real custody |
+| **desk** (public soft-launch) | Connect → `/desk-api` matching + HMC/SUP custody (TOTP withdraw) |
+| **paper** (offline) | localStorage wallet · shared reference mids — **not** real custody |
 | **lab** | Optional loopback sibling API — contributor / private lab only |
 | **live** | **Blocked** in this SPA until an explicit product go-live |
 
@@ -118,7 +119,7 @@ Maintainer extras (`test:e2e:full`, `audit:full`, lab smokes): [`scripts/README.
 
 | Doc | Purpose |
 |-----|---------|
-| [`STATUS.md`](STATUS.md) | Product status · HOLD on matching/custody |
+| [`STATUS.md`](STATUS.md) | Product status · soft-launch matching/custody GO |
 | [`docs/README.md`](docs/README.md) | Docs index |
 | [`docs/SCOPE.md`](docs/SCOPE.md) | Boundaries vs HackMe hub |
 | [`docs/ECONOMICS.md`](docs/ECONOMICS.md) | Fees · VIP · reference mids |

@@ -86,12 +86,12 @@ function modeBlurb(): string {
   if (isDeskConnectEnabled()) {
     if (useDeskMatching()) return "desk Connect · matching LIVE · soft-launch";
     if (usePublicDeskBook()) return "desk Connect · matching live · Connect to trade";
-    return "desk Connect · matching HOLD · paper Spot";
+    return "desk Connect · paper Spot";
   }
   if (isLabLoopbackApi()) return useLabMatching() ? "lab ledger connected" : "LAB ready · connect fixture below";
   if (isLabApiEnabled()) return "API wired";
   if (isDemoMode()) return "paper wallet";
-  return "paper / synthetic";
+  return "paper Spot";
 }
 
 /** Shared TOTP UI (desk + lab) — same ids so wireLabApiButtons stays single-path. */

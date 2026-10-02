@@ -226,6 +226,7 @@ import {
   formatPriceCompact,
   formatRewardPerM,
   formatVolBase,
+  formatBookQty,
   localFallbackMarket,
   midForPair,
   pctTone,
@@ -596,8 +597,7 @@ async function ensureAlertNotifications(): Promise<void> {
 }
 
 function ensurePublicTape(force = false): void {
-  // Live L2 (public desk book or session matching): never seed fake prints —
-  // they clash with "Loading live book" and look like real Trades.
+  // Live L2: public prints come from GET /trades (marketStream), never oracle seeds.
   if (useLiveBook()) return;
   const tk = tickers[state.activePair] ?? (market ? tickerFromMarket(market, state.activePair) : null);
   if (!tk) return;
@@ -607,6 +607,34 @@ function ensurePublicTape(force = false): void {
       ...seedPublicTape(state.activePair, tk),
     ].slice(0, 80);
   }
+}
+
+/** L2 spread % from best bid/ask; falls back to ticker.spreadBps only in paper/oracle mode. */
+function liveSpreadPct(t: Ticker = activeTicker()): number {
+  if (useLiveBook()) {
+    const book = getLabBookCache(state.activePair);
+    const bid = book?.bids[0]?.price ?? t.bid;
+    const ask = book?.asks[0]?.price ?? t.ask;
+    const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : t.mid;
+    if (bid > 0 && ask > 0 && mid > 0) return ((ask - bid) / mid) * 100;
+    return 0;
+  }
+  return (t.spreadBps || 0) / 100;
+}
+
+/** Desk 24h vol from public tape (honest); paper keeps candle vol. */
+function deskVol24hBase(pairId: PairId = state.activePair): number {
+  if (!useLiveBook()) {
+    const t = tickers[pairId];
+    return t?.volume24hBase ?? 0;
+  }
+  const cutoff = Date.now() - 24 * 3600_000;
+  let sum = 0;
+  for (const row of publicTape) {
+    if (row.pairId !== pairId || row.ts < cutoff) continue;
+    sum += row.amountBase;
+  }
+  return sum;
 }
 
 function renderAnnounce(): string {
@@ -619,36 +647,21 @@ function renderAnnounce(): string {
   const bold = isLiveModeBlocked()
     ? "Live mode blocked — matching API not connected"
     : lab
-      ? "Private lab matching — not production custody or real money"
+      ? "Private lab matching — not production custody"
       : deskLive
-        ? "Desk matching live — soft-launch caps · use Deposit address (not Copy addr)"
+        ? "Desk matching live — soft-launch caps · Deposit address ≠ Copy addr"
         : deskBook
-          ? "Desk matching live — Connect wallet to trade · Deposit ≠ Copy addr"
-          : desk && (deskEdgeSnap.depositEnabled || deskEdgeSnap.withdrawEnabled)
-            ? `Desk custody live — ${[
-                deskEdgeSnap.depositEnabled ? "Deposit ≠ Copy addr" : null,
-                deskEdgeSnap.withdrawEnabled ? "Withdraw + TOTP" : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}`
-            : desk
-              ? "Desk Connect ready · matching / deposit / withdraw on HOLD"
-              : "Paper desk — simulated balances · matching API on HOLD";
-  const detail = lab
-    ? "lab ledger balances"
-    : deskLive
-      ? "live L2 via /desk-api · session CSRF"
-      : deskBook
-        ? "live L2 on book · Connect to place orders"
-        : desk && (deskEdgeSnap.depositEnabled || deskEdgeSnap.withdrawEnabled)
-          ? [
-              deskEdgeSnap.depositEnabled ? "deposit on" : "deposit HOLD",
-              deskEdgeSnap.withdrawEnabled ? "withdraw on" : "withdraw HOLD",
-              "matching needs Connect",
-            ].join(" · ")
+          ? "Desk book live — Connect to trade · Deposit ≠ Copy addr"
           : desk
-            ? "browser HMC wallet via /desk-api · Spot stays paper"
-            : "reference mids · paper balances in localStorage";
+            ? "Desk Connect — paper Spot until you connect"
+            : "Paper Spot — simulated balances · reference mids";
+  const detail = lab
+    ? "lab ledger"
+    : deskLive || deskBook
+      ? "live L2 · public tape"
+      : desk
+        ? "browser wallet · Spot paper until session"
+        : "paper balances in localStorage";
   const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
@@ -790,8 +803,9 @@ function paperGuardsOrWarn(
   }
   const pair = pairById(state.activePair);
   const mid =
-    (useServerMatching() ? labBookMid(state.activePair) : 0) ||
-    (market ? midForPair(market, state.activePair) : activeTicker().mid);
+    (useLiveBook() ? labBookMid(state.activePair) : 0) ||
+    (useLiveBook() ? 0 : market ? midForPair(market, state.activePair) : 0) ||
+    activeTicker().mid;
   const check = validatePaperTradingGuards({
     side,
     kind,
@@ -1014,9 +1028,16 @@ function activeTicker(): Ticker {
 
 /** Spot mid for any pair — same source for toolbar, market rows, and chart HUD. */
 function spotMidForPair(pairId: PairId): number {
-  if (useServerMatching()) {
+  // Desk/public L2: always prefer live book mid (guests included — not session-only).
+  if (useLiveBook()) {
     const lab = labBookMid(pairId);
     if (lab > 0) return lab;
+    const tkLive = tickers[pairId];
+    if (tkLive?.mid && tkLive.mid > 0 && tkLive.bid > 0 && tkLive.ask > 0) return tkLive.mid;
+    // Keep last L2 tip — never fall through to paper sine-wave around 0.05.
+    const blendedLive = prevMids[pairId];
+    if (blendedLive != null && blendedLive > 0) return blendedLive;
+    return 0;
   }
   const blended = prevMids[pairId];
   if (blended != null && blended > 0) return blended;
@@ -1062,11 +1083,14 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
     const fx = pair.quote === "BTC" ? market.btcUsd : pair.quote === "SUP" ? market.supUsdt : 1;
     fiatEl.textContent = `≈ ${formatPrice(quote.mid * fx)} USDT`;
   }
-  if (statsEl && quote.high24h > 0) {
+  if (statsEl) {
     const spans = statsEl.querySelectorAll("span.mono");
-    if (spans[0]) spans[0].textContent = formatPrice(quote.high24h);
-    if (spans[1]) spans[1].textContent = formatPrice(quote.low24h);
-    if (spans[2]) spans[2].textContent = formatVolBase(quote.vol24h, pair.base);
+    const live = useLiveBook();
+    const vol = live ? deskVol24hBase() : quote.vol24h;
+    if (spans[0] && quote.high24h > 0) spans[0].textContent = formatPrice(quote.high24h);
+    if (spans[1] && quote.low24h > 0) spans[1].textContent = formatPrice(quote.low24h);
+    if (spans[2]) spans[2].textContent = live && !(vol > 0) ? "—" : formatVolBase(vol, pair.base);
+    if (spans[3]) spans[3].textContent = `${formatNum(liveSpreadPct(), 3)}%`;
   }
 }
 
@@ -1267,7 +1291,7 @@ function wireOrderPanelEvents(): void {
     btn.addEventListener("click", () => {
       const side = (btn as HTMLElement).dataset.bbo as "buy" | "sell";
       const t = activeTicker();
-      const labLive = useServerMatching();
+      const labLive = useLiveBook();
       const lab = labLive ? getLabBookCache(state.activePair) : null;
       if (labLive && (!lab || (!lab.bids.length && !lab.asks.length))) {
         toast("Live book not ready", "warn");
@@ -1544,7 +1568,7 @@ function renderBook(): string {
     const emptyHint = labLive
       ? lab && !waitingLive
         ? "Live book empty — place a limit or wait for resting depth"
-        : "Fetching live L2…"
+        : "Loading live L2 depth…"
       : "Waiting for oracle mid…";
     const emptyTitle = labLive
       ? lab && !waitingLive
@@ -1562,24 +1586,26 @@ function renderBook(): string {
       <button type="button" class="bv active" data-bv="depth">Depth</button>
     </div>${renderVolumeRatio()}${renderDepthPanel(bids, asks, pair.base, pair.quote, { labLive })}`;
   }
-  const max = Math.max(...bids.map((b) => b.amountBase), ...asks.map((a) => a.amountBase), 1);
+  const visibleBids = bids.filter((l) => l.amountBase > 0);
+  const visibleAsks = asks.filter((l) => l.amountBase > 0);
+  const max = Math.max(...visibleBids.map((b) => b.amountBase), ...visibleAsks.map((a) => a.amountBase), 1);
   const row = (l: (typeof bids)[0], side: "bid" | "ask") => {
     const pct = (l.amountBase / max) * 100;
     const price = l.price;
     const title = labLive
-      ? `Set ${side === "ask" ? "Buy" : "Sell"} limit to this lab price`
+      ? `Set ${side === "ask" ? "Buy" : "Sell"} limit to this live price`
       : `Set ${side === "ask" ? "Buy" : "Sell"} limit to ${formatPrice(price)}`;
     const aria = side === "ask" ? `Buy at ${formatPrice(price)}` : `Sell at ${formatPrice(price)}`;
     return `<div class="ob-row ${side}" data-book-price="${price}" data-book-side="${side}" role="button" tabindex="0" title="${title}" aria-label="${aria}">
       <div class="ob-bar" style="width:${pct}%"></div>
       <span class="ob-price">${formatPrice(price)}</span>
-      <span class="ob-amt">${formatNum(l.amountBase, 1)}</span>
+      <span class="ob-amt">${formatBookQty(l.amountBase)}</span>
       <span class="dim ob-total">${formatPrice(l.totalQuote)}</span>
     </div>`;
   };
   const steps = bookStepsForPair(state.activePair);
-  const bestBid = bids[0]?.price ?? (lab ? 0 : t.bid);
-  const bestAsk = asks[0]?.price ?? (lab ? 0 : t.ask);
+  const bestBid = visibleBids[0]?.price ?? (lab ? 0 : t.bid);
+  const bestAsk = visibleAsks[0]?.price ?? (lab ? 0 : t.ask);
   const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : lab ? bestBid || bestAsk || t.mid : t.mid;
   const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : Math.max(0, t.ask - t.bid);
   const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
@@ -1591,7 +1617,7 @@ function renderBook(): string {
       <button type="button" class="bv" data-bv="depth">Depth</button>
     </div>
     ${renderVolumeRatio()}
-    <div class="depth-wrap" aria-hidden="true">${renderDepthSvg(bids, asks)}</div>
+    <div class="depth-wrap" aria-hidden="true">${renderDepthSvg(visibleBids, visibleAsks)}</div>
     <div class="book-group-row">
       <label class="muted small">Group</label>
       <select id="book-group-select" class="book-select mono">
@@ -1600,54 +1626,64 @@ function renderBook(): string {
     </div>
     <div class="ob-head"><span>Price (${pair.quote})</span><span>Amount (${pair.base})</span><span class="ob-total">Total</span></div>
     <div class="book-ladder">
-      <div class="ob-asks-pane" data-book-pane="asks">${asks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
+      <div class="ob-asks-pane" data-book-pane="asks">${visibleAsks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
       <div class="ob-mid" title="${midTitle}">
         <div class="ob-mid-price">${formatPrice(midPx)}</div>
         <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
         <div class="ob-mid-src muted small">${midHint}</div>
       </div>
-      <div class="ob-bids-pane" data-book-pane="bids">${bids.map((l) => row(l, "bid")).join("")}</div>
+      <div class="ob-bids-pane" data-book-pane="bids">${visibleBids.map((l) => row(l, "bid")).join("")}</div>
     </div>`;
 }
 
 function renderTape(): string {
   ensurePublicTape();
   const live = useLiveBook();
-  const rows = live
-    ? mergeTapeRows(state.trades, [], state.activePair, 18)
-    : mergeTapeRows(state.trades, publicTape, state.activePair, 18);
+  const rows = mergeTapeRows(state.trades, publicTape, state.activePair, 18);
   if (!rows.length) {
     return `<div class="tape-empty">
-      <p class="empty-title">No trades yet</p>
-      <p class="muted small">${live ? "Fills appear here after you trade." : "Synthetic tape fills in as the oracle ticks."}</p>
+      <p class="empty-title">${live ? "No market prints yet" : "No trades yet"}</p>
+      <p class="muted small">${
+        live
+          ? "Public tape fills as the desk matches · your fills highlight here."
+          : "Synthetic tape fills in as the oracle ticks."
+      }</p>
     </div>`;
   }
   return rows
-    .map(
-      (t) => `<div class="tape-row ${t.synthetic ? "syn" : "you"}" title="${t.synthetic ? "Synthetic public tape (simulated)" : live ? "Your fill" : "Your paper fill"}">
+    .map((t) => {
+      const mine = !t.synthetic && state.trades.some((u) => u.id === t.id);
+      const cls = t.synthetic ? "syn" : mine ? "you" : "mkt";
+      const tip = t.synthetic
+        ? "Synthetic public tape (simulated)"
+        : mine
+          ? live
+            ? "Your fill"
+            : "Your paper fill"
+          : "Public market print";
+      const badge = t.synthetic ? "SYN" : mine ? (t.feeRole === "maker" ? "M" : "T") : "MKT";
+      return `<div class="tape-row ${cls}" title="${tip}">
         <span class="${t.side === "buy" ? "up" : "down"}">${formatPrice(t.price)}</span>
-        <span class="mono">${formatNum(t.amountBase, 2)}</span>
-        <span class="role-badge sm ${t.synthetic ? "syn-badge" : t.feeRole}">${t.synthetic ? "SYN" : t.feeRole === "maker" ? "M" : "T"}</span>
+        <span class="mono">${formatBookQty(t.amountBase)}</span>
+        <span class="role-badge sm ${t.synthetic ? "syn-badge" : t.feeRole}">${badge}</span>
         <span class="dim">${new Date(t.ts).toLocaleTimeString()}</span>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("");
 }
 
 function renderMobileTradeTape(): string {
   ensurePublicTape();
   const live = useLiveBook();
-  const rows = live
-    ? mergeTapeRows(state.trades, [], state.activePair, 8)
-    : mergeTapeRows(state.trades, publicTape, state.activePair, 8);
+  const rows = mergeTapeRows(state.trades, publicTape, state.activePair, 8);
   if (!rows.length) {
-    return `<div class="mobile-tape-empty muted small">No trades yet</div>`;
+    return `<div class="mobile-tape-empty muted small">${live ? "No market prints yet" : "No trades yet"}</div>`;
   }
   return rows
     .map(
       (t) => `<div class="mobile-tape-row ${t.side === "buy" ? "up" : "down"}">
         <span class="mono">${formatPrice(t.price)}</span>
-        <span class="mono dim">${formatNum(t.amountBase, 2)}</span>
+        <span class="mono dim">${formatBookQty(t.amountBase)}</span>
       </div>`,
     )
     .join("");
@@ -1820,8 +1856,8 @@ function renderConvert(): string {
         <p class="kicker">${
           isDeskConnectEnabled()
             ? isDeskMatchingLive(deskEdgeSnap.matching)
-              ? "Instant swap · paper · desk matching live"
-              : "Instant swap · paper · desk HOLD"
+              ? "Instant swap · desk matching live · Convert still paper"
+              : "Instant swap · paper balances"
             : isLabLoopbackApi()
               ? "Instant swap · lab"
               : "Instant swap · paper"
@@ -2601,12 +2637,12 @@ function renderSpot(): string {
       <h1>${pair.label}</h1>
           <span class="tb-sub muted small">${
             useLabMatching()
-              ? "Lab book · DEMO matching"
+              ? "Lab book · live matching"
               : useDeskMatching()
                 ? "Desk book · live matching"
                 : usePublicDeskBook()
                   ? "Desk book · Connect to trade"
-                  : "Pool oracle · paper preview"
+                  : "Paper Spot · reference mids"
           }</span>
     </div>
         <span class="tb-chev" aria-hidden="true">▾</span>
@@ -2627,13 +2663,21 @@ function renderSpot(): string {
     <div class="tb-stats">
       <div><label>24h High</label><span class="mono">${formatPrice(s24.high24h || t.high24h)}</span></div>
       <div><label>24h Low</label><span class="mono">${formatPrice(s24.low24h || t.low24h)}</span></div>
-      <div><label>24h Vol (${pair.base})</label><span class="mono">${formatVolBase(s24.vol24h || t.volume24hBase, pair.base)}</span></div>
-      <div><label>Spread</label><span class="mono">${formatNum(t.spreadBps / 100, 3)}%</span></div>
+      <div><label>24h Vol (${pair.base})</label><span class="mono">${
+        useLiveBook()
+          ? deskVol24hBase() > 0
+            ? formatVolBase(deskVol24hBase(), pair.base)
+            : "—"
+          : formatVolBase(s24.vol24h || t.volume24hBase, pair.base)
+      }</span></div>
+      <div><label>Spread</label><span class="mono">${formatNum(liveSpreadPct(t), 3)}%</span></div>
     </div>
     <div class="tb-right">
       <div class="vip-badge mono" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">
-        <span class="vip-name" title="Demo VIP from local trade history — not server volume">${vip.name}</span>
-        <span class="vip-demo muted small">demo</span>
+        <span class="vip-name" title="${
+          useLiveBook() ? "VIP from your desk trade history" : "VIP from local paper trade history"
+        }">${vip.name}</span>
+        ${useLiveBook() ? "" : `<span class="vip-demo muted small">paper</span>`}
         <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
         <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
       </div>
@@ -2826,17 +2870,19 @@ function render(): void {
     ? isDeskConnectEnabled()
       ? useDeskMatching() || usePublicDeskBook()
         ? "hub embed · desk live"
-        : "hub embed · desk HOLD"
+        : "hub embed · desk"
       : isLabLoopbackApi()
         ? "hub embed · lab"
         : "hub embed · paper"
     : isDeskConnectEnabled()
       ? useDeskMatching()
-        ? `Spot · ${INTEGRATION.mode} · desk live`
+        ? "Spot · desk live"
         : usePublicDeskBook()
-          ? `Spot · ${INTEGRATION.mode} · desk Connect`
-          : `Spot · ${INTEGRATION.mode} · desk HOLD`
-      : `Spot · ${INTEGRATION.mode}`;
+          ? "Spot · desk · Connect to trade"
+          : "Spot · desk"
+      : isLabLoopbackApi()
+        ? "Spot · lab"
+        : "Spot · paper";
   // Live oracle / lab sync used to remount the whole tree every few seconds and
   // collapse <details>, wipe withdraw fields, etc. Capture → restore after wire.
   const uiSnap = captureEphemeralUi(app);
@@ -4651,10 +4697,10 @@ function toastChartScreenshot(): void {
 }
 
 function quickOrderMid(pairId: PairId): number {
-  return (
-    (useServerMatching() ? labBookMid(pairId) : 0) ||
-    (market ? midForPair(market, pairId) : activeTicker().mid)
-  );
+  if (useLiveBook()) {
+    return labBookMid(pairId) || tickers[pairId]?.mid || 0;
+  }
+  return (market ? midForPair(market, pairId) : 0) || activeTicker().mid;
 }
 
 function buildQuickOrderValidation(pairId: PairId, price: number): QuickOrderValidation {
@@ -5297,7 +5343,7 @@ function patchBookTapeDom(): void {
         amountBase: l.amountBase,
         totalQuote: l.totalQuote,
         priceLabel: formatPrice(l.price),
-        amountLabel: formatNum(l.amountBase, 0),
+        amountLabel: formatBookQty(l.amountBase),
         totalLabel: formatPrice(l.totalQuote),
         barPct: (l.amountBase / max) * 100,
       }));
@@ -5332,6 +5378,19 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
   if (state.mainView !== "spot") return;
   if (ev.type === "book" && ev.changed) {
     throttledBookTapePatch();
+    patchTickerBar();
+    updatePreview();
+    return;
+  }
+  if (ev.type === "public_tape") {
+    publicTape = [
+      ...publicTape.filter((t) => t.pairId !== ev.pairId),
+      ...ev.prints,
+    ].slice(0, 120);
+    const tape = document.getElementById("tape");
+    if (tape) tape.innerHTML = renderTape();
+    patchMobileTradeTape();
+    patchTickerBar();
     return;
   }
   if (ev.type === "tape") {
@@ -5415,10 +5474,20 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
     setOrderPreview(side, `OCO TP ${formatPriceCompact(form.tp)} · SL ${formatPriceCompact(form.stop)}`);
     return;
   }
-  if (useServerMatching()) {
+  if (useServerMatching() || useLiveBook()) {
     const lab = getLabBookCache(state.activePair);
     if (!lab || (!lab.bids.length && !lab.asks.length)) {
-      setOrderPreview(side, "Waiting for lab book…");
+      // Keep a usable estimate from last ticker bid/ask while L2 loads / rate-limits.
+      if (t.bid > 0 && t.ask > 0) {
+        const m = matchMarket(t, side, form.amt);
+        const fee = calcFee(state, market, state.activePair, m.quote, "taker");
+        setOrderPreview(
+          side,
+          `≈ ${formatPriceCompact(m.avgPrice)} · ${formatBookQty(form.amt)} ${pair.base} · ${previewFeeLabel(fee, pair.quote)} · loading L2`,
+        );
+        return;
+      }
+      setOrderPreview(side, "Loading live L2…");
       return;
     }
     const m = matchMarket(t, side, form.amt, lab);
@@ -7392,23 +7461,17 @@ function upsertAllCandles(fillPx: number): void {
 }
 
 /**
- * Advance candle tip for one pair. Live desk: always applyMid (never paper-reseed),
- * so buy/sell / L2 flicker cannot replace lived OHLC with a synthetic path.
+ * Advance candle tip for one pair. Live desk: tip = L2 mid exactly (no client EMA),
+ * so every device paints the same close from the same book.
  */
 function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean): void {
   if (!state.candles[pairId]) state.candles[pairId] = {};
   const prev = prevMids[pairId];
   if (labLive) {
-    // Never fall through to paper-oracle mid while live L2 is on — that snap
-    // rewrites tip close across Soft-MM ↔ oracle and looks like a reset spike.
-    const raw = displayMid > 0 ? displayMid : 0;
-    const mid = raw > 0 ? raw : prev && prev > 0 ? prev : 0;
+    const mid = displayMid > 0 ? displayMid : prev && prev > 0 ? prev : 0;
     if (!(mid > 0)) return;
-    // Soft-MM BBO mid jitters inside the spread; EMA the tip so wicks stay CEX-calm.
-    const smoothed =
-      prev && prev > 0 && raw > 0 ? prev * 0.72 + raw * 0.28 : mid;
-    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, smoothed, prev);
-    prevMids[pairId] = smoothed;
+    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev);
+    prevMids[pairId] = mid;
     return;
   }
   state.candles[pairId] = applyPaperClockToPairCandles(state.candles[pairId]!, pairId);
@@ -7418,20 +7481,35 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
 function microTickPrices(): void {
   if (!market) return;
   if (document.hidden) return;
-  // Shared paper mids always — Convert/Account must not lag Spot ticker.
-  market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
+  const labLive = useLiveBook();
+  // Paper sine-walk around 0.05 — ONLY when desk L2 is off.
+  if (!labLive) {
+    market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
+  }
 
   // Scrubbing: do NOT run applyPaperClock×all pairs / series.update / DOM.
   if (state.mainView === "spot" && isChartPointerBusy()) {
     liveTickN += 1;
-    const mid = midForPair(market, state.activePair);
-    if (tickers[state.activePair]) {
-      tickers[state.activePair] = {
-        ...tickers[state.activePair]!,
-        mid,
-        bid: mid * 0.9995,
-        ask: mid * 1.0005,
-      };
+    const mid = labLive
+      ? labBookMid(state.activePair) || prevMids[state.activePair] || 0
+      : midForPair(market, state.activePair);
+    if (tickers[state.activePair] && mid > 0) {
+      if (labLive) {
+        const book = getLabBookCache(state.activePair);
+        tickers[state.activePair] = {
+          ...tickers[state.activePair]!,
+          mid,
+          bid: book?.bids[0]?.price ?? tickers[state.activePair]!.bid,
+          ask: book?.asks[0]?.price ?? tickers[state.activePair]!.ask,
+        };
+      } else {
+        tickers[state.activePair] = {
+          ...tickers[state.activePair]!,
+          mid,
+          bid: mid * 0.9995,
+          ask: mid * 1.0005,
+        };
+      }
     }
     evaluatePriceAlerts(mid);
     updateLivePriceHud(mid, true, candleCountdown(state.activeTf));
@@ -7440,23 +7518,34 @@ function microTickPrices(): void {
 
   if (state.mainView !== "spot") {
     for (const p of PAIRS) {
-      if (tickers[p.id]) {
+      if (!tickers[p.id]) continue;
+      if (labLive) {
+        const labMid = labBookMid(p.id);
+        if (labMid > 0) {
+          const book = getLabBookCache(p.id);
+          tickers[p.id] = {
+            ...tickers[p.id]!,
+            mid: labMid,
+            bid: book?.bids[0]?.price ?? labMid * 0.999,
+            ask: book?.asks[0]?.price ?? labMid * 1.001,
+          };
+        }
+      } else {
         const mid = midForPair(market, p.id);
         tickers[p.id] = { ...tickers[p.id]!, mid, bid: mid * 0.9995, ask: mid * 1.0005 };
       }
     }
     liveTickN += 1;
     if (liveTickN % 2 === 0) settleOpenOrdersFromTickers(true);
-    evaluatePriceAlerts(midForPair(market, state.activePair));
+    evaluatePriceAlerts(spotMidForPair(state.activePair));
     return;
   }
   liveTickN += 1;
-  const labLive = useLiveBook();
 
   // Active pair every tick; rotate other pairs — avoids ~200ms setInterval violations.
   for (let i = 0; i < PAIRS.length; i++) {
     const p = PAIRS[i]!;
-    const oracleTarget = midForPair(market, p.id);
+    const oracleTarget = labLive ? 0 : midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
     // Live book: tip only from L2 mid (0 keeps previous). Never mix oracle into live OHLC.
     const displayMid = labLive ? labMid : oracleTarget;
@@ -7473,7 +7562,7 @@ function microTickPrices(): void {
         const bid = book?.bids[0]?.price ?? labMid * 0.999;
         const ask = book?.asks[0]?.price ?? labMid * 1.001;
         tickers[p.id] = { ...tickers[p.id]!, mid: labMid, bid, ask };
-      } else {
+      } else if (!labLive) {
         tickers[p.id] = { ...tickers[p.id]!, mid: displayMid, bid: displayMid * 0.9995, ask: displayMid * 1.0005 };
       }
     }
@@ -7601,11 +7690,19 @@ async function refresh(): Promise<void> {
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
   // Only reseed when oracle scale actually diverges — never wipe history on every page load.
-  if (needsCandleReseedForMarket(state, market)) {
-    reseedCandlesFromMarket(state, market);
-    chartNeedsFullReplace = true;
+  // Live desk: never reseed / paper-clock candles from oracle (would snap chart to ~0.05 sine).
+  if (!useLiveBook()) {
+    if (needsCandleReseedForMarket(state, market)) {
+      reseedCandlesFromMarket(state, market);
+      chartNeedsFullReplace = true;
+    } else {
+      ensureCandles(state, market);
+    }
   } else {
-    ensureCandles(state, market);
+    // Ensure map keys exist; tip updates come only from L2 via tipCandlesForPair.
+    for (const p of PAIRS) {
+      if (!state.candles[p.id]) state.candles[p.id] = {};
+    }
   }
   seedEquitySnapshots(state, market);
   snapshotEquity(state, market);
@@ -7623,8 +7720,33 @@ async function refresh(): Promise<void> {
     const live = useLiveBook();
     // Live: tip only from L2 mid. Oracle mid here would snap OHLC on every poll miss.
     const displayMid = live ? labMid : midForPair(market, p.id);
-    if (labMid > 0) {
-      // Preserve lab L2 mid/bid/ask if we already have a book; only refresh 24h stats fields.
+    if (live) {
+      const prevTk = tickers[p.id];
+      if (labMid > 0) {
+        const book = getLabBookCache(p.id);
+        tickers[p.id] = {
+          ...(prevTk ?? tk),
+          mid: labMid,
+          bid: book?.bids[0]?.price ?? prevTk?.bid ?? labMid * 0.999,
+          ask: book?.asks[0]?.price ?? prevTk?.ask ?? labMid * 1.001,
+          change24hPct: s.changePct,
+          high24h: s.high,
+          low24h: s.low,
+          // Desk vol comes from public tape — don't import paper candle millions.
+          volume24hBase: deskVol24hBase(p.id),
+          source: "live",
+        };
+      } else if (prevTk && prevTk.mid > 0) {
+        // Keep last L2 ticker — never overwrite with paper sine mid.
+        tickers[p.id] = {
+          ...prevTk,
+          change24hPct: s.changePct,
+          high24h: s.high,
+          low24h: s.low,
+          volume24hBase: deskVol24hBase(p.id),
+        };
+      }
+    } else if (labMid > 0) {
       const prevTk = tickers[p.id];
       if (prevTk && prevTk.bid > 0 && prevTk.ask > 0) {
         tickers[p.id] = {
@@ -7643,7 +7765,7 @@ async function refresh(): Promise<void> {
     // caused ~500ms longtasks every oracle poll. Only sync active (or lab) tip.
     if (p.id === state.activePair || labMid > 0 || chartNeedsFullReplace) {
       tipCandlesForPair(p.id, displayMid, live);
-    } else {
+    } else if (!live) {
       prevMids[p.id] = displayMid;
     }
   }

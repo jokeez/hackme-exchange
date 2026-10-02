@@ -11,15 +11,15 @@ Hub (hackme.tech or :8080)  --tab Exchange-->  iframe  exchange.hackme.tech/?emb
 - SPA code lives in **this repository** (not inside the HackMe git tree).
 - Hub tab is **Exchange**, not Market (`#orders` = useful-PoW/fuzz market; HMS Market = storage).
 - Node Wallet remains `#wallet` (hub chrome + SPA System → Hub wallet via `postMessage`).
-- **D0 default:** static paper SPA on `https://exchange.hackme.tech` — no public matching API.
-- **Desk Connect (HOLD):** same-origin `/desk-api` auth/session only when `VITE_PUBLIC_DESK_CONNECT=1`. Matching / deposit / withdraw remain HOLD. Hub (`132…`) must not host the exchange edge.
+- **Soft-launch GO:** public SPA on `https://exchange.hackme.tech` with same-origin `/desk-api` when `VITE_PUBLIC_DESK_CONNECT=1`. Matching / deposit / withdraw **ON** (ops-gated withdraw + TOTP). Hub (`132…`) must not host the exchange edge.
+- **USDT real custody:** still HOLD until partner bridge; paper/lab mint for testing only.
 
 ## Embed chrome
 
 With `?embed=hub` (or nested iframe):
 
 - Flat hub background, denser header, no announce / tour / mining strip
-- Brand shortens by mode: **Exchange · hub embed · paper** (default D0), **· desk HOLD** when `VITE_PUBLIC_DESK_CONNECT=1`, **· lab** only on loopback lab builds — never hard-code “lab” on public paper
+- Brand shortens by mode: **Exchange · hub embed · paper** (legacy D0), **· desk** when `VITE_PUBLIC_DESK_CONNECT=1`, **· lab** only on loopback lab builds — never hard-code “lab” on public paper
 - Desktop desk forced (Book | Chart+Orders | Markets+Activity) even if iframe &lt; 1024px
 - Chart `min-height: 0` + ResizeObserver so canvas scales (no fold / overlap onto Buy/Sell)
 - Order zone capped (`max-height: min(28vh, 250px)`, `min-height: 0`) so the chart keeps a usable floor for crosshair in short iframes; **no bottom strip** — Orders / Fills / Tape / Alerts live under Markets (`#activity-body`)
@@ -76,6 +76,6 @@ Allowed overrides: `https://exchange.hackme.tech`, `http://127.0.0.1:5199`, `htt
 
 ## Verdict
 
-**GO** for hub paper embed. **HOLD** for public matching API / real custody.
+**GO** for hub embed + public matching/deposit/withdraw (soft-launch). **HOLD** for real USDT/custody bridge until partner rail.
 
-See also: [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md) before any public matching flip. Hub must not host the exchange API edge.
+See also: [`STATUS.md`](../STATUS.md), [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md). Hub must not host the exchange API edge.

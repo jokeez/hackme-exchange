@@ -1,5 +1,5 @@
 import type { BookLevel } from "./types";
-import { formatNum, formatPrice } from "./market";
+import { formatBookQty, formatNum, formatPrice } from "./market";
 
 export type DepthStats = {
   bestBid: number;
@@ -149,7 +149,7 @@ export function renderDepthPanel(
             (r) => `<div class="depth-row bid" data-book-price="${r.price}" data-book-side="bid" role="button" tabindex="0">
               <div class="depth-bar" style="width:${(r.cum / maxCum) * 100}%"></div>
               <span>${formatPrice(r.price)}</span>
-              <span class="depth-amt">${formatNum(r.amountBase, 0)}</span>
+              <span class="depth-amt">${formatBookQty(r.amountBase)}</span>
               <span class="dim">${formatNum(r.cum, 0)}</span>
             </div>`,
           )
@@ -162,7 +162,7 @@ export function renderDepthPanel(
             (r) => `<div class="depth-row ask" data-book-price="${r.price}" data-book-side="ask" role="button" tabindex="0">
               <div class="depth-bar" style="width:${(r.cum / maxCum) * 100}%"></div>
               <span>${formatPrice(r.price)}</span>
-              <span class="depth-amt">${formatNum(r.amountBase, 0)}</span>
+              <span class="depth-amt">${formatBookQty(r.amountBase)}</span>
               <span class="dim">${formatNum(r.cum, 0)}</span>
             </div>`,
           )

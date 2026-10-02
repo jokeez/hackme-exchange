@@ -93,9 +93,16 @@ async function main() {
   console.log("PASS  health matching=ok");
 
   if (health.public_edge) {
-    if (health.deposit?.enabled) throw new Error("public_edge deposit must stay OFF for Matching GO");
-    if (health.withdraw?.enabled) throw new Error("public_edge withdraw must stay OFF for Matching GO");
-    console.log("PASS  public_edge deposit/withdraw OFF");
+    if (process.env.EX_CUSTODY_GO === "1") {
+      if (!health.deposit?.enabled || !health.withdraw?.enabled) {
+        throw new Error("EX_CUSTODY_GO=1 but deposit/withdraw not both ON");
+      }
+      console.log("PASS  public_edge deposit/withdraw ON (custody soft-launch)");
+    } else {
+      if (health.deposit?.enabled) throw new Error("public_edge deposit must stay OFF for Matching GO (or set EX_CUSTODY_GO=1)");
+      if (health.withdraw?.enabled) throw new Error("public_edge withdraw must stay OFF for Matching GO (or set EX_CUSTODY_GO=1)");
+      console.log("PASS  public_edge deposit/withdraw OFF");
+    }
   } else if (health.deposit?.enabled) {
     console.log("WARN  deposit enabled — OK only on private lab");
   }

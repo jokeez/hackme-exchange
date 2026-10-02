@@ -3,6 +3,7 @@ import {
   chartLocaleTag,
   chartLocalization,
   chartPriceFormatter,
+  formatBookQty,
   formatGh,
   formatNum,
   formatPct,
@@ -82,6 +83,14 @@ describe("formatNum / formatPct", () => {
     expect(formatPct(1.5)).toBe("+1.50%");
     expect(formatPct(-2)).toBe("-2.00%");
     expect(formatPct(NaN)).toBe("—");
+  });
+});
+
+describe("formatBookQty", () => {
+  it("keeps fractional qty instead of rounding to 0", () => {
+    expect(formatBookQty(183.27)).toMatch(/183\.27/);
+    expect(formatBookQty(0.4)).not.toBe("0");
+    expect(formatBookQty(0.27)).toMatch(/0\.27/);
   });
 });
 

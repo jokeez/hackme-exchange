@@ -1,6 +1,6 @@
 # Docs — HackMe Exchange (SPA)
 
-Open-source **paper** Spot UI. Matching API and custody stay **HOLD** on the public edge.
+Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT/BTC real custody remains **HOLD**.
 
 ## Ecosystem
 
@@ -17,7 +17,7 @@ Open-source **paper** Spot UI. Matching API and custody stay **HOLD** on the pub
 | Doc | Purpose |
 |-----|---------|
 | [../README.md](../README.md) | Quick start · modes |
-| [../STATUS.md](../STATUS.md) | Product status · HOLD on matching/custody |
+| [../STATUS.md](../STATUS.md) | Product status · matching/custody GO |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Setup · PRs · secrets |
 | [../scripts/README.md](../scripts/README.md) | Maintainer QA scripts |
 

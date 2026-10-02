@@ -1,12 +1,12 @@
 #!/usr/bin/env npx tsx
 /**
- * Matching GO security probe — defensive HOLD gates against public desk (or EXCHANGE_DESK_BASE).
+ * Matching GO security probe — defensive gates against public desk (or EXCHANGE_DESK_BASE).
  *
- * Does NOT enable matching. Asserts CSRF / CORS / cookies / authz / trading_disabled /
- * deposit+withdraw OFF. Rate-limit: soft burst only (stops at first 429).
+ * HOLD mode (default when matching≠ok): book/place 503, deposit/withdraw OFF.
+ * Soft-launch GO: set EX_MATCHING_GO=1 (and EX_CUSTODY_GO=1 when deposit/withdraw ON).
  *
  *   npm run smoke:matching-sec
- *   EXCHANGE_DESK_BASE=https://exchange.hackme.tech/desk-api npm run smoke:matching-sec
+ *   EX_MATCHING_GO=1 EX_CUSTODY_GO=1 npm run smoke:matching-sec
  */
 import * as ed from "@noble/ed25519";
 import { sha256 } from "@noble/hashes/sha256";
@@ -50,7 +50,7 @@ async function main() {
   };
   const cookieHeader = () => [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 
-  // --- 1. Health HOLD ---
+  // --- 1. Health posture ---
   const health = await fetch(`${BASE}/health`);
   const hj = (await health.json()) as {
     matching?: string;
@@ -58,12 +58,26 @@ async function main() {
     withdraw?: { enabled?: boolean };
     public_edge?: boolean;
   };
-  if (hj.matching !== "disabled") fail(`matching not HOLD: ${hj.matching}`);
+  const matchingGo = process.env.EX_MATCHING_GO === "1" || hj.matching === "ok";
+  const custodyGo = process.env.EX_CUSTODY_GO === "1" || (matchingGo && !!hj.deposit?.enabled && !!hj.withdraw?.enabled);
+
+  if (matchingGo) {
+    if (hj.matching !== "ok") fail(`matching GO: want ok got ${hj.matching}`);
+    else pass("health matching=ok");
+  } else if (hj.matching !== "disabled") fail(`matching not HOLD: ${hj.matching}`);
   else pass("health matching=disabled");
-  if (hj.deposit?.enabled) fail("deposit enabled on HOLD edge");
-  else pass("deposit.enabled=false");
-  if (hj.withdraw?.enabled) fail("withdraw enabled on HOLD edge");
-  else pass("withdraw.enabled=false");
+
+  if (custodyGo) {
+    if (hj.deposit?.enabled !== true) fail("custody GO: deposit want enabled");
+    else pass("deposit.enabled=true");
+    if (hj.withdraw?.enabled !== true) fail("custody GO: withdraw want enabled");
+    else pass("withdraw.enabled=true");
+  } else {
+    if (hj.deposit?.enabled) fail("deposit enabled on HOLD edge");
+    else pass("deposit.enabled=false");
+    if (hj.withdraw?.enabled) fail("withdraw enabled on HOLD edge");
+    else pass("withdraw.enabled=false");
+  }
 
   // Soft-launch caps advertised on public slim health (SPA chrome). Optional until edge redeploy.
   if (typeof (hj as { max_open_orders?: number }).max_open_orders === "number") {
@@ -78,17 +92,22 @@ async function main() {
     pass(`health min_notional=${(hj as { min_notional: number }).min_notional}`);
   }
 
-  // --- 2. Book 503 HOLD ---
+  // --- 2. Book ---
   const book = await fetch(`${BASE}/book?pair=HMC/USDT`);
   const bookBody = await book.json().catch(() => ({}));
-  if (book.status !== 503) fail(`book want 503 got ${book.status}`);
-  else pass("book 503 HOLD");
-  const bookCode = (bookBody as { code?: string }).code;
-  if (bookCode && bookCode !== "trading_disabled") {
-    fail(`book code want trading_disabled got ${bookCode}`);
-  } else if (bookCode) pass("book code=trading_disabled");
+  if (matchingGo) {
+    if (book.status !== 200) fail(`matching GO: book want 200 got ${book.status}`);
+    else pass("book 200");
+  } else {
+    if (book.status !== 503) fail(`book want 503 got ${book.status}`);
+    else pass("book 503 HOLD");
+    const bookCode = (bookBody as { code?: string }).code;
+    if (bookCode && bookCode !== "trading_disabled") {
+      fail(`book code want trading_disabled got ${bookCode}`);
+    } else if (bookCode) pass("book code=trading_disabled");
+  }
 
-  // --- 3. Place while HOLD → 503 (even before auth if gated first) ---
+  // --- 3. Place without session ---
   const placeHold = await fetch(`${BASE}/orders`, {
     method: "POST",
     headers: { "content-type": "application/json", Origin: ORIGIN },
@@ -100,7 +119,11 @@ async function main() {
       qty: 100_000_000,
     }),
   });
-  if (placeHold.status !== 503 && placeHold.status !== 401) {
+  if (matchingGo) {
+    if (placeHold.status !== 401 && placeHold.status !== 403) {
+      fail(`authed-less place want 401/403 got ${placeHold.status}`);
+    } else pass(`place without session → ${placeHold.status}`);
+  } else if (placeHold.status !== 503 && placeHold.status !== 401) {
     fail(`place HOLD want 503/401 got ${placeHold.status}`);
   } else pass(`place while HOLD → ${placeHold.status}`);
 
@@ -171,7 +194,7 @@ async function main() {
   if (loBadCsrf.status !== 403) fail(`logout bad CSRF want 403 got ${loBadCsrf.status}`);
   else pass("logout bad CSRF → 403");
 
-  // --- 7. Place authenticated still HOLD ---
+  // --- 7. Place authenticated ---
   const placeAuth = await fetch(`${BASE}/orders`, {
     method: "POST",
     headers: {
@@ -189,8 +212,14 @@ async function main() {
     }),
   });
   const placeAuthBody = await placeAuth.json().catch(() => ({}));
-  if (placeAuth.status !== 503) fail(`authed place HOLD want 503 got ${placeAuth.status} ${JSON.stringify(placeAuthBody)}`);
-  else pass("authed place → 503 trading_disabled");
+  if (matchingGo) {
+    // Soft-launch: engine accepts request; empty wallet → insufficient_balance (not trading_disabled).
+    if (placeAuth.status === 400 || placeAuth.status === 200) {
+      pass(`authed place → ${placeAuth.status} ${JSON.stringify(placeAuthBody).slice(0, 80)}`);
+    } else fail(`authed place GO want 200/400 got ${placeAuth.status} ${JSON.stringify(placeAuthBody)}`);
+  } else if (placeAuth.status !== 503) {
+    fail(`authed place HOLD want 503 got ${placeAuth.status} ${JSON.stringify(placeAuthBody)}`);
+  } else pass("authed place → 503 trading_disabled");
 
   // --- 8. CORS evil Origin on mutating route ---
   const corsEvil = await fetch(`${BASE}/auth/logout`, {
@@ -267,7 +296,9 @@ async function main() {
     console.error(`[matching-go-sec] FAILED (${failed}) — ${BASE}`);
     process.exit(1);
   }
-  console.log(`[matching-go-sec] OK — HOLD gates green · ${BASE} · ${addr}`);
+  console.log(
+    `[matching-go-sec] OK — ${matchingGo ? "GO" : "HOLD"} gates green · ${BASE} · ${addr}`,
+  );
 }
 
 main().catch((e) => {

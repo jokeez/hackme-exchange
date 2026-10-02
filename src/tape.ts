@@ -75,7 +75,30 @@ export function tradeToPrint(t: Trade): TapePrint {
   };
 }
 
-/** Merge user fills + public tape for a pair (newest first). */
+/** Public GET /trades row → tape print (not synthetic oracle seed). */
+export function marketTradeToPrint(
+  pairId: PairId,
+  t: {
+    id: string;
+    price: number;
+    amountBase: number;
+    side: OrderSide;
+    ts: number;
+  },
+): TapePrint {
+  return {
+    id: t.id,
+    pairId,
+    side: t.side,
+    price: t.price,
+    amountBase: t.amountBase,
+    feeRole: "taker",
+    ts: t.ts,
+    synthetic: false,
+  };
+}
+
+/** Merge user fills + public tape for a pair (newest first). Dedupes by id. */
 export function mergeTapeRows(
   userTrades: Trade[],
   publicTape: TapePrint[],
@@ -84,5 +107,13 @@ export function mergeTapeRows(
 ): TapePrint[] {
   const user = userTrades.filter((t) => t.pairId === pairId).map(tradeToPrint);
   const pub = publicTape.filter((t) => t.pairId === pairId);
-  return [...user, ...pub].sort((a, b) => b.ts - a.ts).slice(0, limit);
+  const seen = new Set<string>();
+  const merged: TapePrint[] = [];
+  for (const row of [...user, ...pub].sort((a, b) => b.ts - a.ts)) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    merged.push(row);
+    if (merged.length >= limit) break;
+  }
+  return merged;
 }

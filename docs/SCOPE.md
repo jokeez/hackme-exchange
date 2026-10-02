@@ -12,26 +12,26 @@
 
 ---
 
-## In scope (paper D0)
+## Soft-launch (public desk — GO)
 
-- Spot / Convert / Account / Pool on **paper** (default)
-- Static paper UI on [exchange.hackme.tech](https://exchange.hackme.tech)
-- Optional **lab** mode against loopback API for contributors
+- Spot / Convert / Account / Pool with optional **Desk Connect**
+- Live matching book/orders via same-origin `/desk-api` (soft-launch caps)
+- HMC/SUP deposit addresses + withdraw with per-user TOTP; ops completes withdraws
 - Hub iframe embed (`?embed=hub`)
 - Read-only oracle from public `hackme.tech` APIs
 - Operator reference mids (**0.05** HMC · **0.25** SUP); pool GH is telemetry only
 
 ---
 
-## Out of scope (public edge)
+## Out of scope / still HOLD
 
 | Item | Status |
 |------|--------|
-| Public matching (book/orders live) | **HOLD** |
-| Public desk API (`/desk-api` + `exchange-api.hackme.tech`) | Live under HOLD — auth/session Connect only; matching/deposit/withdraw OFF |
-| Real USDT / BTC custody in the browser | Never |
+| Public matching (book/orders live) | **GO** (soft-launch caps) |
+| HMC/SUP deposit + withdraw + TOTP | **GO** (ops-gated complete) |
+| Real USDT / BTC on-chain custody | **HOLD** — partner bridge |
 | Merging SPA into HackMe hub git | Sidecar only |
-| Foreign CEX “listing” claims | Not this product’s paper launch |
+| Foreign CEX “listing” claims | Not this product |
 
 ### Hostmap (ops)
 
@@ -39,8 +39,8 @@
 |------|------|
 | Paper SPA / Caddy | `89.150.41.40` · `exchange.hackme.tech` |
 | Same-origin desk proxy | `https://exchange.hackme.tech/desk-api/*` → private desk API (Strict cookies) |
-| Public desk API HOLD | `exchange-api.hackme.tech` (CF) · `api.exchange.hackme.tech` fallback |
-| Private C2 API (loopback) | **same** `89.150.41.40` — matching OFF |
+| Public desk API | `exchange-api.hackme.tech` (CF) · `api.exchange.hackme.tech` fallback |
+| Private C2 API (loopback) | **same** `89.150.41.40` — soft-launch trading ON |
 | Mining hub / node | `132.243.112.100` — **not** exchange edge |
 
 ---
@@ -57,5 +57,6 @@
 | Layer | Status |
 |-------|--------|
 | This source repo | Public (AGPL) |
-| Paper product | Live static SPA |
-| Matching / custody | **HOLD** |
+| Paper / desk product | Live SPA + soft-launch matching |
+| Matching / HMC·SUP custody | **GO** |
+| USDT/BTC custody | **HOLD** |

@@ -3,12 +3,24 @@
  * Replaces duplicate labBookTimer + scattered book/tape refresh timers.
  */
 
-import type { PairId } from "../types";
+import type { DemoState, MarketSnapshot, OrderSide, PairId } from "../types";
 import { INTEGRATION } from "../config/integration";
-import { exchangeHealth, type HealthResponse } from "./exchangeApi";
-import { getLabSessionMeta, listExchangeFills, listExchangeOrders, pairIdToApi, fetchExchangeBalances, mergeApiBalancesIntoWallet } from "./exchangeApi";
+import {
+  exchangeHealth,
+  type HealthResponse,
+  getLabSessionMeta,
+  listExchangeFills,
+  listExchangeOrders,
+  pairIdToApi,
+  apiPairToId,
+  fetchExchangeBalances,
+  mergeApiBalancesIntoWallet,
+  fetchPublicTrades,
+  apiPriceToDisplay,
+  minorToDisplay,
+} from "./exchangeApi";
 import { mergeServerFills, mergeServerOpenOrders, refreshLabBook } from "./labMatching";
-import type { DemoState, MarketSnapshot } from "../types";
+import { marketTradeToPrint, type TapePrint } from "../tape";
 
 export type StreamTransport = "ws" | "poll" | "local" | "idle";
 
@@ -16,7 +28,8 @@ export type MarketStreamEvent =
   | { type: "book"; pairId: PairId; changed: boolean }
   | { type: "tape" }
   | { type: "trades" }
-  | { type: "transport"; transport: StreamTransport };
+  | { type: "transport"; transport: StreamTransport }
+  | { type: "public_tape"; pairId: PairId; prints: TapePrint[] };
 
 export type MarketStreamHandlers = {
   onEvent?: (ev: MarketStreamEvent) => void;
@@ -210,10 +223,15 @@ export class MarketStream {
         return;
       }
       if (msg.type === "tape" || msg.type === "trades" || msg.type === "fill") {
-        void this.syncFillsLight().then((changed) => {
+        void this.syncPublicTrades(this.opts.getActivePair());
+        if (this.sessionOn()) {
+          void this.syncFillsLight().then((changed) => {
+            this.handlers.onEvent?.({ type: "tape" });
+            if (changed) this.handlers.onEvent?.({ type: "trades" });
+          });
+        } else {
           this.handlers.onEvent?.({ type: "tape" });
-          if (changed) this.handlers.onEvent?.({ type: "trades" });
-        });
+        }
       }
     } catch {
       /* ignore malformed */
@@ -260,14 +278,36 @@ export class MarketStream {
     const book = await refreshLabBook(pairId);
     if (book.changed) this.handlers.onEvent?.({ type: "book", pairId, changed: true });
 
-    // Fills/orders need Connect CSRF — skip when only public L2 is live.
-    if (!this.sessionOn()) return;
+    // Public market tape for guests + connected users (not session /fills).
     this.fillTick += 1;
+    if (this.fillTick % 2 === 0) {
+      await this.syncPublicTrades(pairId);
+    }
+
+    // Session fills/orders need Connect CSRF.
+    if (!this.sessionOn()) return;
     if (this.fillTick % 3 === 0) {
       const changed = await this.syncFillsLight();
       this.handlers.onEvent?.({ type: "tape" });
       if (changed) this.handlers.onEvent?.({ type: "trades" });
     }
+  }
+
+  private async syncPublicTrades(pairId: PairId): Promise<void> {
+    const res = await fetchPublicTrades(pairIdToApi(pairId), 40, 4_000);
+    if (!res.ok) return;
+    const prints: TapePrint[] = [];
+    for (const t of res.trades) {
+      const pid = apiPairToId(t.pair) ?? pairId;
+      if (pid !== pairId) continue;
+      const side: OrderSide = String(t.taker_side || "").toLowerCase() === "sell" ? "sell" : "buy";
+      const price = apiPriceToDisplay(Number(t.price));
+      const amountBase = minorToDisplay(Number(t.qty));
+      if (!(price > 0) || !(amountBase > 0)) continue;
+      const ts = t.created_at ? Date.parse(t.created_at) || Date.now() : Date.now();
+      prints.push(marketTradeToPrint(pid, { id: t.id, price, amountBase, side, ts }));
+    }
+    this.handlers.onEvent?.({ type: "public_tape", pairId, prints });
   }
 
   private async syncFillsLight(): Promise<boolean> {

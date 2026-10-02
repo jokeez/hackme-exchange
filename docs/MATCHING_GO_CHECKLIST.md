@@ -1,7 +1,7 @@
 # Matching GO checklist (public desk)
 
-**Status:** HOLD until every gate below is checked and an explicit product **GO** is recorded.  
-**Scope:** turn public desk from auth-only (`/desk-api`) into live book/orders — **not** deposit/withdraw yet (those are later GOs).
+**Status:** **GO (soft-launch)** — matching `ok` · deposit/withdraw **ON** (TOTP + ops complete) · USDT/BTC real custody still **HOLD**.  
+**Scope:** public desk live book/orders + HMC/SUP custody. Soft-launch caps: `max_open_orders=20`, `price_band_bps=1500`, `min_notional=1e6`.
 
 Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `89.150.41.40`.
 
@@ -11,11 +11,12 @@ Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `89.
 
 - [x] Paper SPA on `https://exchange.hackme.tech`
 - [x] Same-origin `/desk-api` proxy + Strict cookies
-- [x] Desk Connect (browser ephemeral `HMC-…`) — matching still HOLD
-- [x] `GET /health` → `matching: disabled`, deposit/withdraw `enabled: false`
-- [x] `GET /book` → `503` while HOLD
+- [x] Desk Connect (browser ephemeral `HMC-…`) — matching **GO**
+- [x] `GET /health` → `matching: ok`, deposit/withdraw `enabled: true` (soft-launch)
+- [x] `GET /book` → `200` with bids/asks
 - [x] Lab fixture Ed25519 seed **absent** from paper `dist-d0`
-- [x] Hub embed (`?embed=hub`) paper-only — CSP `frame-ancestors`
+- [x] Hub embed (`?embed=hub`) — CSP `frame-ancestors`
+- [x] Operator soft-launch cycle — `npm run smoke:operator` (lab) · desk smokes with `EX_MATCHING_GO=1 EX_CUSTODY_GO=1`
 
 ---
 
@@ -32,22 +33,23 @@ Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `89.
 | 1.7 | Input bounds | Price band, min notional, qty clamps server-side | Reject 4xx + metrics |
 | 1.8 | Abuse | Self-trade / wash guards; cancel spam | Pause matching |
 
-SPA smoke (HOLD): `npm run smoke:desk` · live: `npm run smoke:live`  
-Security subset: see `scripts/full_audit.sh` · `npm run smoke:matching-sec`  
-Lab acceptance (authz + band + place/cancel): `npm run smoke:matching-go`
+SPA smoke (GO): `EX_MATCHING_GO=1 EX_CUSTODY_GO=1 npm run smoke:desk` · live origin: `npm run smoke:live`  
+Operator cycle (lab): `npm run smoke:operator`  
+Security subset: `EX_MATCHING_GO=1 EX_CUSTODY_GO=1 npm run smoke:matching-sec` · `npm run audit:security`  
+Lab acceptance: `npm run smoke:matching-go` · `npm run smoke:lab`
 
 ---
 
 ## 2. Matching feature flags
 
-| Flag / health field | HOLD today | GO target |
-|---------------------|------------|-----------|
-| `matching` | `disabled` | `ok` |
-| `deposit.enabled` | `false` | stays **false** until Deposit GO |
-| `withdraw.enabled` | `false` | stays **false** until Withdraw GO |
+| Flag / health field | Soft-launch GO | Notes |
+|---------------------|----------------|-------|
+| `matching` | `ok` | Public edge |
+| `deposit.enabled` | `true` | HMC/SUP deposit addr |
+| `withdraw.enabled` | `true` | TOTP + ops complete |
 | SPA `useLabMatching()` | loopback CSRF only | **stays false** on public desk |
-| SPA `useDeskMatching()` | false while HOLD | true when health `ok` + desk CSRF |
-| SPA `useServerMatching()` | lab only today | lab **or** desk live |
+| SPA `useDeskMatching()` | true when health `ok` + desk CSRF | Soft-launch |
+| SPA `useServerMatching()` | lab **or** desk live | |
 
 Public desk Connect must **not** flip `useLabMatching()` — live book uses `useDeskMatching` / `useServerMatching` after Matching GO.
 
@@ -57,7 +59,7 @@ Public desk Connect must **not** flip `useLabMatching()` — live book uses `use
 
 Run against **staging first**, then public desk after GO:
 
-1. `GET /health` → `matching: ok`, deposit/withdraw still off  
+1. `GET /health` → `matching: ok`, deposit/withdraw **ON** (soft-launch)  
 2. Desk Connect challenge → verify → CSRF  
 3. `GET /book?pair=HMC/USDT` → `200` with bids/asks (not 503)  
 4. Place limit → appears in open orders  
@@ -67,17 +69,18 @@ Run against **staging first**, then public desk after GO:
 8. Rate-limit trip → `429` with backoff (`EX_MATCHING_GO_RATE=1`)  
 9. After logout → balances/orders unauthorized  
 10. Cross-account cancel → denied  
+11. Custody fee quote `GET /fees/custody` · trading fees land in fee wallet  
+12. Withdraw without TOTP → 401 · with TOTP → pending · ops complete  
 
-Automate: `npm run smoke:matching-go` (lab/staging). `scripts/desk-connect-smoke.ts` behind `EX_MATCHING_GO=1` for book 200 after GO.
+Automate: `npm run smoke:matching-go` · `npm run smoke:operator` (lab). Desk: `EX_MATCHING_GO=1 EX_CUSTODY_GO=1 npm run smoke:desk`.
 
-**HOLD security probe (run anytime against public desk):**
+**Security probe (public desk):**
 
 ```bash
-npm run smoke:matching-sec
-# or: npx tsx scripts/matching_go_security_probe.ts
+EX_MATCHING_GO=1 EX_CUSTODY_GO=1 npm run smoke:matching-sec
 ```
 
-Asserts: health HOLD, book 503 + `trading_disabled`, place 503, CSRF on logout, cookie HttpOnly/Secure/SameSite=Strict, no evil CORS ACAO, admin closed, metrics/openapi closed, post-logout unauthorized.
+Asserts: health GO + caps, book 200, place authz, CSRF on logout, cookie HttpOnly/Secure/SameSite=Strict, no evil CORS ACAO, admin closed, metrics/openapi closed, post-logout unauthorized.
 
 API sibling: `hackme-exchange-api/scripts/matching_go_hold_probe.sh` · `ops_drill_matching_rollback.sh`.  
 Ops flip plan: `hackme-exchange-ops/docs/RUNBOOK_MATCHING_GO.md`.

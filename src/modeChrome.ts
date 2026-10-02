@@ -14,21 +14,21 @@ export function modeChromeLabel(): string {
   if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) {
     return "Desk matching live — Connect wallet to trade (soft-launch)";
   }
-  if (isDeskConnectEnabled()) return "Desk Connect · matching HOLD — paper preview until GO";
+  if (isDeskConnectEnabled()) return "Desk Connect · paper Spot until session";
   switch (INTEGRATION.mode) {
     case "paper":
-      return "Paper / synthetic — not real exchange";
+      return "Paper Spot — simulated balances";
     default:
-      return "Demo / paper balances — not real exchange";
+      return "Paper Spot — simulated balances";
   }
 }
 
 export function modeStatusPill(): string {
   if (isLiveModeBlocked()) return "⛔ Live blocked";
   if (isStagingMode()) return useLabMatching() ? "◈ D1 local" : "◈ D1 staging";
-  if (useLabMatching()) return "◎ Lab · connected";
+  if (useLabMatching()) return "◎ Lab";
   if (useDeskMatching()) return "◎ Desk · live";
   if (usePublicDeskBook()) return "◎ Desk · Connect";
-  if (isDeskConnectEnabled()) return "◎ Desk · HOLD";
-  return "◎ Paper / Synthetic";
+  if (isDeskConnectEnabled()) return "◎ Desk · paper";
+  return "◎ Paper";
 }

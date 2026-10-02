@@ -66,6 +66,17 @@ export function formatNum(n: number, d = 2): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d });
 }
 
+/** Book / depth qty — never round sub-1 amounts to 0 (was formatNum(_, 0)). */
+export function formatBookQty(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  const abs = Math.abs(n);
+  if (abs >= 1000) return formatNum(n, 1);
+  if (abs >= 10) return formatNum(n, 2);
+  if (abs >= 1) return formatNum(n, 2);
+  if (abs >= 0.01) return formatNum(n, 4);
+  return formatNum(n, 6);
+}
+
 export function formatPct(n: number, d = 2): string {
   if (!Number.isFinite(n)) return "—";
   // Flat = no plus (avoids "+0.00%" looking like a green win).
@@ -97,7 +108,7 @@ export function formatVolBase(n: number, base: string): string {
   if (!Number.isFinite(n) || n <= 0) return `0 ${base}`;
   if (n >= 1_000_000) return `${formatNum(n / 1_000_000, 2)}M ${base}`;
   if (n >= 1000) return `${formatNum(n / 1000, 1)}K ${base}`;
-  return `${formatNum(n, 0)} ${base}`;
+  return `${formatBookQty(n)} ${base}`;
 }
 
 export function formatVol(n: number): string {

@@ -13,6 +13,7 @@ export {
   pctTone,
   formatVol,
   formatVolBase,
+  formatBookQty,
   formatGh,
   formatRewardPerM,
   chartPriceFormatter,

@@ -9,7 +9,7 @@ describe("binance-inspired UI contracts", () => {
   it("book renderer includes inline depth mini-chart above ladder", () => {
     const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
     expect(app).toContain('class="depth-wrap"');
-    expect(app).toContain("renderDepthSvg(bids, asks)");
+    expect(app).toContain("renderDepthSvg(visibleBids, visibleAsks)");
     expect(app).toContain("Price (${pair.quote})");
     expect(app).toContain("Amount (${pair.base})");
   });

@@ -1,12 +1,12 @@
-# Security — paper SPA
+# Security — paper SPA + soft-launch desk
 
-Threat checklist for this **open-source paper UI**. Matching API / custody are **HOLD** on the public edge.
+Threat checklist for this **open-source SPA**. Soft-launch matching / HMC·SUP custody are **GO** on the public edge; USDT/BTC real custody remains **HOLD**.
 
 ## Paper demo — threat model
 
 | Risk | Mitigation |
 |------|------------|
-| Fake balances | Labeled **PAPER**; localStorage only |
+| Fake balances | Labeled **PAPER**; localStorage only (offline) |
 | Oracle manipulation | Read-only public stats; display-only pricing |
 | XSS in SPA | `escapeHtml` on ledger / search / pool / object-tree / ctx menu / node hrefs |
 | Chart color XSS | Sanitize on load + import; re-validate at render |
@@ -15,13 +15,13 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 | localStorage pollution | `loadState` strip + clamps |
 | Origin spoof | `sanitizeHttpUrl` — `http:` / `https:` only |
 
-**Residual (accepted for paper):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
+**Residual (accepted for paper offline):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
 
-**Desk Connect (optional HOLD lane):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Auth is for desk prep only — not custody; matching/deposit/withdraw stay OFF.
+**Desk Connect (soft-launch):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Matching / deposit / withdraw follow server health; withdraw requires per-user TOTP.
 
-**Residual (accepted for HOLD desk prep):** XSS in the SPA origin that can read `sessionStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps, HTTP CSP, no durable seed in `localStorage`, user-confirm on export, never embed fixture seeds in paper builds. Treat exported backup JSON as a private key.
+**Residual (accepted for desk):** XSS in the SPA origin that can read `sessionStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps, HTTP CSP, no durable seed in `localStorage`, user-confirm on export, never embed fixture seeds in paper builds. Treat exported backup JSON as a private key. Soft-launch caps + ops withdraw complete limit blast radius.
 
-**This is not a financial system.** Do not treat paper settlement as production custody.
+**This is not a licensed financial system.** Soft-launch caps apply; USDT/BTC custody is not live.
 
 ---
 
@@ -33,15 +33,15 @@ Threat checklist for this **open-source paper UI**. Matching API / custody are *
 - [x] HTTP CSP + security headers on paper origin (Caddy on `89.150.41.40`)
 - [ ] Self-host fonts or add SRI when convenient
 
-## Principles (when matching/custody land later)
+## Soft-launch principles
 
-1. Keys never in the browser  
-2. Server-authoritative balances  
+1. Keys never leave the browser except user-initiated export  
+2. Server-authoritative balances after Connect  
 3. Session cookies httpOnly + CSRF + CORS allowlist  
-4. Hot wallet on server / HSM — never SPA-signed privileged chain txs  
+4. Withdraw: TOTP + ops complete; no blind auto-payout  
+5. Soft-launch caps: max open orders / price band / min notional  
+6. Hot wallet on server / HSM — never SPA-signed privileged chain txs  
 
-## Matching GO (later)
-
-Before enabling public book/orders, complete [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md): CSRF, rate limits, caps, rollback drill. Deposit/withdraw stay OFF until their own GOs.
+Before enabling or rolling back public book/orders, complete [`MATCHING_GO_CHECKLIST.md`](MATCHING_GO_CHECKLIST.md).
 
 See also: [`SCOPE.md`](SCOPE.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`STATUS.md`](../STATUS.md).

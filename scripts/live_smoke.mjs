@@ -140,12 +140,15 @@ async function browserCheck() {
   }
 
   const noise = (s) =>
-    /favicon|cloudflare|Failed to load resource: net::ERR_|ResizeObserver|frame-ancestors|Content Security Policy directive/i.test(
+    /favicon|cloudflare|Failed to load resource: net::ERR_|ResizeObserver|frame-ancestors|Content Security Policy directive|status of 429/i.test(
       s,
     );
   const realConsole = consoleErrs.filter((e) => !noise(e));
   const realPage = pageErrs.filter((e) => !noise(e));
-  const real404 = badResponses.filter((e) => !/cloudflareinsights|favicon\.ico/i.test(e));
+  // Soft-launch rate limits on public book polls are expected under soak; ignore 429 noise.
+  const real404 = badResponses.filter(
+    (e) => !/cloudflareinsights|favicon\.ico|\b429\b/i.test(e),
+  );
 
   if (realConsole.length) {
     console.error("[console]", realConsole.slice(0, 8));

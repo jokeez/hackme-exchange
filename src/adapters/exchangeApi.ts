@@ -1343,6 +1343,49 @@ export async function listExchangeFills(
   }
 }
 
+/** Public market print (GET /trades) — no accounts / fees. */
+export type ApiMarketTrade = {
+  id: string;
+  pair: string;
+  price: number;
+  qty: number;
+  quote?: number;
+  taker_side?: string;
+  created_at?: string;
+};
+
+/** GET /trades?pair= — public tape (no session). */
+export async function fetchPublicTrades(
+  pair: string,
+  limit = 40,
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<{ ok: true; trades: ApiMarketTrade[]; source?: string } | ExchangeApiError> {
+  const q = new URLSearchParams();
+  q.set("pair", pair);
+  q.set("limit", String(Math.max(1, Math.min(100, limit))));
+  const url = apiUrl(`/trades?${q}`, baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store", mode: "cors", credentials: "include", headers: { Accept: "application/json" } },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "list trades failed");
+    const data = body as { trades?: ApiMarketTrade[]; source?: string };
+    return { ok: true, trades: data.trades ?? [], source: data.source };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      code: "unreachable",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 /** L2 level from GET /book (integer minors). */
 export type ApiBookLevel = {
   price: number;
