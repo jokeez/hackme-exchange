@@ -74,6 +74,17 @@ localStorage.setItem('hackme.exchange.origin', 'http://127.0.0.1:5199')
 
 Allowed overrides: `https://exchange.hackme.tech`, `http://127.0.0.1:5199`, `http://localhost:5199`.
 
+## Session cookies (hub iframe)
+
+Desk Connect sets `exchange_session` on `exchange.hackme.tech` (same-origin `/desk-api`).
+When the SPA is framed by hub (`http://127.0.0.1:8080` or `hackme.tech`), that cookie is
+**third-party** relative to the top-level site. Public edge issues
+`SameSite=None; Secure; Partitioned` (CHIPS) so the embed partition keeps the session.
+
+If Connect succeeds but balances show **session required** / zeros: use **Pop out**
+(standalone desk — first-party cookies) or hard-reload the hub tab after an API redeploy
+that includes Partitioned cookies.
+
 ## Verdict
 
 **GO** for hub embed + public matching/deposit/withdraw (soft-launch). **HOLD** for real USDT/custody bridge until partner rail.

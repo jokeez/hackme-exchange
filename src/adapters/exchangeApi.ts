@@ -331,6 +331,23 @@ function asError(status: number, body: unknown, fallback: string): ExchangeApiEr
   };
 }
 
+/** True when the desk JWT cookie did not ride along (401 / "session required"). */
+export function isSessionRequiredError(err: Pick<ExchangeApiError, "code" | "message" | "status">): boolean {
+  const code = (err.code || "").toLowerCase();
+  const msg = (err.message || "").toLowerCase();
+  if (err.status === 401) return true;
+  if (code === "unauthorized" || code === "session_required") return true;
+  return msg.includes("session required");
+}
+
+/**
+ * Hub `#exchange` iframe is third-party to the desk host — without CHIPS cookies
+ * Connect looks OK (CSRF in JSON) but /balances returns session required.
+ */
+export function hubEmbedSessionBlockedHint(): string {
+  return "Hub iframe blocked desk session cookie — click Pop out (top bar) to open the desk and see balances";
+}
+
 /** Human-readable order/API reject for ticket / toast (code + message). */
 export function formatExchangeReject(err: ExchangeApiError): string {
   const code = (err.code || "").trim();
@@ -361,6 +378,10 @@ export function formatExchangeReject(err: ExchangeApiError): string {
     const soft = code.replace(/_/g, " ");
     const msgLc = msg.toLowerCase();
     const softLc = soft.toLowerCase();
+    // Missing JWT cookie — API returns terse "session required"; prefer reconnect copy.
+    if (code === "unauthorized" && msgLc.includes("session required") && friendly[code]) {
+      return friendly[code]!;
+    }
     // API already sent a human sentence that starts with the soft code — prefer it.
     if (msgLc === softLc || msgLc.startsWith(softLc) || msgLc.startsWith(code.toLowerCase())) {
       return friendly[code] && msgLc === softLc ? friendly[code]! : msg;

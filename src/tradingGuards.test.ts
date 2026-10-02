@@ -145,6 +145,27 @@ describe("tradingGuards", () => {
         message: "unknown pair",
       }),
     ).toBe("Unsupported convert / trade pair");
+    expect(
+      formatExchangeReject({
+        ok: false,
+        status: 401,
+        code: "unauthorized",
+        message: "session required",
+      }),
+    ).toMatch(/reconnect desk/i);
+  });
+
+  it("isSessionRequiredError detects hub cookie drop", async () => {
+    const { isSessionRequiredError, hubEmbedSessionBlockedHint } = await import("./adapters/exchangeApi");
+    expect(
+      isSessionRequiredError({
+        ok: false,
+        status: 401,
+        code: "unauthorized",
+        message: "session required",
+      }),
+    ).toBe(true);
+    expect(hubEmbedSessionBlockedHint()).toMatch(/Pop out/i);
   });
 
   it("parses convert_fee / hmc_fee_pay health flags", () => {

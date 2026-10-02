@@ -93,6 +93,8 @@ import {
   fetchCustodyFees,
   fetchDepositAddress,
   formatExchangeReject,
+  hubEmbedSessionBlockedHint,
+  isSessionRequiredError,
   listExchangeFills,
   listWithdrawals,
   minorToDisplay,
@@ -3362,7 +3364,10 @@ async function syncLabLedgerUi(): Promise<void> {
   const res = await syncLabBalancesAndBook(state, market);
   if (!res.ok) {
     if (msgEl) msgEl.textContent = res.message;
-    toast(res.message, "warn");
+    toast(
+      isHubEmbed() && isSessionRequiredError(res) ? hubEmbedSessionBlockedHint() : res.message,
+      "warn",
+    );
     return;
   }
   saveState(state);
@@ -3507,18 +3512,20 @@ async function deskWalletConnectUi(): Promise<void> {
   }
   if (msg) msg.textContent = `Connected ${res.wallet.address} · ${useServerMatching() ? "matching live" : "matching HOLD"}`;
   toast(`Desk wallet connected · ${res.wallet.address.slice(0, 14)}…`, "ok");
-  // HOLD: sync session/note only — do NOT overwrite paper balances with empty desk ledger.
-  if (useServerMatching()) {
+  // Sync desk ledger (or HOLD probe). Cookie must ride for /balances.
+  {
     const sync = await syncLabBalancesAndBook(state, market);
     if (sync.ok) {
       saveState(state);
       if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
-    } else if (msg) {
-      msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
+    } else {
+      if (msg) msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
+      if (isHubEmbed() && isSessionRequiredError(sync)) {
+        toast(hubEmbedSessionBlockedHint(), "warn");
+      } else {
+        toast(formatExchangeReject(sync), "warn");
+      }
     }
-  } else {
-    const sync = await syncLabBalancesAndBook(state, market);
-    if (sync.ok && msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
   }
   if (market && repairStaleEquityBaseline(state, market)) saveState(state);
   if (state.mainView === "account") render();
@@ -3632,6 +3639,8 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
         `Desk ledger · ${formatNum(state.wallet.hmc, 4)} HMC · ${formatNum(state.wallet.usdt, 2)} USDT · ${formatNum(state.wallet.sup, 4)} SUP`,
         "ok",
       );
+    } else if (isHubEmbed() && isSessionRequiredError(sync)) {
+      toast(hubEmbedSessionBlockedHint(), "warn");
     } else {
       toast(`Connected but ledger sync failed: ${sync.message} — tap Reconnect desk`, "warn");
     }
