@@ -119,6 +119,10 @@ describe("Account desk session (HOLD)", () => {
     });
     expect(html).toContain("btn-desk-dep-hmc");
     expect(html).toContain("btn-desk-dep-sup");
+    expect(html).toContain("btn-desk-dep-usdt");
+    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
+    expect(html).toMatch(/USDT:<\/strong> BEP-20/);
+    expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
     expect(html).toContain("Login addr ≠ deposit");
     expect(html).toContain("Desk custody live");

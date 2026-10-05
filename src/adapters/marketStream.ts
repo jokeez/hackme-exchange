@@ -348,7 +348,7 @@ export class MarketStream {
   }
 
   private async syncPublicTrades(pairId: PairId): Promise<void> {
-    const res = await fetchPublicTrades(pairIdToApi(pairId), 100, 4_000);
+    const res = await fetchPublicTrades(pairIdToApi(pairId), 500, 12_000, undefined, { window: "24h" });
     if (!res.ok) return;
     const prints: TapePrint[] = [];
     for (const t of res.trades) {

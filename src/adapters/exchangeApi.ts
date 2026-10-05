@@ -953,6 +953,11 @@ export type DepositAddressResponse = {
   kind: string;
   bridge_model?: string;
   warning?: string;
+  chain_id?: number;
+  network?: string;
+  contract?: string;
+  standard?: string;
+  token?: string;
 };
 
 /** GET /deposit/address?asset= */
@@ -1048,6 +1053,7 @@ export type CustodyFeeQuote = {
   fee: number;
   receive: number;
   debit_total: number;
+  min_withdraw?: number;
   note?: string;
   paused?: boolean;
 };
@@ -1500,10 +1506,13 @@ export async function fetchPublicTrades(
   limit = 40,
   timeoutMs = 5_000,
   baseOverride?: string,
+  opts?: { window?: "24h" | "7d" },
 ): Promise<{ ok: true; trades: ApiMarketTrade[]; source?: string } | ExchangeApiError> {
   const q = new URLSearchParams();
   q.set("pair", pair);
-  q.set("limit", String(Math.max(1, Math.min(100, limit))));
+  const cap = pair ? 2500 : 100;
+  q.set("limit", String(Math.max(1, Math.min(cap, limit))));
+  if (opts?.window) q.set("window", opts.window);
   const url = apiUrl(`/trades?${q}`, baseOverride);
   if (!url) return disabled();
   try {

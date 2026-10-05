@@ -968,8 +968,8 @@ export function applyMidToPairCandles(
   opts?: { syntheticVolume?: boolean },
 ): Partial<Record<Timeframe, Candle[]>> {
   let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
-  // Inactive pairs / stale cache can carry holes — tip-only upsert never backfills them.
-  if (prevBase.length >= 2 && !candlesAreContiguous(prevBase, CANDLE_BASE_TF)) {
+  // Always bridge to wall-clock tip — stale contiguous caches otherwise freeze at last closed bar.
+  if (prevBase.length >= 1) {
     prevBase = ensureContiguousCandles(prevBase, CANDLE_BASE_TF, {
       pairId,
       fillToNow: true,
@@ -1423,8 +1423,21 @@ export function ensureContiguousCandles(
     if (t < g) continue;
     const hit = byBucket.get(t);
     if (hit) {
-      out.push(hit);
-      px = hit.close;
+      // Bridge open to prior close so paper-pad → print junctions don't leave 5–15% islands.
+      let bar = hit;
+      if (out.length && px > 0) {
+        const jump = Math.abs(hit.open - px) / px;
+        if (jump > 0.002) {
+          bar = {
+            ...hit,
+            open: px,
+            high: Math.max(hit.high, px, hit.close),
+            low: Math.min(hit.low, px, hit.close),
+          };
+        }
+      }
+      out.push(bar);
+      px = bar.close;
     } else {
       // Idle UTC hole: constrained walk (pair known) or fattened hold — never 1bps doji rulers.
       const open = px > 0 ? px : tipPxFallback(byBucket, times, px);
@@ -1553,8 +1566,136 @@ export type CandlePrint = {
   amountBase?: number;
 };
 
-/** v13: discard v12 after backward-tip paint (ceiling+needles Soft-MM on 1D/all TF). */
-const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v13:";
+/** v17: 24h durable tape + ticker dayRange envelope for pumps. */
+const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v17:";
+
+/** Durable 24h ticker envelope — widens print OHLC when tape window is shorter than 24h. */
+export type LiveDayRange = { high?: number; low?: number; open?: number };
+
+function medianClose(candles: Candle[]): number {
+  const xs = candles.map((c) => c.close).filter((n) => n > 0 && Number.isFinite(n));
+  if (!xs.length) return 0;
+  xs.sort((a, b) => a - b);
+  const m = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[m]! : (xs[m - 1]! + xs[m]!) / 2;
+}
+
+function medianPrintPrice(prints: CandlePrint[]): number {
+  const xs = prints.map((p) => p.price).filter((n) => n > 0 && Number.isFinite(n));
+  if (!xs.length) return 0;
+  xs.sort((a, b) => a - b);
+  const m = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[m]! : (xs[m - 1]! + xs[m]!) / 2;
+}
+
+/** Session cache must track the same price scale as live last + public prints. */
+export function liveCandleCacheFitsTip(
+  cached: Candle[] | null | undefined,
+  tip: number,
+  prints: CandlePrint[],
+): boolean {
+  if (!cached?.length || !(tip > 0)) return true;
+  const med = medianClose(cached);
+  if (!(med > 0)) return false;
+  const drift = Math.abs(tip - med) / tip;
+  if (drift <= 0.055) return true;
+  if (prints.length >= 2) {
+    const pMed = medianPrintPrice(prints);
+    if (pMed > 0) {
+      const tapeDrift = Math.abs(tip - pMed) / tip;
+      const cacheVsTape = Math.abs(med - pMed) / pMed;
+      if (tapeDrift <= 0.04 && cacheVsTape > 0.07) return false;
+    }
+  }
+  return drift <= 0.08;
+}
+
+export function pruneLiveCacheForHydration(
+  cached: Candle[] | null | undefined,
+  tip: number,
+  prints: CandlePrint[],
+): Candle[] | null {
+  if (!cached?.length) return cached ?? null;
+  if (liveCandleCacheFitsTip(cached, tip, prints)) return cached;
+  if (!prints.length) return null;
+  const sec = TF_SEC[CANDLE_BASE_TF];
+  const firstTs = Math.min(...prints.map((p) => p.ts));
+  const firstBucket = Math.floor(firstTs / 1000 / sec) * sec;
+  const trimmed = cached.filter(
+    (c) => c.time >= firstBucket && Math.abs(c.close - tip) / tip <= 0.14,
+  );
+  if (trimmed.length >= 6 && liveCandleCacheFitsTip(trimmed, tip, prints)) return trimmed;
+  return null;
+}
+
+/**
+ * Paper-walk pad / stale cache must not invent skyscraper highs away from tape.
+ * Real print buckets keep full OHLC+volume; optional dayHi/dayLo widen the envelope
+ * so a short pump inside the 24h range is not crushed toward tip.
+ */
+export function constrainLiveHistoryToTape(
+  candles: Candle[],
+  prints: CandlePrint[],
+  tip: number,
+  bandFrac = 0.22,
+  dayRange?: { high?: number; low?: number },
+): Candle[] {
+  if (!candles.length || !(tip > 0)) return candles;
+  const band = Math.min(0.45, Math.max(0.1, bandFrac));
+  let tapeHi = tip;
+  let tapeLo = tip;
+  const printBuckets = new Set<number>();
+  const sec = TF_SEC[CANDLE_BASE_TF];
+  for (const p of prints) {
+    if (!(p.price > 0)) continue;
+    tapeHi = Math.max(tapeHi, p.price);
+    tapeLo = Math.min(tapeLo, p.price);
+    printBuckets.add(Math.floor(p.ts / 1000 / sec) * sec);
+  }
+  if (dayRange?.high && dayRange.high > 0) tapeHi = Math.max(tapeHi, dayRange.high);
+  if (dayRange?.low && dayRange.low > 0) tapeLo = Math.min(tapeLo, dayRange.low);
+  // Synthetic pad stays near tip; print energy may use the full day envelope.
+  const synthHi = Math.max(tip * (1 + band), tip * 1.12);
+  const synthLo = Math.min(tip * (1 - band), tip * 0.88);
+  const printHiCap = Math.max(tapeHi * 1.02, tip * 1.6);
+  const printLoCap = Math.min(tapeLo * 0.98, tip * 0.5);
+  return candles.map((c) => {
+    const fromPrint = printBuckets.has(c.time) && (c.volume || 0) > 0;
+    if (fromPrint) {
+      // Keep print OHLC — only clip absurd orphan needles outside day/tape envelope.
+      const high = Math.min(c.high, printHiCap);
+      const low = Math.max(c.low, Math.max(printLoCap, tip * 1e-6));
+      const open = Math.min(high, Math.max(low, c.open));
+      const close = Math.min(high, Math.max(low, c.close));
+      return {
+        ...c,
+        open,
+        high: Math.max(high, open, close),
+        low: Math.min(low, open, close),
+        close,
+        volume: c.volume > 0 ? c.volume : 0,
+      };
+    }
+    const open = Math.min(synthHi, Math.max(synthLo, c.open));
+    const close = Math.min(synthHi, Math.max(synthLo, c.close));
+    const high = Math.min(synthHi, Math.max(open, close, c.high));
+    const low = Math.max(synthLo, Math.min(open, close, c.low));
+    return { ...c, open, high, low, close };
+  });
+}
+
+export function clearLiveCandleCache(pairId: PairId): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v15:" + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v16:" + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v14:" + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v13:" + pairId);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Persist 1m series across F5 (sessionStorage — survives reload, not cross-browser). */
 export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
@@ -1620,8 +1761,17 @@ export function hydrateLiveCandlesFromPrints(
   tipMid: number,
   nowMs = Date.now(),
   cached1m?: Candle[] | null,
+  dayRange?: LiveDayRange,
 ): Record<Timeframe, Candle[]> {
   const sec = TF_SEC[CANDLE_BASE_TF];
+  const sortedPrints = [...prints]
+    .filter((p) => p.price > 0 && Number.isFinite(p.price) && p.ts > 0)
+    .sort((a, b) => a.ts - b.ts);
+  const tipEarly =
+    tipMid > 0 && Number.isFinite(tipMid)
+      ? tipMid
+      : sortedPrints[sortedPrints.length - 1]?.price ?? 0;
+  cached1m = pruneLiveCacheForHydration(cached1m, tipEarly, sortedPrints);
   const byBucket = new Map<number, Candle>();
 
   const ingest = (rows: Candle[]) => {
@@ -1643,10 +1793,7 @@ export function hydrateLiveCandlesFromPrints(
 
   if (cached1m?.length) ingest(cached1m);
 
-  const sorted = [...prints]
-    .filter((p) => p.price > 0 && Number.isFinite(p.price) && p.ts > 0)
-    .sort((a, b) => a.ts - b.ts);
-  for (const p of sorted) {
+  for (const p of sortedPrints) {
     const t = Math.floor(p.ts / 1000 / sec) * sec;
     if (t < CHART_GENESIS_UNIX) continue;
     const vol = p.amountBase && p.amountBase > 0 ? p.amountBase : 0;
@@ -1671,10 +1818,18 @@ export function hydrateLiveCandlesFromPrints(
   let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
   const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
 
-  // Pad short real history with paper walk ending at first real open / tip.
+  // Pad short real history — anchor to tape/tip, never a stale 0.05 session cache.
   const want = Math.min(barCountForTf(CANDLE_BASE_TF, nowMs), 400);
-  if (base.length < 24 && tip > 0) {
-    const seedMid = chartAnchorMid(base[0]?.open || tip) || tip;
+  const printAnchor =
+    sortedPrints.length > 0
+      ? medianPrintPrice(sortedPrints) || sortedPrints[0]!.price
+      : 0;
+  const printBucketsN = byBucket.size;
+  if (base.length < 24 && printBucketsN < 12 && tip > 0) {
+    const open24 = dayRange?.open && dayRange.open > 0 ? dayRange.open : 0;
+    const anchor =
+      printAnchor > 0 ? printAnchor : open24 > 0 ? open24 : base[0]?.open || tip;
+    const seedMid = chartAnchorMid(anchor) || tip;
     const seeded = seedCandles(pairId, CANDLE_BASE_TF, seedMid, want, nowMs);
     const firstReal = base[0]?.time;
     if (firstReal) {
@@ -1711,21 +1866,46 @@ export function hydrateLiveCandlesFromPrints(
     }
   }
 
+  const dayHiLo =
+    dayRange?.high && dayRange.high > 0 && dayRange?.low && dayRange.low > 0
+      ? { high: dayRange.high, low: dayRange.low }
+      : undefined;
+  // Kill synthetic 0.09 skyscrapers before contiguous fill expands them.
+  if (tip > 0) {
+    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo);
+  }
   base = sanitizeDerivedCandlesForChart(base.slice(-MAX_CANDLES), pairId);
-  // Print islands / stale cache leave UTC holes — flat-fill before any tip heal.
-  if (base.length >= 2 && !candlesAreContiguous(base, CANDLE_BASE_TF)) {
+  // Always run contiguous+open-bridge — time-contiguous print islands still gap open vs prior close.
+  if (base.length >= 2) {
     base = ensureContiguousCandles(base, CANDLE_BASE_TF, {
       pairId,
       fillToNow: true,
       nowMs,
     });
   }
+  // Contiguous fill can reintroduce paper extremes — clamp again.
+  if (tip > 0) {
+    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo);
+  }
   // Tip-run only — never rewrite mid-history print/seed into fake chop.
   if (tip > 0) {
     base = healFlatPaperBars(pairId, CANDLE_BASE_TF, base, tip, nowMs, { scope: "tipRun" });
   }
-  const all = deriveAllTimeframes(base, pairId);
+  const all = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, base);
+  if (tip > 0) {
+    for (const tf of TIMEFRAMES) {
+      const series = all[tf];
+      if (!series?.length) continue;
+      all[tf] = constrainLiveHistoryToTape(
+        series,
+        sortedPrints,
+        tip,
+        tf === "1H" || tf === "2H" || tf === "4H" ? 0.28 : 0.22,
+        dayHiLo,
+      );
+    }
+  }
   all[CANDLE_BASE_TF] = base;
   return all as Record<Timeframe, Candle[]>;
 }

@@ -13,7 +13,9 @@ import {
   clampFillWickPx,
   deriveAllTimeframes,
   ensureTfSeriesCadence,
+  clearLiveCandleCache,
   hydrateLiveCandlesFromPrints,
+  liveCandleCacheFitsTip,
   loadLiveCandleCache,
   nudgeCloseTowardFill,
   prependOlderCandles,
@@ -21,6 +23,7 @@ import {
   seedAllTimeframes,
   stats24h,
   type CandlePrint,
+  type LiveDayRange,
 } from "./candles";
 import {
   applyOverlays,
@@ -357,6 +360,7 @@ let marketLane = "all";
 let chartMounted = false;
 /** After reseed / multi-bar gap — next patchLive must full-replace candle series. */
 let chartNeedsFullReplace = false;
+let lastPaintedTipTime = 0;
 let refreshGen = 0;
 let refreshInFlight: Promise<void> | null = null;
 let hotkeysWired = false;
@@ -688,6 +692,16 @@ function candlePrintsFromApiTrades(
   return out;
 }
 
+function liveDayRangeForPair(pairId: PairId): LiveDayRange | undefined {
+  const api = deskApiTickers.get(pairId);
+  if (!api) return undefined;
+  const out: LiveDayRange = {};
+  if (api.high24h > 0) out.high = api.high24h;
+  if (api.low24h > 0) out.low = api.low24h;
+  if (api.open24h > 0) out.open = api.open24h;
+  return out.high || out.low || out.open ? out : undefined;
+}
+
 function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
   const out: CandlePrint[] = [];
   for (const t of publicTape) {
@@ -703,13 +717,14 @@ function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
 
 /** Restore live OHLC from session cache + public tape / GET /trades (survives F5). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
-  const cached =
+  let cached =
     loadLiveCandleCache(pairId) ??
     (state.candles[pairId]?.[CANDLE_BASE_TF]?.length
       ? state.candles[pairId]![CANDLE_BASE_TF]!
       : null);
   let apiPrints: CandlePrint[] = [];
-  const res = await fetchPublicTrades(pairIdToApi(pairId), 100, 5_000);
+  await hydrateDeskApiTickers();
+  const res = await fetchPublicTrades(pairIdToApi(pairId), 2000, 15_000, undefined, { window: "24h" });
   if (res.ok) {
     apiPrints = candlePrintsFromApiTrades(res.trades, pairId);
     // Same /trades payload feeds 24h Vol — don't wait for WS/poll push.
@@ -739,7 +754,18 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
   if (!prints.length && !(cached?.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
-  state.candles[pairId] = hydrateLiveCandlesFromPrints(pairId, prints, tip, Date.now(), cached);
+  if (cached?.length && !liveCandleCacheFitsTip(cached, tip, prints)) {
+    clearLiveCandleCache(pairId);
+    cached = null;
+  }
+  state.candles[pairId] = hydrateLiveCandlesFromPrints(
+    pairId,
+    prints,
+    tip,
+    Date.now(),
+    cached,
+    liveDayRangeForPair(pairId),
+  );
   prevMids[pairId] = tip;
   persistLiveCandleCache(pairId, true);
   liveHydratedPairs.add(pairId);
@@ -752,7 +778,18 @@ function restoreLiveCandlesFromCache(pairId: PairId, tipMid: number): boolean {
   if (!cached?.length) return false;
   const tip = tipMid > 0 ? tipMid : cached[cached.length - 1]?.close ?? 0;
   if (!(tip > 0)) return false;
-  state.candles[pairId] = hydrateLiveCandlesFromPrints(pairId, candlePrintsFromLocalTape(pairId), tip, Date.now(), cached);
+  if (tipMid > 0 && !liveCandleCacheFitsTip(cached, tipMid, candlePrintsFromLocalTape(pairId))) {
+    clearLiveCandleCache(pairId);
+    return false;
+  }
+  state.candles[pairId] = hydrateLiveCandlesFromPrints(
+    pairId,
+    candlePrintsFromLocalTape(pairId),
+    tip,
+    Date.now(),
+    cached,
+    liveDayRangeForPair(pairId),
+  );
   prevMids[pairId] = tip;
   if (cached.length >= 24) liveHydratedPairs.add(pairId);
   return true;
@@ -2047,17 +2084,34 @@ function activeBookLevels(): {
           asks: raw.asks.filter((l) => l.price > bestBid),
         };
       }
-      // Soft-launch: drop orphan far rungs (old 0.05 peg leftovers) so depth/spread
-      // stay around live BBO — not a fake 15% wall behind Soft-MM.
+      // Soft-launch: drop orphan far rungs. Anchor to Last when it diverges from BBO
+      // (pump/dump): otherwise sticky old 0.069 BBO mid hides the live 0.094 ladder
+      // and the mid band disagrees with the chart tip.
       const bb = raw.bids[0]?.price ?? 0;
       const ba = raw.asks[0]?.price ?? 0;
       if (bb > 0 && ba > 0 && ba > bb) {
-        const mid = (bb + ba) / 2;
-        const maxDev = mid * 0.02; // 200 bps
-        raw = {
-          bids: raw.bids.filter((l) => mid - l.price <= maxDev),
-          asks: raw.asks.filter((l) => l.price - mid <= maxDev),
+        const bboMid = (bb + ba) / 2;
+        const lastPx = liveLastPrice(state.activePair) || t.mid || 0;
+        const desync =
+          lastPx > 0 && bboMid > 0 ? Math.abs(lastPx - bboMid) / lastPx : 0;
+        const anchor = lastPx > 0 && desync > 0.025 ? lastPx : bboMid;
+        const maxDev = anchor * (desync > 0.08 ? 0.035 : 0.025); // 250–350 bps
+        const filtered = {
+          bids: raw.bids.filter((l) => anchor - l.price <= maxDev && l.price <= anchor * 1.002),
+          asks: raw.asks.filter((l) => l.price - anchor <= maxDev && l.price >= anchor * 0.998),
         };
+        // Keep filtered book when we still have two-sided depth near Last; else keep BBO
+        // cluster so an empty filter doesn't blank the panel mid-rebuild.
+        if (
+          (filtered.bids.length || filtered.asks.length) &&
+          (desync <= 0.025 || (filtered.bids.length && filtered.asks.length))
+        ) {
+          raw = filtered;
+        } else if (desync > 0.025 && lastPx > 0) {
+          // Stale BBO cluster far from Last — hide it; mid falls back to last print.
+          raw = { bids: [], asks: [] };
+          kickLiveBookFetch(state.activePair);
+        }
       }
     } else if (lab) {
       // Health+poll succeeded but Soft-MM depth is empty — not "still fetching".
@@ -4147,7 +4201,7 @@ async function deskCopyAddressUi(): Promise<void> {
   if (deskEdgeSnap.depositEnabled) {
     toast(
       ok
-        ? `Copied Connect/login ${addr.slice(0, 14)}… — NOT for deposits. Use Account → Deposit → Show HMC deposit address`
+        ? `Copied Connect/login ${addr.slice(0, 14)}… — NOT for deposits. Use Account → Deposit → Show HMC / SUP / USDT deposit address`
         : "Clipboard blocked",
       ok ? "warn" : "warn",
     );
@@ -4411,10 +4465,30 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   }
   const reveal = document.getElementById("lab-deposit-reveal");
   const addrInp = document.getElementById("lab-deposit-addr") as HTMLInputElement | null;
+  const metaEl = document.getElementById("lab-deposit-meta");
   if (reveal) reveal.hidden = false;
   if (addrInp) addrInp.value = dep;
+  if (metaEl) {
+    if (res.kind === "evm_bep20" || res.asset === "USDT") {
+      const bits = [
+        res.standard || "BEP-20",
+        res.network || (res.chain_id === 97 ? "BSC_TESTNET" : res.chain_id === 56 ? "BSC" : "BSC"),
+        res.chain_id ? `chain ${res.chain_id}` : "",
+        res.contract ? `contract ${res.contract}` : "",
+      ].filter(Boolean);
+      metaEl.hidden = false;
+      metaEl.textContent = bits.join(" · ");
+    } else {
+      metaEl.hidden = true;
+      metaEl.textContent = "";
+    }
+  }
   if (msg) {
-    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · credits usually within ~30s after chain confirm${
+    const creditHint =
+      res.kind === "evm_bep20"
+        ? "watcher credits to HOLD after confirmations — ops release before trade; send only USDT BEP-20 on this network"
+        : "credits usually within ~30s after chain confirm";
+    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${
       res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
     }`;
   }
@@ -4709,9 +4783,14 @@ async function labWithdrawQuoteUi(): Promise<void> {
   applyLabCustodyPauseUi();
   const q = res.quote;
   if (!q) return;
+  const minW = q.min_withdraw && q.min_withdraw > 0 ? q.min_withdraw : 0;
+  const minLine =
+    minW > 0 ? ` · min ${minorToDisplay(minW)} ${asset}` : "";
   quoteEl2.textContent = q.paused
     ? `Paused — ${q.note || "unavailable"}`
-    : `Fee ${minorToDisplay(q.fee)} ${q.asset} on top · dest gets ${minorToDisplay(q.receive)} · wallet debit ${minorToDisplay(q.debit_total)}`;
+    : q.note === "below minimum withdraw for asset"
+      ? `Below min withdraw${minLine} · fee would be ${minorToDisplay(q.fee)} ${q.asset} on top`
+      : `Fee ${minorToDisplay(q.fee)} ${q.asset} on top · dest gets ${minorToDisplay(q.receive)} · wallet debit ${minorToDisplay(q.debit_total)}${minLine}`;
 }
 
 async function labFillsRefreshUi(): Promise<void> {
@@ -5167,6 +5246,7 @@ function wireLabApiButtons(): void {
   click("btn-lab-dep-usdt", () => void labShowDepositAddr("USDT"));
   click("btn-desk-dep-hmc", () => void showDepositAddrUi("HMC"));
   click("btn-desk-dep-sup", () => void showDepositAddrUi("SUP"));
+  click("btn-desk-dep-usdt", () => void showDepositAddrUi("USDT"));
   click("btn-desk-dep-copy", () => {
     const addr = (document.getElementById("lab-deposit-addr") as HTMLInputElement | null)?.value?.trim() || "";
     if (!addr) {
@@ -6222,6 +6302,7 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
               tip,
               Date.now(),
               cached,
+              liveDayRangeForPair(ev.pairId),
             );
             prevMids[ev.pairId] = tip;
             persistLiveCandleCache(ev.pairId, true);
@@ -8604,6 +8685,7 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
   if (!state.candles[pairId]) state.candles[pairId] = {};
   const prev = prevMids[pairId];
   if (labLive) {
+    const tipClose = state.candles[pairId]?.[CANDLE_BASE_TF]?.at(-1)?.close ?? 0;
     const mid =
       displayMid > 0
         ? displayMid
@@ -8611,7 +8693,9 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
           ? lastPublicMid(pairId)
           : prev && prev > 0
             ? prev
-            : 0;
+            : tipClose > 0
+              ? tipClose
+              : 0;
     if (!(mid > 0)) return;
     state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev, {
       syntheticVolume: false,
@@ -8718,13 +8802,19 @@ function microTickPrices(): void {
   const last = candles[candles.length - 1];
   const opts = chartOpts();
   const scrubbing = scrubbingEarly || isChartPointerBusy();
+  const tipRolled = !!(last && lastPaintedTipTime > 0 && last.time > lastPaintedTipTime);
+  if (last) lastPaintedTipTime = last.time;
   if (chartNeedsFullReplace || !last) {
     setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
     chartNeedsFullReplace = false;
   } else if (!updateLastCandle(last, opts)) {
     // New UTC bucket / heal rewrite — always paint (even while scrubbing) so the
     // time axis never freezes at the last closed bar while the hair is over the pane.
-    setCandleData(candles, opts, { preserveLogicalRange: true });
+    // Follow live tip on rollover unless the user is actively scrubbing.
+    setCandleData(candles, opts, {
+      preserveLogicalRange: scrubbing && !tipRolled,
+      scrollToLive: !scrubbing && tipRolled,
+    });
   }
   if (!scrubbing && state.multiChartLayout !== "1" && liveTickN % 2 === 0) {
     const n = state.multiChartLayout === "4" ? 4 : 2;

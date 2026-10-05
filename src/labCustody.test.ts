@@ -89,13 +89,16 @@ describe("Account custody UI (buttons + copy)", () => {
     expect(html).toContain("btn-lab-fixture-connect");
   });
 
-  it("withdraw hint: HMC/SUP use HMC- destinations; USDT/BTC stay paper stubs", () => {
+  it("withdraw hint: HMC/SUP use HMC- destinations; USDT is BEP-20 with fee policy", () => {
     if (!isLabApiEnabled()) return;
     const html = renderAccountPage(baseState(), sampleMarket());
     expect(html).toContain('data-ph-sup="HMC-ffffffffffffffff"');
     expect(html).not.toContain('data-ph-sup="paper-sup-ops-wallet-01"');
     expect(html).toMatch(/HMC\/SUP →/);
-    expect(html).toMatch(/USDT\/BTC paper stubs/);
+    expect(html).toMatch(/BEP-20 \(BSC\)/);
+    expect(html).toMatch(/min <strong>15 USDT<\/strong>/);
+    expect(html).toMatch(/fee <strong>1\.5 USDT<\/strong>/);
+    expect(html).toContain('data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"');
     expect(html).not.toMatch(/HMC\/SUP need/);
   });
 

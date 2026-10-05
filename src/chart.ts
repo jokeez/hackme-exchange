@@ -198,26 +198,23 @@ export function crosshairPaintOptions(_mode: 0 | 1 = 0) {
 }
 
 /** True while pointer is over the chart — live tip/series updates must not fight the hair. */
-let chartPointerBusyDepth = 0;
+let chartPointerHover = false;
+let chartPointerGestureDepth = 0;
 let freeXh: FreeCrosshairHandle | null = null;
 let freeXhCleanup: (() => void) | null = null;
 let pendingLiveTip: { c: Candle; opts: ChartMountOpts } | null = null;
 let pendingHud: { price: number; up: boolean; countdown: string | null } | null = null;
 
 export function isChartPointerBusy(): boolean {
-  return chartPointerBusyDepth > 0;
+  return chartPointerHover || chartPointerGestureDepth > 0;
 }
 
 /** Secondary panes share the same scrub lock so tip ticks pause on any chart hover. */
 export function noteChartPointerBusy(on: boolean): void {
-  setChartPointerBusy(on);
+  setChartGestureBusy(on);
 }
 
-function setChartPointerBusy(on: boolean): void {
-  const prev = chartPointerBusyDepth > 0;
-  if (on) chartPointerBusyDepth += 1;
-  else chartPointerBusyDepth = Math.max(0, chartPointerBusyDepth - 1);
-  const next = chartPointerBusyDepth > 0;
+function notifyBusyTransition(prev: boolean, next: boolean): void {
   if (prev === next) return;
   if (!chart) {
     if (!next) flushChartLivePaint();
@@ -230,6 +227,29 @@ function setChartPointerBusy(on: boolean): void {
     /* ignore */
   }
   if (!next) flushChartLivePaint();
+}
+
+/** Hover latch — enter/leave must not refcount (child retargets / pinch stacked forever). */
+function setChartHoverBusy(on: boolean): void {
+  const prev = isChartPointerBusy();
+  chartPointerHover = on;
+  notifyBusyTransition(prev, isChartPointerBusy());
+}
+
+/** Pan/pinch gesture refcount — always paired down on gesture end. */
+function setChartGestureBusy(on: boolean): void {
+  const prev = isChartPointerBusy();
+  if (on) chartPointerGestureDepth += 1;
+  else chartPointerGestureDepth = Math.max(0, chartPointerGestureDepth - 1);
+  notifyBusyTransition(prev, isChartPointerBusy());
+}
+
+/** Hard clear (pointerleave / unmount) — kills stuck depth from missed gesture ups. */
+function clearChartPointerBusy(): void {
+  const prev = isChartPointerBusy();
+  chartPointerHover = false;
+  chartPointerGestureDepth = 0;
+  notifyBusyTransition(prev, false);
 }
 
 /** Apply tip/HUD paints deferred while the pointer was over the chart. */
@@ -332,11 +352,17 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     return (pts[0]!.x + pts[1]!.x) / 2;
   };
 
+  let pinchBusyHeld = false;
   const endPan = () => {
     panning = false;
     panStartLogical = null;
     panStartPrice = null;
     freeXh?.setPanning(false);
+  };
+  const releasePinchBusy = () => {
+    if (!pinchBusyHeld) return;
+    pinchBusyHeld = false;
+    setChartGestureBusy(false);
   };
 
   const beginPinch = () => {
@@ -362,7 +388,10 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     } catch {
       pinchStartPrice = null;
     }
-    setChartPointerBusy(true);
+    if (!pinchBusyHeld) {
+      pinchBusyHeld = true;
+      setChartGestureBusy(true);
+    }
   };
 
   const applyPinchNow = () => {
@@ -484,7 +513,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   const onEnter = () => {
     freeXh?.refreshRect();
     syncFreeCrosshairCapture();
-    setChartPointerBusy(true);
+    setChartHoverBusy(true);
   };
   const onLeave = () => {
     freeXh?.hide();
@@ -494,7 +523,8 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     pointers.clear();
     panStartLogical = null;
     panStartPrice = null;
-    setChartPointerBusy(false);
+    releasePinchBusy();
+    clearChartPointerBusy();
     lastOpts?.onCrosshair?.(null);
   };
   const onDown = (e: PointerEvent) => {
@@ -545,6 +575,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     if (pointers.size === 1 && pinching) {
       // Drop back to 1-finger pan from remaining touch.
       pinching = false;
+      releasePinchBusy();
       pinchStartDist = 0;
       const [id, pt] = [...pointers.entries()][0]!;
       const lr = chart?.timeScale().getVisibleLogicalRange();
@@ -571,6 +602,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     }
     endPan();
     pinching = false;
+    releasePinchBusy();
     pinchStartDist = 0;
     freeXh?.move(e.clientX, e.clientY);
     try {
@@ -4239,7 +4271,8 @@ export function destroyChart(): void {
   freeXhCleanup?.();
   pendingLiveTip = null;
   pendingHud = null;
-  chartPointerBusyDepth = 0;
+  chartPointerHover = false;
+  chartPointerGestureDepth = 0;
   clearDrawPointerListeners();
   // Drop any previous viewport — remounts (TF/pair) must re-anchor to the live candle.
   savedLogicalRange = null;

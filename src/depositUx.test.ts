@@ -35,8 +35,11 @@ describe("deposit UX contracts", () => {
     expect(html).toMatch(/Do not send to Connect|Login addr ≠ deposit/);
     expect(html).toMatch(/Show HMC deposit/);
     expect(html).toMatch(/Show SUP deposit/);
+    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
+    expect(html).toContain("btn-desk-dep-usdt");
     expect(html).toContain("HMC-09dc5f553bfff940");
     expect(html).toMatch(/Login only/);
+    expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     // Copy-addr path must stay labeled as login-only when custody is live
     expect(html).toMatch(/Copy login ≠ deposit|NOT for deposits/);
     expect(html).toMatch(/NOT for deposits/);

@@ -8,7 +8,9 @@ import {
   deriveAllTimeframes,
   ensureContiguousCandles,
   ensureTfSeriesCadence,
+  constrainLiveHistoryToTape,
   hydrateLiveCandlesFromPrints,
+  liveCandleCacheFitsTip,
   loadLiveCandleCache,
   MAX_CANDLES,
   maxBarsSinceGenesis,
@@ -458,7 +460,7 @@ describe("hydrateLiveCandlesFromPrints", () => {
 
     // Poisoned / non-finite OHLC must not hydrate (same key prefix as save/load).
     sessionStorage.setItem(
-      "hackme-ex-live-1m:v13:HMC_USDT",
+      "hackme-ex-live-1m:v17:HMC_USDT",
       JSON.stringify({
         at: Date.now(),
         bars: [{ t: t0, o: "x", h: 1, l: 0, c: 1, v: 0 }, { t: t0 + 60, o: 1, h: 0.5, l: 2, c: 1, v: 0 }],
@@ -466,6 +468,70 @@ describe("hydrateLiveCandlesFromPrints", () => {
     );
     expect(loadLiveCandleCache("HMC_USDT")).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("retains 24h pump high from prints when dayRange envelope is set", () => {
+    const now = Date.now();
+    const sec = 60;
+    const pumpT = Math.floor(now / 1000 / sec) * sec - 1800;
+    const prints = [
+      { ts: (pumpT - 60) * 1000, price: 0.05, amountBase: 2 },
+      { ts: pumpT * 1000 + 100, price: 0.096324, amountBase: 5 },
+      { ts: pumpT * 1000 + 500, price: 0.055, amountBase: 3 },
+      { ts: (pumpT + 120) * 1000, price: 0.086, amountBase: 1 },
+    ];
+    const tip = 0.086;
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, null, {
+      high: 0.096324,
+      low: 0.034964,
+      open: 0.053,
+    });
+    const base = all["1m"]!;
+    const pumpBar = base.find((c) => c.time === pumpT);
+    expect(pumpBar).toBeTruthy();
+    expect(pumpBar!.high).toBeGreaterThanOrEqual(0.096);
+    expect(pumpBar!.volume).toBeGreaterThan(0);
+  });
+
+  it("clamps synthetic pad highs that never traded on the tape", () => {
+    const tip = 0.055;
+    const fake: Candle[] = [
+      { time: 1_700_000_000, open: 0.05, high: 0.092, low: 0.049, close: 0.051, volume: 0 },
+      { time: 1_700_000_060, open: 0.051, high: 0.053, low: 0.05, close: 0.052, volume: 0 },
+      { time: 1_700_000_120, open: 0.052, high: 0.056, low: 0.051, close: tip, volume: 2 },
+    ];
+    const prints = [
+      { ts: 1_700_000_120_000, price: 0.054, amountBase: 1 },
+      { ts: 1_700_000_120_500, price: tip, amountBase: 1 },
+    ];
+    const out = constrainLiveHistoryToTape(fake, prints, tip, 0.22);
+    expect(out[0]!.high).toBeLessThan(0.07);
+    expect(out[0]!.high).toBeLessThanOrEqual(tip * 1.22 + 1e-9);
+    expect(out[2]!.close).toBeCloseTo(tip, 5);
+  });
+
+  it("drops stale session cache when live last moved to a new price band", () => {
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 3600;
+    const stale: Candle[] = [];
+    for (let i = 0; i < 120; i++) {
+      const px = 0.051 + (i % 3) * 0.00001;
+      stale.push({ time: t0 + i * sec, open: px, high: px * 1.001, low: px * 0.999, close: px, volume: 1 });
+    }
+    const prints = [
+      { ts: (t0 + 3500) * 1000, price: 0.068, amountBase: 2 },
+      { ts: (t0 + 3500) * 1000 + 500, price: 0.0681, amountBase: 1 },
+      { ts: (t0 + 3560) * 1000, price: 0.0679, amountBase: 3 },
+    ];
+    const tip = 0.068;
+    expect(liveCandleCacheFitsTip(stale, tip, prints)).toBe(false);
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, stale);
+    const base = all[CANDLE_BASE_TF]!;
+    const med = base.slice(0, -5).map((c) => c.close);
+    const medClose = med.sort((a, b) => a - b)[Math.floor(med.length / 2)]!;
+    expect(medClose).toBeGreaterThan(0.06);
+    expect(base[base.length - 1]!.close).toBeCloseTo(tip, 3);
   });
 
   it("live applyMid does not inflate tip volume with synthetic tickVol", () => {

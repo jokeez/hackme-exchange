@@ -309,18 +309,20 @@ function renderDepositCard(
                 ? `<div class="acct-cash-actions">
             <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-hmc"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show HMC deposit</button>
             <button type="button" class="btn-sm" id="btn-desk-dep-sup"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show SUP deposit</button>
+            <button type="button" class="btn-sm" id="btn-desk-dep-usdt"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show USDT deposit (BEP-20)</button>
           </div>
           <div class="acct-dep-reveal" id="lab-deposit-reveal" hidden>
             <label class="lab-field lab-field-wide" for="lab-deposit-addr">Deposit address <span class="muted">(send here)</span>
               <input id="lab-deposit-addr" class="mono" type="text" readonly spellcheck="false" autocomplete="off" value="" />
             </label>
+            <p id="lab-deposit-meta" class="muted small mono acct-dep-meta" hidden></p>
             <div class="lab-action-row">
               <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy deposit address</button>
             </div>
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
           <p class="muted small acct-cash-hint acct-dep-warn"><strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.</p>
-          <p class="muted small acct-cash-hint">HMC/SUP credits after on-chain transfer are applied by ops node-watch (not instant). USDT/BTC real custody is still HOLD — stub addresses reject mainnet funds.</p>
+          <p class="muted small acct-cash-hint">HMC/SUP: credits via node-watch (not instant). <strong>USDT:</strong> BEP-20 on <strong>BSC</strong> — your own <code>0x…</code> per account; watcher credits to <strong>HOLD</strong> after confirmations (ops release before trade). Don’t send TRC-20 / ERC-20 / other tokens / wrong network.</p>
           ${
             session.address
               ? `<p class="muted small mono acct-cash-hint">Login only: <code>${escapeHtml(session.address)}</code></p>`
@@ -376,9 +378,9 @@ function renderWithdrawCard(
               <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.05" />
             </label>
             <label class="lab-field lab-field-wide">Destination
-              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="paper-usdt-ops-wallet-01" data-ph-btc="lab-ops-btc-01" />
+              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" data-ph-btc="lab-ops-btc-01" />
             </label>
-            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet (not Connect/login addr) · USDT/BTC paper stubs only · no auto hot-send</p>
+            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT → <strong>BEP-20 (BSC)</strong> <code>0x…</code> (TRC-20 later) · min <strong>15 USDT</strong> · fee <strong>1.5 USDT</strong> on top · no auto hot-send until bridge live</p>
             <label class="lab-field">2FA code
               <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or recovery" />
             </label>
