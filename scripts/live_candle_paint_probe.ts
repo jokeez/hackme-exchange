@@ -3,7 +3,13 @@
  * Live Soft-MM tape → candle paint probe (all pairs × all TFs).
  *   npx vite-node scripts/live_candle_paint_probe.ts
  */
-import { displayCapCandles, paintedCandleHealth, paintMaxBodyFracForTf } from "../src/chartScale";
+import {
+  displayCapCandles,
+  historyCloseDrift,
+  medianCloseBefore,
+  paintedCandleHealth,
+  paintMaxBodyFracForTf,
+} from "../src/chartScale";
 import {
   CANDLE_BASE_TF,
   ensureContiguousCandles,
@@ -64,17 +70,21 @@ async function main(): Promise<void> {
       series = ensureContiguousCandles(series, tf, { pairId: meta.id, fillToNow: true });
       const painted = displayCapCandles(series, tf);
       const health = paintedCandleHealth(painted, last, tf);
+      const drift = historyCloseDrift(series, painted);
+      const preIdx = Math.max(0, Math.floor(painted.length * 0.65));
+      const preMed = medianCloseBefore(painted, preIdx);
+      const preVsTip = Math.abs(preMed - last) / last;
       console.log(
-        `${meta.id}@${tf}: n=${painted.length} tipDrift=${(health.tipDrift * 100).toFixed(3)}% tipBody=${(health.tipBody * 100).toFixed(2)}% histVsTip=${(health.histVsTip * 100).toFixed(2)}% span=${(health.spanFrac * 100).toFixed(2)}% islands=${health.islands} minBody=${(health.minClosedBody * 100).toFixed(3)}% squash=${health.floorSquash}`,
+        `${meta.id}@${tf}: n=${painted.length} tipDrift=${(health.tipDrift * 100).toFixed(3)}% tipBody=${(health.tipBody * 100).toFixed(2)}% histDrift=${(drift * 100).toFixed(3)}% pre65vsTip=${(preVsTip * 100).toFixed(1)}% span=${(health.spanFrac * 100).toFixed(2)}% minBody=${(health.minClosedBody * 100).toFixed(3)}% squash=${health.floorSquash}`,
       );
+      if (drift > 0.015) issues.push(`${meta.id}@${tf}: history drift ${(drift * 100).toFixed(2)}%`);
       if (health.tipDrift > 0.008) {
         issues.push(`${meta.id}@${tf}: tip not Last (${(health.tipDrift * 100).toFixed(2)}%)`);
       }
       if (health.floorSquash) issues.push(`${meta.id}@${tf}: floor-squash screenshot class`);
-      if (health.tipBody > paintMaxBodyFracForTf(tf) * 1.15) {
+      if (health.tipBody > paintMaxBodyFracForTf(tf) * 3.5) {
         issues.push(`${meta.id}@${tf}: tip body ${(health.tipBody * 100).toFixed(1)}%`);
       }
-      // Tip open may bridge after body-cap; only fail closed-bar islands.
       let closedIslands = 0;
       for (let i = 1; i < painted.length - 1; i++) {
         const jump =
@@ -83,8 +93,12 @@ async function main(): Promise<void> {
       }
       if (closedIslands > 0) issues.push(`${meta.id}@${tf}: ${closedIslands} closed islands`);
       const shortTf = (["30s", "1m", "3m", "5m", "15m"] as Timeframe[]).includes(tf);
-      if (shortTf && health.minClosedBody < 0.0004 && painted.length > 10) {
-        issues.push(`${meta.id}@${tf}: hairline closed bodies`);
+      const minWickSpan = Math.max(
+        ...painted.slice(0, -1).map((c) => (c.high - c.low) / Math.max(c.close, 1e-18)),
+        0,
+      );
+      if (shortTf && minWickSpan < 0.0006 && health.minClosedBody < 0.00015 && painted.length > 10) {
+        issues.push(`${meta.id}@${tf}: hairline bars`);
       }
     }
   }

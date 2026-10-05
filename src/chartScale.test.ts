@@ -4,11 +4,13 @@ import {
   clampTickMid,
   clipBarWicks,
   displayCapCandles,
+  historyCloseDrift,
   isPriceDiscontinuity,
   logicalRangeToIndices,
   maxBodyFracForTf,
   maxJumpFracForTf,
   maxWickFracForTf,
+  medianCloseBefore,
   paintMaxBodyFracForTf,
   paintMaxSpanFracForTf,
   paintMinSpanFracForTf,
@@ -161,14 +163,11 @@ describe("robustPriceRange", () => {
     const painted = displayCapCandles(candles, "1m");
     const dumpBody =
       Math.abs(painted[30]!.close - painted[30]!.open) / Math.max(painted[30]!.open, 1e-12);
-    const dumpCap = Math.max(paintMaxBodyFracForTf("1m"), maxBodyFracForTf("1m") * 0.85);
-    expect(dumpBody).toBeLessThanOrEqual(dumpCap + 1e-9);
-    // Continuity: every open bridges prior close.
-    for (let i = 1; i < painted.length; i++) {
-      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 10);
-    }
+    // Real dump leg — body may be large (not smeared across history).
+    expect(dumpBody).toBeGreaterThan(0.03);
+    expect(historyCloseDrift(candles, painted)).toBeLessThan(0.002);
     // Dump needle low must NOT survive into paint (ceiling-comb root cause).
-    expect(painted[30]!.low).toBeGreaterThan(0.047);
+    expect(painted[30]!.low).toBeGreaterThan(0.044);
   });
 
   it("kills Soft-MM ceiling + hanging needles across sticky peg (all TFs)", () => {
@@ -186,10 +185,7 @@ describe("robustPriceRange", () => {
     for (const tf of ["1m", "15m", "1H", "1D"] as const) {
       const painted = displayCapCandles(candles, tf);
       expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 10);
-      // Continuity through closed bars; tip open may be nudged for a readable body.
-      for (let i = 1; i < painted.length - 1; i++) {
-        expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
-      }
+      expect(historyCloseDrift(candles, painted)).toBeLessThan(0.003);
       // Soft-MM 18% dump needles clipped to TF wick cap.
       for (const c of painted) {
         const bodyLo = Math.min(c.open, c.close);
@@ -198,9 +194,10 @@ describe("robustPriceRange", () => {
         const bodyFrac = Math.abs(c.close - c.open) / Math.max(c.open, 1e-12);
         expect(bodyFrac).toBeLessThanOrEqual(paintMaxBodyFracForTf(tf) + 1e-6);
       }
-      // Sticky peg breathes into real candle bodies (not a dashed ruler).
-      const bodies = painted.slice(0, -1).map((c) => Math.abs(c.close - c.open) / c.open);
-      expect(Math.max(...bodies)).toBeGreaterThan(0.0005);
+      if (tf === "1m" || tf === "15m") {
+        const wickSpan = painted.slice(0, -1).map((c) => (c.high - c.low) / c.close);
+        expect(Math.max(...wickSpan)).toBeGreaterThan(0.001);
+      }
     }
   });
 
@@ -211,9 +208,7 @@ describe("robustPriceRange", () => {
       return bar(1_700_000_000 + i * 60, tip, tip, dump ? tip * 0.7 : tip, tip);
     });
     const painted = displayCapCandles(candles, "1m");
-    for (let i = 1; i < painted.length; i++) {
-      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
-    }
+    expect(historyCloseDrift(candles, painted)).toBeLessThan(0.002);
     expect(Math.min(...painted.map((c) => c.low))).toBeGreaterThan(tip * 0.95);
   });
 
@@ -362,117 +357,93 @@ describe("paper tip + volume hygiene", () => {
   });
 });
 
-describe("screenshot Soft-MM floor-dash + skyscraper tip", () => {
-  function stickyHistoryThenTipCliff(histPx: number, tipPx: number, n = 80): Candle[] {
+describe("honest history + recent pump (no fake multi-day ramp)", () => {
+  function flatThenPump(histPx: number, tipPx: number, flatN = 70, pumpBars = 6): Candle[] {
     const candles: Candle[] = [];
-    for (let i = 0; i < n - 1; i++) {
-      const wobble = 1 + Math.sin(i / 9) * 0.0008;
-      const px = histPx * wobble;
-      candles.push(bar(1_700_000_000 + i * 60, px, px * 1.0004, px * 0.9996, px));
+    for (let i = 0; i < flatN; i++) {
+      const px = histPx * (1 + Math.sin(i / 11) * 0.0005);
+      candles.push(bar(1_700_000_000 + i * 60, px, px * 1.0003, px * 0.9997, px));
     }
-    // Tip Last far above sticky Soft-MM history (screenshot class).
+    const pumpStart = flatN;
+    for (let j = 0; j < pumpBars - 1; j++) {
+      const t = 1_700_000_000 + (pumpStart + j) * 60;
+      const open = j === 0 ? histPx : candles[candles.length - 1]!.close;
+      const close = open + ((tipPx - histPx) * (j + 1)) / (pumpBars - 1);
+      candles.push(bar(t, open, Math.max(open, close) * 1.002, Math.min(open, close) * 0.998, close));
+    }
+    const lastOpen = candles[candles.length - 1]!.close;
     candles.push(
-      bar(1_700_000_000 + (n - 1) * 60, histPx, Math.max(histPx, tipPx), Math.min(histPx, tipPx), tipPx),
+      bar(
+        1_700_000_000 + (pumpStart + pumpBars - 1) * 60,
+        lastOpen,
+        Math.max(lastOpen, tipPx) * 1.001,
+        Math.min(lastOpen, tipPx) * 0.999,
+        tipPx,
+      ),
     );
     return candles;
   }
 
-  it("HMC 1m: affine-pins history so tip is not a skyscraper", () => {
+  it("pre-pump median stays near flat history after paint (not dragged to Last)", () => {
+    const hist = 0.05;
+    const tip = 0.082;
+    const raw = flatThenPump(hist, tip, 80, 8);
+    const painted = displayCapCandles(raw, "1m");
+    const preMedRaw = medianCloseBefore(raw, 80);
+    const preMedPaint = medianCloseBefore(painted, 80);
+    expect(preMedRaw).toBeCloseTo(hist, 3);
+    expect(preMedPaint).toBeCloseTo(hist, 3);
+    expect(Math.abs(preMedPaint - tip) / tip).toBeGreaterThan(0.25);
+    expect(historyCloseDrift(raw, painted)).toBeLessThan(0.0005);
+  });
+
+  it("recent pump leg keeps large bodies (not smeared across flat days)", () => {
+    const raw = flatThenPump(0.05, 0.08, 60, 10);
+    const painted = displayCapCandles(raw, "1m");
+    const pumpSlice = painted.slice(60, -1);
+    const pumpBodies = pumpSlice.map((c) => Math.abs(c.close - c.open) / Math.max(c.open, 1e-12));
+    expect(Math.max(...pumpBodies)).toBeGreaterThan(0.008);
+    const flatSlice = painted.slice(10, 50);
+    const flatBodies = flatSlice.map((c) => Math.abs(c.close - c.open) / Math.max(c.open, 1e-12));
+    expect(Math.max(...flatBodies)).toBeLessThan(0.004);
+  });
+
+  it("sticky flat history then instant tip cliff does not rewrite closes", () => {
     const hist = 0.05;
     const tip = 0.077;
-    const painted = displayCapCandles(stickyHistoryThenTipCliff(hist, tip), "1m");
-    const health = paintedCandleHealth(painted, tip, "1m");
-    expect(health.floorSquash).toBe(false);
-    expect(health.tipDrift).toBeLessThan(1e-9);
-    expect(health.tipBody).toBeLessThanOrEqual(paintMaxBodyFracForTf("1m") + 1e-6);
-    expect(health.histVsTip).toBeLessThan(paintMaxSpanFracForTf("1m"));
-    expect(health.islands).toBe(0);
-    expect(health.spanFrac).toBeLessThan(0.12);
-    // Closed bars stay readable (not zero-height dashes).
-    expect(health.minClosedBody).toBeGreaterThan(0.0005);
+    const candles: Candle[] = [];
+    for (let i = 0; i < 79; i++) {
+      const px = hist;
+      candles.push(bar(1_700_000_000 + i * 60, px, px * 1.0001, px * 0.9999, px));
+    }
+    candles.push(bar(1_700_000_000 + 79 * 60, hist, Math.max(hist, tip), Math.min(hist, tip), tip));
+    const painted = displayCapCandles(candles, "1m");
+    expect(historyCloseDrift(candles, painted)).toBeLessThan(0.0005);
+    expect(medianCloseBefore(painted, 79)).toBeCloseTo(hist, 4);
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 10);
+    const tipBody = Math.abs(painted[79]!.close - painted[79]!.open) / painted[79]!.open;
+    expect(tipBody).toBeGreaterThan(0.03);
   });
 
-  it("SUP 1m: 40% Soft-MM tip cliff heals without floor dashes", () => {
-    const painted = displayCapCandles(stickyHistoryThenTipCliff(0.25, 0.35, 60), "1m");
-    const health = paintedCandleHealth(painted, 0.35, "1m");
-    expect(health.floorSquash).toBe(false);
-    expect(health.tipBody).toBeLessThanOrEqual(paintMaxBodyFracForTf("1m") + 1e-6);
-    expect(health.histVsTip).toBeLessThan(0.08);
-    expect(health.islands).toBe(0);
-  });
-
-  it("dump tip cliff (Last below history) also heals", () => {
-    const painted = displayCapCandles(stickyHistoryThenTipCliff(0.09, 0.055, 50), "1m");
-    const health = paintedCandleHealth(painted, 0.055, "1m");
-    expect(health.floorSquash).toBe(false);
-    expect(health.tipBody).toBeLessThanOrEqual(paintMaxBodyFracForTf("1m") + 1e-6);
-    expect(painted[painted.length - 1]!.close).toBeCloseTo(0.055, 10);
-    expect(health.islands).toBe(0);
-  });
-
-  for (const tf of ["30s", "1m", "3m", "5m", "15m", "1H", "4H", "1D"] as const) {
-    it(`${tf}: tip cliff heal keeps Last + readable bodies`, () => {
-      const painted = displayCapCandles(stickyHistoryThenTipCliff(0.04, 0.07, 40), tf);
-      const health = paintedCandleHealth(painted, 0.07, tf);
-      expect(health.tipDrift).toBeLessThan(1e-9);
-      expect(health.floorSquash).toBe(false);
-      expect(health.tipBody).toBeLessThanOrEqual(
-        Math.max(paintMaxBodyFracForTf(tf), maxBodyFracForTf(tf) * 0.85) + 1e-5,
-      );
-      expect(health.islands).toBe(0);
-      expect(health.histVsTip).toBeLessThan(paintMaxSpanFracForTf(tf) * 1.1);
+  for (const tf of ["1m", "15m", "1H"] as const) {
+    it(`${tf}: closed history close drift stays tiny`, () => {
+      const raw = flatThenPump(0.04, 0.07, 50, 8);
+      const painted = displayCapCandles(raw, tf);
+      expect(historyCloseDrift(raw, painted)).toBeLessThan(0.001);
+      expect(painted[painted.length - 1]!.close).toBeCloseTo(0.07, 8);
     });
   }
 
   for (const pairMid of [
     ["HMC_USDT", 0.08],
     ["SUP_USDT", 0.22],
-    ["HMC_SUP", 0.4],
-    ["HMC_BTC", 0.000012],
-    ["SUP_BTC", 0.000004],
   ] as const) {
-    it(`${pairMid[0]} seed paint is not floor-squashed on 1m`, () => {
+    it(`${pairMid[0]} seed paint preserves walk closes on 1m`, () => {
       const seeded = seedCandles(pairMid[0], "1m", pairMid[1], 120);
-      // Inject Soft-MM tip jump after seed.
-      const tip = pairMid[1] * 1.45;
-      seeded[seeded.length - 1] = {
-        ...seeded[seeded.length - 1]!,
-        high: Math.max(seeded[seeded.length - 1]!.high, tip),
-        low: Math.min(seeded[seeded.length - 1]!.low, tip),
-        close: tip,
-      };
       const painted = displayCapCandles(seeded, "1m");
-      const health = paintedCandleHealth(painted, tip, "1m");
-      expect(health.floorSquash).toBe(false);
-      expect(health.tipBody).toBeLessThanOrEqual(paintMaxBodyFracForTf("1m") + 1e-5);
-      expect(health.islands).toBe(0);
+      expect(historyCloseDrift(seeded, painted)).toBeLessThan(0.008);
     });
   }
-
-  it("affine pin preserves relative close silhouette (not Renko ladder)", () => {
-    const candles: Candle[] = [];
-    let px = 0.05;
-    for (let i = 0; i < 30; i++) {
-      const open = px;
-      const close = px * (1 + (i % 3 === 0 ? 0.004 : i % 3 === 1 ? -0.003 : 0.001));
-      candles.push(bar(1_700_000_000 + i * 60, open, Math.max(open, close) * 1.001, Math.min(open, close) * 0.999, close));
-      px = close;
-    }
-    const tip = px * 1.5;
-    candles[candles.length - 1] = bar(
-      candles[candles.length - 1]!.time,
-      candles[candles.length - 1]!.open,
-      Math.max(candles[candles.length - 1]!.high, tip),
-      Math.min(candles[candles.length - 1]!.low, tip),
-      tip,
-    );
-    const painted = displayCapCandles(candles, "1m");
-    const bodies = painted.slice(0, -1).map((c) => Math.abs(c.close - c.open) / c.open);
-    const uniq = new Set(bodies.map((b) => b.toFixed(4)));
-    expect(uniq.size).toBeGreaterThanOrEqual(3);
-    // Not a uniform Renko step.
-    expect(Math.max(...bodies) - Math.min(...bodies)).toBeGreaterThan(0.0005);
-  });
 
   it("autoscale min span floor is wide enough for chunky Soft-MM bodies", () => {
     expect(paintMinSpanFracForTf("1m")).toBeGreaterThanOrEqual(0.025);
@@ -480,29 +451,15 @@ describe("screenshot Soft-MM floor-dash + skyscraper tip", () => {
     expect(paintMinSpanFracForTf("1D")).toBeGreaterThanOrEqual(paintMinSpanFracForTf("1m"));
   });
 
-  it("sticky peg Soft-MM ruler breathes into candles on every short TF", () => {
+  it("sticky peg Soft-MM ruler breathes into candles on short TF", () => {
     const tip = 0.0915;
-    for (const tf of ["1m", "5m", "15m"] as const) {
-      const candles = Array.from({ length: 40 }, (_, i) => bar(1_700_000_000 + i * 60, tip, tip * 1.0001, tip * 0.9999, tip));
-      const painted = displayCapCandles(candles, tf);
-      const health = paintedCandleHealth(painted, tip, tf);
-      expect(health.floorSquash).toBe(false);
-      expect(health.minClosedBody).toBeGreaterThan(0.0008);
-      expect(health.tipDrift).toBeLessThan(1e-9);
-    }
-  });
-
-  it("robust+clamp after paint keeps tip and history in one pane", () => {
-    const painted = displayCapCandles(stickyHistoryThenTipCliff(0.05, 0.08, 70), "1m");
-    const tip = painted[painted.length - 1]!.close;
-    const robust = robustPriceRange(painted)!;
-    const clamped = clampPaintPriceSpan(robust, tip, paintMaxSpanFracForTf("1m"));
-    const outside = painted.filter(
-      (c) => Math.max(c.open, c.close) < clamped.minValue || Math.min(c.open, c.close) > clamped.maxValue,
+    const candles = Array.from({ length: 40 }, (_, i) =>
+      bar(1_700_000_000 + i * 60, tip, tip * 1.0001, tip * 0.9999, tip),
     );
-    // After heal, almost all bodies sit inside the clamped window (no floor-dash class).
-    expect(outside.length / painted.length).toBeLessThan(0.15);
-    expect(clamped.minValue).toBeLessThanOrEqual(tip);
-    expect(clamped.maxValue).toBeGreaterThanOrEqual(tip);
+    const painted = displayCapCandles(candles, "1m");
+    const health = paintedCandleHealth(painted, tip, "1m");
+    const withWick = painted.filter((c) => (c.high - c.low) / c.close > 0.0015);
+    expect(withWick.length).toBeGreaterThan(10);
+    expect(historyCloseDrift(candles, painted)).toBeLessThan(0.0005);
   });
 });

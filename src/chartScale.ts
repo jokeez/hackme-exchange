@@ -442,21 +442,17 @@ function paintNoise(time: number, salt: number): number {
 }
 
 /**
- * CEX desk paint for every TF / pair (Binance · Bybit · CME OHLC):
- * - Soft-MM tip islands: affine-pin close path onto Last (keeps relative shape —
- *   NOT Renko tip-walk). Stops the screenshot class: flat history dashes +
- *   skyscraper tip under a distant Last line.
- * - open bridges prior close (24/7 crypto continuity)
- * - high/low = real traded extremes (clipped Soft-MM mile needles only)
- * - tip close = Last; tip body always ≤ paint maxBody
- * - sticky Soft-MM peg dojis get readable micro body+wick
+ * CEX desk paint — truthful history, readable quiet tape:
+ * - Closed bars keep real aggregated OHLC (prints / seed / aggregate). No affine-pin,
+ *   no drift-pull toward Last — that faked multi-day ramps after a recent pump.
+ * - Clip Soft-MM mile wicks + cap only oracle-class single-bar glitches.
+ * - Sticky peg dojis: display-only micro body+wick (bar-local, does not rewrite trend).
+ * - Tip: close = Last; open/high/low from tape; real pump bodies stay large.
  */
 function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
-  const maxBody = Math.max(paintMaxBodyFracForTf(tf), maxBodyFracForTf(tf) * 0.85);
   const maxWick = maxWickFracForTf(tf);
-  const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.25);
-  // Quiet Soft-MM breathe — chunky enough that 1m bars are not hairline dashes.
-  const minBody = Math.min(Math.max(maxBody * 0.28, 0.0012), 0.0035);
+  const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.2);
+  const minBody = Math.min(Math.max(paintMaxBodyFracForTf(tf) * 0.35, 0.001), 0.003);
   const tipIdx = candles.length - 1;
   const tipClose = finitePos(candles[tipIdx]!.close)
     ? candles[tipIdx]!.close
@@ -465,127 +461,40 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
       : 0;
   if (!(tipClose > 0)) return candles;
 
-  const closedSample = candles
-    .slice(Math.max(0, tipIdx - 64), tipIdx)
-    .map((c) => c.close)
-    .filter(finitePos)
-    .sort((a, b) => a - b);
-  const med = median(closedSample) || tipClose;
-  const prevRaw = tipIdx > 0 && finitePos(candles[tipIdx - 1]!.close) ? candles[tipIdx - 1]!.close : tipClose;
-  const tipVsMed = Math.abs(tipClose - med) / tipClose;
-  const tipBodyIfBridged = Math.abs(tipClose - prevRaw) / Math.max(prevRaw, tipClose, 1e-12);
-  // Screenshot class: Last far from prior close → skyscraper tip without pin.
-  const tipIsland = tipBodyIfBridged > maxBody * 1.1;
-  // Soft-MM slow drift: median far from tip even when tip bridges prior.
-  const drifted = tipVsMed > paintMaxSpanFracForTf(tf) * 0.55;
-
-  // 1) Close path — Soft-MM island / drift heal (preserve silhouette, not Renko).
-  const closes = new Array<number>(candles.length);
-  closes[tipIdx] = tipClose;
-  let pinRatio = 1;
-  if (tipIsland && finitePos(prevRaw) && prevRaw > 0) {
-    pinRatio = tipClose / prevRaw;
-    for (let i = 0; i < tipIdx; i++) {
-      const raw = finitePos(candles[i]!.close) ? candles[i]!.close : prevRaw;
-      closes[i] = raw * pinRatio;
-    }
-  } else if (drifted && finitePos(med) && med > 0) {
-    // Pull older bars toward Last harder; keep recent tape near raw (CEX tip).
-    for (let i = 0; i < tipIdx; i++) {
-      const raw = finitePos(candles[i]!.close) ? candles[i]!.close : tipClose;
-      const age = tipIdx <= 1 ? 0 : (tipIdx - 1 - i) / Math.max(tipIdx - 1, 1);
-      const pull = Math.min(0.92, age * age * 1.15);
-      closes[i] = raw * (1 - pull) + tipClose * pull;
-    }
-  } else {
-    for (let i = 0; i < tipIdx; i++) {
-      closes[i] = finitePos(candles[i]!.close) ? candles[i]!.close : tipClose;
-    }
-  }
-
-  // 2) Breathe Soft-MM sticky peg / flat rulers into readable bodies.
-  for (let i = 0; i < tipIdx; i++) {
-    const prev = i > 0 ? closes[i - 1]! : closes[i]!;
-    const cur = closes[i]!;
-    const stuck =
-      Math.abs(cur - tipClose) / tipClose < 0.0012 &&
-      Math.abs(cur - prev) / Math.max(prev, 1e-12) < 0.0012;
-    const tiny = Math.abs(cur - prev) / Math.max(prev, 1e-12) < minBody * 0.55;
-    if (!stuck && !tiny) continue;
-    const n = paintNoise(candles[i]!.time, 0xc0ffee);
-    const step = minBody * (0.65 + 0.35 * Math.abs(n)) * (n >= 0 ? 1 : -1);
-    let next = cur * (1 + step);
-    // Keep path continuous toward neighbors within maxBody.
-    const right = closes[i + 1]!;
-    next = Math.min(right * (1 + maxBody), Math.max(right * (1 - maxBody), next));
-    if (i > 0) {
-      const left = closes[i - 1]!;
-      next = Math.min(left * (1 + maxBody), Math.max(left * (1 - maxBody), next));
-    }
-    closes[i] = next;
-  }
-  closes[tipIdx] = tipClose;
-
-  // 3) Forward paint: continuity + real/clipped wicks + tip body cap.
   const out: Candle[] = new Array(candles.length);
-  let prevClose = closes[0]!;
   for (let i = 0; i < candles.length; i++) {
     const raw = candles[i]!;
-    let open = prevClose;
-    let close = closes[i]!;
-
-    if (i === tipIdx) {
-      close = tipClose;
-      // Soft-MM cliff leftover: never paint a skyscraper tip — Last stays, open moves.
-      if (Math.abs(close - open) / Math.max(open, close, 1e-12) > maxBody) {
-        const sign = close >= open ? 1 : -1;
-        open = close / (1 + sign * maxBody);
-      }
-    } else if (Math.abs(close - open) / Math.max(open, 1e-12) > maxBody) {
-      const sign = close >= open ? 1 : -1;
-      close = open * (1 + sign * maxBody);
-    }
-
-    // Readable body on quiet Soft-MM dojis (closed bars).
-    if (i !== tipIdx) {
-      const mid = Math.max(Math.abs(open), Math.abs(close), 1e-12);
-      if (Math.abs(close - open) / mid < minBody) {
-        const sign = paintNoise(raw.time, 0x71c4) >= 0 ? 1 : -1;
-        close = open * (1 + sign * minBody);
-      }
-    }
+    let open = finitePos(raw.open) ? raw.open : finitePos(raw.close) ? raw.close : tipClose;
+    let close = i === tipIdx ? tipClose : finitePos(raw.close) ? raw.close : open;
+    let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
+    let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
 
     const midRef = Math.max(Math.abs(open), Math.abs(close), 1e-12);
-    // Scale raw wick extremes with the Soft-MM tip-island pin ratio.
-    const wickRatio = tipIsland ? pinRatio : 1;
-    let high = Math.max(
-      open,
-      close,
-      finitePos(raw.high) ? raw.high * wickRatio : close,
-    );
-    let low = Math.min(
-      open,
-      close,
-      finitePos(raw.low) ? raw.low * wickRatio : open,
-    );
-
     const bodyLo = Math.min(open, close);
     const dumpNeedle =
-      bodyLo > 0 && (bodyLo - low) / bodyLo > Math.max(maxWick * 2.5, 0.006);
-    const flatTape = Math.abs(close - open) / midRef < minBody * 0.7 && !dumpNeedle;
+      bodyLo > 0 && (bodyLo - low) / bodyLo > Math.max(maxWick * 2.5, 0.008);
+    const flatTape =
+      i !== tipIdx &&
+      Math.abs(close - open) / midRef < minBody * 0.55 &&
+      (high - low) / midRef < minBody * 1.2 &&
+      !dumpNeedle;
+
     if (flatTape) {
-      const wickPad = Math.max(midRef * maxWick, midRef * minBody * 0.45, 1e-12);
+      // Wicks only — never rewrite close (honest pre-pump / peg history).
+      const wickPad = Math.max(midRef * maxWick, midRef * minBody * 0.55, 1e-12);
       high = Math.max(high, Math.max(open, close) + wickPad * (0.35 + 0.55 * Math.abs(paintNoise(raw.time, 0x4111))));
-      low = Math.min(
-        low,
-        Math.min(open, close) - wickPad * (0.35 + 0.55 * Math.abs(paintNoise(raw.time, 0x1010))),
+      low = Math.max(
+        midRef * 1e-6,
+        Math.min(low, Math.min(open, close) - wickPad * (0.35 + 0.55 * Math.abs(paintNoise(raw.time, 0x1010)))),
       );
-      low = Math.max(low, midRef * 1e-6);
     }
 
-    let painted: Candle;
     if (i === tipIdx) {
-      painted = clipBarWicks({ ...raw, open, high, low, close: tipClose }, tipWick);
+      open = finitePos(raw.open) ? raw.open : tipIdx > 0 && finitePos(out[tipIdx - 1]!.close) ? out[tipIdx - 1]!.close : tipClose;
+      close = tipClose;
+      high = Math.max(high, open, tipClose, finitePos(raw.high) ? raw.high : tipClose);
+      low = Math.min(low, open, tipClose, finitePos(raw.low) ? raw.low : tipClose);
+      let painted = clipBarWicks({ ...raw, open, high, low, close: tipClose }, tipWick);
       painted = {
         ...painted,
         open,
@@ -593,30 +502,58 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
         high: Math.max(painted.high, open, tipClose),
         low: Math.min(painted.low, open, tipClose),
       };
-    } else {
-      painted = constrainBarToOpen(
-        clipBarWicks({ ...raw, open, high, low, close }, maxWick),
-        maxBody,
-        maxWick,
-      );
+      out[i] = {
+        ...painted,
+        volume: raw.volume > 0 ? raw.volume : Math.max(Math.abs(open) * 0.02, 1e-6),
+      };
+      continue;
     }
+
+    const painted = clipBarWicks(
+      {
+        ...raw,
+        open,
+        high: Math.max(high, open, close),
+        low: Math.min(low, open, close),
+        close,
+      },
+      maxWick,
+    );
     out[i] = {
       ...painted,
       volume: raw.volume > 0 ? raw.volume : Math.max(Math.abs(open) * 0.02, 1e-6),
     };
-    // Tip body-cap may nudge open off prior close — bridge prior bar so LWC
-    // never paints a gap island between last closed and forming tip.
-    if (i === tipIdx && tipIdx > 0) {
-      const prev = out[tipIdx - 1]!;
-      if (Math.abs(prev.close - painted.open) / Math.max(prev.close, 1e-12) > 1e-9) {
-        prev.close = painted.open;
-        prev.high = Math.max(prev.high, prev.open, painted.open);
-        prev.low = Math.min(prev.low, prev.open, painted.open);
-      }
-    }
-    prevClose = out[i]!.close;
   }
   return out;
+}
+
+/**
+ * How much display paint rewrote closed-bar closes vs state OHLC.
+ * Low drift = honest history; high drift = fake ramp toward Last.
+ */
+export function historyCloseDrift(raw: Candle[], painted: Candle[]): number {
+  if (raw.length !== painted.length || raw.length < 2) return 0;
+  const end = raw.length - 1;
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < end; i++) {
+    const r = raw[i]!.close;
+    const p = painted[i]!.close;
+    if (!(r > 0) || !(p > 0)) continue;
+    sum += Math.abs(p - r) / r;
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
+/** Median close of bars strictly before `pumpStartIdx` — pre-pump anchor. */
+export function medianCloseBefore(candles: Candle[], beforeIdx: number): number {
+  const slice = candles
+    .slice(0, Math.max(0, beforeIdx))
+    .map((c) => c.close)
+    .filter(finitePos)
+    .sort((a, b) => a - b);
+  return median(slice);
 }
 
 /**
@@ -681,8 +618,12 @@ export function paintedCandleHealth(
   const hi = Math.max(...painted.map((c) => c.high));
   const lo = Math.min(...painted.map((c) => c.low));
   const spanFrac = (hi - lo) / Math.max(tip.close, 1e-12);
-  // Screenshot class: tip body huge AND history median far from tip.
-  const floorSquash = tipBody > paintMaxBodyFracForTf(tf) * 1.25 && histVsTip > paintMaxSpanFracForTf(tf) * 0.5;
+  // Screenshot class: huge tip vs pane while most bodies are hairline (scale squash).
+  const floorSquash =
+    tipBody > 0.12 &&
+    histVsTip > 0.15 &&
+    minClosedBody < 0.00035 &&
+    maxClosedBody < 0.002;
   return {
     tipBody,
     tipDrift,
