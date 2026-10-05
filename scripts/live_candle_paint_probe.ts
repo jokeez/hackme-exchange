@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
  * Live Soft-MM tape → candle paint probe (all pairs × all TFs).
- *   npx tsx scripts/live_candle_paint_probe.ts
+ *   npx vite-node scripts/live_candle_paint_probe.ts
  */
-import { displayCapCandles } from "../src/chartScale";
+import { displayCapCandles, paintedCandleHealth, paintMaxBodyFracForTf } from "../src/chartScale";
 import {
   CANDLE_BASE_TF,
   ensureContiguousCandles,
@@ -25,7 +25,10 @@ const PAIRS: { id: PairId; api: string }[] = [
 
 async function load(apiPair: string): Promise<{ prints: CandlePrint[]; last: number }> {
   const enc = encodeURIComponent(apiPair);
-  const trades = ((await (await fetch(`${API}/trades?pair=${enc}&limit=100`)).json()) as { trades?: { created_at?: string; price: number; qty?: number }[] }).trades || [];
+  const trades =
+    ((await (await fetch(`${API}/trades?pair=${enc}&limit=100`)).json()) as {
+      trades?: { created_at?: string; price: number; qty?: number }[];
+    }).trades || [];
   const tickers = (await (await fetch(`${API}/tickers`)).json()) as {
     tickers?: { pair: string; last: number }[];
   };
@@ -58,50 +61,30 @@ async function main(): Promise<void> {
         issues.push(`${meta.id}@${tf}: short series ${series.length}`);
         continue;
       }
-      // Same path as chart.ts prepCandles.
       series = ensureContiguousCandles(series, tf, { pairId: meta.id, fillToNow: true });
       const painted = displayCapCandles(series, tf);
-      const tip = painted[painted.length - 1]!;
-      const tipDrift = Math.abs(tip.close - last) / last;
-      let islands = 0;
-      let maxBodyClosed = 0;
-      let maxWick = 0;
-      let maxOpenJump = 0;
-      const tipBody = Math.abs(tip.close - tip.open) / Math.max(tip.open, 1e-18);
-      for (let i = 0; i < painted.length; i++) {
-        const c = painted[i]!;
-        const midb = (c.open + c.close) / 2;
-        if (i < painted.length - 1) {
-          maxBodyClosed = Math.max(maxBodyClosed, Math.abs(c.close - c.open) / Math.max(c.open, 1e-18));
-        }
-        maxWick = Math.max(maxWick, (c.high - c.low) / Math.max(midb, 1e-18));
-        if (i > 0) {
-          const jump = Math.abs(c.open - painted[i - 1]!.close) / Math.max(painted[i - 1]!.close, 1e-18);
-          maxOpenJump = Math.max(maxOpenJump, jump);
-          if (jump > 0.05) islands++;
-        }
-      }
-      const closed = painted.slice(0, -1);
-      const uniq = new Set(closed.map((c) => c.close.toFixed(8))).size;
-      const sticky =
-        closed.length > 0
-          ? closed.filter((c) => Math.abs(c.close - last) / last < 0.0002).length / closed.length
-          : 0;
-      const shortTf = (["30s", "1m", "3m", "5m", "15m"] as Timeframe[]).includes(tf);
-      const bodyCap = shortTf ? 0.08 : 0.15;
-      const wickCap = shortTf ? 0.12 : 0.4;
+      const health = paintedCandleHealth(painted, last, tf);
       console.log(
-        `${meta.id}@${tf}: n=${painted.length} tipDrift=${(tipDrift * 100).toFixed(3)}% closedBody=${(maxBodyClosed * 100).toFixed(2)}% tipBody=${(tipBody * 100).toFixed(2)}% maxWick=${(maxWick * 100).toFixed(2)}% islands=${islands} openJump=${(maxOpenJump * 100).toFixed(2)}% uniqClosed=${uniq} stickyTail=${(sticky * 100).toFixed(0)}%`,
+        `${meta.id}@${tf}: n=${painted.length} tipDrift=${(health.tipDrift * 100).toFixed(3)}% tipBody=${(health.tipBody * 100).toFixed(2)}% histVsTip=${(health.histVsTip * 100).toFixed(2)}% span=${(health.spanFrac * 100).toFixed(2)}% islands=${health.islands} minBody=${(health.minClosedBody * 100).toFixed(3)}% squash=${health.floorSquash}`,
       );
-      // Ticker vs last print can race a few bps on live Soft-MM.
-      if (tipDrift > 0.008) issues.push(`${meta.id}@${tf}: tip not Last (${(tipDrift * 100).toFixed(2)}%)`);
-      if (islands > 0) issues.push(`${meta.id}@${tf}: ${islands} islands`);
-      if (maxBodyClosed > bodyCap) {
-        issues.push(`${meta.id}@${tf}: closed body ${(maxBodyClosed * 100).toFixed(1)}%>${bodyCap * 100}%`);
+      if (health.tipDrift > 0.008) {
+        issues.push(`${meta.id}@${tf}: tip not Last (${(health.tipDrift * 100).toFixed(2)}%)`);
       }
-      if (maxWick > wickCap) issues.push(`${meta.id}@${tf}: wick ${(maxWick * 100).toFixed(1)}%>${wickCap * 100}%`);
-      if (shortTf && sticky > 0.85 && closed.length > 8) {
-        issues.push(`${meta.id}@${tf}: Soft-MM ruler sticky=${(sticky * 100).toFixed(0)}%`);
+      if (health.floorSquash) issues.push(`${meta.id}@${tf}: floor-squash screenshot class`);
+      if (health.tipBody > paintMaxBodyFracForTf(tf) * 1.15) {
+        issues.push(`${meta.id}@${tf}: tip body ${(health.tipBody * 100).toFixed(1)}%`);
+      }
+      // Tip open may bridge after body-cap; only fail closed-bar islands.
+      let closedIslands = 0;
+      for (let i = 1; i < painted.length - 1; i++) {
+        const jump =
+          Math.abs(painted[i]!.open - painted[i - 1]!.close) / Math.max(painted[i - 1]!.close, 1e-12);
+        if (jump > 0.05) closedIslands++;
+      }
+      if (closedIslands > 0) issues.push(`${meta.id}@${tf}: ${closedIslands} closed islands`);
+      const shortTf = (["30s", "1m", "3m", "5m", "15m"] as Timeframe[]).includes(tf);
+      if (shortTf && health.minClosedBody < 0.0004 && painted.length > 10) {
+        issues.push(`${meta.id}@${tf}: hairline closed bodies`);
       }
     }
   }

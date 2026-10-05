@@ -45,6 +45,7 @@ import {
   displayCapCandles,
   logicalRangeToIndices,
   paintMaxSpanFracForTf,
+  paintMinSpanFracForTf,
   robustPriceRange,
 } from "./chartScale";
 import { candleAtTime } from "./chartCandleIndex";
@@ -939,17 +940,26 @@ function makeRobustAutoscaleProvider() {
       const lr = chart.timeScale().getVisibleLogicalRange();
       if (!lr || !Number.isFinite(lr.from) || !Number.isFinite(lr.to)) return original();
       const { fromIdx, toIdx } = logicalRangeToIndices(lr.from, lr.to, currentCandles.length);
-      const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
-      if (!robust) return original();
+      // Prefer recent tape for Y when Soft-MM history span would squash live bodies.
+      const recentFrom = Math.max(fromIdx, toIdx - 96);
+      const recent = robustPriceRange(currentCandles, recentFrom, toIdx);
+      const full = robustPriceRange(currentCandles, fromIdx, toIdx);
+      if (!recent && !full) return original();
+      let robust = full ?? recent!;
+      if (recent && full) {
+        const rSpan = recent.maxValue - recent.minValue;
+        const fSpan = full.maxValue - full.minValue;
+        if (fSpan > rSpan * 2.2 && rSpan > 0) robust = recent;
+      }
       const tip = currentCandles[currentCandles.length - 1]!.close;
       const tf = lastOpts?.tf ?? "1m";
       // Clamp Soft-MM cliffs only — keep multi-hour Soft-MM breathe filling the pane.
       const clamped = clampPaintPriceSpan(robust, tip, paintMaxSpanFracForTf(tf));
       const mid = (clamped.minValue + clamped.maxValue) / 2;
       const rawSpan = clamped.maxValue - clamped.minValue;
-      // ~1.2% floor so quiet Soft-MM tape still shows body height (not flat dashes).
-      const minSpan = mid > 0 ? mid * 0.012 : 0;
-      const span = Math.max(rawSpan * 1.1, minSpan);
+      // Quiet Soft-MM tape needs a tall enough pane so bodies aren't hairline dashes.
+      const minSpan = mid > 0 ? mid * paintMinSpanFracForTf(tf) : 0;
+      const span = Math.max(rawSpan * 1.12, minSpan);
       return {
         priceRange: {
           minValue: mid - span / 2,
@@ -3147,9 +3157,32 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
   const pairId = (opts.pairId ?? lastOpts?.pairId ?? "HMC_USDT") as PairId;
+  const prevPainted = currentCandles;
   currentCandles = prepCandles(rawCandlesCache, mode, tf, pairId);
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
+
+  // Soft-MM cliff heal rewrites closed OHLC — series.update tip-only would leave
+  // stale history as floor-dashes under a skyscraper tip. Force full setData.
+  if (
+    prevPainted.length === currentCandles.length &&
+    prevPainted.length > 1
+  ) {
+    for (let i = 0; i < currentCandles.length - 1; i++) {
+      const a = prevPainted[i]!;
+      const b = currentCandles[i]!;
+      if (
+        Math.abs(a.open - b.open) / Math.max(a.open, 1e-12) > 1e-6 ||
+        Math.abs(a.close - b.close) / Math.max(a.close, 1e-12) > 1e-6 ||
+        Math.abs(a.high - b.high) / Math.max(a.high, 1e-12) > 1e-6 ||
+        Math.abs(a.low - b.low) / Math.max(a.low, 1e-12) > 1e-6
+      ) {
+        return false;
+      }
+    }
+  } else if (prevPainted.length !== currentCandles.length && prevPainted.length > 0) {
+    return false;
+  }
 
   // While scrubbing: keep in-memory tip fresh, defer series.update (LWC recalculate fights the hair).
   if (isChartPointerBusy()) {
