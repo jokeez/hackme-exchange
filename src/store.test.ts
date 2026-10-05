@@ -3,6 +3,7 @@ import {
   applyMarketTrade,
   cancelAllOpenOrders,
   cancelOrder,
+  compactEquitySnapshots,
   ensureCandles,
   loadState,
   placeLimitOrder,
@@ -233,5 +234,57 @@ describe("store order mutations", () => {
     expect(Array.isArray(s.priceAlerts)).toBe(true);
     expect(s.stateVersion).toBe(STATE_VERSION);
     expect(s.drawingsLocked).toBe(false);
+  });
+
+  it("compactEquitySnapshots keeps prior-day anchors after dense intraday snaps", () => {
+    const now = Date.now();
+    const snaps = [];
+    // 14 prior days: one EOD each
+    for (let d = 14; d >= 1; d--) {
+      snaps.push({ ts: now - d * 86_400_000, equityUsdt: 10 + d * 0.01 });
+    }
+    // Today: 200×1m samples (old blind cap of 72 would wipe every prior day)
+    for (let i = 200; i >= 0; i--) {
+      snaps.push({ ts: now - i * 60_000, equityUsdt: 10.05 - i * 0.00001 });
+    }
+    const kept = compactEquitySnapshots(snaps, false);
+    const dayKeys = new Set(
+      kept.map((s) => {
+        const d = new Date(s.ts);
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      }),
+    );
+    expect(dayKeys.size).toBeGreaterThanOrEqual(14);
+    expect(kept.length).toBeLessThanOrEqual(200);
+    // Oldest prior day still present
+    expect(kept.some((s) => Math.abs(s.ts - (now - 14 * 86_400_000)) < 60_000)).toBe(true);
+  });
+
+  it("save/load round-trip preserves multi-day equity history past old 72-cap", () => {
+    const map = installMemoryLocalStorage();
+    const s = baseState();
+    const now = Date.now();
+    s.equitySnapshots = [];
+    for (let d = 10; d >= 1; d--) {
+      s.equitySnapshots.push({ ts: now - d * 86_400_000, equityUsdt: 7 + d * 0.1 });
+    }
+    for (let i = 120; i >= 0; i--) {
+      s.equitySnapshots.push({ ts: now - i * 60_000, equityUsdt: 8.0 - i * 0.00002 });
+    }
+    // Newest-first like runtime (unshift order)
+    s.equitySnapshots.sort((a, b) => b.ts - a.ts);
+    expect(saveState(s)).toBe(true);
+    const raw = JSON.parse(map.get(STORAGE_KEY)!);
+    // Compaction may shrink well below the old blind 72-cap — day coverage is the contract.
+    expect(raw.equitySnapshots.length).toBeGreaterThanOrEqual(10);
+    expect(raw.equitySnapshots.length).toBeLessThan(s.equitySnapshots.length + 1);
+    const loaded = loadState();
+    const days = new Set(
+      loaded.equitySnapshots.map((e) => {
+        const d = new Date(e.ts);
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      }),
+    );
+    expect(days.size).toBeGreaterThanOrEqual(10);
   });
 });

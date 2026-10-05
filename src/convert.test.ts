@@ -1,12 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { CONVERT_ROUTES, convert, convertChipDefaultAmount, convertFeeHintLine, convertNetReceive, convertRateLabel, convertSlippageDriftBps, feeQuoteFromLabConvert, flipRoute, formatConvertFeeToast, formatLabConvertFeeToast, isConvertPreviewError, previewConvert, routeForAssets, type ConvertPreview } from "./convert";
+import {
+  CONVERT_PRIMARY_PAIRS,
+  CONVERT_ROUTES,
+  CONVERT_UI_ASSETS,
+  applyConvertPrimaryPair,
+  clampPrimaryConvertLegs,
+  convert,
+  convertAllowedToAssets,
+  convertChipDefaultAmount,
+  convertCtaLabel,
+  convertFeeHintLine,
+  convertNetReceive,
+  convertPrimaryPair,
+  convertRateLabel,
+  convertSlippageDriftBps,
+  feeQuoteFromLabConvert,
+  flipRoute,
+  formatConvertFeeToast,
+  formatConvertQuoteAge,
+  formatLabConvertFeeToast,
+  isConvertPreviewError,
+  isPrimaryConvertRoute,
+  previewConvert,
+  routeForAssets,
+  type ConvertPreview,
+} from "./convert";
 import { placeOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("convert", () => {
   const market = sampleMarket();
 
-  it("lists bidirectional routes including BTC", () => {
+  it("lists bidirectional routes including BTC (engine) while UI is primary-only", () => {
     expect(CONVERT_ROUTES.length).toBeGreaterThanOrEqual(10);
     expect(CONVERT_ROUTES.map((r) => r.id)).toEqual([
       "HMC_USDT",
@@ -20,6 +45,26 @@ describe("convert", () => {
       "SUP_BTC",
       "BTC_SUP",
     ]);
+    expect(CONVERT_PRIMARY_PAIRS).toEqual(["HMC_USDT", "HMC_SUP"]);
+    expect(CONVERT_UI_ASSETS.map((a) => a.key)).toEqual(["hmc", "sup", "usdt"]);
+    expect(isPrimaryConvertRoute("HMC_USDT")).toBe(true);
+    expect(isPrimaryConvertRoute("HMC_SUP")).toBe(true);
+    expect(isPrimaryConvertRoute("SUP_USDT")).toBe(false);
+    expect(isPrimaryConvertRoute("HMC_BTC")).toBe(false);
+  });
+
+  it("clamps desk legs onto primary pairs and preserves direction on pair tabs", () => {
+    expect(clampPrimaryConvertLegs("btc", "hmc")).toEqual({ from: "hmc", to: "usdt" });
+    expect(clampPrimaryConvertLegs("sup", "usdt")).toEqual({ from: "sup", to: "hmc" });
+    expect(convertAllowedToAssets("hmc")).toEqual(["usdt", "sup"]);
+    expect(convertAllowedToAssets("usdt")).toEqual(["hmc"]);
+    expect(convertPrimaryPair("hmc", "usdt")).toBe("HMC_USDT");
+    expect(applyConvertPrimaryPair("HMC_SUP", "usdt", "hmc")).toEqual({ from: "sup", to: "hmc" });
+    expect(applyConvertPrimaryPair("HMC_USDT", "hmc", "sup")).toEqual({ from: "hmc", to: "usdt" });
+    expect(formatConvertQuoteAge(Date.now() - 500, Date.now())).toBe("Fresh");
+    expect(formatConvertQuoteAge(Date.now() - 12_000, Date.now())).toBe("12s ago");
+    expect(convertCtaLabel("HMC", "USDT", 0, String)).toBe("Enter amount");
+    expect(convertCtaLabel("HMC", "USDT", 100, (n) => String(n))).toBe("Convert 100 HMC → USDT");
   });
 
   it("routeForAssets + flipRoute round-trip", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_REGISTRY, onChainAssets, PLANNED_ASSETS } from "./assets";
-import { nodeWalletUrl, nodeTransferUrl } from "./walletLinks";
+import { nodeTransferUrl, nodeWalletUrl, publicHubOrigin } from "./walletLinks";
 import { mergeNodeIntoDemoWallet } from "./nodeWallet";
 import { activeSettlement } from "./settlement";
 
@@ -20,6 +20,12 @@ describe("integration adapters", () => {
     expect(nodeWalletUrl()).toContain("8080");
     expect(nodeWalletUrl()).toContain("#wallet");
     expect(nodeTransferUrl("hmc")).toContain("focus=transfer");
+  });
+
+  it("public hub CTAs never use /hub-proxy (wallet UI lives on hackme.tech)", () => {
+    expect(publicHubOrigin()).not.toMatch(/hub-proxy/i);
+    expect(nodeWalletUrl()).not.toMatch(/hub-proxy/i);
+    expect(publicHubOrigin()).toMatch(/^https?:\/\//);
   });
 
   it("merges node snapshot into demo wallet", () => {

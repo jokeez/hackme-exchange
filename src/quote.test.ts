@@ -41,5 +41,23 @@ describe("pairQuoteFromMid", () => {
     expect(q.refOpen).toBeCloseTo(0.05, 6);
     expect(q.refClose).toBeCloseTo(0.052, 6);
     expect(q.changePct).toBeCloseTo(((0.052 - 0.05) / 0.05) * 100, 4);
+    expect(q.high24h).toBeGreaterThanOrEqual(q.mid);
+  });
+
+  it("never lets 24h high sit below live mid / tip wick", () => {
+    const flat: Candle[] = [
+      { time: 1, open: 0.05, high: 0.0505, low: 0.0495, close: 0.05, volume: 10 },
+      { time: 2, open: 0.05, high: 0.0502, low: 0.0498, close: 0.05, volume: 10 },
+    ];
+    const tip: Candle[] = [
+      { time: 100, open: 0.05, high: 0.0535, low: 0.05, close: 0.0532, volume: 40 },
+    ];
+    const q = buildPairQuote({
+      pairId: "HMC_USDT",
+      mid: 0.0532,
+      candlesByTf: { "15m": flat, "1m": tip },
+    });
+    expect(q.high24h).toBeGreaterThanOrEqual(0.0535);
+    expect(q.high24h).toBeGreaterThanOrEqual(q.mid);
   });
 });

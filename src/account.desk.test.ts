@@ -66,6 +66,34 @@ describe("Account desk session (HOLD)", () => {
     expect(html).not.toMatch(/id="btn-lab-2fa-setup"[^>]*disabled/);
   });
 
+  it("multi-wallet prefers desk ledger + hub (no paper/lab sandbox chrome)", () => {
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      feeWallet: null,
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: false },
+    });
+    expect(html).toContain("Desk ledger · soft-launch Spot");
+    expect(html).toContain("Desk ledger");
+    expect(html).toContain('data-wallet-slice="desk"');
+    expect(html).toContain('href="#acct-desk"');
+    expect(html).toContain(">Connect<");
+    expect(html).toContain("Hub wallet");
+    expect(html).not.toContain("Paper trading · node wallet · lab sandbox");
+    expect(html).not.toContain("Paper wallet");
+    expect(html).not.toContain("Lab ledger");
+    expect(html).not.toContain("Connect fixture");
+    expect(html).not.toContain('href="#account">Open');
+  });
+
+  it("desk session live marks desk ledger Active", () => {
+    setLabSessionMeta("HMC-deskmw0123456789", "csrf-mw");
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(html).toContain('data-wallet-slice="desk"');
+    expect(html).toContain(">Active<");
+    expect(html).not.toContain('href="#acct-desk"');
+  });
+
   it("renders soft-launch caps when health advertises them", () => {
     const html = renderAccountPage(baseState(), sampleMarket(), {
       feeWallet: null,

@@ -71,6 +71,27 @@ describe("formatPrice", () => {
     expect(() => new Intl.NumberFormat(tag).format(1)).not.toThrow();
     expect(chartLocalization().priceFormatter(0.05)).toContain("0.05");
   });
+
+  it("1D tick marks are dates, not HH:MM", async () => {
+    const { chartTickMarkFormatter } = await import("./format");
+    const { TickMarkType } = await import("lightweight-charts");
+    const fmt = chartTickMarkFormatter("1D");
+    const day = Math.floor(Date.parse("2026-10-03T00:00:00.000Z") / 1000);
+    const label = fmt(day as never, TickMarkType.DayOfMonth, "en-US");
+    expect(label).toMatch(/Oct/);
+    expect(label).toMatch(/3/);
+    expect(label).not.toMatch(/^\d{2}:\d{2}$/);
+    // UTC day key — not shifted by local TZ.
+    expect(label).toBe("Oct 3");
+    // Month boundary must be "Oct 2026", never "Oct 26" (year 2-digit looked like day 26).
+    const month = fmt(day as never, TickMarkType.Month, "en-US");
+    expect(month).toBe("Oct 2026");
+    expect(month).not.toBe("Oct 26");
+    expect(month).not.toMatch(/^Oct\s+26$/);
+    const fmt1m = chartTickMarkFormatter("1m");
+    const minLabel = fmt1m((day + 16 * 3600 + 10 * 60) as never, TickMarkType.Time, "en-US");
+    expect(minLabel).toMatch(/\d{2}:\d{2}/);
+  });
 });
 
 describe("formatNum / formatPct", () => {

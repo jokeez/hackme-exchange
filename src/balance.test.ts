@@ -8,6 +8,7 @@ import {
   maxSellBaseAmount,
   reservedBalances,
 } from "./balance";
+import { calcFee } from "./fees";
 import { placeOco, placeOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
 
@@ -213,7 +214,7 @@ describe("100% pct sizing (buy + sell)", () => {
     expect(assertOrderFunds(s, m, "HMC_USDT", "buy", naive, slip, "market", true).ok).toBe(false);
   });
 
-  it("buy with payFeesInHmc and 0 HMC returns 0 (fee blocker, not quote Avbl 0)", () => {
+  it("buy with payFeesInHmc and 0 HMC blocks meaningful size (fee blocker, not quote Avbl 0)", () => {
     const m = sampleMarket({ hmcUsdt: 0.05, supUsdt: 0.05 });
     const s = baseState({
       wallet: { usdt: 0, hmc: 0, sup: 0.199, btc: 0 },
@@ -221,10 +222,19 @@ describe("100% pct sizing (buy + sell)", () => {
     });
     const price = 0.2003;
     const amt = maxBuyBaseAmount(s, m, "HMC_SUP", price, "market", 1, price);
-    expect(amt).toBe(0);
+    // Server-parity ApplyHMCDiscountPct trunc can zero feeHmc on dust notionals, so MAX may
+    // return a sub-fee dust size (e.g. ~5e-5) — not a regression vs exact 0. Meaningful fills stay blocked.
+    expect(amt).toBeLessThan(0.001);
+    if (amt > 0) {
+      const dustFee = calcFee(s, m, "HMC_SUP", price * amt, "taker");
+      expect(dustFee.paidInHmc).toBe(true);
+      expect(dustFee.feeHmc).toBe(0);
+    }
     const probe = assertOrderFunds(s, m, "HMC_SUP", "buy", 0.5, price, "market");
     expect(probe.ok).toBe(false);
     if (!probe.ok) expect(probe.reason).toMatch(/HMC for fee/i);
+    const probeFee = calcFee(s, m, "HMC_SUP", price * 0.5, "taker");
+    expect(probeFee.feeHmc).toBeGreaterThan(0);
   });
 
   it("maxOrderBaseAmount pct fractions stay within free funds", () => {

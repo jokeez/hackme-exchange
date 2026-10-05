@@ -39,6 +39,15 @@ export const CONVERT_ASSETS: { key: keyof Wallet; symbol: string; name: string }
   { key: "btc", symbol: "BTC", name: "Bitcoin" },
 ];
 
+/** Soft-launch Convert desk — HMC/USDT + HMC/SUP only (BTC / SUP↔USDT stay off the picker). */
+export const CONVERT_PRIMARY_PAIRS = ["HMC_USDT", "HMC_SUP"] as const;
+export type ConvertPrimaryPair = (typeof CONVERT_PRIMARY_PAIRS)[number];
+
+export const CONVERT_UI_ASSETS = CONVERT_ASSETS.filter(
+  (a): a is { key: "hmc" | "sup" | "usdt"; symbol: string; name: string } =>
+    a.key === "hmc" || a.key === "sup" || a.key === "usdt",
+);
+
 export function convertRouteDef(route: ConvertRoute): RouteDef | null {
   return ROUTES[route] ?? null;
 }
@@ -48,6 +57,78 @@ export function routeForAssets(from: keyof Wallet, to: keyof Wallet): ConvertRou
     if (r.from === from && r.to === to) return id;
   }
   return null;
+}
+
+export function isPrimaryConvertRoute(route: ConvertRoute): boolean {
+  const r = ROUTES[route];
+  return !!r && (r.pair === "HMC_USDT" || r.pair === "HMC_SUP");
+}
+
+/** Allowed To assets for the Convert desk given From (primary pairs only). */
+export function convertAllowedToAssets(from: keyof Wallet): Array<"hmc" | "sup" | "usdt"> {
+  if (from === "hmc") return ["usdt", "sup"];
+  if (from === "usdt" || from === "sup") return ["hmc"];
+  return ["usdt"];
+}
+
+/** Snap From/To onto a primary Convert route (defaults HMC→USDT). */
+export function clampPrimaryConvertLegs(
+  from: keyof Wallet,
+  to: keyof Wallet,
+): { from: keyof Wallet; to: keyof Wallet } {
+  const ui = new Set<keyof Wallet>(["hmc", "sup", "usdt"]);
+  let f: keyof Wallet = ui.has(from) ? from : "hmc";
+  let t: keyof Wallet = ui.has(to) ? to : "usdt";
+  if (f === t) t = f === "hmc" ? "usdt" : "hmc";
+  const route = routeForAssets(f, t);
+  if (route && isPrimaryConvertRoute(route)) return { from: f, to: t };
+  if (f === "sup" || t === "sup") {
+    return f === "sup" ? { from: "sup", to: "hmc" } : { from: "hmc", to: "sup" };
+  }
+  return { from: "hmc", to: "usdt" };
+}
+
+export function convertPrimaryPair(from: keyof Wallet, to: keyof Wallet): ConvertPrimaryPair | null {
+  const route = routeForAssets(from, to);
+  if (!route || !isPrimaryConvertRoute(route)) return null;
+  const pair = ROUTES[route].pair;
+  return pair === "HMC_USDT" || pair === "HMC_SUP" ? pair : null;
+}
+
+/** Apply a primary pair tab while preserving direction when possible. */
+export function applyConvertPrimaryPair(
+  pair: ConvertPrimaryPair,
+  from: keyof Wallet,
+  to: keyof Wallet,
+): { from: keyof Wallet; to: keyof Wallet } {
+  const curRoute = routeForAssets(from, to);
+  const wasInvert = !!(curRoute && ROUTES[curRoute]?.invert);
+  if (pair === "HMC_USDT") {
+    return wasInvert ? { from: "usdt", to: "hmc" } : { from: "hmc", to: "usdt" };
+  }
+  return wasInvert ? { from: "sup", to: "hmc" } : { from: "hmc", to: "sup" };
+}
+
+/** Compact quote age for Convert desk freshness chrome. */
+export function formatConvertQuoteAge(quotedAtMs: number, nowMs = Date.now()): string {
+  if (!(quotedAtMs > 0) || !Number.isFinite(quotedAtMs)) return "—";
+  const ageSec = Math.max(0, Math.floor((nowMs - quotedAtMs) / 1000));
+  if (ageSec < 2) return "Fresh";
+  if (ageSec < 60) return `${ageSec}s ago`;
+  const mins = Math.floor(ageSec / 60);
+  if (mins < 10) return `${mins}m ago`;
+  return "Stale · refresh";
+}
+
+/** Primary CTA copy — amount + direction when sized. */
+export function convertCtaLabel(
+  fromSym: string,
+  toSym: string,
+  amount: number,
+  formatAmt: (n: number) => string,
+): string {
+  if (!(amount > 0) || !Number.isFinite(amount)) return "Enter amount";
+  return `Convert ${formatAmt(amount)} ${fromSym} → ${toSym}`;
 }
 
 export function flipRoute(route: ConvertRoute): ConvertRoute | null {

@@ -1202,7 +1202,12 @@ async function testMobileDeep(browser) {
 
     const indTabs = await page.evaluate(() => {
       const tabs = document.getElementById("ind-tabs");
-      if (!tabs) return { ok: false };
+      if (!tabs) return { ok: false, reason: "missing" };
+      const cs = getComputedStyle(tabs);
+      // Chart panel intentionally hides ind chips (More sheet) — Binance/OKX pattern.
+      if (cs.display === "none" || cs.visibility === "hidden") {
+        return { ok: true, hidden: true };
+      }
       const first = tabs.querySelector(".ind");
       const tabRect = first?.getBoundingClientRect();
       const rowRect = tabs.getBoundingClientRect();
@@ -1212,7 +1217,7 @@ async function testMobileDeep(browser) {
       return { ok: !clipped && tabs.scrollHeight <= tabs.clientHeight + 2, clipped };
     });
     if (!indTabs.ok) note("P1", "mobile-ind-tabs", "indicator tabs clipped");
-    else ok("mobile indicator tabs not clipped");
+    else ok(indTabs.hidden ? "mobile indicator tabs hidden in More (expected)" : "mobile indicator tabs not clipped");
 
     const scaleBox = await page.locator("#chart-host .tv-lightweight-charts table tr td:last-child").first().boundingBox();
     if (!scaleBox) {

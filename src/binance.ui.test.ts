@@ -57,6 +57,9 @@ describe("binance-inspired UI contracts", () => {
     const modals = readFileSync(resolve(process.cwd(), "src/chartModals.ts"), "utf8");
     expect(app).toContain('id="cv-flip"');
     expect(app).toContain('id="cv-max"');
+    expect(app).toContain("useServerConvert");
+    expect(app).toContain("renderConvertPairTabs");
+    expect(app).not.toContain("Popular routes");
     expect(app).toContain('state.mainView === "convert"');
     expect(app).toContain('document.getElementById("cv-flip")?.click()');
     expect(modals).toContain("mc-link-panes");

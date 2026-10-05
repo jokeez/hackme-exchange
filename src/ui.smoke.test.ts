@@ -326,7 +326,11 @@ describe("chart context menu actions", () => {
     expect(menu!.textContent).toContain("Buy HMC");
     expect(menu!.textContent).toContain("Sell HMC");
     expect(menu!.textContent).toContain("Add Alert");
+    expect(menu!.textContent).toContain("Cancel nearest");
+    expect(menu!.textContent).toContain("Cancel all open");
     expect(menu!.innerHTML).toContain("add_alert");
+    expect(menu!.innerHTML).toContain("cancel_nearest");
+    expect(menu!.querySelector('[data-a="cancel_all"]')?.hasAttribute("disabled")).toBe(true);
     // Menu must not inject a sticky orange price-line DOM node
     expect(document.querySelector("[title='↕']")).toBeNull();
     closeChartContextMenu();
@@ -425,13 +429,15 @@ describe("visual CSS tokens & critical rules", () => {
     expect(css).toMatch(/--edge:\s*#2a2e39/);
   });
 
-  it("ships centered convert desk with readable chips", () => {
+  it("ships centered convert desk with primary pair tabs", () => {
     expect(css).toContain(".convert-shell");
     expect(css).toContain(".convert-desk-wrap");
-    expect(css).toContain(".cv-chip.active");
+    expect(css).toContain(".cv-pair-tab.active");
+    expect(css).toContain(".cv-quote-age");
     expect(css).toContain(".cv-pct button.active");
+    expect(css).not.toContain("Popular routes");
     expect(css).toMatch(/\.convert-shell\s*\{[^}]*margin:\s*0 auto/s);
-    expect(css).toMatch(/\.cv-chip\s*\{[^}]*font-weight:\s*600/s);
+    expect(css).toMatch(/\.cv-pair-tab\s*\{[^}]*font-weight:\s*700/s);
   });
 
   it("keeps thin scrollbars on terminal panes", () => {

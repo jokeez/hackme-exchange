@@ -140,7 +140,8 @@ export type ChartOverlaySettings = {
 };
 
 export const DEFAULT_CHART_OVERLAYS: ChartOverlaySettings = {
-  showVolume: true,
+  /** Off by default — volume histogram reads as a green/red strip under candles. */
+  showVolume: false,
   showOrderLines: true,
   showLastPrice: true,
   orderPreview: false,

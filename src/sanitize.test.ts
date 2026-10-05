@@ -10,6 +10,7 @@ import {
   sanitizeHttpUrl,
   sanitizeIndicatorConfig,
   sanitizeOracleAnchor,
+  sanitizeOtpauthUrl,
   migrateOracleAnchor,
 } from "./sanitize";
 
@@ -37,6 +38,17 @@ describe("escapeHtml", () => {
     expect(escapeHtml(`<img src=x onerror="alert(1)">`)).toBe(
       "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;",
     );
+  });
+});
+
+describe("sanitizeOtpauthUrl", () => {
+  it("allows totp otpauth and rejects javascript/https", () => {
+    const ok = sanitizeOtpauthUrl("otpauth://totp/HackMe:user?secret=ABCDEF&issuer=HackMe");
+    expect(ok).toMatch(/^otpauth:\/\//);
+    expect(sanitizeOtpauthUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeOtpauthUrl("https://evil.example/phish")).toBeNull();
+    expect(sanitizeOtpauthUrl("otpauth://evilhost/x")).toBeNull();
+    expect(sanitizeOtpauthUrl("")).toBeNull();
   });
 });
 

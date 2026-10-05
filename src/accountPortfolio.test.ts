@@ -33,6 +33,11 @@ describe("accountPortfolio", () => {
     expect(formatFloatingPnlDisplay(1.25, 10)).toBe("+1.25 (+10.00%)");
   });
 
+  it("formatFloatingPnlDisplay shows flat instead of 0.00%", () => {
+    expect(formatFloatingPnlDisplay(0, 0)).toBe("flat");
+    expect(formatFloatingPnlDisplay(1e-12, 0)).toBe("flat");
+  });
+
   it("syncDenomRingDom highlights active denom orb", () => {
     document.body.innerHTML = `<div class="acct-denom-ring">
       <button data-denom="USDT" class="acct-denom-orb active"></button>

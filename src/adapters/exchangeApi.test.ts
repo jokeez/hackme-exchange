@@ -13,6 +13,7 @@ import {
   exchangeHealth,
   fetchExchangeBalances,
   fetchExchangeBook,
+  fetchExchangeVip,
   listExchangeFills,
   listExchangeOrders,
   mergeApiBalancesIntoWallet,
@@ -408,6 +409,17 @@ describe("exchangeApi HTTP (mocked)", () => {
             { status: 200 },
           );
         }
+        if (url.includes("/vip")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              address: "HMC-65b60673d6ed884b",
+              volume_30d_usdt: 150_000 * 100_000_000,
+              tier: { name: "VIP1", maker_bps: 6, taker_bps: 8, min_vol_usdt_minor: 100_000 * 100_000_000 },
+            }),
+            { status: 200 },
+          );
+        }
         if (url.includes("/fills")) {
           return new Response(JSON.stringify({ fills: [] }), { status: 200 });
         }
@@ -511,6 +523,9 @@ describe("exchangeApi HTTP (mocked)", () => {
     const bal = await fetchExchangeBalances(5_000, base);
     expect(bal).toMatchObject({ ok: true });
     if (bal.ok) expect(minorToDisplay(bal.balances[0]!.available)).toBe(5);
+    const vip = await fetchExchangeVip(5_000, base);
+    expect(vip).toMatchObject({ ok: true, tier: { name: "VIP1", maker_bps: 6, taker_bps: 8 } });
+    if (vip.ok) expect(minorToDisplay(vip.volume_30d_usdt)).toBe(150_000);
     const ord = await postExchangeOrder(
       { pair: "HMC/USDT", side: "buy", type: "limit", qty: 100_000_000, price: 42000 },
       3_000,

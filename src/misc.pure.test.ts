@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { uid } from "./id";
 import { roundToTick, tickInputValue } from "./tick";
-import { feeScheduleLabel, previewFeeRole, quoteAssetForPair, volume30dUsdt } from "./fees";
+import {
+  clearServerVipVolume,
+  feeScheduleLabel,
+  previewFeeRole,
+  quoteAssetForPair,
+  setServerVipVolumeUsdt,
+  volume30dUsdt,
+} from "./fees";
 import { baseState } from "./testFixtures";
 import { defaultIndicatorConfig, defaultOverlays } from "./chartModals";
 import { countActiveIndicators, clearAllIndicators, clearIndicatorConfig, toggleIndicator } from "./chart";
@@ -82,13 +89,24 @@ describe("fees extras", () => {
     expect(feeScheduleLabel(baseState())).toMatch(/Taker/);
     expect(feeScheduleLabel(baseState())).toMatch(/demo VIP/);
   });
+
+  it("feeScheduleLabel switches to desk VIP when server volume synced", () => {
+    setServerVipVolumeUsdt(0);
+    expect(feeScheduleLabel(baseState())).toMatch(/desk VIP · server volume/);
+    clearServerVipVolume();
+    expect(feeScheduleLabel(baseState())).toMatch(/demo VIP · local history/);
+  });
+});
+
+afterEach(() => {
+  clearServerVipVolume();
 });
 
 describe("chartModals defaults", () => {
   it("default overlays / indicator config are clones of types defaults", () => {
     const o = defaultOverlays();
     const ic = defaultIndicatorConfig();
-    expect(o.showVolume).toBe(true);
+    expect(o.showVolume).toBe(false);
     expect(ic.ma).toHaveLength(4);
     o.showOrderLines = !o.showOrderLines;
     expect(defaultOverlays().showOrderLines).not.toBe(o.showOrderLines);

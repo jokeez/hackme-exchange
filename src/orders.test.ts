@@ -250,30 +250,59 @@ describe("processOpenOrders", () => {
     expect(s.trades[0]?.feeRole).toBe("taker");
   });
 
-  it("sell stop-limit triggers then fills when mid reaches limit", () => {
+  it("sell stop-limit fills on gap through limit (protective)", () => {
     const s = baseState();
     placeOrder(s, "HMC_USDT", "sell", "stop_limit", 100, 0.048, 0.049);
-    let m = sampleMarket({ hmcUsdt: 0.047 });
-    processOpenOrders(s, m, tickersFor(m));
-    expect(s.orders[0].status).toBe("triggered");
-    m = sampleMarket({ hmcUsdt: 0.048 });
+    const m = sampleMarket({ hmcUsdt: 0.047 });
     processOpenOrders(s, m, tickersFor(m));
     expect(s.orders[0].status).toBe("filled");
+    expect(s.trades[0]?.price).toBe(0.047);
     expect(s.trades[0]?.feeRole).toBe("taker");
   });
 
-  it("buy OCO SL triggers on mid rise then fills at limit", () => {
+  it("attached SL with stop==limit fills when mid gaps past (not stuck triggered)", () => {
+    const s = baseState();
+    placeOrder(s, "HMC_USDT", "sell", "stop_limit", 100, 0.045, 0.045);
+    const m = sampleMarket({ hmcUsdt: 0.04 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(s.orders[0].status).toBe("filled");
+    expect(s.trades[0]?.price).toBe(0.04);
+  });
+
+  it("OCO SL gaps through stop==limit and cancels TP", () => {
+    const s = baseState();
+    const placed = placeOco(s, "HMC_USDT", "sell", 50, 0.06, 0.045, 0.045, market);
+    expect("tp" in placed).toBe(true);
+    if (!("tp" in placed)) return;
+    const m = sampleMarket({ hmcUsdt: 0.04 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(placed.sl.status).toBe("filled");
+    expect(placed.tp.status).toBe("cancelled");
+    expect(s.trades[0]?.price).toBe(0.04);
+  });
+
+  it("buy OCO SL gaps through limit and cancels TP", () => {
     const s = baseState();
     const placed = placeOco(s, "HMC_USDT", "buy", 1000, 0.04, 0.055, 0.052, market);
     expect("tp" in placed).toBe(true);
     if (!("tp" in placed)) return;
-    let m = sampleMarket({ hmcUsdt: 0.056 });
-    processOpenOrders(s, m, tickersFor(m));
-    expect(placed.sl.status).toBe("triggered");
-    expect(placed.tp.status).toBe("open");
-    m = sampleMarket({ hmcUsdt: 0.051 });
+    const m = sampleMarket({ hmcUsdt: 0.056 });
     processOpenOrders(s, m, tickersFor(m));
     expect(placed.sl.status).toBe("filled");
+    expect(placed.tp.status).toBe("cancelled");
+    expect(s.trades[0]?.price).toBe(0.056);
+  });
+
+  it("buy OCO SL fills at limit when mid lands between stop and limit", () => {
+    const s = baseState();
+    const placed = placeOco(s, "HMC_USDT", "buy", 1000, 0.04, 0.055, 0.06, market);
+    expect("tp" in placed).toBe(true);
+    if (!("tp" in placed)) return;
+    // mid above stop, at/below limit → classic limit fill (no adverse gap)
+    const m = sampleMarket({ hmcUsdt: 0.057 });
+    processOpenOrders(s, m, tickersFor(m));
+    expect(placed.sl.status).toBe("filled");
+    expect(s.trades[0]?.price).toBe(0.06);
     expect(placed.tp.status).toBe("cancelled");
   });
 

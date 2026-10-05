@@ -11,6 +11,7 @@ ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 describe("deskWallet", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     vi.resetModules();
   });
 
@@ -37,9 +38,11 @@ describe("deskWallet", () => {
       isExchangeApiWired: () => true,
       isLabLoopbackApi: () => false,
     }));
-    const { loadOrCreateDeskSeed, clearDeskSeed, deskWalletIdentity } = await import("./deskWallet");
+    const { loadOrCreateDeskSeed, clearDeskSeed, deskWalletIdentity, deskSeedStorageKind } = await import("./deskWallet");
     const first = deskWalletIdentity(loadOrCreateDeskSeed()).address;
+    expect(deskSeedStorageKind()).toBe("local");
     clearDeskSeed();
+    expect(deskSeedStorageKind()).toBe("none");
     const second = deskWalletIdentity(loadOrCreateDeskSeed()).address;
     expect(second).toMatch(/^HMC-[0-9a-f]{16}$/);
     expect(second).not.toBe(first);

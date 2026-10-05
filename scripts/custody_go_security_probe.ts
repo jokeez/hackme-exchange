@@ -89,8 +89,9 @@ async function main() {
   else pass("withdraw.enabled=true");
   if (h.public_edge !== true) fail("public_edge");
   else pass("public_edge");
-  if (h.max_open_orders !== 20) fail(`max_open_orders ${h.max_open_orders}`);
-  else pass("max_open_orders=20");
+  if (h.max_open_orders !== 20 && h.max_open_orders !== 40) {
+    fail(`max_open_orders ${h.max_open_orders} (want 20 or 40 soft-launch)`);
+  } else pass(`max_open_orders=${h.max_open_orders}`);
 
   for (const path of ["/metrics", "/openapi.yaml", "/lab/deposit", "/admin/credit", "/admin/node-watch-sync", "/admin/withdraw/complete"]) {
     const r = await fetch(`${BASE}${path}`, {

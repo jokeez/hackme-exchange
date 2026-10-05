@@ -66,25 +66,25 @@ export function maxJumpFracForTf(tf: Timeframe | string): number {
 export function maxWickFracForTf(tf: Timeframe | string): number {
   switch (tf) {
     case "30s":
-      return 0.0035;
+      return 0.0025;
     case "1m":
-      return 0.0045;
+      return 0.0032;
     case "3m":
-      return 0.006;
+      return 0.0045;
     case "5m":
-      return 0.008;
+      return 0.006;
     case "15m":
-      return 0.01;
+      return 0.0075;
     case "1H":
-      return 0.014;
+      return 0.011;
     case "2H":
-      return 0.018;
+      return 0.014;
     case "4H":
-      return 0.022;
+      return 0.018;
     case "1D":
-      return 0.03;
+      return 0.025;
     case "1W":
-      return 0.045;
+      return 0.04;
     default:
       return MAX_WICK_FRAC;
   }
@@ -115,6 +115,96 @@ export function maxBodyFracForTf(tf: Timeframe | string): number {
     default:
       return 0.03;
   }
+}
+
+/**
+ * Display-only body cap — Soft-MM cliffs only (not quiet CEX tape).
+ * Kept near state maxBody so real Soft-MM / print moves paint as readable
+ * bodies (hammer / engulfing / marubozu), not Renko hairlines.
+ */
+export function paintMaxBodyFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.012;
+    case "1m":
+      return 0.016;
+    case "3m":
+      return 0.02;
+    case "5m":
+      return 0.022;
+    case "15m":
+      return 0.028;
+    case "1H":
+      return 0.035;
+    case "2H":
+      return 0.04;
+    case "4H":
+      return 0.045;
+    case "1D":
+      return 0.05;
+    case "1W":
+      return 0.07;
+    default:
+      return 0.025;
+  }
+}
+
+/**
+ * Max Y-span (fraction of mid) before tip-anchoring.
+ * Binance/TV keep several % of visible Soft-MM breathe — not a 1.2% tip window
+ * that flattens history into a dashed ruler at the bottom of the pane.
+ */
+export function paintMaxSpanFracForTf(tf: Timeframe | string): number {
+  switch (tf) {
+    case "30s":
+      return 0.045;
+    case "1m":
+      return 0.055;
+    case "3m":
+      return 0.065;
+    case "5m":
+      return 0.08;
+    case "15m":
+      return 0.1;
+    case "1H":
+      return 0.14;
+    case "2H":
+      return 0.16;
+    case "4H":
+      return 0.2;
+    case "1D":
+      return 0.28;
+    case "1W":
+      return 0.4;
+    default:
+      return 0.1;
+  }
+}
+
+/**
+ * Clamp a robust range so Soft-MM cliffs cannot squash the pane, while normal
+ * multi-hour Soft-MM breathe still fills the viewport (CEX desk).
+ */
+export function clampPaintPriceSpan(
+  range: PriceRange,
+  tipClose: number,
+  maxSpanFrac: number,
+): PriceRange {
+  let minValue = range.minValue;
+  let maxValue = range.maxValue;
+  if (!(maxValue > minValue)) return range;
+  const tip = finitePos(tipClose) ? tipClose : (minValue + maxValue) / 2;
+  // Always keep Last on-screen.
+  if (tip < minValue) minValue = tip;
+  if (tip > maxValue) maxValue = tip;
+  const mid = (minValue + maxValue) / 2;
+  const maxSpan = Math.max(Math.abs(mid) * maxSpanFrac, Math.abs(tip) * maxSpanFrac, 1e-12);
+  let span = maxValue - minValue;
+  if (span <= maxSpan) return { minValue, maxValue };
+  // Extreme cliff only: tip-centered window (still wide enough for real bodies).
+  const above = maxSpan * 0.45;
+  const below = maxSpan - above;
+  return { minValue: tip - below, maxValue: tip + above };
 }
 
 function finitePos(n: number): boolean {
@@ -243,30 +333,34 @@ export function sanitizeCandleExtremes(
 export type PriceRange = { minValue: number; maxValue: number };
 
 /**
- * Robust visible range: use percentiles of OHLC so extreme wicks don't squash the pane.
- * Last close is included only when it sits near the percentile band (no cliff expansion).
+ * Robust visible range: body-weighted percentiles so mile wicks / dump cliffs
+ * don't squash the pane into «island» hairlines with blank strips between.
+ * Last close is included only when it sits near the percentile band.
  */
 export function robustPriceRange(
   candles: Candle[],
   fromIdx = 0,
   toIdx?: number,
-  loPct = 0.02,
-  hiPct = 0.98,
+  loPct = 0.05,
+  hiPct = 0.95,
 ): PriceRange | null {
   if (!candles.length) return null;
   const start = Math.max(0, Math.floor(fromIdx));
   const end = Math.min(candles.length - 1, Math.floor(toIdx ?? candles.length - 1));
   if (end < start) return null;
 
-  const samples: number[] = [];
+  // Prefer open/close (bodies). Admit high/low only when they sit near the body
+  // — otherwise Soft-MM needles expand Y and every quiet bar becomes invisible.
+  const bodySamples: number[] = [];
+  const wickSamples: number[] = [];
   for (let i = start; i <= end; i++) {
     const c = candles[i]!;
-    if (finitePos(c.low)) samples.push(c.low);
-    if (finitePos(c.high)) samples.push(c.high);
-    if (finitePos(c.open)) samples.push(c.open);
-    if (finitePos(c.close)) samples.push(c.close);
+    if (finitePos(c.open)) bodySamples.push(c.open);
+    if (finitePos(c.close)) bodySamples.push(c.close);
+    if (finitePos(c.high)) wickSamples.push(c.high);
+    if (finitePos(c.low)) wickSamples.push(c.low);
   }
-  if (samples.length < 4) {
+  if (bodySamples.length < 4) {
     const closes = candles.slice(start, end + 1).map((c) => c.close).filter(finitePos);
     if (!closes.length) return null;
     const mn = Math.min(...closes);
@@ -278,29 +372,150 @@ export function robustPriceRange(
     return { minValue: mn, maxValue: mx };
   }
 
-  samples.sort((a, b) => a - b);
-  const at = (p: number) => {
-    const i = Math.min(samples.length - 1, Math.max(0, Math.floor(p * (samples.length - 1))));
-    return samples[i]!;
+  bodySamples.sort((a, b) => a - b);
+  const at = (arr: number[], p: number) => {
+    const i = Math.min(arr.length - 1, Math.max(0, Math.floor(p * (arr.length - 1))));
+    return arr[i]!;
   };
-  let minValue = at(loPct);
-  let maxValue = at(hiPct);
-  const last = candles[end]!;
-  if (finitePos(last.close)) {
-    const span = Math.max(maxValue - minValue, maxValue * 0.002);
-    const bandLo = minValue - span * 0.25;
-    const bandHi = maxValue + span * 0.25;
-    if (last.close >= bandLo && last.close <= bandHi) {
-      minValue = Math.min(minValue, last.close);
-      maxValue = Math.max(maxValue, last.close);
+  let minValue = at(bodySamples, loPct);
+  let maxValue = at(bodySamples, hiPct);
+  const bodySpan = Math.max(maxValue - minValue, maxValue * 0.002);
+  // Allow modest wick extension (~35% of body span) — not full needle extremes.
+  const wickPad = bodySpan * 0.35;
+  for (const w of wickSamples) {
+    if (w >= minValue - wickPad && w <= maxValue + wickPad) {
+      minValue = Math.min(minValue, w);
+      maxValue = Math.max(maxValue, w);
     }
+  }
+  const last = candles[end]!;
+  // Always keep Last on-scale — excluding tip after Soft-MM breathe painted the
+  // empty-top / flat-bottom screenshot (Yday + tip islands).
+  if (finitePos(last.close)) {
+    minValue = Math.min(minValue, last.close);
+    maxValue = Math.max(maxValue, last.close);
+  }
+  if (finitePos(last.open)) {
+    minValue = Math.min(minValue, last.open);
+    maxValue = Math.max(maxValue, last.open);
   }
   if (!(maxValue > minValue)) {
     const pad = Math.max(Math.abs(maxValue) * 0.002, 1e-12);
     return { minValue: maxValue - pad, maxValue: maxValue + pad };
   }
-  const pad = (maxValue - minValue) * 0.04;
+  const pad = (maxValue - minValue) * 0.06;
   return { minValue: minValue - pad, maxValue: maxValue + pad };
+}
+
+/** Deterministic ∈ [-1,1] from bar time — display breathe only (not trading state). */
+function paintNoise(time: number, salt: number): number {
+  let x = (Math.imul(time ^ salt, 0x9e3779b9) >>> 0) / 0x100000000;
+  x = x * 2 - 1;
+  return x;
+}
+
+/**
+ * CEX desk paint for every TF / pair (Binance · Bybit · CME OHLC):
+ * - open bridges prior close (24/7 crypto continuity)
+ * - high/low = real traded extremes (clipped Soft-MM mile needles only)
+ * - tip close = Last
+ * - sticky Soft-MM peg dojis get micro body+wick so bars look like candles,
+ *   not a dashed ruler
+ *
+ * No backward tip-walk Renko — that squashed history into flat hairlines.
+ */
+function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
+  const maxBody = Math.max(paintMaxBodyFracForTf(tf), maxBodyFracForTf(tf) * 0.85);
+  const maxWick = maxWickFracForTf(tf);
+  // Tip may sit far from week/day open after Soft-MM breathe — allow wider tip wick clip.
+  const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.35);
+  // Quiet-tape breathe — enough for hammer / doji / marubozu silhouette, not Renko steps.
+  const minBody = Math.min(maxBody * 0.22, 0.0018);
+  const tipIdx = candles.length - 1;
+  const tipClose = finitePos(candles[tipIdx]!.close)
+    ? candles[tipIdx]!.close
+    : finitePos(candles[tipIdx]!.open)
+      ? candles[tipIdx]!.open
+      : 0;
+  if (!(tipClose > 0)) return candles;
+
+  const out: Candle[] = new Array(candles.length);
+  let prevClose = finitePos(candles[0]!.open) ? candles[0]!.open : candles[0]!.close;
+  for (let i = 0; i < candles.length; i++) {
+    const raw = candles[i]!;
+    // Binance/CME spot: next bar opens at prior close (24/7 crypto; no session gap invent).
+    let open = finitePos(prevClose) ? prevClose : finitePos(raw.open) ? raw.open : tipClose;
+    let close = i === tipIdx ? tipClose : finitePos(raw.close) ? raw.close : open;
+
+    // Closed bars: body-cap Soft-MM cliffs. Tip: Last wins — never invent tip open island.
+    if (i !== tipIdx && Math.abs(close - open) / Math.max(open, 1e-12) > maxBody) {
+      const sign = close >= open ? 1 : -1;
+      close = open * (1 + sign * maxBody);
+    }
+
+    // Sticky Soft-MM peg (O≈C, H≈L): synthesize CEX-quiet body + wick so the pane
+    // shows real candles (patterns sheet), not flat horizontal dashes.
+    const midRef = Math.max(Math.abs(open), Math.abs(close), 1e-12);
+    const bodyLo = Math.min(open, close);
+    const dumpNeedle =
+      finitePos(raw.low) &&
+      bodyLo > 0 &&
+      (bodyLo - raw.low) / bodyLo > Math.max(maxWick * 2.5, 0.006);
+    // Peg / doji: flat body — ignore modest Soft-MM H/L (0.1% ceiling band).
+    const flatTape = Math.abs(close - open) / midRef < minBody * 0.55 && !dumpNeedle;
+    if (flatTape && i !== tipIdx) {
+      const n = paintNoise(raw.time, 0x71c4);
+      const sign = n >= 0 ? 1 : -1;
+      close = open * (1 + sign * minBody * (0.7 + 0.3 * Math.abs(n)));
+    }
+    // Forming bar: open always bridges prior close — widen wicks only (CEX).
+
+    // Preserve child high/low (true wicks), then clip Soft-MM mile needles.
+    let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
+    let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
+    if (flatTape) {
+      const wickPad = Math.max(midRef * maxWick, midRef * minBody * 0.35, 1e-12);
+      high = Math.max(high, Math.max(open, close) + wickPad * (0.25 + 0.55 * Math.abs(paintNoise(raw.time, 0x4111))));
+      low = Math.min(
+        low,
+        Math.min(open, close) - wickPad * (0.25 + 0.55 * Math.abs(paintNoise(raw.time, 0x1010))),
+      );
+      low = Math.max(low, midRef * 1e-6);
+    }
+
+    let painted: Candle;
+    if (i === tipIdx) {
+      painted = clipBarWicks({ ...raw, open, high, low, close: tipClose }, tipWick);
+      painted = {
+        ...painted,
+        open,
+        close: tipClose,
+        high: Math.max(painted.high, open, tipClose),
+        low: Math.min(painted.low, open, tipClose),
+      };
+    } else {
+      painted = constrainBarToOpen(
+        clipBarWicks({ ...raw, open, high, low, close }, maxWick),
+        maxBody,
+        maxWick,
+      );
+    }
+    out[i] = {
+      ...painted,
+      volume: raw.volume > 0 ? raw.volume : Math.max(Math.abs(open) * 0.02, 1e-6),
+    };
+    prevClose = out[i]!.close;
+  }
+  return out;
+}
+
+/**
+ * Display-only OHLC for LWC — CEX aggregation paint on every TF / pair / ticker.
+ * State/cache untouched. Tip close always = Last.
+ */
+export function displayCapCandles(candles: Candle[], tf: Timeframe | string): Candle[] {
+  if (candles.length < 2) return candles;
+  return displayCapCex(candles, tf);
 }
 
 /** Logical range → candle indices (LWC logical coords ≈ bar index). */

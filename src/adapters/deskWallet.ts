@@ -1,6 +1,9 @@
 /**
- * Browser-local HMC wallet for public desk Connect (HOLD matching).
- * Seed stays in sessionStorage only — never shipped in the bundle, never a known lab fixture.
+ * Browser-local HMC wallet for public desk Connect (soft-launch matching).
+ *
+ * Seed is durable in localStorage (survives reload + tab close) with a
+ * sessionStorage mirror. Logout / clear-wallet wipes both. Treat like a private key:
+ * XSS on this origin can read it — keep escapeHtml / CSP tight; export JSON is SECRET.
  */
 
 import * as ed from "@noble/ed25519";
@@ -59,6 +62,21 @@ function readStoredDeskSeed(): string | null {
 /** True when a desk seed is stored (localStorage preferred). */
 export function hasDeskSeed(): boolean {
   return !!readStoredDeskSeed();
+}
+
+/** Where the active seed lives — for security chrome / docs honesty. */
+export function deskSeedStorageKind(): "local" | "session" | "none" {
+  try {
+    if (normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "")) return "local";
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "")) return "session";
+  } catch {
+    /* ignore */
+  }
+  return "none";
 }
 
 export function loadOrCreateDeskSeed(): string {
@@ -122,7 +140,7 @@ export function buildDeskSeedBackup(seedHex = loadOrCreateDeskSeed()): DeskSeedB
     seed_hex: id.seedHex,
     created_at: new Date().toISOString(),
     warning:
-      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Matching/deposit/withdraw stay HOLD until GO.",
+      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Soft-launch seed is durable in this browser until Clear wallet / Logout.",
   };
 }
 

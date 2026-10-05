@@ -117,9 +117,10 @@ describe("security / mode boundaries", () => {
     expect(INTEGRATION.adminToken ?? "").toBe("");
   });
 
-  it("withdraw dest validator blocks XSS and SUP-as-HMC confusion", async () => {
+  it("withdraw dest validator blocks XSS; SUP shares HMC- rail", async () => {
     const { validateLabWithdrawDestination } = await import("./labCustody");
-    expect(validateLabWithdrawDestination("SUP", "HMC-ffffffffffffffff").ok).toBe(false);
+    // API: SUP is Ed25519 rail — HMC- destinations are valid (not paper stubs).
+    expect(validateLabWithdrawDestination("SUP", "HMC-ffffffffffffffff").ok).toBe(true);
     expect(validateLabWithdrawDestination("USDT", '<script>x</script>').ok).toBe(false);
     expect(validateLabWithdrawDestination("HMC", "HMC-ffffffffffffffff").ok).toBe(true);
   });

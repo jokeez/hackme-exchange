@@ -4,7 +4,15 @@ import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/l
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { isHubEmbed, postHubGotoTab } from "./embed";
-import { VIP_TIERS, activeVipTier, feeScheduleLabel, formatBps, nextVipProgress, volume30dUsdt } from "./fees";
+import {
+  VIP_TIERS,
+  activeVipTier,
+  feeScheduleLabel,
+  formatBps,
+  hasServerVipVolume,
+  nextVipProgress,
+  volume30dUsdt,
+} from "./fees";
 import { formatNum, formatPct, formatPrice } from "./market";
 import { pnlPct, walletEquityFromMarket } from "./store";
 import { dailyPnlCalendar, pnlWindows, renderPnlCalendarHtml } from "./pnl";
@@ -33,7 +41,13 @@ import {
 import { loadAcctHideSmall, loadAcctTab, saveAcctHideSmall, saveAcctTab } from "./uiPrefs";
 import { renderDustPanel } from "./product/dustConvert";
 import { portfolioEquityChart30d, refreshPortfolioChartHtml, wirePortfolioEquityChart } from "./product/portfolioChart";
-import { renderMultiWalletCard, type WalletSlice } from "./product/multiWallet";
+import {
+  multiWalletTagline,
+  renderMultiWalletCard,
+  resolveMultiWalletSlices,
+  type MultiWalletMode,
+  type WalletSlice,
+} from "./product/multiWallet";
 import { renderSpotEmptyState } from "./product/emptyStates";
 import { formatDeskMatchingLabel, isDeskMatchingLive } from "./settingsModal";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
@@ -340,9 +354,9 @@ function renderWithdrawCard(
               <h4>Withdraw</h4>
               <p class="muted small">${
                 deskWd
-                  ? "Request + TOTP · ops completes on-chain"
+                  ? "Request + TOTP · stays pending until ops sends on-chain (not automatic)"
                   : labOn
-                    ? "Request only · complete via CLI"
+                    ? "Request only · pending until ops CLI complete"
                     : "Edge withdraw HOLD"
               }</p>
             </div>
@@ -362,9 +376,9 @@ function renderWithdrawCard(
               <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.05" />
             </label>
             <label class="lab-field lab-field-wide">Destination
-              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="paper-sup-ops-wallet-01" data-ph-usdt="paper-usdt-ops-wallet-01" data-ph-btc="lab-ops-btc-01" />
+              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="paper-usdt-ops-wallet-01" data-ph-btc="lab-ops-btc-01" />
             </label>
-            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT/BTC paper stubs only</p>
+            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet (not Connect/login addr) · USDT/BTC paper stubs only · no auto hot-send</p>
             <label class="lab-field">2FA code
               <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or recovery" />
             </label>
@@ -521,7 +535,7 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
               .sort((a, b) => a.minVolUsdt - b.minVolUsdt)
               .map(
                 (t) => `<tr class="${t.name === vip.name ? "active-tier" : ""}">
-                  <td>${t.name}</td>
+                  <td>${escapeHtml(t.name)}</td>
                   <td>≥ ${formatNum(t.minVolUsdt, 0)}</td>
                   <td>${formatBps(t.makerBps)}</td>
                   <td>${formatBps(t.takerBps)}</td>
@@ -538,36 +552,34 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
     </section>`;
 }
 
+function multiWalletMode(): MultiWalletMode {
+  if (isDeskConnectEnabled()) return "desk";
+  if (isLabLoopbackApi()) return "lab";
+  return "paper";
+}
+
 function buildMultiWalletSlices(state: DemoState, opts: AccountPageOpts | undefined): WalletSlice[] {
-  const paper: Wallet = { ...state.wallet };
+  const mode = multiWalletMode();
+  const session = labSessionLabel();
   const nodeBal: Wallet = {
     usdt: 0,
     hmc: opts?.nodeWallet?.hmc ?? 0,
     sup: opts?.nodeWallet?.sup ?? 0,
     btc: 0,
   };
-  return [
-    {
-      id: "paper",
-      label: "Paper wallet",
-      subtitle: "Spot · Convert · localStorage demo",
-      wallet: paper,
-    },
-    {
-      id: "node",
-      label: "Node wallet",
-      subtitle: opts?.nodeWallet ? "Synced HMC/SUP from hackme-node" : "Connect node to sync on-chain balances",
-      wallet: nodeBal,
-      href: nodeWalletUrl(),
-    },
-    {
-      id: "lab",
-      label: "Lab ledger",
-      subtitle: useLabMatching() ? "Private DEMO/LAB matching session" : "Connect fixture for lab balances",
-      wallet: useLabMatching() ? paper : { usdt: 0, hmc: 0, sup: 0, btc: 0 },
-      href: "#account",
-    },
-  ];
+  const chainHref = nodeWalletUrl();
+  const chainLabel = isHubEmbed() || mode === "desk" ? "Hub wallet" : "Node wallet";
+  return resolveMultiWalletSlices({
+    mode,
+    ledgerWallet: { ...state.wallet },
+    nodeWallet: nodeBal,
+    deskConnected: mode === "desk" && session.live,
+    deskMatchingLive: mode === "desk" && useDeskMatching(),
+    publicDeskBook: mode === "desk" && usePublicDeskBook(),
+    labConnected: mode === "lab" && useLabMatching(),
+    chainWalletHref: chainHref,
+    chainWalletLabel: chainLabel,
+  });
 }
 
 function renderActivityBlock(
@@ -726,8 +738,12 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         <h2>Account</h2>
         <p class="muted small acct-sub">${modeSubtitle()}</p>
       </div>
-      <div class="acct-vip-pill" title="Demo VIP from local trade history">
-        <span class="vip-badge"><span class="vip-name">${vip.name}</span></span>
+      <div class="acct-vip-pill" title="${
+        hasServerVipVolume()
+          ? "VIP from server GET /vip (30d USDT fills)"
+          : "Demo VIP from local paper trade history"
+      }">
+        <span class="vip-badge"><span class="vip-name">${escapeHtml(vip.name)}</span></span>
         <span class="muted small mono">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
       </div>
     </header>
@@ -746,7 +762,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           </p>
           <p class="acct-fiat muted small" id="acct-fiat-eq">${maskBalance(eqView.secondary, hidden)}</p>
           ${formatTodayPnlHtml(dayPnl, market, denom, hidden)}
-          <p class="acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}">All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
+          <p class="acct-alltime muted small mono ${Math.abs(pnl) < 5e-3 ? "flat" : pnl >= 0 ? "up" : "down"}">All-time ${Math.abs(pnl) < 5e-3 ? "" : pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</p>
           <div id="acct-denom-host">${renderDenomRing(denom)}</div>
           <div class="acct-quick-actions">
             ${
@@ -815,16 +831,20 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <div class="acct-tab-panel" data-acct-panel="account"${acctTab !== "account" ? " hidden" : ""}>
         <div class="acct-account-view">
           <div class="acct-vip-row">
-            <span class="vip-badge lg" title="Demo VIP from local trade history">
-              <span class="vip-name">${vip.name}</span>
+            <span class="vip-badge lg" title="${
+              hasServerVipVolume()
+                ? "VIP from server GET /vip (30d USDT fills)"
+                : "Demo VIP from local paper trade history"
+            }">
+              <span class="vip-name">${escapeHtml(vip.name)}</span>
               <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
-              <span class="vip-demo muted small">demo</span>
+              <span class="vip-demo muted small">${hasServerVipVolume() ? "live" : "demo"}</span>
             </span>
             <div class="vip-progress">
               <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
               <p class="muted small">${
                 vipProg.next
-                  ? `${formatNum(vol, 0)} / ${formatNum(vipProg.next.minVolUsdt, 0)} USDT · need ${formatNum(vipProg.remaining, 0)} → ${vipProg.next.name}`
+                  ? `${formatNum(vol, 0)} / ${formatNum(vipProg.next.minVolUsdt, 0)} USDT · need ${formatNum(vipProg.remaining, 0)} → ${escapeHtml(vipProg.next.name)}`
                   : `${formatNum(vol, 0)} USDT · top VIP`
               }</p>
             </div>
@@ -836,7 +856,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
                 const pnlFmt = formatPnlAbsInDenom(x.abs, market, denom);
                 return `<article class="pnl-card glass-inset">
                   <span class="muted small">${x.label}</span>
-                  <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
+                  <strong class="mono ${Math.abs(x.pct) < 5e-3 ? "flat" : x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
                   <span class="dim mono">${maskBalance(`${pnlFmt.amount} ${pnlFmt.unit}`, hidden)}</span>
                 </article>`;
               })
@@ -873,7 +893,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <div id="acct-recent-tx-body">${renderRecentTxTable(state, hidden)}</div>
     </section>
 
-    ${renderMultiWalletCard(buildMultiWalletSlices(state, opts), market)}
+    ${renderMultiWalletCard(buildMultiWalletSlices(state, opts), market, multiWalletTagline(multiWalletMode()))}
 
     ${renderDustPanel(w, market, "usdt", state)}
 
@@ -944,6 +964,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
         </div>
         <p class="muted small">Spot limit → Counterparty bot (self-trade blocked). Fixture key is lab-only — never fund it.</p>
         <p id="lab-api-msg" class="muted small sync-msg" role="status"></p>
+        <p id="lab-session-expires" class="muted small mono" hidden aria-live="polite"></p>
         <div class="fund-btns spaced">
           <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
           <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Hub wallet" : "Node wallet"}</a>
@@ -1168,7 +1189,12 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     const valueStr = formatNum(r.usdtValue, 2);
     const costStr = formatNum(r.costBasisUsdt, 2);
     const pnlStr = formatFloatingPnlDisplay(r.floatingPnl, r.floatingPnlPct);
-    const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
+    const pnlCls =
+      Math.abs(r.floatingPnl) < 1e-9 && Math.abs(r.floatingPnlPct) < 5e-3
+        ? "flat"
+        : r.floatingPnl >= 0
+          ? "up"
+          : "down";
     const reservedStr = formatNum(r.reserved, decimals);
     const availStr = formatNum(Math.max(0, r.amount - r.reserved), decimals);
 
@@ -1177,7 +1203,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     const pnlEl = tr.querySelector('[data-col="pnl"]');
     if (pnlEl) {
       pnlEl.textContent = hidden ? "****" : pnlStr;
-      pnlEl.classList.remove("up", "down");
+      pnlEl.classList.remove("up", "down", "flat");
       pnlEl.classList.add(pnlCls);
     }
     const priceCell = tr.querySelector(".acct-asset-price");
@@ -1228,8 +1254,9 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
   const allTime = document.querySelector(".acct-alltime");
   if (allTime) {
     const pnl = pnlPct(state, market);
-    allTime.className = `acct-alltime muted small mono ${pnl >= 0 ? "up" : "down"}`;
-    allTime.textContent = `All-time ${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%`;
+    const tone = Math.abs(pnl) < 5e-3 ? "flat" : pnl >= 0 ? "up" : "down";
+    allTime.className = `acct-alltime muted small mono ${tone}`;
+    allTime.textContent = `All-time ${Math.abs(pnl) < 5e-3 ? "" : pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%`;
   }
 
   const pnlHost = document.querySelector(".acct-account-view .pnl-cards.compact");
@@ -1238,9 +1265,10 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     pnlHost.innerHTML = windows
       .map((x) => {
         const pnlFmt = formatPnlAbsInDenom(x.abs, market, denom);
+        const tone = Math.abs(x.pct) < 5e-3 ? "flat" : x.pct >= 0 ? "up" : "down";
         return `<article class="pnl-card glass-inset">
           <span class="muted small">${x.label}</span>
-          <strong class="mono ${x.pct >= 0 ? "up" : "down"}">${formatPct(x.pct)}</strong>
+          <strong class="mono ${tone}">${formatPct(x.pct)}</strong>
           <span class="dim mono">${maskBalance(`${pnlFmt.amount} ${pnlFmt.unit}`, hidden)}</span>
         </article>`;
       })
@@ -1284,15 +1312,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
   const promoHmc = document.querySelector('[data-acct-promo-mid="hmc"]');
   if (promoHmc) promoHmc.textContent = formatPrice(market.hmcUsdt);
 
-  const paperBal = document.querySelector('[data-wallet-slice="paper"] .multi-wallet-bal .mono');
-  if (paperBal) {
-    const paperUsdt =
-      w.usdt + w.hmc * market.hmcUsdt + w.sup * market.supUsdt + w.btc * market.btcUsd;
-    paperBal.textContent = `${formatNum(paperUsdt, 2)} USDT`;
-  }
-
   for (const slice of buildMultiWalletSlices(state, opts)) {
-    if (slice.id === "paper") continue;
     const row = document.querySelector(`[data-wallet-slice="${slice.id}"]`);
     if (!row) continue;
     const usdt =

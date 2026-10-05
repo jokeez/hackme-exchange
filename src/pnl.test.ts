@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  bookDepthRatio,
   dailyPnlCalendar,
   pnlWindows,
   renderPnlCalendarHtml,
   snapshotEquity,
   volumeRatio5m,
+  volumeRatioFromPrints,
 } from "./pnl";
 import { pnlPct, walletEquityFromMarket } from "./store";
 import { baseState, sampleMarket } from "./testFixtures";
@@ -132,6 +134,66 @@ describe("snapshotEquity / dailyPnlCalendar", () => {
     expect(today.pnl).toBeCloseTo(-0.01, 8);
     expect(today.hasData).toBe(true);
   });
+
+  it("dailyPnlCalendar keeps prior-day PnL from EOD snaps across rollover", () => {
+    const s = baseState();
+    const now = Date.now();
+    // Noon anchors so dayKey is stable across TZ edges in CI.
+    const dayAgo = (n: number) => {
+      const d = new Date(now);
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - n);
+      return d.getTime();
+    };
+    s.equitySnapshots = [
+      { ts: dayAgo(2), equityUsdt: 10.0 },
+      { ts: dayAgo(1), equityUsdt: 9.5 },
+      { ts: dayAgo(0), equityUsdt: 9.0 },
+    ];
+    const days = dailyPnlCalendar(s, market, 7);
+    const yday = days[days.length - 2]!;
+    const today = days[days.length - 1]!;
+    expect(yday.hasData).toBe(true);
+    expect(yday.pnl).toBeCloseTo(-0.5, 8);
+    expect(today.hasData).toBe(true);
+    expect(today.pnl).toBeCloseTo(-0.5, 8);
+    expect(today.isToday).toBe(true);
+  });
+
+  it("calendar history survives compactEquitySnapshots after dense today snaps", async () => {
+    const { compactEquitySnapshots } = await import("./store");
+    const s = baseState();
+    const now = Date.now();
+    const dayAgo = (n: number) => {
+      const d = new Date(now);
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - n);
+      return d.getTime();
+    };
+    const snaps = [
+      { ts: dayAgo(3), equityUsdt: 10.0 },
+      { ts: dayAgo(2), equityUsdt: 10.2 },
+      { ts: dayAgo(1), equityUsdt: 10.1 },
+    ];
+    for (let i = 100; i >= 0; i--) {
+      snaps.push({ ts: now - i * 60_000, equityUsdt: 10.1 - 0.002 });
+    }
+    s.equitySnapshots = compactEquitySnapshots(snaps, false);
+    const days = dailyPnlCalendar(s, market, 7);
+    const d3 = days[days.length - 4]!;
+    const d2 = days[days.length - 3]!;
+    const d1 = days[days.length - 2]!;
+    expect(d3.hasData).toBe(true);
+    expect(d2.hasData).toBe(true);
+    expect(d1.hasData).toBe(true);
+    expect(d2.pnl).toBeCloseTo(0.2, 2);
+    // Compact may fold a dense today tick onto the prior day boundary (±0.002).
+    expect(d1.pnl).toBeCloseTo(-0.1, 2);
+    // Today must remain present after compact (pnl may be ~0 if open≈last).
+    const today = days[days.length - 1]!;
+    expect(today.hasData).toBe(true);
+    expect(today.isToday).toBe(true);
+  });
 });
 
 describe("volumeRatio5m", () => {
@@ -205,5 +267,58 @@ describe("volumeRatio5m", () => {
     expect(r.sellVol).toBe(30);
     expect(r.buyPct).toBe(70);
     expect(r.sellPct).toBe(30);
+  });
+});
+
+describe("bookDepthRatio", () => {
+  it("is unknown (not fake 50/50) when book empty", () => {
+    const r = bookDepthRatio([], []);
+    expect(r.known).toBe(false);
+    expect(r.buyPct).toBe(50);
+  });
+
+  it("weights by quote notional from visible L2", () => {
+    const r = bookDepthRatio(
+      [
+        { totalQuote: 0.02 },
+        { totalQuote: 0.38 },
+        { totalQuote: 0.75 },
+      ],
+      [
+        { totalQuote: 0.39 },
+        { totalQuote: 0.16 },
+        { totalQuote: 0.78 },
+        { totalQuote: 0.25 },
+      ],
+    );
+    expect(r.known).toBe(true);
+    expect(r.buyVol).toBeCloseTo(1.15, 6);
+    expect(r.sellVol).toBeCloseTo(1.58, 6);
+    expect(r.buyPct + r.sellPct).toBeCloseTo(100, 6);
+    expect(r.buyPct).toBeLessThan(50);
+    expect(r.sellPct).toBeGreaterThan(50);
+  });
+});
+
+describe("volumeRatioFromPrints", () => {
+  it("marks known=false when empty", () => {
+    expect(volumeRatioFromPrints([], "HMC_USDT").known).toBe(false);
+  });
+
+  it("can weight quote notional", () => {
+    const now = Date.now();
+    const r = volumeRatioFromPrints(
+      [
+        { pairId: "HMC_USDT", ts: now, side: "buy", amountBase: 10, price: 2 },
+        { pairId: "HMC_USDT", ts: now, side: "sell", amountBase: 10, price: 1 },
+      ],
+      "HMC_USDT",
+      60_000,
+      true,
+    );
+    expect(r.known).toBe(true);
+    expect(r.buyVol).toBe(20);
+    expect(r.sellVol).toBe(10);
+    expect(r.buyPct).toBeCloseTo(66.666, 1);
   });
 });

@@ -12,10 +12,15 @@ import {
   chartAnchorMid,
   clampFillWickPx,
   deriveAllTimeframes,
+  ensureTfSeriesCadence,
+  hydrateLiveCandlesFromPrints,
+  loadLiveCandleCache,
   nudgeCloseTowardFill,
   prependOlderCandles,
+  saveLiveCandleCache,
   seedAllTimeframes,
   stats24h,
+  type CandlePrint,
 } from "./candles";
 import {
   applyOverlays,
@@ -68,6 +73,7 @@ import {
   setPanelWidth,
   terminalGridColumnsForView,
   togglePanelCollapsed,
+  toggleBottomCollapsed,
   applyLayoutPreset,
   LAYOUT_DEFAULTS,
   type LayoutPrefs,
@@ -89,10 +95,14 @@ import {
   auth2faStatus,
   authLogout,
   authRevokeAll,
+  apiPairToId,
+  apiPriceToDisplay,
   displayToMinor,
   exchangeHealth,
   fetchCustodyFees,
   fetchDepositAddress,
+  fetchPublicTrades,
+  fetchPublicTickers,
   formatExchangeReject,
   hubEmbedSessionBlockedHint,
   isSessionRequiredError,
@@ -101,6 +111,8 @@ import {
   minorToDisplay,
   getLabSessionMeta,
   labSessionLabel,
+  sessionMsRemaining,
+  pairIdToApi,
   postLabBridgeCredit,
   postLabConvert,
   postLabDeposit,
@@ -108,7 +120,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -117,6 +129,7 @@ import {
   labBookMid,
   labMarketSlipHint,
   lastPublicMid,
+  lastPublicTs,
   setLastPublicMid,
   mergeServerFills,
   placeLabOrder,
@@ -145,33 +158,39 @@ import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
 import { markPerf, measurePerf, throttle } from "./perf";
 import {
-  CONVERT_ASSETS,
   CONVERT_ROUTES,
+  CONVERT_UI_ASSETS,
+  applyConvertPrimaryPair,
   assetSymbol,
+  clampPrimaryConvertLegs,
   convert,
   convertChipDefaultAmount,
+  convertCtaLabel,
   convertFeeHintLine,
   convertNetReceive,
+  convertPrimaryPair,
   convertRateLabel,
   convertSlippageDriftBps,
   pairQuoteSym,
   feeQuoteFromLabConvert,
   flipRoute,
   formatConvertFeeToast,
+  formatConvertQuoteAge,
   formatLabConvertFeeToast,
   isConvertPreviewError,
+  isPrimaryConvertRoute,
   previewConvert,
   convertRouteDef,
   routeForAssets,
   type ConvertPreview,
-  type ConvertRoute,
+  type ConvertPrimaryPair,
 } from "./convert";
 import {
   patchConvertPickerBalances,
   renderConvertAssetOptions,
   renderConvertAssetPicker,
   renderConvertBalanceList,
-  renderConvertQuickRoutes,
+  renderConvertPairTabs,
   renderConvertRecentList,
   syncConvertPickerUi,
   wireConvertAssetPickers,
@@ -197,10 +216,12 @@ import {
   calcFee,
   feeScheduleLabel,
   formatBps,
+  hasServerVipVolume,
   liquidityRole,
   nextVipProgress,
   previewFeeRole,
   volume30dUsdt,
+  type CalcFeeOpts,
 } from "./fees";
 import { executeFill } from "./execution";
 import {
@@ -233,6 +254,7 @@ import {
   formatPrice,
   formatPriceCompact,
   formatRewardPerM,
+  formatVol,
   formatVolBase,
   formatBookQty,
   localFallbackMarket,
@@ -243,12 +265,14 @@ import {
 import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { LANES, PAIRS, pairById } from "./pairs";
 import {
+  bookDepthRatio,
   seedEquitySnapshots,
   snapshotEquity,
   volumeRatio5m,
+  volumeRatioFromPrints,
 } from "./pnl";
 import { fetchPoolLive, offlinePoolLive, pendingPoolLive, patchPoolLiveDom, renderPoolPage } from "./pool";
-import { copyTextToClipboard, escapeHtml, sanitizeOracleAnchor } from "./sanitize";
+import { copyTextToClipboard, escapeHtml, sanitizeOracleAnchor, sanitizeOtpauthUrl } from "./sanitize";
 import {
   cancelAllOpenOrders,
   cancelOrder,
@@ -278,6 +302,7 @@ import type {
   MarketSnapshot,
   MultiPanePairs,
   MultiPaneTfs,
+  Order,
   OrderKind,
   OrderSide,
   PairId,
@@ -355,6 +380,8 @@ function applyHubEmbedLayoutPrefs(): void {
   layoutPrefs = {
     ...layoutPrefs,
     toolsCollapsed: true,
+    // Hub iframe is short — never leave Orders/Cancel buried behind bottomCollapsed.
+    bottomCollapsed: false,
     bookWidth: Math.min(layoutPrefs.bookWidth, 200),
     rightWidth: Math.min(Math.max(layoutPrefs.rightWidth, 240), 280),
   };
@@ -433,7 +460,11 @@ let deskEdgeSnap: {
   minNotional: 0,
   priceBandBps: 0,
 };
-const cvDeskInit = loadConvertDesk();
+const cvDeskInit = (() => {
+  const raw = loadConvertDesk();
+  const clamped = clampPrimaryConvertLegs(raw.from, raw.to);
+  return { ...raw, ...clamped };
+})();
 /** Convert desk selection — survives re-render without form wipe. */
 let convertFrom: keyof Wallet = cvDeskInit.from;
 let convertTo: keyof Wallet = cvDeskInit.to;
@@ -447,6 +478,8 @@ let convertConfirmLarge = (() => {
 })();
 /** Ignore stale lab convert quotes when flip/amount races ahead of await. */
 let convertPreviewSeq = 0;
+/** Last successful Convert quote timestamp (ms) for freshness chrome. */
+let lastConvertQuoteAt = 0;
 /** Ignore stale custody fee quotes when asset/amount change mid-flight. */
 let withdrawQuoteSeq = 0;
 /** Ignore stale fills list paints after re-render / rapid Sync. */
@@ -472,13 +505,14 @@ function bookHeaderBadge(): string {
 }
 
 function renderPanelRail(
-  side: "left" | "right" | "tools",
+  side: "left" | "right" | "tools" | "orders",
   id: string,
   label: string,
   title: string,
 ): string {
-  const chevron = side === "right" ? "‹" : "›";
-  return `<button type="button" class="panel-rail ${side === "tools" ? "tools-rail" : side}" id="${id}" title="${title}" aria-label="${title}">
+  const chevron = side === "right" || side === "orders" ? "‹" : "›";
+  const cls = side === "tools" ? "tools-rail" : side;
+  return `<button type="button" class="panel-rail ${cls}" id="${id}" title="${title}" aria-label="${title}">
     <span class="rail-chevron" aria-hidden="true">${chevron}</span>
     <span class="rail-label">${label}</span>
   </button>`;
@@ -523,8 +557,14 @@ function syncRouteHash(): void {
 }
 
 function ensureDistinctConvertLegs(): void {
-  if (convertFrom !== convertTo) return;
-  convertTo = convertFrom === "hmc" ? "usdt" : "hmc";
+  const next = clampPrimaryConvertLegs(convertFrom, convertTo);
+  convertFrom = next.from;
+  convertTo = next.to;
+}
+
+/** Lab or desk session with advertised /convert — use server quote/swap (never invent). */
+function useServerConvert(): boolean {
+  return tradingGuards.convertFeeServer && useServerMatching();
 }
 
 function applyHashToState(): void {
@@ -604,6 +644,8 @@ async function ensureAlertNotifications(): Promise<void> {
   }
 }
 
+const liveHydratedPairs = new Set<PairId>();
+
 function ensurePublicTape(force = false): void {
   // Live L2: public prints come from GET /trades (marketStream), never oracle seeds.
   if (useLiveBook()) return;
@@ -615,6 +657,105 @@ function ensurePublicTape(force = false): void {
       ...seedPublicTape(state.activePair, tk),
     ].slice(0, 80);
   }
+}
+
+let lastLiveCandleCacheSaveAt = 0;
+function persistLiveCandleCache(pairId: PairId = state.activePair, force = false): void {
+  if (!useLiveBook()) return;
+  const now = Date.now();
+  if (!force && now - lastLiveCandleCacheSaveAt < 2_500) return;
+  const base = state.candles[pairId]?.[CANDLE_BASE_TF];
+  if (base?.length) {
+    saveLiveCandleCache(pairId, base);
+    lastLiveCandleCacheSaveAt = now;
+  }
+}
+
+function candlePrintsFromApiTrades(
+  trades: { id?: string; pair?: string; price: number; qty: number; taker_side?: string; created_at?: string }[],
+  pairId: PairId,
+): CandlePrint[] {
+  const out: CandlePrint[] = [];
+  for (const t of trades) {
+    const pid = t.pair ? apiPairToId(t.pair) ?? pairId : pairId;
+    if (pid !== pairId) continue;
+    const price = apiPriceToDisplay(Number(t.price));
+    const amountBase = minorToDisplay(Number(t.qty));
+    if (!(price > 0) || !Number.isFinite(price)) continue;
+    const ts = t.created_at ? Date.parse(t.created_at) || Date.now() : Date.now();
+    out.push({ ts, price, amountBase: amountBase > 0 ? amountBase : 0 });
+  }
+  return out;
+}
+
+function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
+  const out: CandlePrint[] = [];
+  for (const t of publicTape) {
+    if (t.pairId !== pairId || !(t.price > 0)) continue;
+    out.push({ ts: t.ts, price: t.price, amountBase: t.amountBase > 0 ? t.amountBase : 0 });
+  }
+  for (const t of state.trades) {
+    if (t.pairId !== pairId || !(t.price > 0)) continue;
+    out.push({ ts: t.ts, price: t.price, amountBase: t.amountBase > 0 ? t.amountBase : 0 });
+  }
+  return out;
+}
+
+/** Restore live OHLC from session cache + public tape / GET /trades (survives F5). */
+async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
+  const cached =
+    loadLiveCandleCache(pairId) ??
+    (state.candles[pairId]?.[CANDLE_BASE_TF]?.length
+      ? state.candles[pairId]![CANDLE_BASE_TF]!
+      : null);
+  let apiPrints: CandlePrint[] = [];
+  const res = await fetchPublicTrades(pairIdToApi(pairId), 100, 5_000);
+  if (res.ok) {
+    apiPrints = candlePrintsFromApiTrades(res.trades, pairId);
+    // Same /trades payload feeds 24h Vol — don't wait for WS/poll push.
+    const volPrints: { id?: string; ts: number; amountBase: number; price?: number }[] = [];
+    for (const t of res.trades) {
+      const pid = t.pair ? apiPairToId(t.pair) ?? pairId : pairId;
+      if (pid !== pairId) continue;
+      const amountBase = minorToDisplay(Number(t.qty));
+      if (!(amountBase > 0)) continue;
+      const price = apiPriceToDisplay(Number(t.price));
+      const ts = t.created_at ? Date.parse(t.created_at) || Date.now() : Date.now();
+      volPrints.push({ id: t.id, ts, amountBase, price: price > 0 ? price : undefined });
+    }
+    ingestDeskVolPrints(pairId, volPrints);
+    markDeskVolReady(pairId);
+    if (pairId === state.activePair) patchTickerBar();
+  }
+  const prints = [...apiPrints, ...candlePrintsFromLocalTape(pairId)];
+  const tip =
+    tipMid > 0
+      ? tipMid
+      : lastPublicMid(pairId) ||
+        labBookMid(pairId) ||
+        prints[prints.length - 1]?.price ||
+        cached?.[cached.length - 1]?.close ||
+        0;
+  // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
+  if (!prints.length && !(cached?.length) && !(tip > 0)) return false;
+  if (!(tip > 0)) return false;
+  state.candles[pairId] = hydrateLiveCandlesFromPrints(pairId, prints, tip, Date.now(), cached);
+  prevMids[pairId] = tip;
+  persistLiveCandleCache(pairId, true);
+  liveHydratedPairs.add(pairId);
+  return true;
+}
+
+/** Sync path: session cache only (before GET /trades returns). */
+function restoreLiveCandlesFromCache(pairId: PairId, tipMid: number): boolean {
+  const cached = loadLiveCandleCache(pairId);
+  if (!cached?.length) return false;
+  const tip = tipMid > 0 ? tipMid : cached[cached.length - 1]?.close ?? 0;
+  if (!(tip > 0)) return false;
+  state.candles[pairId] = hydrateLiveCandlesFromPrints(pairId, candlePrintsFromLocalTape(pairId), tip, Date.now(), cached);
+  prevMids[pairId] = tip;
+  if (cached.length >= 24) liveHydratedPairs.add(pairId);
+  return true;
 }
 
 /** L2 spread % from best bid/ask; falls back to ticker.spreadBps only in paper/oracle mode. */
@@ -630,19 +771,223 @@ function liveSpreadPct(t: Ticker = activeTicker()): number {
   return (t.spreadBps || 0) / 100;
 }
 
-/** Desk 24h vol from public tape (honest); paper keeps candle vol. */
+/** Desk 24h vol: public tape only (never seed/tickVol candle sums — those fake ~20M HMC). */
+const deskVolSeen = new Map<string, { ts: number; qty: number }>();
+/** Pair has completed at least one /trades hydrate (even if empty) — paint 0 instead of "—". */
+const deskVolReady = new Set<PairId>();
+const DESK_VOL_CACHE_PREFIX = "hackme-ex-desk-vol-v1:";
+let lastDeskVolPersistAt = 0;
+
+function ingestDeskVolPrints(
+  pairId: PairId,
+  prints: { id?: string; ts: number; amountBase: number; price?: number }[],
+): void {
+  const cutoff = Date.now() - 24 * 3600_000;
+  for (const p of prints) {
+    if (!(p.amountBase > 0) || p.ts < cutoff) continue;
+    const key =
+      p.id && String(p.id).trim()
+        ? `${pairId}:${p.id}`
+        : `${pairId}:${p.ts}:${p.price ?? 0}:${p.amountBase}`;
+    if (deskVolSeen.has(key)) continue;
+    deskVolSeen.set(key, { ts: p.ts, qty: p.amountBase });
+  }
+  // Bound map — drop oldest outside 24h.
+  if (deskVolSeen.size > 8_000) {
+    for (const [k, v] of deskVolSeen) {
+      if (v.ts < cutoff) deskVolSeen.delete(k);
+    }
+  }
+}
+
+/** Paper-only: candle-derived 24h base vol. Never used on live desk. */
+function candleVol24hFallback(pairId: PairId): number {
+  const c15 = state.candles[pairId]?.["15m"];
+  if (c15 && c15.length >= 4) {
+    const v = stats24h(c15, "15m").vol;
+    if (v > 0) return v;
+  }
+  const c1 = state.candles[pairId]?.["1m"];
+  if (c1 && c1.length >= 8) {
+    const v = stats24h(c1, "1m").vol;
+    if (v > 0) return v;
+  }
+  return 0;
+}
+
+/** Durable 24h ticker from GET /tickers (fills DB) — display units. */
+type DeskApiTicker = {
+  last: number;
+  open24h: number;
+  high24h: number;
+  low24h: number;
+  volume24hBase: number;
+  nTrades24h: number;
+  changePct: number;
+};
+const deskApiTickers = new Map<PairId, DeskApiTicker>();
+let deskApiTickersReady = false;
+let lastDeskApiTickersAt = 0;
+
+async function hydrateDeskApiTickers(force = false): Promise<boolean> {
+  if (!useLiveBook()) return false;
+  const now = Date.now();
+  if (!force && now - lastDeskApiTickersAt < 8_000) return deskApiTickersReady;
+  const res = await fetchPublicTickers(5_000);
+  lastDeskApiTickersAt = now;
+  if (!res.ok) return deskApiTickersReady;
+  for (const row of res.tickers) {
+    const pid = apiPairToId(row.pair);
+    if (!pid) continue;
+    const open = apiPriceToDisplay(Number(row.open_24h ?? 0));
+    const last = apiPriceToDisplay(Number(row.last ?? 0));
+    const high = apiPriceToDisplay(Number(row.high_24h ?? 0));
+    const low = apiPriceToDisplay(Number(row.low_24h ?? 0));
+    const vol = minorToDisplay(Number(row.volume_24h_base ?? 0));
+    const bps = Number(row.change_bps ?? 0);
+    const changePct =
+      Number.isFinite(bps) && bps !== 0
+        ? bps / 100
+        : open > 0 && last > 0
+          ? ((last - open) / open) * 100
+          : 0;
+    deskApiTickers.set(pid, {
+      last,
+      open24h: open,
+      high24h: high,
+      low24h: low,
+      volume24hBase: vol > 0 ? vol : 0,
+      nTrades24h: Number(row.n_trades_24h ?? 0) || 0,
+      changePct,
+    });
+    deskVolReady.add(pid);
+  }
+  deskApiTickersReady = true;
+  if (state.mainView === "spot") {
+    patchTickerBar();
+    patchMarketRowsInPlace();
+  }
+  return true;
+}
+
+function deskVolTapeBase(pairId: PairId): number {
+  const cutoff = Date.now() - 24 * 3600_000;
+  let sum = 0;
+  const prefix = `${pairId}:`;
+  for (const [k, v] of deskVolSeen) {
+    if (!k.startsWith(prefix)) continue;
+    if (v.ts < cutoff) {
+      deskVolSeen.delete(k);
+      continue;
+    }
+    sum += v.qty;
+  }
+  for (const row of publicTape) {
+    if (row.pairId !== pairId || row.ts < cutoff) continue;
+    const key = row.id ? `${pairId}:${row.id}` : `${pairId}:${row.ts}:${row.price}:${row.amountBase}`;
+    if (!deskVolSeen.has(key)) sum += row.amountBase;
+  }
+  return sum;
+}
+
 function deskVol24hBase(pairId: PairId = state.activePair): number {
   if (!useLiveBook()) {
     const t = tickers[pairId];
-    return t?.volume24hBase ?? 0;
+    const fromTk = t?.volume24hBase ?? 0;
+    return fromTk > 0 ? fromTk : candleVol24hFallback(pairId);
   }
-  const cutoff = Date.now() - 24 * 3600_000;
-  let sum = 0;
-  for (const row of publicTape) {
-    if (row.pairId !== pairId || row.ts < cutoff) continue;
-    sum += row.amountBase;
+  // Live: durable fills ticker first, then short public-tape ring. Never seed/candle vol.
+  const api = deskApiTickers.get(pairId);
+  if (api && api.volume24hBase > 0) return api.volume24hBase;
+  const tape = deskVolTapeBase(pairId);
+  if (tape > 0) return tape;
+  if (api) return 0;
+  return 0;
+}
+
+function persistDeskVolCache(pairId: PairId = state.activePair, force = false): void {
+  if (typeof sessionStorage === "undefined") return;
+  const now = Date.now();
+  if (!force && now - lastDeskVolPersistAt < 2_000) return;
+  const cutoff = now - 24 * 3600_000;
+  const prefix = `${pairId}:`;
+  const entries: { k: string; ts: number; qty: number }[] = [];
+  for (const [k, v] of deskVolSeen) {
+    if (!k.startsWith(prefix) || v.ts < cutoff || !(v.qty > 0)) continue;
+    entries.push({ k, ts: v.ts, qty: v.qty });
   }
-  return sum;
+  try {
+    sessionStorage.setItem(
+      DESK_VOL_CACHE_PREFIX + pairId,
+      JSON.stringify({ at: now, ready: deskVolReady.has(pairId), entries: entries.slice(-2_000) }),
+    );
+    lastDeskVolPersistAt = now;
+  } catch {
+    /* quota */
+  }
+}
+
+/** Sync restore so first paint can show last-known 24h Vol (survives F5). */
+function restoreDeskVolCache(pairId: PairId): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    const raw = sessionStorage.getItem(DESK_VOL_CACHE_PREFIX + pairId);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as {
+      at?: number;
+      ready?: boolean;
+      entries?: { k?: string; ts?: number; qty?: number }[];
+    };
+    if (!parsed?.at || Date.now() - parsed.at > 24 * 3600_000) return false;
+    const cutoff = Date.now() - 24 * 3600_000;
+    let n = 0;
+    for (const e of parsed.entries ?? []) {
+      if (!e?.k || !(e.qty! > 0) || !(e.ts! >= cutoff)) continue;
+      if (!deskVolSeen.has(e.k)) deskVolSeen.set(e.k, { ts: e.ts!, qty: e.qty! });
+      n += 1;
+    }
+    if (parsed.ready || n > 0) deskVolReady.add(pairId);
+    return parsed.ready === true || n > 0;
+  } catch {
+    return false;
+  }
+}
+
+function markDeskVolReady(pairId: PairId): void {
+  deskVolReady.add(pairId);
+  persistDeskVolCache(pairId, true);
+}
+
+function formatLiveVol24h(pairId: PairId, base: string): string {
+  const vol = deskVol24hBase(pairId);
+  if (vol > 0) return formatVolBase(vol, base);
+  // Ready (tickers/trades hydrate) with no fills → honest 0, never seed/demo vol.
+  if (deskVolReady.has(pairId) || deskApiTickersReady) return formatVolBase(0, base);
+  return "—";
+}
+
+/** Eager GET /trades → deskVolSeen so ticker Vol paints without waiting for WS push. */
+async function hydrateDeskVolFromApi(pairId: PairId): Promise<boolean> {
+  if (!useLiveBook()) return false;
+  const res = await fetchPublicTrades(pairIdToApi(pairId), 100, 5_000);
+  if (res.ok) {
+    const prints: { id?: string; ts: number; amountBase: number; price?: number }[] = [];
+    for (const t of res.trades) {
+      const pid = t.pair ? apiPairToId(t.pair) ?? pairId : pairId;
+      if (pid !== pairId) continue;
+      const price = apiPriceToDisplay(Number(t.price));
+      const amountBase = minorToDisplay(Number(t.qty));
+      if (!(amountBase > 0)) continue;
+      const ts = t.created_at ? Date.parse(t.created_at) || Date.now() : Date.now();
+      prints.push({ id: t.id, ts, amountBase, price: price > 0 ? price : undefined });
+    }
+    ingestDeskVolPrints(pairId, prints);
+  }
+  // Always mark ready so quiet pairs paint candle/seed Vol instead of staying on "—".
+  markDeskVolReady(pairId);
+  if (pairId === state.activePair) patchTickerBar();
+  patchMarketRowsInPlace();
+  return res.ok;
 }
 
 function renderAnnounce(): string {
@@ -768,8 +1113,8 @@ function placeOrderOrWarn(
   trailPct?: number,
   timeInForce: TimeInForce = "GTC",
   postOnly = false,
-): boolean {
-  if (!market) return false;
+): Order | null {
+  if (!market) return null;
   const res = placeOrder(
     state,
     pairId,
@@ -785,9 +1130,9 @@ function placeOrderOrWarn(
   );
   if ("ok" in res && res.ok === false) {
     toast(res.reason, "warn");
-    return false;
+    return null;
   }
-  return true;
+  return res as Order;
 }
 
 function paperGuardsOrWarn(
@@ -1028,23 +1373,79 @@ function refreshOpenOrderChartLines(): void {
   refreshSecondaryChartOrderLines();
 }
 
-let lastMidForAlerts = 0;
+let lastMidForAlertsByPair = new Map<PairId, number>();
 
 function activeTicker(): Ticker {
   return tickers[state.activePair] ?? tickerFromMarket(market!, state.activePair);
 }
 
-/** Spot mid for any pair — same source for toolbar, market rows, and chart HUD. */
+/**
+ * Last tradeable print for ticker/chart tip (CEX "Last").
+ * Prefer public prints over Soft-MM mid — Soft-MM re-pegs BBO and stays sticky for
+ * minutes (top-up skip_existing), which paints a horizontal ruler if used as tip.
+ */
+function liveLastPrice(pairId: PairId): number {
+  const tape = lastPublicMid(pairId);
+  const tapeTs = lastPublicTs(pairId);
+  const lab = labBookMid(pairId);
+  const tipTf = pairId === state.activePair ? state.activeTf : CANDLE_BASE_TF;
+  const tip = state.candles[pairId]?.[tipTf]?.slice(-1)[0]?.close ?? 0;
+  const ageMs = tapeTs > 0 ? Date.now() - tapeTs : Number.POSITIVE_INFINITY;
+  // Short freshness — Soft-MM peg must not own Last for minutes after tape dies.
+  const tapeFresh = tape > 0 && ageMs < 45_000;
+
+  if (tapeFresh) return tape;
+  // Stale print: blend toward Soft-MM so Last drifts instead of snapping to a peg.
+  if (tape > 0 && lab > 0) {
+    const w = Math.min(1, Math.max(0, (ageMs - 45_000) / (3 * 60_000)));
+    return tape * (1 - w) + lab * w;
+  }
+  if (tape > 0) return tape;
+  if (lab > 0) return lab;
+  if (tip > 0) return tip;
+  const tk = tickers[pairId];
+  if (tk?.mid && tk.mid > 0) return tk.mid;
+  const prev = prevMids[pairId];
+  if (prev != null && prev > 0) return prev;
+  return 0;
+}
+
+/** Live desk mid for book/spread math (true BBO when two-sided). */
+function liveSpotMid(pairId: PairId): number {
+  const lab = labBookMid(pairId);
+  if (lab > 0) return lab;
+  return liveLastPrice(pairId);
+}
+
+function bookMidFromLevels(
+  pairId: PairId,
+  bestBid: number,
+  bestAsk: number,
+  labLive: boolean,
+  fallbackMid: number,
+): { midPx: number; spreadAbs: number; spreadPct: number; midHint: string; midTitle: string } {
+  if (bestBid > 0 && bestAsk > 0 && bestAsk >= bestBid) {
+    const midPx = (bestBid + bestAsk) / 2;
+    const spreadAbs = Math.max(0, bestAsk - bestBid);
+    const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
+    const hint = labLive ? "Live L2 mid" : "Oracle · indicative";
+    return { midPx, spreadAbs, spreadPct, midHint: hint, midTitle: hint };
+  }
+  const printMid = labLive ? liveLastPrice(pairId) : fallbackMid;
+  const midPx = printMid > 0 ? printMid : bestBid || bestAsk || fallbackMid;
+  const oneSided = labLive && (bestBid <= 0 || bestAsk <= 0);
+  const midHint = oneSided ? "Last print · one-sided L2" : labLive ? "Live L2 mid" : "Oracle · indicative";
+  const midTitle = oneSided
+    ? "Book is one-sided — mid from last public trade print"
+    : midHint;
+  return { midPx, spreadAbs: 0, spreadPct: 0, midHint, midTitle };
+}
+
+/** Spot last for toolbar, market rows, and chart tip — one source. */
 function spotMidForPair(pairId: PairId): number {
-  // Desk/public L2: always prefer live book mid (guests included — not session-only).
   if (useLiveBook()) {
-    const lab = labBookMid(pairId);
-    if (lab > 0) return lab;
-    const tkLive = tickers[pairId];
-    if (tkLive?.mid && tkLive.mid > 0 && tkLive.bid > 0 && tkLive.ask > 0) return tkLive.mid;
-    // Keep last L2 tip — never fall through to paper sine-wave around 0.05.
-    const blendedLive = prevMids[pairId];
-    if (blendedLive != null && blendedLive > 0) return blendedLive;
+    const last = liveLastPrice(pairId);
+    if (last > 0) return last;
     return 0;
   }
   const blended = prevMids[pairId];
@@ -1054,11 +1455,28 @@ function spotMidForPair(pairId: PairId): number {
   return market ? midForPair(market, pairId) : 0;
 }
 
-/** Unified quote: one mid + 24h change from 15m candles everywhere. */
+/** Unified quote: live desk uses durable /tickers; paper uses candle 24h. */
 function pairQuote(pairId: PairId = state.activePair): PairQuote {
+  const mid = spotMidForPair(pairId);
+  if (useLiveBook()) {
+    const api = deskApiTickers.get(pairId);
+    if (api) {
+      const changePct = api.changePct;
+      return {
+        mid: mid > 0 ? mid : api.last,
+        changePct,
+        tone: pctTone(changePct),
+        high24h: api.high24h,
+        low24h: api.low24h,
+        vol24h: api.volume24hBase,
+        refOpen: api.open24h,
+        refClose: api.last,
+      };
+    }
+  }
   return buildPairQuote({
     pairId,
-    mid: spotMidForPair(pairId),
+    mid,
     candlesByTf: state.candles[pairId],
     fallbackTf: pairId === state.activePair ? state.activeTf : "15m",
   });
@@ -1110,7 +1528,7 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
       markNoTranslate(spans[1]);
     }
     if (spans[2]) {
-      spans[2].textContent = live && !(vol > 0) ? "—" : formatVolBase(vol, pair.base);
+      spans[2].textContent = live ? formatLiveVol24h(state.activePair, pair.base) : formatVolBase(vol, pair.base);
       markNoTranslate(spans[2]);
     }
     if (spans[3]) {
@@ -1122,13 +1540,22 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
 
 let lastOhlcLegendText = "";
 
+function formatOhlcLegendText(c: Pick<Candle, "open" | "high" | "low" | "close" | "volume"> | null, midFallback: number): string {
+  const ha = state.chartMode === "heikin" ? "HA " : "";
+  if (!c) return `${ha}O — H — L — C ${formatPrice(midFallback)}`;
+  const base = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
+  if (!isMobileLayout()) return base;
+  const vol = Number(c.volume);
+  if (!(vol > 0)) return base;
+  return `${base} · V ${formatVol(vol)}`;
+}
+
 function updateOhlcDisplays(c: Candle | null): void {
   // Caller (chart crosshair) is already rAF-coalesced — paint sync to avoid +1 frame lag.
   paintOhlcLegend(c);
 }
 
 function paintOhlcLegend(c: Candle | null): void {
-  const ha = state.chartMode === "heikin" ? "HA " : "";
   const el = document.getElementById("ohlc-legend");
   const mob = document.getElementById("mobile-ohlc-bar");
   if (!c) {
@@ -1136,7 +1563,7 @@ function paintOhlcLegend(c: Candle | null): void {
     mob?.classList.remove("live");
     return;
   }
-  const text = `${ha}O ${formatPrice(c.open)} H ${formatPrice(c.high)} L ${formatPrice(c.low)} C ${formatPrice(c.close)}`;
+  const text = formatOhlcLegendText(c, activeTicker().mid);
   if (text === lastOhlcLegendText) return;
   lastOhlcLegendText = text;
   if (el) el.textContent = text;
@@ -1395,6 +1822,8 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
   patchActivePairChrome();
 
   if (useLiveBook()) {
+    restoreDeskVolCache(pairId);
+    void hydrateDeskVolFromApi(pairId);
     void refreshLabBook(pairId).then((r) => {
       const bookEl = document.getElementById("book");
       if (bookEl) {
@@ -1412,6 +1841,7 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
     });
   }
 
+  repairPairTfCandles(pairId, state.activeTf);
   const candles = state.candles[pairId]?.[state.activeTf] ?? [];
   const chartOpt = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
   if (chartMounted && switchChartPair(candles, chartOpt)) {
@@ -1424,7 +1854,8 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
 
   bookFlashSnap = snapshotBookLevels(document.getElementById("book"));
   refreshActivityPanel();
-  void refresh();
+  // Do NOT await full oracle refresh() here — it blocks Markets clicks for seconds.
+  // Book for the new pair is fetched above; ticker/oracle keep polling on their timers.
 }
 
 /** Spot header / order defaults: lab L2 mid when fixture matching is live. */
@@ -1458,6 +1889,8 @@ function renderMarketsList(): string {
     const q = pairQuote(p.id);
     const active = p.id === state.activePair ? "active" : "";
     const starred = state.favoritePairs.includes(p.id) ? "on" : "";
+    const vol = useLiveBook() ? deskVol24hBase(p.id) : q.vol24h;
+    const volTxt = vol > 0 ? formatVolBase(vol, p.base) : "—";
     return `<div class="market-row-wrap ${active}">
       <button type="button" class="star ${starred}" data-star="${p.id}" title="Favorite" aria-label="Favorite ${p.label}">★</button>
       <button type="button" class="market-row ${active}" data-pair="${p.id}">
@@ -1468,6 +1901,7 @@ function renderMarketsList(): string {
       <div class="mr-right">
         <span class="mono mr-px notranslate" translate="no">${q.mid > 0 ? formatPriceCompact(q.mid) : "—"}</span>
         <span class="mono mr-chg notranslate ${quoteToneClass(q.tone)}" translate="no">${formatPct(q.changePct)}</span>
+        <span class="mono mr-vol muted notranslate" translate="no" title="24h volume">${escapeHtml(volTxt)}</span>
       </div>
     </button></div>`;
   };
@@ -1496,18 +1930,60 @@ function bookGroupStep(): number {
 }
 
 function renderVolumeRatio(): string {
-  const vr = volumeRatio5m(state.trades, state.activePair);
-  const buyLabel = vr.buyVol > 0 || vr.sellVol > 0
-    ? `${formatNum(vr.buyPct, 0)}% B`
-    : "50% B";
-  const sellLabel = vr.buyVol > 0 || vr.sellVol > 0
-    ? `${formatNum(vr.sellPct, 0)}% S`
-    : "50% S";
-  return `<div class="volume-ratio" title="Buy/Sell volume · last 5 min">
+  // Live desk: B/S bar from L2 quote depth (visible book), not empty local trades → fake 50/50.
+  // Fallback: public tape + session fills in the last 5m.
+  let buyPct = 50;
+  let sellPct = 50;
+  let known = false;
+  let title = "Buy/Sell volume · last 5 min";
+  if (useLiveBook()) {
+    const { bids, asks } = activeBookLevels();
+    const depth = bookDepthRatio(bids, asks);
+    if (depth.known) {
+      buyPct = depth.buyPct;
+      sellPct = depth.sellPct;
+      known = true;
+      title = "Bid/Ask depth · visible L2 notional";
+    } else {
+      const tapePrints = [
+        ...publicTape.map((t) => ({
+          pairId: t.pairId,
+          ts: t.ts,
+          side: t.side,
+          amountBase: t.amountBase,
+          price: t.price,
+        })),
+        ...state.trades.map((t) => ({
+          pairId: t.pairId,
+          ts: t.ts,
+          side: t.side,
+          amountBase: t.amountBase,
+          price: t.price,
+        })),
+      ];
+      const tape = volumeRatioFromPrints(tapePrints, state.activePair, 5 * 60_000, true);
+      if (tape.known) {
+        buyPct = tape.buyPct;
+        sellPct = tape.sellPct;
+        known = true;
+        title = "Buy/Sell notional · last 5 min (tape)";
+      }
+    }
+  } else {
+    const vr = volumeRatio5m(state.trades, state.activePair);
+    buyPct = vr.buyPct;
+    sellPct = vr.sellPct;
+    known = vr.buyVol > 0 || vr.sellVol > 0;
+  }
+  const buyLabel = known ? `${formatNum(buyPct, 0)}% B` : "—% B";
+  const sellLabel = known ? `${formatNum(sellPct, 0)}% S` : "—% S";
+  const buyW = known ? buyPct : 50;
+  const sellW = known ? sellPct : 50;
+  return `<div class="volume-ratio" title="${title}">
     <div class="volume-ratio-labels"><span class="buy">${buyLabel}</span><span class="sell">${sellLabel}</span></div>
     <div class="volume-ratio-track">
-      <div class="vr-buy" style="width:${vr.buyPct}%"></div>
-      <div class="vr-sell" style="width:${vr.sellPct}%"></div>
+      <div class="vr-buy" style="width:${buyW}%"></div>
+      <div class="vr-sell" style="width:${sellW}%"></div>
     </div>
   </div>`;
 }
@@ -1569,6 +2045,18 @@ function activeBookLevels(): {
         raw = {
           bids: raw.bids.filter((l) => l.price < bestAsk),
           asks: raw.asks.filter((l) => l.price > bestBid),
+        };
+      }
+      // Soft-launch: drop orphan far rungs (old 0.05 peg leftovers) so depth/spread
+      // stay around live BBO — not a fake 15% wall behind Soft-MM.
+      const bb = raw.bids[0]?.price ?? 0;
+      const ba = raw.asks[0]?.price ?? 0;
+      if (bb > 0 && ba > 0 && ba > bb) {
+        const mid = (bb + ba) / 2;
+        const maxDev = mid * 0.02; // 200 bps
+        raw = {
+          bids: raw.bids.filter((l) => mid - l.price <= maxDev),
+          asks: raw.asks.filter((l) => l.price - mid <= maxDev),
         };
       }
     } else if (lab) {
@@ -1642,31 +2130,46 @@ function renderBook(): string {
   const steps = bookStepsForPair(state.activePair);
   const bestBid = visibleBids[0]?.price ?? (lab ? 0 : t.bid);
   const bestAsk = visibleAsks[0]?.price ?? (lab ? 0 : t.ask);
-  const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : lab ? bestBid || bestAsk || t.mid : t.mid;
-  const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : Math.max(0, t.ask - t.bid);
-  const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
-  const midHint = labLive ? "Live L2 mid" : "Oracle · indicative";
-  const midTitle = labLive ? "Live L2 mid" : "Oracle · indicative (not tradeable L2)";
+  const {
+    midPx,
+    spreadAbs,
+    spreadPct,
+    midHint,
+    midTitle,
+  } = bookMidFromLevels(state.activePair, bestBid, bestAsk, labLive, t.mid);
+  const mobileBook = isMobileLayout();
   return `
-    <div class="book-view-tabs segmented">
+    ${
+      mobileBook
+        ? ""
+        : `<div class="book-view-tabs segmented">
       <button type="button" class="bv active" data-bv="book">Book</button>
       <button type="button" class="bv" data-bv="depth">Depth</button>
-    </div>
+    </div>`
+    }
     ${renderVolumeRatio()}
-    <div class="depth-wrap" aria-hidden="true">${renderDepthSvg(visibleBids, visibleAsks)}</div>
-    <div class="book-group-row">
+    ${mobileBook ? "" : `<div class="depth-wrap" aria-hidden="true">${renderDepthSvg(visibleBids, visibleAsks)}</div>`}
+    ${
+      mobileBook
+        ? ""
+        : `<div class="book-group-row">
       <label class="muted small">Group</label>
       <select id="book-group-select" class="book-select mono">
         ${steps.map((s) => `<option value="${s.value}" ${state.bookGrouping === s.value ? "selected" : ""}>${s.label}</option>`).join("")}
       </select>
-    </div>
-    <div class="ob-head"><span>Price (${pair.quote})</span><span>Amount (${pair.base})</span><span class="ob-total">Total</span></div>
+    </div>`
+    }
+    <div class="ob-head"><span>${mobileBook ? "Price" : `Price (${pair.quote})`}</span><span>${mobileBook ? "Amt" : `Amount (${pair.base})`}</span><span class="ob-total">${mobileBook ? "Tot" : "Total"}</span></div>
     <div class="book-ladder">
       <div class="ob-asks-pane" data-book-pane="asks">${visibleAsks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
       <div class="ob-mid" title="${midTitle}">
         <div class="ob-mid-price">${formatPrice(midPx)}</div>
-        <div class="ob-mid-spread">Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%</div>
-        <div class="ob-mid-src muted small">${midHint}</div>
+        <div class="ob-mid-spread">${
+          spreadAbs > 0
+            ? `Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%`
+            : midHint
+        }</div>
+        ${mobileBook ? "" : `<div class="ob-mid-src muted small">${midHint}</div>`}
       </div>
       <div class="ob-bids-pane" data-book-pane="bids">${visibleBids.map((l) => row(l, "bid")).join("")}</div>
     </div>`;
@@ -1716,6 +2219,7 @@ function renderMobileTradeTape(): string {
     return `<div class="mobile-tape-empty muted small">${live ? "No market prints yet" : "No trades yet"}</div>`;
   }
   return rows
+    .slice(0, 4)
     .map(
       (t) => `<div class="mobile-tape-row ${t.side === "buy" ? "up" : "down"}">
         <span class="mono">${formatPrice(t.price)}</span>
@@ -1727,7 +2231,14 @@ function renderMobileTradeTape(): string {
 
 function patchMobileTradeTape(): void {
   const el = document.getElementById("mobile-trade-tape");
+  const wrap = document.getElementById("mobile-trade-tape-wrap");
   if (el) el.innerHTML = renderMobileTradeTape();
+  if (wrap) {
+    ensurePublicTape();
+    const rows = mergeTapeRows(state.trades, publicTape, state.activePair, 8);
+    wrap.classList.toggle("is-empty", rows.length === 0);
+    wrap.hidden = rows.length === 0;
+  }
 }
 
 function formatTradeFee(t: { feeQuote: number; feeHmc?: number; feePaidInHmc: boolean }, quoteSymbol = "USDT"): string {
@@ -1817,7 +2328,9 @@ function renderActivityBody(): string {
       <p class="muted small act-empty-hint">${
         fills
           ? `Past fills are under Fills · resting limits stay here until hit or cancel`
-          : `Use Buy/Sell under the chart · Limit rests on the book; Market fills instantly (paper)`
+          : isDeskConnectEnabled()
+            ? `Use Trade tab Buy/Sell · Limit rests on the live book; Market fills against L2`
+            : `Use Trade tab Buy/Sell · Limit rests on the book; Market fills instantly`
       }</p>`;
   }
   return `<div class="act-list">${rows
@@ -1853,27 +2366,28 @@ function renderActivityBody(): string {
 }
 
 function renderConvert(): string {
+  ensureDistinctConvertLegs();
   const vip = activeVipTier(state, market ?? undefined);
-  const labReady = tradingGuards.convertFeeServer && useLabMatching();
-  const labAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useLabMatching();
-  const feeNote = labReady
-    ? `Lab <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${vip.name}) · net shown`
-    : labAvail
-      ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${vip.name})`
-      : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${vip.name}) — same VIP schedule as Spot`;
+  const serverReady = useServerConvert();
+  const serverAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useServerMatching();
+  const feeNote = serverReady
+    ? `Server <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
+    : serverAvail
+      ? `Server convert ready — Connect on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+      : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
   const hmcPay =
     state.feeConfig.payFeesInHmc
       ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · paper only until health advertises hmc_fee_pay"}`
       : `Fees in quote asset · toggle HMC (−${state.feeConfig.hmcDiscountPct}%) on Account or Spot`;
 
-  const activeRoute = routeForAssets(convertFrom, convertTo);
+  const activePair = convertPrimaryPair(convertFrom, convertTo);
   const fromOpts = renderConvertAssetOptions(convertFrom);
   const toOpts = renderConvertAssetOptions(convertTo);
 
-  const balRows = CONVERT_ASSETS.map((a) => ({
+  const balRows = CONVERT_UI_ASSETS.map((a) => ({
     symbol: a.symbol,
     name: a.name,
-    value: formatNum(freeBalance(state, a.key), a.key === "btc" ? 8 : 4),
+    value: formatNum(freeBalance(state, a.key), 4),
   }));
 
   const recentRows = state.ledger
@@ -1885,41 +2399,43 @@ function renderConvert(): string {
       amount: formatNum(Math.abs(e.amount), 4),
     }));
 
+  const kicker = isDeskConnectEnabled()
+    ? serverReady
+      ? "Instant swap · desk convert live"
+      : isDeskMatchingLive(deskEdgeSnap.matching)
+        ? "Instant swap · desk matching live · Convert paper until convert GO"
+        : "Instant swap · paper balances"
+    : isLabLoopbackApi()
+      ? serverReady
+        ? "Instant swap · lab convert"
+        : "Instant swap · lab"
+      : "Instant swap · paper";
+
+  const holdBanner = isDeskConnectEnabled()
+    ? serverReady
+      ? `<p class="muted small convert-hold-banner" role="status">Desk convert uses server mid + VIP taker on HMC/USDT and HMC/SUP.</p>`
+      : isDeskMatchingLive(deskEdgeSnap.matching)
+        ? `<p class="muted small convert-hold-banner" role="status">Desk matching is live for Spot — Convert stays on paper until health advertises convert. Primary pairs: HMC/USDT · HMC/SUP.</p>`
+        : `<p class="muted small convert-hold-banner" role="status">Matching HOLD on this edge — Convert uses local paper balances · HMC/USDT · HMC/SUP.</p>`
+    : "";
+
   return `
   <section class="convert-page glass">
     <div class="convert-shell">
       <header class="convert-hero">
-        <p class="kicker">${
-          isDeskConnectEnabled()
-            ? isDeskMatchingLive(deskEdgeSnap.matching)
-              ? "Instant swap · desk matching live · Convert still paper"
-              : "Instant swap · paper balances"
-            : isLabLoopbackApi()
-              ? "Instant swap · lab"
-              : "Instant swap · paper"
-        }</p>
+        <p class="kicker">${kicker}</p>
         <h2>Convert</h2>
-        <p class="muted convert-lead">Swap paper balances at mid · ${feeNote}. No book, no futures.</p>
-        ${
-          isDeskConnectEnabled()
-            ? isDeskMatchingLive(deskEdgeSnap.matching)
-              ? `<p class="muted small convert-hold-banner" role="status">Desk matching is live for Spot — Convert stays on paper balances until convert GO. HMC→BTC quote uses oracle mid.</p>`
-              : `<p class="muted small convert-hold-banner" role="status">Matching HOLD on this edge — Convert uses local paper balances.</p>`
-            : ""
-        }
+        <p class="muted convert-lead">Swap at mid · ${feeNote}. No book, no futures.</p>
+        ${holdBanner}
         <p class="muted small convert-fee-mode mono">${hmcPay}</p>
       </header>
       <div class="convert-desk-wrap">
       <div class="convert-desk glass-inset">
-        <div class="cv-quick-head">
-          <span class="cv-quick-label">Popular routes</span>
-          <span class="muted small">Tap a pair to prefill</span>
-        </div>
-        <div class="cv-quick cv-route-grid" id="cv-quick" data-active-route="${activeRoute ?? ""}">${renderConvertQuickRoutes(activeRoute)}</div>
+        ${renderConvertPairTabs(activePair)}
         <div class="cv-swap-stack">
         <div class="cv-leg cv-leg-from">
           <div class="cv-leg-head">
-            <span>From</span>
+            <span>You pay</span>
             <button type="button" class="linkish" id="cv-max">Max</button>
           </div>
           <div class="cv-leg-row">
@@ -1927,7 +2443,7 @@ function renderConvert(): string {
             <select id="cv-from" class="cv-sel-native" aria-hidden="true" tabindex="-1">${fromOpts}</select>
             <div class="cv-amt-wrap cv-amt-wrap-inline">
               <label class="muted small cv-amt-label" for="cv-amt">Amount</label>
-              <input id="cv-amt" class="inp mono cv-amt-inp" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount" placeholder="0.00" />
+              <input id="cv-amt" class="inp mono cv-amt-inp" type="number" min="0" step="any" value="${escapeHtml(convertAmtStr)}" aria-label="Amount you pay" placeholder="0.00" inputmode="decimal" />
             </div>
           </div>
           <div class="cv-bal muted small mono" id="cv-from-bal"></div>
@@ -1939,24 +2455,30 @@ function renderConvert(): string {
           </div>
         </div>
         <div class="cv-flip-wrap">
-          <button type="button" class="cv-flip" id="cv-flip" title="Flip direction" aria-label="Flip From and To">${Ico.swap()}</button>
+          <button type="button" class="cv-flip" id="cv-flip" title="Flip direction" aria-label="Flip You pay and You receive">${Ico.swap()}</button>
         </div>
         <div class="cv-leg cv-leg-to">
-          <div class="cv-leg-head"><span>To</span><span class="muted small" id="cv-to-label">You receive</span></div>
+          <div class="cv-leg-head"><span>You receive</span><span class="muted small" id="cv-to-label">Net after fee</span></div>
           <div class="cv-leg-row">
             ${renderConvertAssetPicker("to", convertTo, convertFrom)}
             <select id="cv-to" class="cv-sel-native" aria-hidden="true" tabindex="-1">${toOpts}</select>
             <div class="cv-receive-wrap cv-receive-wrap-inline">
               <span class="muted small cv-receive-label">Estimated receive</span>
-              <div class="cv-receive mono" id="cv-got">—</div>
+              <div class="cv-receive mono" id="cv-got" aria-live="polite">—</div>
             </div>
           </div>
         </div>
         </div>
         <div class="cv-quote mono" id="cv-quote">
+          <div class="cv-q-head">
+            <span>Quote details</span>
+            <span class="cv-quote-age" id="cv-quote-age" aria-live="polite">—</span>
+          </div>
+          <div class="cv-q-row"><span>You pay</span><span id="cv-pay">—</span></div>
+          <div class="cv-q-row"><span>You receive</span><span id="cv-recv-line">—</span></div>
           <div class="cv-q-row"><span>Rate</span><span id="cv-rate">—</span></div>
           <div class="cv-q-row"><span>Fee</span><span id="cv-fee">—</span></div>
-          <div class="cv-q-row"><span>Route</span><span id="cv-route-label">—</span></div>
+          <div class="cv-q-row"><span>Pair</span><span id="cv-route-label">—</span></div>
         </div>
         <div class="cv-slippage-row">
           <span class="cv-slippage-label muted small">Slippage guard</span>
@@ -1969,8 +2491,8 @@ function renderConvert(): string {
           <input type="checkbox" id="cv-confirm-large" ${convertConfirmLarge ? "checked" : ""} />
           Confirm when spending &gt;50% of available balance
         </label>
-        <button type="button" class="btn-primary btn-block cv-go" id="cv-go">Convert</button>
-        <p class="muted small cv-hint" id="cv-hint">Pick two assets · live preview before you confirm</p>
+        <button type="button" class="btn-primary btn-block cv-go" id="cv-go" aria-live="polite">Convert</button>
+        <p class="muted small cv-hint" id="cv-hint">HMC/USDT or HMC/SUP · live preview before you confirm</p>
         <div class="cv-actions">
           <button type="button" class="btn-sm" id="cv-open-spot" title="Open matching Spot market">Trade on Spot →</button>
         </div>
@@ -1993,6 +2515,31 @@ function refreshConvertPreview(): void {
   void refreshConvertPreviewAsync();
 }
 
+function paintConvertCta(go: HTMLButtonElement | null, amt: number, disabled: boolean): void {
+  if (!go) return;
+  go.disabled = disabled;
+  go.textContent = convertCtaLabel(
+    assetSymbol(convertFrom),
+    assetSymbol(convertTo),
+    amt,
+    (n) => formatNum(n, convertFrom === "usdt" ? 4 : 4),
+  );
+}
+
+function paintConvertQuoteAge(ok: boolean): void {
+  const ageEl = document.getElementById("cv-quote-age");
+  if (!ageEl) return;
+  if (!ok) {
+    ageEl.textContent = "—";
+    ageEl.classList.remove("fresh", "stale");
+    return;
+  }
+  lastConvertQuoteAt = Date.now();
+  ageEl.textContent = formatConvertQuoteAge(lastConvertQuoteAt);
+  ageEl.classList.add("fresh");
+  ageEl.classList.remove("stale");
+}
+
 async function refreshConvertPreviewAsync(): Promise<void> {
   const seq = ++convertPreviewSeq;
   const balEl = document.getElementById("cv-from-bal");
@@ -2000,40 +2547,47 @@ async function refreshConvertPreviewAsync(): Promise<void> {
   const rateEl = document.getElementById("cv-rate");
   const feeEl = document.getElementById("cv-fee");
   const routeEl = document.getElementById("cv-route-label");
+  const payEl = document.getElementById("cv-pay");
+  const recvLine = document.getElementById("cv-recv-line");
   const hint = document.getElementById("cv-hint");
   const go = document.getElementById("cv-go") as HTMLButtonElement | null;
   if (!balEl || !gotEl || !rateEl || !feeEl || !routeEl) return;
 
+  ensureDistinctConvertLegs();
   const avail = freeBalance(state, convertFrom, market ?? undefined);
-  balEl.textContent = `Available ${formatNum(avail, convertFrom === "btc" ? 8 : 4)} ${assetSymbol(convertFrom)}`;
+  balEl.textContent = `Available ${formatNum(avail, 4)} ${assetSymbol(convertFrom)}`;
   const pickerBals: Partial<Record<keyof Wallet, string>> = {};
-  for (const a of CONVERT_ASSETS) {
-    pickerBals[a.key] = formatNum(freeBalance(state, a.key, market ?? undefined), a.key === "btc" ? 8 : 4);
+  for (const a of CONVERT_UI_ASSETS) {
+    pickerBals[a.key] = formatNum(freeBalance(state, a.key, market ?? undefined), 4);
   }
   patchConvertPickerBalances(pickerBals);
   syncConvertPickerUi(convertFrom, convertTo);
-  const quickEl = document.getElementById("cv-quick");
-  if (quickEl) quickEl.dataset.activeRoute = routeForAssets(convertFrom, convertTo) ?? "";
 
   const route = routeForAssets(convertFrom, convertTo);
-  if (!route) {
+  if (!route || !isPrimaryConvertRoute(route)) {
     gotEl.textContent = "—";
     rateEl.textContent = "—";
     feeEl.textContent = "—";
-    routeEl.textContent = "Unsupported pair";
-    if (hint) hint.textContent = "No direct route for this pair — pick another To asset";
-    if (go) go.disabled = true;
+    if (payEl) payEl.textContent = "—";
+    if (recvLine) recvLine.textContent = "—";
+    routeEl.textContent = "Pick HMC/USDT or HMC/SUP";
+    paintConvertQuoteAge(false);
+    if (hint) hint.textContent = "Primary pairs only — HMC/USDT or HMC/SUP";
+    paintConvertCta(go, 0, true);
     return;
   }
   routeEl.textContent = CONVERT_ROUTES.find((r) => r.id === route)?.label ?? route;
 
   const amt = Number(convertAmtStr);
-  if (go) go.disabled = !(amt > 0);
   if (!market || !(amt > 0)) {
     gotEl.textContent = "—";
     rateEl.textContent = "—";
     feeEl.textContent = "—";
+    if (payEl) payEl.textContent = "—";
+    if (recvLine) recvLine.textContent = "—";
+    paintConvertQuoteAge(false);
     if (hint) hint.textContent = "Enter amount to see live receive + fee";
+    paintConvertCta(go, amt, !(amt > 0));
     return;
   }
 
@@ -2044,9 +2598,9 @@ async function refreshConvertPreviewAsync(): Promise<void> {
   const toSnap = convertTo;
   const amtSnap = convertAmtStr;
 
-  // Lab session: preview from server ConvertMid (seed/default) — not pool-oracle / last trade.
-  // Never fall back to paper mids while lab matching is live (misleading preview → failed submit).
-  if (tradingGuards.convertFeeServer && useLabMatching()) {
+  // Server session: preview from ConvertMid (seed/default) — not pool-oracle / last trade.
+  // Never fall back to paper mids while server convert is live (misleading preview → failed submit).
+  if (useServerConvert()) {
     const q = await getLabConvertQuote({
       from: fromSym,
       to: toSym,
@@ -2072,6 +2626,8 @@ async function refreshConvertPreviewAsync(): Promise<void> {
       const feeH = minorToDisplay(q.fee_hmc);
       lastConvertPreviewNet = netDisp;
       gotEl.textContent = formatPrice(netDisp);
+      if (payEl) payEl.textContent = `${formatPrice(amt)} ${assetSymbol(convertFrom)}`;
+      if (recvLine) recvLine.textContent = `${formatPrice(netDisp)} ${assetSymbol(convertTo)}`;
       rateEl.textContent = convertRateLabel(
         assetSymbol(convertFrom),
         assetSymbol(convertTo),
@@ -2080,41 +2636,37 @@ async function refreshConvertPreviewAsync(): Promise<void> {
         formatPrice,
       );
       feeEl.textContent = q.paid_in_hmc
-        ? `Taker ${formatBps(q.fee_bps)} · lab · est ${formatPrice(feeH)} HMC`
-        : `Taker ${formatBps(q.fee_bps)} · lab · est ${formatPrice(feeQ)} ${pairQuoteSym(def.pair)}`;
+        ? `Taker ${formatBps(q.fee_bps)} · server · est ${formatPrice(feeH)} HMC`
+        : `Taker ${formatBps(q.fee_bps)} · server · est ${formatPrice(feeQ)} ${pairQuoteSym(def.pair)}`;
+      paintConvertQuoteAge(true);
       if (hint) {
         hint.textContent =
           avail < amt
             ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
             : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · server seed mid`;
       }
-      if (go) {
-        const maxOk = maxConvertibleFrom();
-        go.disabled = avail < amt || amt > maxOk + 1e-12;
-      }
-      document.querySelectorAll("#cv-quick .cv-chip").forEach((btn) => {
-        btn.classList.toggle("active", (btn as HTMLElement).dataset.cvRoute === route);
-      });
+      const maxOk = maxConvertibleFrom();
+      paintConvertCta(go, amt, avail < amt || amt > maxOk + 1e-12);
       return;
     }
     const reject = formatExchangeReject(q);
     gotEl.textContent = "—";
     rateEl.textContent = "—";
     feeEl.textContent = reject;
+    if (payEl) payEl.textContent = "—";
+    if (recvLine) recvLine.textContent = "—";
+    paintConvertQuoteAge(false);
     if (hint) {
       hint.textContent =
         q.code === "min_notional"
-          ? `${reject} — raise amount (BTC routes often need ≥~200 HMC / ≥~500 SUP)`
+          ? `${reject} — raise amount`
           : q.code === "invalid_order"
             ? `${reject} — try a smaller size (pair qty/price caps)`
             : q.code === "convert_inventory"
               ? `${reject} — try Spot book or a smaller convert`
               : reject;
     }
-    if (go) go.disabled = true;
-    document.querySelectorAll("#cv-quick .cv-chip").forEach((btn) => {
-      btn.classList.toggle("active", (btn as HTMLElement).dataset.cvRoute === route);
-    });
+    paintConvertCta(go, amt, true);
     return;
   }
 
@@ -2123,14 +2675,19 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     gotEl.textContent = "—";
     rateEl.textContent = "—";
     feeEl.textContent = prev.reason;
+    if (payEl) payEl.textContent = "—";
+    if (recvLine) recvLine.textContent = "—";
+    paintConvertQuoteAge(false);
     if (hint) hint.textContent = prev.reason;
-    if (go) go.disabled = true;
+    paintConvertCta(go, amt, true);
     return;
   }
   const p = prev as ConvertPreview;
   const net = convertNetReceive(p);
   lastConvertPreviewNet = net;
   gotEl.textContent = formatPrice(net);
+  if (payEl) payEl.textContent = `${formatPrice(amt)} ${assetSymbol(convertFrom)}`;
+  if (recvLine) recvLine.textContent = `${formatPrice(net)} ${assetSymbol(convertTo)}`;
   rateEl.textContent = convertRateLabel(
     assetSymbol(convertFrom),
     assetSymbol(convertTo),
@@ -2139,6 +2696,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     formatPrice,
   );
   feeEl.textContent = convertFeeHintLine(p);
+  paintConvertQuoteAge(true);
   if (hint) {
     hint.textContent =
       avail < amt
@@ -2149,14 +2707,8 @@ async function refreshConvertPreviewAsync(): Promise<void> {
               p.fee.paidInHmc ? " · fee in HMC" : p.fee.feeQuote > 0 ? " · fee from quote" : ""
             }`;
   }
-  if (go) {
-    const maxOk = maxConvertibleFrom();
-    go.disabled = avail < amt || amt > maxOk + 1e-12;
-  }
-
-  document.querySelectorAll("#cv-quick .cv-chip").forEach((btn) => {
-    btn.classList.toggle("active", (btn as HTMLElement).dataset.cvRoute === route);
-  });
+  const maxOk = maxConvertibleFrom();
+  paintConvertCta(go, amt, avail < amt || amt > maxOk + 1e-12);
 }
 
 /** Max convertible amount reserving fee buffer (HMC pay or quote-fee on invert routes). */
@@ -2218,7 +2770,7 @@ async function runConvertDesk(): Promise<void> {
   const slippageBps = loadConvertSlippageBps();
   if (slippageBps > 0 && lastConvertPreviewNet > 0) {
     let freshNet = 0;
-    if (tradingGuards.convertFeeServer && useLabMatching()) {
+    if (useServerConvert()) {
       const q = await getLabConvertQuote({
         from,
         to,
@@ -2249,10 +2801,10 @@ async function runConvertDesk(): Promise<void> {
 
   try {
   if (isLabSessionStale()) {
-    toast("Lab session stale — reconnect fixture (convert frozen)", "warn");
+    toast("Session stale — reconnect (convert frozen)", "warn");
     return;
   }
-  if (tradingGuards.convertFeeServer && useLabMatching() && def) {
+  if (useServerConvert() && def) {
     const apiRes = await postLabConvert({
       from,
       to,
@@ -2286,8 +2838,9 @@ async function runConvertDesk(): Promise<void> {
         resultDriftBps > slippageBps
           ? ` · preview drift ${(resultDriftBps / 100).toFixed(2)}%`
           : "";
+      const lane = useDeskMatching() ? "Desk" : "Lab";
       toast(
-        `Lab convert → ${formatNum(net, 4)} net${formatLabConvertFeeToast(
+        `${lane} convert → ${formatNum(net, 4)} net${formatLabConvertFeeToast(
           {
             ...apiRes,
             feeQuoteDisplay,
@@ -2300,12 +2853,13 @@ async function runConvertDesk(): Promise<void> {
       softPatchConvertDesk();
       return;
     }
-    // Lab session + advertised /convert: don't invent balances — surface API error.
+    // Session + advertised /convert: don't invent balances — surface API error.
     toast(formatExchangeReject(apiRes), "warn");
     return;
   }
 
   // Lab connected without /convert advertisement — never paper-convert (ledger desync).
+  // Desk without convert GO may still paper-convert (soft-launch).
   if (useLabMatching() && !tradingGuards.convertFeeServer) {
     toast("Lab /convert not advertised — enable on exchange-api or disconnect fixture", "warn");
     return;
@@ -2340,10 +2894,10 @@ function softPatchConvertDesk(): void {
   const list = document.querySelector(".cv-bal-list");
   if (list) {
     list.innerHTML = renderConvertBalanceList(
-      CONVERT_ASSETS.map((a) => ({
+      CONVERT_UI_ASSETS.map((a) => ({
         symbol: a.symbol,
         name: a.name,
-        value: formatNum(freeBalance(state, a.key), a.key === "btc" ? 8 : 4),
+        value: formatNum(freeBalance(state, a.key), 4),
       })),
     );
   }
@@ -2404,10 +2958,10 @@ function softPatchFeePayChrome(): void {
     const labReady = tradingGuards.convertFeeServer && useLabMatching();
     const labAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useLabMatching();
     const feeNote = labReady
-      ? `Lab <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${vip.name}) · net shown`
+      ? `Lab <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
       : labAvail
-        ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${vip.name})`
-        : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${vip.name}) — same VIP schedule as Spot`;
+        ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+        : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
     lead.innerHTML = `Swap at mid · ${feeNote}. No book, no futures.`;
   }
   // Keep Spot + Account checkboxes in sync when either is toggled.
@@ -2438,13 +2992,9 @@ function wireConvertDesk(): void {
     convertTo = toSel.value as keyof Wallet;
     convertAmtStr = amtInp.value;
     document.querySelectorAll("[data-cv-pct]").forEach((btn) => btn.classList.remove("active"));
-    if (convertFrom === convertTo) {
-      const alt = CONVERT_ASSETS.find((a) => a.key !== convertFrom);
-      if (alt) {
-        convertTo = alt.key;
-        toSel.value = alt.key;
-      }
-    }
+    ensureDistinctConvertLegs();
+    fromSel.value = convertFrom;
+    toSel.value = convertTo;
     syncConvertPickerUi(convertFrom, convertTo);
     persistConvertDesk();
     refreshConvertPreview();
@@ -2494,17 +3044,18 @@ function wireConvertDesk(): void {
     });
   });
 
-  document.querySelectorAll("[data-cv-route]").forEach((btn) => {
+  document.querySelectorAll("[data-cv-pair]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const id = (btn as HTMLElement).dataset.cvRoute as ConvertRoute;
-      const d = convertRouteDef(id);
-      if (!d) return;
-      convertFrom = d.from;
-      convertTo = d.to;
+      const id = (btn as HTMLElement).dataset.cvPair as ConvertPrimaryPair | undefined;
+      if (!id) return;
+      const next = applyConvertPrimaryPair(id, convertFrom, convertTo);
+      convertFrom = next.from;
+      convertTo = next.to;
       fromSel.value = convertFrom;
       toSel.value = convertTo;
-      const defAmt = convertChipDefaultAmount(id);
-      if (defAmt) {
+      const route = routeForAssets(convertFrom, convertTo);
+      const defAmt = route ? convertChipDefaultAmount(route) : null;
+      if (defAmt && !(Number(convertAmtStr) > 0)) {
         convertAmtStr = defAmt;
         amtInp.value = defAmt;
       }
@@ -2624,9 +3175,7 @@ function renderSpot(): string {
   const av = availBalance(pair);
   const displayTip = state.chartMode === "heikin" ? (getDisplayedLastCandle() ?? candles.slice(-1)[0] ?? null) : (candles.slice(-1)[0] ?? null);
   const ohlcSource = lastOhlc ?? displayTip;
-  const ohlc = ohlcSource
-    ? `${state.chartMode === "heikin" ? "HA " : ""}O ${formatPrice(ohlcSource.open)} H ${formatPrice(ohlcSource.high)} L ${formatPrice(ohlcSource.low)} C ${formatPrice(ohlcSource.close)}`
-    : `${state.chartMode === "heikin" ? "HA " : ""}O — H — L — C ${formatPrice(t.mid)}`;
+  const ohlc = formatOhlcLegendText(ohlcSource, t.mid);
   const chartModes: { id: ChartMode; label: string }[] = [
     { id: "candles", label: "Candles" },
     { id: "bars", label: "Bars" },
@@ -2699,11 +3248,9 @@ function renderSpot(): string {
     <div class="tb-stats">
       <div><label>24h High</label><span class="mono notranslate" translate="no">${formatPrice(s24.high24h || t.high24h)}</span></div>
       <div><label>24h Low</label><span class="mono notranslate" translate="no">${formatPrice(s24.low24h || t.low24h)}</span></div>
-      <div><label>24h Vol (${noTranslateText(pair.base)})</label><span class="mono notranslate" translate="no">${
+      <div title="Rolling 24h base volume from durable fills (not calendar midnight reset)"><label>24h Vol (${noTranslateText(pair.base)})</label><span class="mono notranslate" translate="no">${
         useLiveBook()
-          ? deskVol24hBase() > 0
-            ? formatVolBase(deskVol24hBase(), pair.base)
-            : "—"
+          ? formatLiveVol24h(pair.id, pair.base)
           : formatVolBase(s24.vol24h || t.volume24hBase, pair.base)
       }</span></div>
       <div><label>Spread</label><span class="mono notranslate" translate="no">${formatNum(liveSpreadPct(t), 3)}%</span></div>
@@ -2711,15 +3258,25 @@ function renderSpot(): string {
     <div class="tb-right">
       <div class="vip-badge mono" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">
         <span class="vip-name" title="${
-          useLiveBook() ? "VIP from your desk trade history" : "VIP from local paper trade history"
-        }">${vip.name}</span>
-        ${useLiveBook() ? "" : `<span class="vip-demo muted small">paper</span>`}
+          hasServerVipVolume()
+            ? "VIP from server GET /vip (30d USDT fills)"
+            : useServerMatching()
+              ? "VIP pending server sync — local estimate"
+              : "VIP from local paper trade history"
+        }">${escapeHtml(vip.name)}</span>
+        ${
+          hasServerVipVolume()
+            ? `<span class="vip-demo muted small">live</span>`
+            : useServerMatching()
+              ? `<span class="vip-demo muted small">sync…</span>`
+              : `<span class="vip-demo muted small">paper</span>`
+        }
         <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
         <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
       </div>
       <button type="button" class="btn-sm alerts-chip" id="btn-open-alerts" title="Price alerts">Alerts${alertCount ? ` · ${alertCount}` : ""}</button>
       <button type="button" class="btn-sm" id="btn-hotkeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-    <div class="pnl-chip mono">PnL <span class="${pnl >= 0 ? "up" : "down"}">${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%</span></div>
+    <div class="pnl-chip mono">PnL <span class="${Math.abs(pnl) < 5e-3 ? "flat" : pnl >= 0 ? "up" : "down"}">${Math.abs(pnl) < 5e-3 ? "flat" : `${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%`}</span></div>
   </div>
   </div>
   ${
@@ -2743,7 +3300,7 @@ function renderSpot(): string {
         <button type="button" class="btn-panel-toggle" id="btn-collapse-book" title="Hide order book">‹</button>
       </div>
       <div id="book">${renderBook()}</div>
-      <div class="mobile-trade-tape-wrap" id="mobile-trade-tape-wrap" aria-label="Recent trades">
+      <div class="mobile-trade-tape-wrap is-empty" id="mobile-trade-tape-wrap" aria-label="Recent trades" hidden>
         <div class="mobile-trade-tape-head muted small">Trades</div>
         <div class="mobile-trade-tape" id="mobile-trade-tape">${renderMobileTradeTape()}</div>
       </div>
@@ -2765,6 +3322,7 @@ function renderSpot(): string {
           <button type="button" class="layout-chip ${!layoutPrefs.bookCollapsed ? "active" : ""}" id="chip-book" data-panel="book" title="Order book" aria-pressed="${!layoutPrefs.bookCollapsed ? "true" : "false"}">Book</button>
           <button type="button" class="layout-chip ${!layoutPrefs.toolsCollapsed ? "active" : ""}" id="chip-tools" data-panel="tools" title="Drawing tools" aria-pressed="${!layoutPrefs.toolsCollapsed ? "true" : "false"}">Tools</button>
           <button type="button" class="layout-chip ${!layoutPrefs.rightCollapsed ? "active" : ""}" id="chip-right" data-panel="right" title="Markets" aria-pressed="${!layoutPrefs.rightCollapsed ? "true" : "false"}">Mkts</button>
+          <button type="button" class="layout-chip ${!layoutPrefs.bottomCollapsed ? "active" : ""}" id="chip-orders" data-panel="orders" title="Orders · fills · cancel" aria-pressed="${!layoutPrefs.bottomCollapsed ? "true" : "false"}">Orders</button>
         </div>
         <div class="chart-mode-menu">
           <button type="button" class="btn-ico" id="btn-chart-type" title="Chart type" aria-label="Chart type" aria-haspopup="true" aria-expanded="false">${state.chartMode === "candles" || state.chartMode === "heikin" || state.chartMode === "bars" ? Ico.candlestick() : Ico.chartLine()}<span class="ico-chev" aria-hidden="true">${Ico.chevronDown()}</span></button>
@@ -2859,6 +3417,7 @@ function renderSpot(): string {
     <div class="terminal-rails" id="terminal-rails">
       ${renderPanelRail("left", "btn-expand-book", "Book", "Show order book")}
       ${renderPanelRail("right", "btn-expand-right", "Mkts", "Show markets panel")}
+      ${renderPanelRail("orders", "btn-expand-orders", "Orders", "Show orders · fills · cancel")}
     </div>
   </div>
 
@@ -2876,6 +3435,8 @@ function renderSpot(): string {
   <div class="chart-more-backdrop hidden" id="chart-more-backdrop" aria-hidden="true"></div>
   <div class="mode-drop hidden" id="chart-more-drop" role="menu" aria-label="Chart tools">
     <p class="muted small sheet-title">Chart tools</p>
+    <button type="button" class="cm" data-chart-more="fullscreen" role="menuitem">${state.chartFullscreen ? "Exit fullscreen" : "Fullscreen"}</button>
+    <button type="button" class="cm" data-chart-more="volume" role="menuitem">${state.chartOverlays.showVolume ? "Hide volume" : "Show volume"}</button>
     <button type="button" class="cm" data-chart-more="indicators" role="menuitem">Indicators</button>
     <button type="button" class="cm" data-chart-more="overlays" role="menuitem">Overlays</button>
     <button type="button" class="cm" data-chart-more="style" role="menuitem">Chart style</button>
@@ -3027,17 +3588,17 @@ function patchNonSpotChrome(): void {
   }
 }
 
-function evaluatePriceAlerts(mid: number): void {
-  if (!lastMidForAlerts) {
-    lastMidForAlerts = mid;
+function evaluatePriceAlerts(mid: number, pairId: PairId = state.activePair): void {
+  const last = lastMidForAlertsByPair.get(pairId) ?? 0;
+  if (!last) {
+    lastMidForAlertsByPair.set(pairId, mid);
     return;
   }
   let changed = false;
   for (const a of state.priceAlerts) {
-    if (a.fired || a.pairId !== state.activePair) continue;
+    if (a.fired || a.pairId !== pairId) continue;
     const crossed =
-      (lastMidForAlerts < a.price && mid >= a.price) ||
-      (lastMidForAlerts > a.price && mid <= a.price);
+      (last < a.price && mid >= a.price) || (last > a.price && mid <= a.price);
     if (crossed) {
       a.fired = true;
       changed = true;
@@ -3048,11 +3609,27 @@ function evaluatePriceAlerts(mid: number): void {
       toast(`Alert hit @ ${formatPrice(a.price)}`, "ok");
     }
   }
-  lastMidForAlerts = mid;
+  lastMidForAlertsByPair.set(pairId, mid);
   if (changed) {
     saveState(state);
     refreshOpenOrderChartLines();
     if (activityTab === "alerts") refreshActivityPanel();
+  }
+}
+
+/** Fire alerts for active + multi-pane pairs (not only the focused chart). */
+function evaluateAllPriceAlerts(): void {
+  const ids = new Set<PairId>([state.activePair]);
+  if (state.multiChartLayout !== "1") {
+    const n = state.multiChartLayout === "4" ? 4 : 2;
+    for (let i = 1; i <= n; i++) ids.add(panePair(i));
+  }
+  for (const a of state.priceAlerts) {
+    if (!a.fired) ids.add(a.pairId);
+  }
+  for (const pid of ids) {
+    const mid = spotMidForPair(pid);
+    if (mid > 0) evaluatePriceAlerts(mid, pid);
   }
 }
 
@@ -3320,14 +3897,15 @@ function refreshAccountAfterLab(): void {
 function settleOpenOrdersFromTickers(showToast = false): string[] {
   if (!market || useServerMatching()) return [];
   const notes = processOpenOrders(state, market, tickers);
-  if (!notes.length) return notes;
+  const attached = flushPendingTpslAttaches();
+  if (!notes.length && !attached) return notes;
   saveState(state);
   patchAvailChips();
   refreshOpenOrderChartLines();
   const openLeft = state.orders.some((o) => o.status === "open" || o.status === "triggered");
   if (!openLeft && activityTab === "orders") activityTab = "history";
   refreshActivityPanel();
-  if (showToast) toast(notes[0], "info");
+  if (showToast && notes.length) toast(notes[0], "info");
   return notes;
 }
 
@@ -3964,7 +4542,17 @@ async function labBridgeCreditUi(asset: "USDT" | "BTC", displayAmt: number): Pro
   }
 }
 
-function renderLabWithdrawList(rows: { id: string; asset: string; amount: number; status: string; destination: string }[]): void {
+function renderLabWithdrawList(
+  rows: {
+    id: string;
+    asset: string;
+    amount: number;
+    status: string;
+    destination: string;
+    created_at?: string;
+    fail_reason?: string;
+  }[],
+): void {
   const ul = document.getElementById("lab-wd-list");
   if (!ul) return;
   if (!rows.length) {
@@ -3972,10 +4560,19 @@ function renderLabWithdrawList(rows: { id: string; asset: string; amount: number
     return;
   }
   ul.innerHTML = rows
-    .map(
-      (w) =>
-        `<li><span class="dim">${escapeHtml(w.id.slice(0, 8))}…</span> ${escapeHtml(w.asset)} ${minorToDisplay(w.amount)} → ${escapeHtml(w.destination.slice(0, 18))}… <strong>${escapeHtml(w.status)}</strong></li>`,
-    )
+    .map((w) => {
+      const st = String(w.status || "").toLowerCase();
+      const age = w.created_at ? Date.parse(w.created_at) : NaN;
+      const ageMin = Number.isFinite(age) ? Math.max(0, Math.round((Date.now() - age) / 60_000)) : null;
+      const statusLabel =
+        st === "pending"
+          ? `pending${ageMin != null ? ` · ${ageMin}m` : ""} · waiting ops on-chain`
+          : st === "failed"
+            ? `failed${w.fail_reason ? ` · ${escapeHtml(String(w.fail_reason).slice(0, 40))}` : ""}`
+            : escapeHtml(w.status);
+      const tone = st === "pending" ? "warn" : st === "completed" ? "up" : st === "failed" ? "down" : "dim";
+      return `<li><span class="dim">${escapeHtml(w.id.slice(0, 8))}…</span> ${escapeHtml(w.asset)} ${minorToDisplay(w.amount)} → ${escapeHtml(w.destination.slice(0, 18))}… <strong class="${tone}">${statusLabel}</strong></li>`;
+    })
     .join("");
 }
 
@@ -4063,12 +4660,12 @@ async function labWithdrawRequestUi(): Promise<void> {
     }
     const totpEl = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
     if (totpEl) totpEl.value = "";
-    if (msg) msg.textContent = `Requested ${res.withdraw.id} · ${res.withdraw.status}${
+    if (msg) msg.textContent = `Requested ${res.withdraw.id.slice(0, 8)}… · pending — funds reserved until ops sends on-chain (not automatic)${
       res.fee_quote && res.fee_quote.fee > 0
-        ? ` · fee ${minorToDisplay(res.fee_quote.fee)} ${res.withdraw.asset} (debit ${minorToDisplay(res.fee_quote.debit_total)})`
+        ? ` · fee ${minorToDisplay(res.fee_quote.fee)} ${res.withdraw.asset}`
         : ""
-    } — admin complete via CLI (no SPA token)`;
-    toast("Withdraw pending — operator CLI to complete", "ok");
+    }`;
+    toast("Withdraw queued · pending until ops completes on-chain", "info");
     await labWithdrawRefreshUi();
     const sync = await syncLabBalancesAndBook(state, market);
     if (sync.ok) {
@@ -4237,10 +4834,16 @@ function clearTotpQr(): void {
 }
 
 const PENDING_2FA_KEY = "hmc.desk.2fa.pending.v1";
+const PENDING_2FA_MAX_AGE_MS = 15 * 60_000;
 
 function savePending2faEnrollment(secret: string, otpauth: string): void {
+  const safe = sanitizeOtpauthUrl(otpauth);
+  if (!safe || !secret) return;
   try {
-    sessionStorage.setItem(PENDING_2FA_KEY, JSON.stringify({ secret, otpauth, ts: Date.now() }));
+    sessionStorage.setItem(
+      PENDING_2FA_KEY,
+      JSON.stringify({ secret, otpauth: safe, ts: Date.now() }),
+    );
   } catch {
     /* ignore quota */
   }
@@ -4250,9 +4853,18 @@ function loadPending2faEnrollment(): { secret: string; otpauth: string } | null 
   try {
     const raw = sessionStorage.getItem(PENDING_2FA_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { secret?: string; otpauth?: string };
+    const parsed = JSON.parse(raw) as { secret?: string; otpauth?: string; ts?: number };
     if (!parsed.secret || !parsed.otpauth) return null;
-    return { secret: parsed.secret, otpauth: parsed.otpauth };
+    if (parsed.ts && Date.now() - parsed.ts > PENDING_2FA_MAX_AGE_MS) {
+      clearPending2faEnrollment();
+      return null;
+    }
+    const safe = sanitizeOtpauthUrl(parsed.otpauth);
+    if (!safe) {
+      clearPending2faEnrollment();
+      return null;
+    }
+    return { secret: parsed.secret, otpauth: safe };
   } catch {
     return null;
   }
@@ -4275,6 +4887,7 @@ async function restorePending2faIntoDom(): Promise<boolean> {
   if (linkEl) {
     linkEl.href = cached.otpauth;
     linkEl.textContent = "Open otpauth link";
+    linkEl.rel = "noopener noreferrer";
   }
   await paintTotpQr(cached.otpauth);
   return true;
@@ -4283,10 +4896,14 @@ async function restorePending2faIntoDom(): Promise<boolean> {
 async function paintTotpQr(otpauthUrl: string): Promise<void> {
   const img = document.getElementById("lab-2fa-qr") as HTMLImageElement | null;
   const host = document.getElementById("lab-2fa-qr-host");
-  if (!img || !otpauthUrl) return;
+  const safe = sanitizeOtpauthUrl(otpauthUrl);
+  if (!img || !safe) {
+    clearTotpQr();
+    return;
+  }
   try {
     // Static import (top-level) — CF part-loader breaks relative dynamic chunks.
-    img.src = await QRCode.toDataURL(otpauthUrl, {
+    img.src = await QRCode.toDataURL(safe, {
       width: 180,
       margin: 1,
       errorCorrectionLevel: "M",
@@ -4372,14 +4989,21 @@ async function lab2faSetupUi(opts?: { silent?: boolean }): Promise<void> {
   }
   const secretEl = document.getElementById("lab-2fa-secret");
   const linkEl = document.getElementById("lab-2fa-otpauth") as HTMLAnchorElement | null;
+  const otpauth = sanitizeOtpauthUrl(res.otpauth_url);
+  if (!otpauth) {
+    if (msg) msg.textContent = "Invalid otpauth URL from server";
+    if (!opts?.silent) toast("2FA setup failed — bad otpauth URL", "warn");
+    return;
+  }
   if (secretEl) secretEl.textContent = res.secret_base32;
   if (linkEl) {
-    linkEl.href = res.otpauth_url;
+    linkEl.href = otpauth;
     linkEl.textContent = "Open otpauth link";
+    linkEl.rel = "noopener noreferrer";
   }
-  savePending2faEnrollment(res.secret_base32, res.otpauth_url);
+  savePending2faEnrollment(res.secret_base32, otpauth);
   applyLab2faPanels(false, true);
-  await paintTotpQr(res.otpauth_url);
+  await paintTotpQr(otpauth);
   if (!opts?.silent) document.getElementById("lab-2fa-confirm-code")?.focus();
   if (msg) msg.textContent = res.note || "Scan QR on phone → enter 6-digit code";
   if (!opts?.silent) toast("2FA setup started — scan QR, then confirm", "ok");
@@ -4513,7 +5137,7 @@ function wireLabApiButtons(): void {
   click("btn-desk-new-key", () => {
     if (
       !window.confirm(
-        "Create a new browser desk wallet? This clears the sessionStorage seed and logs out. You cannot recover the old address from this tab.",
+        "Create a new browser desk wallet? This clears the durable browser seed (localStorage) and logs out. Export a backup first if you need this address again.",
       )
     ) {
       return;
@@ -5006,18 +5630,23 @@ function handleChartContextAction(
   switch (action) {
     case "buy_limit":
       quickPlaceFromChart("buy", "limit", price, pairId);
+      ensureActivityPanelVisible("orders");
       break;
     case "buy_stop":
       quickPlaceFromChart("buy", "stop_limit", price, pairId);
+      ensureActivityPanelVisible("orders");
       break;
     case "sell_limit":
       quickPlaceFromChart("sell", "limit", price, pairId);
+      ensureActivityPanelVisible("orders");
       break;
     case "sell_stop":
       quickPlaceFromChart("sell", "stop_limit", price, pairId);
+      ensureActivityPanelVisible("orders");
       break;
     case "create_order":
       fillOrderPanelAtPrice("buy", "limit", price, pairId);
+      ensureActivityPanelVisible("orders");
       toast(`Price → ${formatPrice(price)}`, "info");
       break;
     case "add_alert": {
@@ -5030,10 +5659,46 @@ function handleChartContextAction(
       });
       saveState(state);
       void Notification.requestPermission?.();
-      activityTab = "alerts";
+      ensureActivityPanelVisible("alerts");
       refreshActivityPanel();
       refreshOpenOrderChartLines();
       toast(`Alert @ ${formatPrice(price)}`, "ok");
+      break;
+    }
+    case "cancel_nearest": {
+      const open = state.orders.filter(
+        (o) => (o.status === "open" || o.status === "triggered") && o.pairId === pairId,
+      );
+      if (!open.length) {
+        toast("No open orders", "info");
+        break;
+      }
+      let best = open[0]!;
+      let bestDist = Math.abs(best.price - price);
+      for (const o of open) {
+        const d = Math.abs(o.price - price);
+        const dStop = o.stopPrice ? Math.abs(o.stopPrice - price) : Infinity;
+        const dist = Math.min(d, dStop);
+        if (dist < bestDist) {
+          best = o;
+          bestDist = dist;
+        }
+      }
+      cancelOrder(state, best.id);
+      saveState(state);
+      ensureActivityPanelVisible("orders");
+      refreshOpenOrderChartLines();
+      refreshActivityPanel();
+      toast(`Cancelled ${orderTypeLabel(best.kind, best)} @ ${formatPrice(best.price)}`, "ok");
+      break;
+    }
+    case "cancel_all": {
+      const n = cancelAllOpenOrders(state);
+      saveState(state);
+      ensureActivityPanelVisible("orders");
+      refreshOpenOrderChartLines();
+      refreshActivityPanel();
+      toast(n ? `Cancelled ${n} order${n === 1 ? "" : "s"}` : "No open orders", n ? "ok" : "info");
       break;
     }
     case "reset_view":
@@ -5097,10 +5762,14 @@ function handleChartContextAction(
 function openPaneContextMenu(pairId: PairId, paneHostId: string, price: number, x: number, y: number): void {
   const pair = pairById(pairId);
   const isMain = paneHostId === "chart-host";
+  const openOrderCount = state.orders.filter(
+    (o) => (o.status === "open" || o.status === "triggered") && o.pairId === pairId,
+  ).length;
   showChartContextMenu(x, y, price, {
     baseSymbol: pair.base,
     indicatorCount: isMain ? countActiveIndicators(state.chartSettings, state.indicatorConfig) : 0,
     marksHidden: isMain ? !state.chartOverlays.showVolume : true,
+    openOrderCount,
     onOpen: () => setContextPriceMarker(null),
     onClose: () => setContextPriceMarker(null),
     onAction: (action, p) => handleChartContextAction(action, p, { pairId, paneHostId }),
@@ -5110,17 +5779,11 @@ function openPaneContextMenu(pairId: PairId, paneHostId: string, price: number, 
 function refreshOhlcLegendIdle(): void {
   const el = document.getElementById("ohlc-legend");
   const mob = document.getElementById("mobile-ohlc-bar");
-  const ha = state.chartMode === "heikin" ? "HA " : "";
   const tip =
     state.chartMode === "heikin"
       ? getDisplayedLastCandle()
       : (state.candles[state.activePair]?.[state.activeTf]?.slice(-1)[0] ?? null);
-  let text: string;
-  if (tip) {
-    text = `${ha}O ${formatPrice(tip.open)} H ${formatPrice(tip.high)} L ${formatPrice(tip.low)} C ${formatPrice(tip.close)}`;
-  } else {
-    text = `${ha}O — H — L — C ${formatPrice(activeTicker().mid)}`;
-  }
+  const text = formatOhlcLegendText(tip, activeTicker().mid);
   if (text !== lastOhlcLegendText) {
     lastOhlcLegendText = text;
     if (el) el.textContent = text;
@@ -5131,12 +5794,18 @@ function refreshOhlcLegendIdle(): void {
   }
 }
 
+/** Repair corrupt TF series before any paint (F5 / hotkeys / hash). */
+function repairPairTfCandles(pairId: PairId, tf: Timeframe): void {
+  state.candles[pairId] = ensureTfSeriesCadence(state.candles[pairId] ?? {}, pairId, tf);
+}
+
 function mountChartPanel(): void {
   const host = document.getElementById("chart-host");
   if (!host) return;
   closeChartContextMenu();
   destroyChart();
   chartMounted = false;
+  repairPairTfCandles(state.activePair, state.activeTf);
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
   const opts: import("./types").ChartMountOpts = {
     ...chartOpts(),
@@ -5241,6 +5910,7 @@ function setPaneTf(pane: number, tf: Timeframe): void {
   if (pane <= 1) {
     if (tf === state.activeTf) return;
     state.activeTf = tf;
+    repairPairTfCandles(state.activePair, tf);
     saveState(state);
     syncRouteHash();
     document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
@@ -5256,6 +5926,7 @@ function setPaneTf(pane: number, tf: Timeframe): void {
   next[pane - 2] = tf;
   state.multiPaneTfs = next;
   if (pane === 2) state.secondaryTf = tf;
+  repairPairTfCandles(panePair(pane), tf);
   saveState(state);
   syncMultiCharts();
 }
@@ -5306,6 +5977,7 @@ function syncMultiCharts(): void {
     const pairId = panePair(i);
     const pair = pairById(pairId);
     const tf = paneTf(i);
+    repairPairTfCandles(pairId, tf);
     const c = state.candles[pairId]?.[tf] ?? [];
     if (c.length < 2) {
       host.innerHTML = `<div class="sub-chart-chrome"><span class="muted small">Loading ${pair.label} · ${tf}</span></div>`;
@@ -5392,7 +6064,7 @@ function patchLive(): void {
       refreshSecondaryChartOrderLines();
     }
   }
-  evaluatePriceAlerts(quote.mid);
+  evaluateAllPriceAlerts();
   const strip = document.getElementById("mining-strip");
   if (strip && poolLive) {
     const p = pairById(state.activePair);
@@ -5469,15 +6141,24 @@ function patchBookTapeDom(): void {
       book.dataset.bookSkel = bookPriceSkeletonFingerprint(bids, asks, group, state.bookView);
       const bestBid = bids[0]?.price ?? 0;
       const bestAsk = asks[0]?.price ?? 0;
-      const midPx = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : bestBid || bestAsk;
-      const spreadAbs = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : 0;
-      const spreadPct = midPx > 0 ? (spreadAbs / midPx) * 100 : 0;
+      const { midPx, spreadAbs, spreadPct, midHint } = bookMidFromLevels(
+        state.activePair,
+        bestBid,
+        bestAsk,
+        useLiveBook(),
+        activeTicker().mid,
+      );
       const midEl = book.querySelector(".ob-mid-price");
       const spreadEl = book.querySelector(".ob-mid-spread");
+      const srcEl = book.querySelector(".ob-mid-src");
       const midTxt = formatPrice(midPx);
-      const spreadTxt = `Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%`;
+      const spreadTxt =
+        spreadAbs > 0
+          ? `Spread ${formatPrice(spreadAbs)} · ${formatNum(spreadPct, 3)}%`
+          : midHint;
       if (midEl && midEl.textContent !== midTxt) midEl.textContent = midTxt;
       if (spreadEl && spreadEl.textContent !== spreadTxt) spreadEl.textContent = spreadTxt;
+      if (srcEl && srcEl.textContent !== midHint) srcEl.textContent = midHint;
       return;
     }
   }
@@ -5504,20 +6185,68 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
       ...publicTape.filter((t) => t.pairId !== ev.pairId),
       ...ev.prints,
     ].slice(0, 120);
+    ingestDeskVolPrints(ev.pairId, ev.prints);
+    markDeskVolReady(ev.pairId);
     const newest = ev.prints[0];
     if (newest?.price && newest.price > 0) {
-      setLastPublicMid(ev.pairId, newest.price);
-      // 1m tip must react to tape prints — Soft-MM mid alone is often sticky.
+      setLastPublicMid(ev.pairId, newest.price, newest.ts || Date.now());
+      // Rebuild OHLC from tape+cache so F5-restored spikes and multi-print moves stick.
       if (ev.pairId === state.activePair && useLiveBook()) {
-        upsertAllCandles(newest.price);
-        tipCandlesForPair(ev.pairId, labBookMid(ev.pairId) || newest.price, true);
-        if (state.mainView === "spot") patchLive();
+        // Tip MUST be the print — Soft-MM mid flattens the chart after re-peg.
+        const tip = newest.price;
+        const baseLen = state.candles[ev.pairId]?.[CANDLE_BASE_TF]?.length ?? 0;
+        const needHydrate = baseLen < 24 || !liveHydratedPairs.has(ev.pairId);
+        if (needHydrate) {
+          const cached =
+            state.candles[ev.pairId]?.[CANDLE_BASE_TF] ?? loadLiveCandleCache(ev.pairId);
+          const seen = new Set<string>();
+          const prints: CandlePrint[] = [];
+          const pushPrint = (p: CandlePrint) => {
+            const k = `${p.ts}:${p.price}:${p.amountBase ?? 0}`;
+            if (seen.has(k)) return;
+            seen.add(k);
+            prints.push(p);
+          };
+          for (const p of ev.prints) {
+            pushPrint({
+              ts: p.ts,
+              price: p.price,
+              amountBase: p.amountBase > 0 ? p.amountBase : 0,
+            });
+          }
+          for (const p of candlePrintsFromLocalTape(ev.pairId)) pushPrint(p);
+          if (prints.length) {
+            state.candles[ev.pairId] = hydrateLiveCandlesFromPrints(
+              ev.pairId,
+              prints,
+              tip,
+              Date.now(),
+              cached,
+            );
+            prevMids[ev.pairId] = tip;
+            persistLiveCandleCache(ev.pairId, true);
+            liveHydratedPairs.add(ev.pairId);
+            tipCandlesForPair(ev.pairId, tip, true);
+            if (state.mainView === "spot") patchLive();
+          } else {
+            upsertAllCandles(newest.price, newest.amountBase);
+            tipCandlesForPair(ev.pairId, tip, true);
+            if (state.mainView === "spot") patchLive();
+          }
+        } else {
+          upsertAllCandles(newest.price, newest.amountBase);
+          tipCandlesForPair(ev.pairId, tip, true);
+          if (state.mainView === "spot") patchLive();
+        }
       }
     }
     const tape = document.getElementById("tape");
     if (tape) tape.innerHTML = renderTape();
     patchMobileTradeTape();
     patchTickerBar();
+    throttledBookTapePatch();
+    const list = document.getElementById("markets-list");
+    if (list) list.innerHTML = renderMarketsList();
     return;
   }
   if (ev.type === "tape") {
@@ -5530,7 +6259,7 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
     // Session fills (own + counterparty) — paint tip immediately from latest trade.
     const last = state.trades[0];
     if (last?.pairId === state.activePair && last.price > 0) {
-      upsertAllCandles(last.price);
+      upsertAllCandles(last.price, last.amountBase || 0);
       if (state.mainView === "spot") patchLive();
     }
     refreshActivityPanel();
@@ -5553,6 +6282,44 @@ function startMarketStreamLoop(): void {
     },
   );
   marketStream.start();
+}
+
+function startSessionExpiryWatch(): void {
+  let warned15 = false;
+  let warned2 = false;
+  window.setInterval(() => {
+    const rem = sessionMsRemaining();
+    if (rem == null) {
+      warned15 = false;
+      warned2 = false;
+      return;
+    }
+    if (rem <= 0) {
+      if (!warned2) {
+        warned2 = true;
+        toast("Desk session expired — Connect again to trade", "warn");
+      }
+      return;
+    }
+    const mins = Math.ceil(rem / 60_000);
+    const chip = document.getElementById("lab-session-expires");
+    if (chip) {
+      chip.hidden = false;
+      chip.textContent = rem < 60_000 ? `Session <1m` : `Session ~${mins}m`;
+      chip.title =
+        deskSeedStorageKind() === "local"
+          ? "JWT cookie expiry · browser seed is durable until Clear wallet"
+          : "JWT cookie expiry";
+    }
+    if (rem <= 15 * 60_000 && rem > 2 * 60_000 && !warned15) {
+      warned15 = true;
+      toast(`Desk session expires in ~${mins} min — reconnect soon`, "info");
+    }
+    if (rem <= 2 * 60_000 && !warned2) {
+      warned2 = true;
+      toast("Desk session expires in under 2 min — Connect again", "warn");
+    }
+  }, 30_000);
 }
 
 function startLabSessionLoop(): void {
@@ -5584,18 +6351,27 @@ function previewFeeLabel(fee: { feeQuote: number; feeHmc: number; paidInHmc: boo
   return `est. fee ≈ ${formatPrice(fee.feeQuote)} ${quote}`;
 }
 
+/** Live matching: only show HMC −discount when health advertises hmc_fee_pay. */
+function liveFeeOpts(): CalcFeeOpts | undefined {
+  if (!useServerMatching()) return undefined;
+  return {
+    honorPayFeesInHmc: tradingGuards.hmcFeePayServer && state.feeConfig.payFeesInHmc,
+  };
+}
+
 function updatePreviewForSide(side: "buy" | "sell"): void {
   if (!market) return;
   const form = readOrderForm(side);
   const pair = pairById(state.activePair);
   const t = activeTicker();
+  const feeOpts = liveFeeOpts();
   if (form.amt <= 0) { setOrderPreview(side, ""); return; }
   if (uiType === "limit" || uiType === "stop_limit") {
     const total = form.amt * form.price;
     const mid = spotTradeMid();
     const role =
       uiType === "limit" && isMarketableLimit(side, form.price, mid) ? "taker" : previewFeeRole(uiType);
-    const fee = calcFee(state, market, state.activePair, total, role);
+    const fee = calcFee(state, market, state.activePair, total, role, feeOpts);
     setOrderPreview(side, `${formatNum(form.amt, 0)} @ ${formatPriceCompact(form.price)} · ${previewFeeLabel(fee, pair.quote)}`);
     return;
   }
@@ -5613,7 +6389,7 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
       // Keep a usable estimate from last ticker bid/ask while L2 loads / rate-limits.
       if (t.bid > 0 && t.ask > 0) {
         const m = matchMarket(t, side, form.amt);
-        const fee = calcFee(state, market, state.activePair, m.quote, "taker");
+        const fee = calcFee(state, market, state.activePair, m.quote, "taker", feeOpts);
         setOrderPreview(
           side,
           `≈ ${formatPriceCompact(m.avgPrice)} · ${formatBookQty(form.amt)} ${pair.base} · ${previewFeeLabel(fee, pair.quote)} · loading L2`,
@@ -5624,7 +6400,7 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
       return;
     }
     const m = matchMarket(t, side, form.amt, lab);
-    const fee = calcFee(state, market, state.activePair, m.quote, "taker");
+    const fee = calcFee(state, market, state.activePair, m.quote, "taker", feeOpts);
     setOrderPreview(side, `≈ ${formatPriceCompact(m.avgPrice)} · ${formatNum(m.quote, 4)} ${pair.quote} · ${previewFeeLabel(fee, pair.quote)}`);
     return;
   }
@@ -5638,24 +6414,118 @@ function updatePreview(): void {
   updatePreviewForSide("sell");
 }
 
+/** Paper TP/SL attached after a resting entry fills. */
+type PendingTpslAttach = {
+  entryOrderId: string;
+  pairId: PairId;
+  exitSide: OrderSide;
+  amountBase: number;
+  takeProfit: number;
+  stopLoss: number;
+};
+let pendingTpslAttaches: PendingTpslAttach[] = [];
+
+/** Slip buffer so attached SL limit sits past stop — gaps fill instead of sticking triggered. */
+function attachedSlLimit(exitSide: OrderSide, stopLoss: number, mid: number): number {
+  const slip = Math.max(stopLoss * 0.002, mid > 0 ? mid * 0.0005 : 0, 1e-12);
+  return exitSide === "sell" ? Math.max(1e-12, stopLoss - slip) : stopLoss + slip;
+}
+
+function validateAttachedTpslGeometry(
+  exitSide: OrderSide,
+  takeProfit: number,
+  stopLoss: number,
+  mid: number,
+): string | null {
+  if (!(mid > 0)) return null;
+  if (exitSide === "sell") {
+    if (takeProfit > 0 && takeProfit <= mid) return "TP must be above market for long exit";
+    if (stopLoss > 0 && stopLoss >= mid) return "SL must be below market for long exit";
+  } else {
+    if (takeProfit > 0 && takeProfit >= mid) return "TP must be below market for short exit";
+    if (stopLoss > 0 && stopLoss <= mid) return "SL must be above market for short exit";
+  }
+  return null;
+}
+
 /** Returns true if TP/SL exits were placed (or none requested). */
-function placeAttachedTpsl(side: "buy" | "sell", amountBase: number, exitSide: "buy" | "sell"): boolean {
-  const form = readOrderForm(side);
+function placeAttachedTpsl(
+  side: "buy" | "sell",
+  amountBase: number,
+  exitSide: "buy" | "sell",
+  formOverride?: { takeProfit: number; stopLoss: number; tpslEnabled: boolean },
+  pairId: PairId = state.activePair,
+): boolean {
+  const form = formOverride ?? readOrderForm(side);
   if (!form.tpslEnabled) return true;
+  if (!(form.takeProfit > 0) && !(form.stopLoss > 0)) return true;
+  const mid =
+    (tickers[pairId]?.mid || 0) > 0 ? tickers[pairId]!.mid : midForPair(market!, pairId);
+  const geo = validateAttachedTpslGeometry(exitSide, form.takeProfit, form.stopLoss, mid);
+  if (geo) {
+    toast(geo, "warn");
+    return false;
+  }
   if (form.takeProfit > 0 && form.stopLoss > 0) {
-    return placeOcoOrWarn(state.activePair, exitSide, amountBase, form.takeProfit, form.stopLoss, form.stopLoss);
+    const slLim = attachedSlLimit(exitSide, form.stopLoss, mid);
+    return placeOcoOrWarn(pairId, exitSide, amountBase, form.takeProfit, form.stopLoss, slLim);
   }
   let ok = true;
   if (form.takeProfit > 0) {
-    ok =
-      placeOrderOrWarn(state.activePair, exitSide, "limit", amountBase, form.takeProfit) && ok;
+    ok = !!placeOrderOrWarn(pairId, exitSide, "limit", amountBase, form.takeProfit) && ok;
   }
   if (form.stopLoss > 0) {
+    // stop_market — protective exit on spike/gap (not stop==limit stuck).
     ok =
-      placeOrderOrWarn(state.activePair, exitSide, "stop_limit", amountBase, form.stopLoss, form.stopLoss) &&
-      ok;
+      !!placeOrderOrWarn(
+        pairId,
+        exitSide,
+        "stop_market",
+        amountBase,
+        exitSide === "buy" ? form.stopLoss * 1.01 : form.stopLoss,
+        form.stopLoss,
+      ) && ok;
   }
   return ok;
+}
+
+function queuePendingTpsl(entry: Order, side: "buy" | "sell", exitSide: OrderSide, form: ReturnType<typeof readOrderForm>): void {
+  if (!form.tpslEnabled) return;
+  if (!(form.takeProfit > 0) && !(form.stopLoss > 0)) return;
+  pendingTpslAttaches.push({
+    entryOrderId: entry.id,
+    pairId: entry.pairId,
+    exitSide,
+    amountBase: entry.amountBase,
+    takeProfit: form.takeProfit,
+    stopLoss: form.stopLoss,
+  });
+}
+
+function flushPendingTpslAttaches(): boolean {
+  if (!pendingTpslAttaches.length || !market) return false;
+  const keep: PendingTpslAttach[] = [];
+  let did = false;
+  for (const p of pendingTpslAttaches) {
+    const o = state.orders.find((x) => x.id === p.entryOrderId);
+    if (!o || o.status === "cancelled") continue;
+    if (o.status !== "filled") {
+      keep.push(p);
+      continue;
+    }
+    const ok = placeAttachedTpsl(
+      "buy",
+      p.amountBase,
+      p.exitSide,
+      { takeProfit: p.takeProfit, stopLoss: p.stopLoss, tpslEnabled: true },
+      p.pairId,
+    );
+    did = true;
+    if (!ok) toast("TP/SL attach after fill failed", "warn");
+    else toast("TP/SL attached after entry fill", "ok");
+  }
+  pendingTpslAttaches = keep;
+  return did;
 }
 
 function submitOrder(side: "buy" | "sell"): void {
@@ -5852,9 +6722,20 @@ function submitOrder(side: "buy" | "sell"): void {
       return;
     }
     if (!placeOrderOrWarn(state.activePair, side, "limit", form.amt, form.price, undefined, undefined, uiTif, uiPostOnly)) return;
-    // Resting entry: do not lock exit inventory before fill — use Advanced OCO after fill.
-    if (form.tpslEnabled) {
-      toast("TP/SL attaches after fill — resting entry only for now (use OCO)", "info");
+    const entry = state.orders.find(
+      (o) =>
+        o.status === "open" &&
+        o.pairId === state.activePair &&
+        o.side === side &&
+        o.kind === "limit" &&
+        o.price === form.price &&
+        o.amountBase === form.amt,
+    );
+    if (form.tpslEnabled && entry) {
+      queuePendingTpsl(entry, side, exitSide, form);
+      toast("Limit resting — TP/SL will attach on fill", "info");
+    } else if (form.tpslEnabled) {
+      toast("TP/SL: use Advanced OCO if attach queue missed", "info");
     }
     saveState(state);
     setOrderMsg(side, `Limit · ${uiTif}`, "ok");
@@ -6492,6 +7373,7 @@ function syncLayoutChips(): void {
   set("chip-book", !fs && !layoutPrefs.bookCollapsed);
   set("chip-tools", !layoutPrefs.toolsCollapsed);
   set("chip-right", !fs && !layoutPrefs.rightCollapsed);
+  set("chip-orders", !layoutPrefs.bottomCollapsed);
 }
 
 function applyLayoutToDom(): void {
@@ -6504,12 +7386,13 @@ function applyLayoutToDom(): void {
     term.classList.toggle("chart-fullscreen", fs);
     if (mobile) {
       // Mobile tabs own panel visibility — desktop collapse prefs must not hide book/markets.
-      term.classList.remove("book-collapsed", "right-collapsed", "tools-collapsed");
+      term.classList.remove("book-collapsed", "right-collapsed", "tools-collapsed", "bottom-collapsed");
       term.style.setProperty("grid-template-columns", "1fr", "important");
     } else {
       term.classList.toggle("book-collapsed", layoutPrefs.bookCollapsed);
       term.classList.toggle("right-collapsed", layoutPrefs.rightCollapsed);
       term.classList.toggle("tools-collapsed", layoutPrefs.toolsCollapsed);
+      term.classList.toggle("bottom-collapsed", layoutPrefs.bottomCollapsed);
       term.style.setProperty(
         "grid-template-columns",
         terminalGridColumnsForView(layoutPrefs, fs),
@@ -6566,6 +7449,7 @@ function applyLayoutToDom(): void {
   syncExpandRail("btn-expand-book", !fs && !isMobileLayout() && layoutPrefs.bookCollapsed);
   syncExpandRail("btn-expand-right", !fs && !isMobileLayout() && layoutPrefs.rightCollapsed);
   syncExpandRail("btn-expand-tools", !fs && !isMobileLayout() && layoutPrefs.toolsCollapsed);
+  syncExpandRail("btn-expand-orders", !fs && !isMobileLayout() && layoutPrefs.bottomCollapsed);
   syncFullscreenButton();
   syncLayoutChips();
   scheduleChartResize();
@@ -6725,6 +7609,11 @@ function wireLayoutPanels(): void {
     saveLayoutPrefs(layoutPrefs);
     applyLayoutToDom();
   };
+  const collapseOrders = () => {
+    layoutPrefs = toggleBottomCollapsed(layoutPrefs);
+    saveLayoutPrefs(layoutPrefs);
+    applyLayoutToDom();
+  };
   // Buttons are recreated on render — bind via terminal delegation so collapse works once.
   term.addEventListener("click", (ev) => {
     const t = (ev.target as HTMLElement | null)?.closest?.("button") as HTMLElement | null;
@@ -6733,6 +7622,7 @@ function wireLayoutPanels(): void {
     if (panel === "book" || t.id === "btn-collapse-book" || t.id === "btn-expand-book") collapseBook();
     else if (panel === "right" || t.id === "btn-collapse-right" || t.id === "btn-expand-right") collapseRight();
     else if (panel === "tools" || t.id === "btn-collapse-tools" || t.id === "btn-expand-tools") collapseTools();
+    else if (panel === "orders" || t.id === "btn-expand-orders") collapseOrders();
   });
   wirePanelResize("resize-book", "book");
   wirePanelResize("resize-right", "right");
@@ -6771,10 +7661,30 @@ function switchMobilePanel(mp: MobilePanel, opts?: { tradeSide?: "buy" | "sell" 
   syncMobileChrome(mp);
   applyLayoutToDom();
   if (mp === "chart") {
+    // Mobile CEX charts show volume by default — avoid empty/demo strip under candles.
+    if (isMobileLayout() && !state.chartOverlays.showVolume) {
+      try {
+        if (sessionStorage.getItem("hackme-ex-mobile-vol-boot-v1") !== "1") {
+          sessionStorage.setItem("hackme-ex-mobile-vol-boot-v1", "1");
+          state.chartOverlays.showVolume = true;
+          saveState(state);
+        }
+      } catch {
+        state.chartOverlays.showVolume = true;
+        saveState(state);
+      }
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (chartMounted) resizeChart();
-        else mountChartPanel();
+        if (chartMounted) {
+          syncChartOverlayEffects();
+          applyOverlays(
+            state.chartOverlays,
+            state.orders.filter((o) => o.pairId === state.activePair),
+            activeTicker().mid,
+          );
+          resizeChart();
+        } else mountChartPanel();
       });
     });
   }
@@ -6851,10 +7761,16 @@ function patchMarketRowsInPlace(): void {
     const q = pairQuote(pid);
     const px = row.querySelector(".mr-px");
     const ch = row.querySelector(".mr-chg");
+    const volEl = row.querySelector(".mr-vol");
     if (px) px.textContent = q.mid > 0 ? formatPriceCompact(q.mid) : "—";
     if (ch) {
       ch.textContent = formatPct(q.changePct);
       ch.className = `mono mr-chg ${quoteToneClass(q.tone)}`;
+    }
+    if (volEl) {
+      const vol = useLiveBook() ? deskVol24hBase(pid) : q.vol24h;
+      const base = pairById(pid).base;
+      volEl.textContent = vol > 0 ? formatVolBase(vol, base) : "—";
     }
   });
 }
@@ -7030,6 +7946,8 @@ function wireEvents(): void {
   const setTf = (tf: Timeframe) => {
     if (tf === state.activeTf) return;
     state.activeTf = tf;
+    // Repair corrupt TF series (1D labeled but 1m steps → HH:MM axis).
+    repairPairTfCandles(state.activePair, tf);
     saveState(state);
     syncRouteHash();
     document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
@@ -7088,7 +8006,19 @@ function wireEvents(): void {
       e.stopPropagation();
       const action = (btn as HTMLElement).dataset.chartMore;
       showChartMoreDrop(false);
-      if (action === "indicators") showIndicatorModal(state, (patch) => saveChartPatch(patch));
+      if (action === "fullscreen") {
+        toggleChartFullscreen();
+      } else if (action === "volume") {
+        state.chartOverlays.showVolume = !state.chartOverlays.showVolume;
+        saveState(state);
+        syncChartOverlayEffects();
+        applyOverlays(
+          state.chartOverlays,
+          state.orders.filter((o) => o.pairId === state.activePair),
+          activeTicker().mid,
+        );
+        toast(state.chartOverlays.showVolume ? "Volume shown" : "Volume hidden", "info");
+      } else if (action === "indicators") showIndicatorModal(state, (patch) => saveChartPatch(patch));
       else if (action === "overlays") {
         const anchor = document.getElementById("btn-mobile-chart-more");
         if (anchor) {
@@ -7287,16 +8217,7 @@ function wireEvents(): void {
 function openAlertsPanel(): void {
   activityTab = "alerts";
   saveActivityTab(activityTab);
-  // Uncollapse markets column if needed so Alerts tab is visible.
-  if (layoutPrefs.rightCollapsed) {
-    layoutPrefs = togglePanelCollapsed(layoutPrefs, "right");
-    saveLayoutPrefs(layoutPrefs);
-  }
-  if (state.chartFullscreen) {
-    setChartFullscreen(false);
-  } else {
-    applyLayoutToDom();
-  }
+  ensureActivityPanelVisible();
   switchMobilePanel("orders");
   document.querySelectorAll("#activity-tabs button").forEach((b) => {
     const on = (b as HTMLElement).dataset.tab === "alerts";
@@ -7309,6 +8230,34 @@ function openAlertsPanel(): void {
     wireAlertButtons();
   }
   document.getElementById("activity-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/** Unhide Orders/Fills panel (bottom) + markets column so Cancel/amend stay reachable. */
+function ensureActivityPanelVisible(tab?: typeof activityTab): void {
+  let dirty = false;
+  if (layoutPrefs.bottomCollapsed) {
+    layoutPrefs = { ...layoutPrefs, bottomCollapsed: false };
+    dirty = true;
+  }
+  if (layoutPrefs.rightCollapsed) {
+    layoutPrefs = { ...layoutPrefs, rightCollapsed: false };
+    dirty = true;
+  }
+  if (dirty) saveLayoutPrefs(layoutPrefs);
+  if (state.chartFullscreen) {
+    setChartFullscreen(false);
+  } else if (dirty) {
+    applyLayoutToDom();
+  }
+  if (tab) {
+    activityTab = tab;
+    saveActivityTab(activityTab);
+    document.querySelectorAll("#activity-tabs button").forEach((b) => {
+      const on = (b as HTMLElement).dataset.tab === tab;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
 }
 
 function wireBookTabs(): void {
@@ -7347,31 +8296,32 @@ function setMarketLane(lane: string): void {
 }
 
 function wireMarketRows(): void {
-  document.querySelectorAll(".market-row").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).classList.contains("star")) return;
-      const pair = (btn as HTMLElement).dataset.pair as PairId;
-      switchActivePair(pair, { mobileTrade: isMobileLayout() });
-    });
-  });
-  document.querySelectorAll(".star").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
+  const list = document.getElementById("markets-list");
+  if (!list) return;
+  // Event delegation — survives patchMarketRowsInPlace and avoids rebinding every tick.
+  if (list.dataset.wired === "1") return;
+  list.dataset.wired = "1";
+  list.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (!t) return;
+    const star = t.closest("[data-star]") as HTMLElement | null;
+    if (star && list.contains(star)) {
+      e.preventDefault();
       e.stopPropagation();
-      toggleFavorite(state, (btn as HTMLElement).dataset.star as PairId);
-      document.getElementById("markets-list")!.innerHTML = renderMarketsList();
-      wireMarketRows();
-    });
-  });
-  document.querySelectorAll("[data-lane-jump]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setMarketLane((btn as HTMLElement).dataset.laneJump ?? "all");
-    });
-  });
-  document.querySelectorAll("[data-recent-pair]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const pair = (btn as HTMLElement).dataset.recentPair as PairId;
-      switchActivePair(pair);
-    });
+      toggleFavorite(state, star.dataset.star as PairId);
+      list.innerHTML = renderMarketsList();
+      return;
+    }
+    const row = t.closest(".market-row") as HTMLElement | null;
+    if (row && list.contains(row) && row.dataset.pair) {
+      e.preventDefault();
+      switchActivePair(row.dataset.pair as PairId, { mobileTrade: isMobileLayout() });
+      return;
+    }
+    const jump = t.closest("[data-lane-jump]") as HTMLElement | null;
+    if (jump && list.contains(jump)) {
+      setMarketLane(jump.dataset.laneJump ?? "all");
+    }
   });
 }
 
@@ -7549,15 +8499,23 @@ function onKeydown(e: KeyboardEvent): void {
   }
 
   if (e.key >= "1" && e.key <= "9") {
-    state.activeTf = TIMEFRAMES[Number(e.key) - 1];
+    const tf = TIMEFRAMES[Number(e.key) - 1]!;
+    state.activeTf = tf;
+    repairPairTfCandles(state.activePair, tf);
     saveState(state);
+    syncRouteHash();
     mountChartPanel();
+    document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
     document.querySelectorAll("#tf-tabs .tf").forEach((b, i) => b.classList.toggle("active", TIMEFRAMES[i] === state.activeTf));
   }
   if (e.key === "0") {
-    state.activeTf = TIMEFRAMES[9];
+    const tf = TIMEFRAMES[9]!;
+    state.activeTf = tf;
+    repairPairTfCandles(state.activePair, tf);
     saveState(state);
+    syncRouteHash();
     mountChartPanel();
+    document.querySelectorAll(".tfq").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tf === tf));
     document.querySelectorAll("#tf-tabs .tf").forEach((b, i) => b.classList.toggle("active", TIMEFRAMES[i] === state.activeTf));
   }
   if (e.key === "c" || e.key === "C") {
@@ -7581,49 +8539,45 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 /** Paint a fill/print onto the active pair tip — immediate chart reaction. */
-function upsertAllCandles(fillPx: number): void {
+function upsertAllCandles(fillPx: number, amountBase = 0): void {
   const pairId = state.activePair;
   if (!state.candles[pairId]) return;
   const bookMid = labBookMid(pairId);
   const tapeMid = lastPublicMid(pairId);
   const prev = prevMids[pairId];
-  // Soft-MM bid/ask can sit ~100–160 bps off mid. Keep tip near L2 mid, but
-  // nudge close + wick toward the fill so own trades paint instantly.
-  const anchor =
-    bookMid > 0
-      ? bookMid
-      : tapeMid > 0
-        ? tapeMid
-        : prev && prev > 0
-          ? prev
-          : fillPx;
-  if (!(anchor > 0) || !Number.isFinite(anchor)) return;
 
   if (useServerMatching() || useLiveBook()) {
-    let next = applyMidToPairCandles(state.candles[pairId]!, pairId, anchor, prev);
+    // Live desk: Last = print. Soft-MM bid/ask IS the traded price — do not crush to L2 mid.
+    const tipPx = fillPx > 0 && Number.isFinite(fillPx) ? fillPx : tapeMid || bookMid || prev || 0;
+    if (!(tipPx > 0)) return;
+    // Lock Last to this print so microTick cannot snap tip back to stale Soft-MM mid.
+    setLastPublicMid(pairId, tipPx);
+    let next = applyMidToPairCandles(state.candles[pairId]!, pairId, tipPx, prev, {
+      syntheticVolume: false,
+    });
     if (fillPx > 0 && Number.isFinite(fillPx)) {
-      const wickPx = clampFillWickPx(anchor, fillPx, 45);
-      const tipClose = nudgeCloseTowardFill(anchor, fillPx, 12);
+      const volAdd = amountBase > 0 ? amountBase : 0;
       for (const tf of Object.keys(next) as Timeframe[]) {
         const series = next[tf];
         if (!series?.length) continue;
         const tip = { ...series[series.length - 1]! };
-        tip.close = tipClose;
-        tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
-        tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
-        tip.volume = (tip.volume || 0) + Math.max(80, Math.abs(fillPx) * 0.01);
+        tip.close = fillPx;
+        tip.high = Math.max(tip.high, tip.open, tip.close, fillPx);
+        tip.low = Math.min(tip.low, tip.open, tip.close, fillPx);
+        tip.volume = (tip.volume || 0) + volAdd;
         series[series.length - 1] = tip;
       }
     }
     state.candles[pairId] = next;
-    prevMids[pairId] = tipCloseOr(anchor, fillPx);
+    prevMids[pairId] = tipPx;
+    persistLiveCandleCache(pairId, true);
     return;
   }
 
   // Paper: advance shared clock, then wick/nudge tip toward fill.
+  const paperAnchor = prev && prev > 0 ? prev : fillPx;
   let next = applyPaperClockToPairCandles(state.candles[pairId]!, pairId);
   if (fillPx > 0 && Number.isFinite(fillPx)) {
-    const paperAnchor = prev && prev > 0 ? prev : fillPx;
     const wickPx = clampFillWickPx(paperAnchor, fillPx, 45);
     const tipClose = nudgeCloseTowardFill(paperAnchor, fillPx, 18);
     for (const tf of Object.keys(next) as Timeframe[]) {
@@ -7641,10 +8595,6 @@ function upsertAllCandles(fillPx: number): void {
   if (fillPx > 0) prevMids[pairId] = fillPx;
 }
 
-function tipCloseOr(anchor: number, fillPx: number): number {
-  if (fillPx > 0 && Number.isFinite(fillPx)) return nudgeCloseTowardFill(anchor, fillPx, 12);
-  return anchor;
-}
 
 /**
  * Advance candle tip for one pair. Live desk: tip ≈ L2 mid (with tape fallback),
@@ -7663,8 +8613,11 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
             ? prev
             : 0;
     if (!(mid > 0)) return;
-    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev);
+    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev, {
+      syntheticVolume: false,
+    });
     prevMids[pairId] = mid;
+    persistLiveCandleCache(pairId);
     return;
   }
   state.candles[pairId] = applyPaperClockToPairCandles(state.candles[pairId]!, pairId);
@@ -7739,7 +8692,7 @@ function microTickPrices(): void {
     }
     liveTickN += 1;
     if (liveTickN % 2 === 0) settleOpenOrdersFromTickers(true);
-    evaluatePriceAlerts(spotMidForPair(state.activePair));
+    evaluateAllPriceAlerts();
     return;
   }
   liveTickN += 1;
@@ -7749,9 +8702,9 @@ function microTickPrices(): void {
     const p = PAIRS[i]!;
     const oracleTarget = labLive ? 0 : midForPair(market, p.id);
     const labMid = labLive ? labBookMid(p.id) : 0;
-    // Live book: tip from L2 mid; fall back to last tape / prev so sticky Soft-MM still rolls.
+    // Live: tip last = recent print or L2 mid (same as ticker header).
     const displayMid = labLive
-      ? labMid || lastPublicMid(p.id) || prevMids[p.id] || 0
+      ? liveLastPrice(p.id) || labMid || prevMids[p.id] || 0
       : oracleTarget;
     const isActive = p.id === state.activePair;
     const rotate = liveTickN % PAIRS.length === i;
@@ -7761,11 +8714,19 @@ function microTickPrices(): void {
       prevMids[p.id] = displayMid;
     }
     if (tickers[p.id]) {
-      if (labLive && labMid > 0) {
+      if (labLive) {
         const book = getLabBookCache(p.id);
-        const bid = book?.bids[0]?.price ?? labMid * 0.999;
-        const ask = book?.asks[0]?.price ?? labMid * 1.001;
-        tickers[p.id] = { ...tickers[p.id]!, mid: labMid, bid, ask };
+        const bid = book?.bids[0]?.price ?? 0;
+        const ask = book?.asks[0]?.price ?? 0;
+        const mid = liveLastPrice(p.id) || displayMid;
+        if (mid > 0) {
+          tickers[p.id] = {
+            ...tickers[p.id]!,
+            mid,
+            bid: bid > 0 ? bid : mid * 0.999,
+            ask: ask > 0 ? ask : mid * 1.001,
+          };
+        }
       } else if (!labLive) {
         tickers[p.id] = { ...tickers[p.id]!, mid: displayMid, bid: displayMid * 0.9995, ask: displayMid * 1.0005 };
       }
@@ -7799,7 +8760,7 @@ function microTickPrices(): void {
   }
   const quote = activePairQuote();
   updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
-  evaluatePriceAlerts(quote.mid);
+  evaluateAllPriceAlerts();
   if (scrubbing) return;
   patchTickerBar(quote);
   if (liveTickN % 3 === 0) {
@@ -7811,13 +8772,7 @@ function microTickPrices(): void {
     marketStream?.notifyLocalBookTape();
   }
   if (liveTickN % 4 === 0) patchMarketRowsInPlace();
-  if (liveTickN % 40 === 0) {
-    const list = document.getElementById("markets-list");
-    if (list) {
-      list.innerHTML = renderMarketsList();
-      wireMarketRows();
-    }
-  }
+  // Never full-remount markets-list on the tick path — it kills in-flight clicks.
 }
 
 async function refresh(): Promise<void> {
@@ -7893,6 +8848,12 @@ async function refresh(): Promise<void> {
   market = m!;
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
+  if (useLiveBook()) {
+    void hydrateDeskApiTickers(false);
+    void refreshLabBooks(PAIRS.map((p) => p.id)).then(() => {
+      if (state.mainView === "spot") throttledBookTapePatch();
+    });
+  }
   // Live desk: seed CEX-like walk around shared anchor (last print / L2), not per-tab noise.
   // Tip close still tracks live BBO via tipCandlesForPair every tick.
   if (!useLiveBook()) {
@@ -7914,9 +8875,27 @@ async function refresh(): Promise<void> {
       const cliff =
         tipClose > 0 && (seedMid / tipClose > 1.08 || seedMid / tipClose < 0.92);
       if (empty || cliff) {
-        state.candles[p.id] = seedAllTimeframes(p.id, seedMid);
-        prevMids[p.id] = labMid;
-        chartNeedsFullReplace = true;
+        // Prefer session cache + public prints over wiping with synthetic seed (F5 spike loss).
+        // Never cliff-wipe an existing series — Soft-MM mid vs last print routinely drifts >8%.
+        if (restoreLiveCandlesFromCache(p.id, seedMid)) {
+          chartNeedsFullReplace = true;
+        } else if (empty) {
+          state.candles[p.id] = seedAllTimeframes(p.id, seedMid);
+          prevMids[p.id] = labMid;
+          chartNeedsFullReplace = true;
+        }
+        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
+          if (!ok) return;
+          chartNeedsFullReplace = true;
+          if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
+          else if (state.mainView === "spot" && p.id === state.activePair) render();
+        });
+      } else if (p.id === state.activePair && !liveHydratedPairs.has(p.id)) {
+        // One-shot warm merge after boot so public prints land before the next F5.
+        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
+          if (!ok) return;
+          if (state.mainView === "spot" && chartMounted) patchLive();
+        });
       }
     }
   }
@@ -7934,26 +8913,32 @@ async function refresh(): Promise<void> {
     tk.volume24hBase = s.vol;
     const labMid = useLiveBook() ? labBookMid(p.id) : 0;
     const live = useLiveBook();
-    // Live: tip only from L2 mid. Oracle mid here would snap OHLC on every poll miss.
-    const displayMid = live ? labMid : midForPair(market, p.id);
+    // Live: tip last = recent print or L2 (same source as ticker / chart tip).
+    const displayMid = live ? liveLastPrice(p.id) || labMid : midForPair(market, p.id);
     if (live) {
       const prevTk = tickers[p.id];
-      if (labMid > 0) {
+      const mid = liveLastPrice(p.id);
+      if (mid > 0) {
         const book = getLabBookCache(p.id);
-        const bid = book?.bids[0]?.price ?? prevTk?.bid ?? labMid * 0.999;
-        const ask = book?.asks[0]?.price ?? prevTk?.ask ?? labMid * 1.001;
+        const bid = book?.bids[0]?.price ?? prevTk?.bid ?? mid * 0.999;
+        const ask = book?.asks[0]?.price ?? prevTk?.ask ?? mid * 1.001;
+        const q = buildPairQuote({
+          pairId: p.id,
+          mid,
+          candlesByTf: state.candles[p.id],
+          fallbackTf: "15m",
+        });
         const spreadBps =
-          bid > 0 && ask > 0 && labMid > 0 ? ((ask - bid) / labMid) * 10_000 : prevTk?.spreadBps ?? 0;
+          bid > 0 && ask > 0 && mid > 0 ? ((ask - bid) / mid) * 10_000 : prevTk?.spreadBps ?? 0;
         tickers[p.id] = {
           ...(prevTk ?? tk),
-          mid: labMid,
+          mid,
           bid,
           ask,
           spreadBps,
-          change24hPct: s.changePct,
-          high24h: s.high,
-          low24h: s.low,
-          // Desk vol comes from public tape — don't import paper candle millions.
+          change24hPct: q.changePct,
+          high24h: q.high24h,
+          low24h: q.low24h,
           volume24hBase: deskVol24hBase(p.id),
           source: "live",
         };
@@ -7984,7 +8969,7 @@ async function refresh(): Promise<void> {
     }
     // Candle tip updates belong to microTickPrices — rebuilding every pair here
     // caused ~500ms longtasks every oracle poll. Only sync active (or lab) tip.
-    if (p.id === state.activePair || labMid > 0 || chartNeedsFullReplace) {
+    if (p.id === state.activePair || displayMid > 0 || chartNeedsFullReplace) {
       tipCandlesForPair(p.id, displayMid, live);
     } else if (!live) {
       prevMids[p.id] = displayMid;
@@ -8027,12 +9012,29 @@ export async function boot(): Promise<void> {
     market = applyLivePaperMids(localFallbackMarket(DEFAULT_REFERENCE_MID), DEFAULT_REFERENCE_MID);
     poolLive = pendingPoolLive();
     oracleMeta = { source: "fallback", fetchedAt: 0, poolStatus: "pending" };
-    ensureCandles(state, market);
+    if (useLiveBook()) {
+      // Don't paint paper-clock OHLC on live desk — restore session cache or wait for tape.
+      for (const p of PAIRS) {
+        if (!restoreLiveCandlesFromCache(p.id, 0)) {
+          state.candles[p.id] = {};
+        }
+        restoreDeskVolCache(p.id);
+      }
+    } else {
+      ensureCandles(state, market);
+    }
     for (const p of PAIRS) {
       tickers[p.id] = tickerFromMarket(market, p.id);
       tickers[p.id]!.source = "fallback";
       prevMids[p.id] = tickers[p.id]!.mid;
     }
+  } else if (useLiveBook()) {
+    for (const p of PAIRS) restoreDeskVolCache(p.id);
+  }
+  // Live: durable /tickers (fills DB) + short /trades ring. Never seed/demo vol.
+  if (useLiveBook()) {
+    void hydrateDeskApiTickers(true);
+    for (const p of PAIRS) void hydrateDeskVolFromApi(p.id);
   }
   render();
   // First-visit prefs must run before oracle await — otherwise settings/UI race with defaults.
@@ -8079,6 +9081,7 @@ export async function boot(): Promise<void> {
   startMarketStreamLoop();
   startBookLoop();
   startLabSessionLoop();
+  startSessionExpiryWatch();
   // Restore desk/lab CSRF as early as boot (not only when Account is open).
   if (isLabApiEnabled()) void maybeAutoReconnectLabSession();
   void refreshTradingGuardsFromHealth();
@@ -8135,7 +9138,13 @@ export async function boot(): Promise<void> {
         const nextPair = state.activePair;
         state.activePair = prevPair;
         switchActivePair(nextPair);
-      } else if (state.activeTf !== prevTf) setPaneTf(1, state.activeTf);
+      } else if (state.activeTf !== prevTf) {
+        // Same early-return trap as pair: setPaneTf no-ops when tf === state.activeTf,
+        // so restore prevTf first or buttons/series never switch on hash/F5 deep-link.
+        const nextTf = state.activeTf;
+        state.activeTf = prevTf;
+        setPaneTf(1, nextTf);
+      }
     } else {
       chartMounted = false;
       render();
@@ -8160,6 +9169,70 @@ export async function boot(): Promise<void> {
           layout: detectMultiChartLayout(split),
           hosts: listChartPaneHosts(split).map((h) => h.id),
         };
+      },
+      /** Live matrix: every pair × TF — closed-close diversity + tip≈Last. */
+      candleMatrixAudit() {
+        const labLive = useLiveBook();
+        // Warm every pair so inactive markets are not empty / stale.
+        for (const p of PAIRS) {
+          const mid = liveLastPrice(p.id) || labBookMid(p.id) || prevMids[p.id] || 0;
+          if (mid > 0) tipCandlesForPair(p.id, mid, labLive);
+        }
+        const out: Record<
+          string,
+          Record<
+            string,
+            {
+              n: number;
+              uniqueClosed: number;
+              gluedToTip: number;
+              tipClose: number;
+              tipOk: boolean;
+              contiguous: boolean;
+            }
+          >
+        > = {};
+        for (const p of PAIRS) {
+          const byTf = state.candles[p.id] ?? {};
+          out[p.id] = {};
+          for (const tf of TIMEFRAMES) {
+            const series = byTf[tf] ?? [];
+            if (series.length < 2) {
+              out[p.id]![tf] = {
+                n: series.length,
+                uniqueClosed: 0,
+                gluedToTip: 0,
+                tipClose: 0,
+                tipOk: false,
+                contiguous: series.length <= 1,
+              };
+              continue;
+            }
+            const tip = series[series.length - 1]!;
+            const closed = series.slice(0, -1);
+            const unique = new Set(closed.map((c) => c.close.toFixed(10)));
+            const glued = closed.filter((c) => tip.close > 0 && Math.abs(c.close - tip.close) / tip.close < 0.00005).length;
+            const sec = TF_SEC[tf];
+            let contiguous = true;
+            for (let i = 1; i < series.length; i++) {
+              if (series[i]!.time - series[i - 1]!.time !== sec) {
+                contiguous = false;
+                break;
+              }
+            }
+            const lastPx = liveLastPrice(p.id);
+            const tipOk = lastPx > 0 ? Math.abs(tip.close - lastPx) / lastPx < 0.02 : tip.close > 0;
+            out[p.id]![tf] = {
+              n: series.length,
+              uniqueClosed: unique.size,
+              gluedToTip: glued,
+              tipClose: tip.close,
+              tipOk,
+              contiguous,
+            };
+          }
+        }
+        return out;
       },
       getFocusedPaneId: () => getFocusedChartPaneId(),
       seedOpenOrderForE2E(price: number, amountBase = 120) {
@@ -8224,10 +9297,10 @@ function maybeShowTour(): void {
     {
       t: "Convert & Pool",
       d: deskOn
-        ? "Convert stays paper until convert GO — quotes use oracle mid. Pool shows live hashrate telemetry only."
+        ? "Convert is HMC/USDT + HMC/SUP — paper until convert GO, then server mid. Pool shows live hashrate telemetry only."
         : labOn
-          ? "Convert uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
-          : "Convert both ways (HMC/SUP/USDT/BTC). Pool page shows live hashrate as telemetry — it does not feed spot mids.",
+          ? "Convert (HMC/USDT · HMC/SUP) uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
+          : "Convert HMC/USDT and HMC/SUP at mid. Pool page shows live hashrate as telemetry — it does not feed spot mids.",
     },
   ];
   let i = 0;

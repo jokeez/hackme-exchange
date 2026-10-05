@@ -22,7 +22,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "convert",
     title: "Convert desk",
-    body: "Convert quotes at oracle mid (paper until convert GO). Spot uses the live book after Connect.",
+    body: "Convert HMC/USDT and HMC/SUP at mid (paper until convert GO; server mid when advertised). Spot uses the live book after Connect.",
   },
   {
     id: "pool",

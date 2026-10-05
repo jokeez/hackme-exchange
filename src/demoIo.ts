@@ -23,7 +23,7 @@ import {
 } from "./sanitize";
 import { sanitizeDrawings, stripPollutionKeys } from "./chartDraw";
 import { sanitizeFeeConfig } from "./fees";
-import { defaultDemoState, sanitizeMultiPanePairs } from "./store";
+import { compactEquitySnapshots, defaultDemoState, sanitizeMultiPanePairs } from "./store";
 import { chartPrefsFromState, saveChartPrefs } from "./chartPrefs";
 import { uid } from "./id";
 import { DEFAULT_REFERENCE_MID } from "./market";
@@ -193,12 +193,15 @@ export function parseDemoImport(raw: string): DemoState {
   // Shared paper clock only — imported OHLC would fork charts across devices.
   state.candles = {};
   state.equitySnapshots = Array.isArray(incoming.equitySnapshots)
-    ? incoming.equitySnapshots.slice(0, 200).filter(
-        (e) =>
-          e &&
-          typeof e === "object" &&
-          typeof (e as { ts?: unknown }).ts === "number" &&
-          typeof (e as { equityUsdt?: unknown }).equityUsdt === "number",
+    ? compactEquitySnapshots(
+        incoming.equitySnapshots.filter(
+          (e) =>
+            e &&
+            typeof e === "object" &&
+            typeof (e as { ts?: unknown }).ts === "number" &&
+            typeof (e as { equityUsdt?: unknown }).equityUsdt === "number",
+        ),
+        false,
       )
     : [];
   state.chartOverlays = sanitizeChartOverlays(incoming.chartOverlays);

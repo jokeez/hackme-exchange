@@ -66,7 +66,7 @@ export function setMobileTradeSide(side: MobileTradeSide): void {
   });
 }
 
-/** LWC interaction profile — mobile keeps price-axis drag + vertical chart pan. */
+/** LWC interaction profile — free plot pan/pinch is custom (overlay); LWC keeps axis + pinch flag. */
 export function chartInteractionOptions(): {
   handleScale: {
     axisPressedMouseMove: { time: boolean; price: boolean };
@@ -85,16 +85,15 @@ export function chartInteractionOptions(): {
     handleScale: {
       // Price-axis pan is custom in setupPortableChartPan (clamped) — disable LWC native.
       axisPressedMouseMove: { time: true, price: false },
-      // Price-axis wheel is handled in chart.ts — LWC native wheel fights our clamped zoom.
       mouseWheel: false,
-      pinch: true,
+      // Free-xh overlay owns pinch — LWC native pinch fights custom gestures (chart "flies").
+      pinch: false,
       axisDoubleClickReset: { time: true, price: true },
     },
     handleScroll: {
-      // Plot wheel zoom/pan is custom in chart.ts (Binance-like).
       mouseWheel: false,
-      // Free drag (time + price) is custom in setupPortableChartPan — LWC is horizontal-only.
       pressedMouseMove: false,
+      // When free-xh not capturing, LWC touch drag still works.
       horzTouchDrag: true,
       vertTouchDrag: true,
     },

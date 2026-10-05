@@ -17,11 +17,17 @@ describe("validateLabWithdrawDestination (API-aligned)", () => {
     expect(validateLabWithdrawDestination("HMC", "paper-usdt-ops-wallet-01").ok).toBe(false);
   });
 
-  it("SUP/USDT/BTC require paper stubs — reject HMC- and deposit stubs", () => {
-    for (const asset of ["SUP", "USDT", "BTC"]) {
+  it("SUP uses HMC- rail like HMC (API-aligned)", () => {
+    expect(validateLabWithdrawDestination("SUP", "HMC-ffffffffffffffff")).toEqual({ ok: true });
+    expect(validateLabWithdrawDestination("sup", "HMC-0123456789abcdef").ok).toBe(true);
+    expect(validateLabWithdrawDestination("SUP", "paper-sup-ops-wallet-01").ok).toBe(false);
+    expect(validateLabWithdrawDestination("SUP", "HMC-ffff").ok).toBe(false);
+  });
+
+  it("USDT/BTC require paper stubs — reject HMC- and deposit stubs", () => {
+    for (const asset of ["USDT", "BTC"]) {
       expect(validateLabWithdrawDestination(asset, "paper-usdt-ops-wallet-01").ok).toBe(true);
       expect(validateLabWithdrawDestination(asset, "lab-ops-btc-01").ok).toBe(true);
-      expect(validateLabWithdrawDestination(asset, "companion-sup-out").ok).toBe(true);
       expect(validateLabWithdrawDestination(asset, "HMC-ffffffffffffffff").ok).toBe(false);
       expect(validateLabWithdrawDestination(asset, "labdep-hmc-001").ok).toBe(false);
       expect(validateLabWithdrawDestination(asset, "short").ok).toBe(false);
@@ -86,8 +92,8 @@ describe("Account custody UI (buttons + copy)", () => {
   it("withdraw hint: HMC/SUP use HMC- destinations; USDT/BTC stay paper stubs", () => {
     if (!isLabApiEnabled()) return;
     const html = renderAccountPage(baseState(), sampleMarket());
-    expect(html).toContain("data-ph-sup=\"paper-sup-ops-wallet-01\"");
-    expect(html).not.toContain('data-ph-sup="HMC-ffffffffffffffff"');
+    expect(html).toContain('data-ph-sup="HMC-ffffffffffffffff"');
+    expect(html).not.toContain('data-ph-sup="paper-sup-ops-wallet-01"');
     expect(html).toMatch(/HMC\/SUP →/);
     expect(html).toMatch(/USDT\/BTC paper stubs/);
     expect(html).not.toMatch(/HMC\/SUP need/);

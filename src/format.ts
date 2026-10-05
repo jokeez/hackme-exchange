@@ -1,3 +1,7 @@
+import { TickMarkType, type Time } from "lightweight-charts";
+import type { Timeframe } from "./types";
+import { TF_SEC } from "./types";
+
 /** Human-readable numbers — never scientific notation in UI. */
 
 /**
@@ -123,9 +127,13 @@ function trimZeros(s: string): string {
   return s.replace(/\.?0+$/, "");
 }
 
-/** lightweight-charts custom price formatter */
+/**
+ * Axis / candle tip labels — compact so high/low last ticks stay readable
+ * (full formatPrice pads 0.05 → 0.050000 and clips with entireTextOnly).
+ */
 export function chartPriceFormatter(price: number): string {
-  return formatPrice(price);
+  if (!Number.isFinite(price) || price <= 0) return "—";
+  return formatPriceCompact(price);
 }
 
 const CHART_LOCALE_CANDIDATES = ["en-US", "en"] as const;
@@ -143,6 +151,69 @@ export function chartLocaleTag(): string {
   return "en";
 }
 
-export function chartLocalization(): { locale: string; priceFormatter: typeof chartPriceFormatter } {
+/**
+ * Axis tick labels must match the active TF.
+ * Bug class: 1D watermark + HH:MM every 10m (minute series / default LWC density).
+ */
+export function chartTickMarkFormatter(tf: Timeframe): (time: Time, tickMarkType: TickMarkType, locale: string) => string {
+  const sec = TF_SEC[tf] ?? 60;
+  return (time: Time, tickMarkType: TickMarkType, locale: string) => {
+    const ts = typeof time === "number" ? time : typeof time === "string" ? Date.parse(time) / 1000 : 0;
+    if (!(ts > 0)) return "";
+    const d = new Date(ts * 1000);
+    const loc = locale || chartLocaleTag();
+    // Candle buckets are UTC — label high TFs in UTC so axis matches OHLC day keys.
+    const utc = { timeZone: "UTC" as const };
+    // Daily / weekly — never show intraday HH:MM (that screamed «this is 1m»).
+    // Month ticks must NOT use year:"2-digit" → "Oct 26" looked like day 26.
+    if (sec >= 86_400) {
+      if (tickMarkType === TickMarkType.Year) {
+        return d.toLocaleDateString(loc, { year: "numeric", ...utc });
+      }
+      if (tickMarkType === TickMarkType.Month) {
+        return d.toLocaleDateString(loc, { month: "short", year: "numeric", ...utc }); // "Oct 2026"
+      }
+      return d.toLocaleDateString(loc, { month: "short", day: "numeric", ...utc }); // "Oct 2"
+    }
+    // 1H–4H: UTC date on day/month marks, UTC HH:MM for intraday hours.
+    if (sec >= 3600) {
+      if (tickMarkType === TickMarkType.Year) {
+        return d.toLocaleDateString(loc, { year: "numeric", ...utc });
+      }
+      if (tickMarkType === TickMarkType.Month) {
+        return d.toLocaleDateString(loc, { month: "short", year: "numeric", ...utc });
+      }
+      if (tickMarkType === TickMarkType.DayOfMonth) {
+        return d.toLocaleDateString(loc, { month: "short", day: "numeric", ...utc });
+      }
+      return d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit", hour12: false, ...utc });
+    }
+    // Intraday ≤15m — UTC clock matches bucket times on every desk.
+    if (tickMarkType === TickMarkType.TimeWithSeconds || sec <= 30) {
+      return d.toLocaleTimeString(loc, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        ...utc,
+      });
+    }
+    if (
+      tickMarkType === TickMarkType.Year ||
+      tickMarkType === TickMarkType.Month ||
+      tickMarkType === TickMarkType.DayOfMonth
+    ) {
+      return d.toLocaleDateString(loc, { month: "short", day: "numeric", ...utc });
+    }
+    return d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit", hour12: false, ...utc });
+  };
+}
+
+export function chartLocalization(_tf?: Timeframe): {
+  locale: string;
+  priceFormatter: typeof chartPriceFormatter;
+} {
+  // tickMarkFormatter lives on timeScale options (see chart.ts applyTimeScaleForTf).
+  void _tf;
   return { locale: chartLocaleTag(), priceFormatter: chartPriceFormatter };
 }

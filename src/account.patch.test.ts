@@ -3,6 +3,7 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
+import { setLabSessionMeta } from "./adapters/exchangeApi";
 import { patchAccountFundsDom, renderAccountPage } from "./account";
 import { DENOM_ORB_SEL, setBalanceHidden, setEquityDenom } from "./accountPortfolio";
 import { baseState, sampleMarket } from "./testFixtures";
@@ -60,18 +61,22 @@ describe("patchAccountFundsDom", () => {
     expect(document.querySelector("[data-portfolio-chart]")?.getAttribute("data-chart-denom")).toBe("RUB");
   });
 
-  it("patchAccountFundsDom updates multi-wallet paper row and dust panel", () => {
+  it("patchAccountFundsDom updates multi-wallet lab row and dust panel", () => {
+    // Vitest wires loopback lab API — multi-wallet is lab ledger (no paper sandbox row).
+    setLabSessionMeta("HMC-patchlab01234567", "csrf-patch");
     const s = baseState();
     s.wallet.hmc = 0.0005;
     s.wallet.usdt = 50;
     const m = sampleMarket();
     document.body.innerHTML = renderAccountPage(s, m);
+    expect(document.querySelector('[data-wallet-slice="paper"]')).toBeNull();
+    expect(document.querySelector('[data-wallet-slice="lab"]')).toBeTruthy();
     s.wallet.usdt = 12_500;
     s.wallet.hmc = 0;
     s.wallet.sup = 0;
     s.wallet.btc = 0;
     patchAccountFundsDom(s, m);
-    expect(document.querySelector('[data-wallet-slice="paper"] .mono')?.textContent).toMatch(/12[,.]?500/);
+    expect(document.querySelector('[data-wallet-slice="lab"] .mono')?.textContent).toMatch(/12[,.]?500/);
     expect(document.getElementById("acct-dust")?.textContent).toMatch(/No dust/i);
   });
 

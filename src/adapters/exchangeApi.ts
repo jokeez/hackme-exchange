@@ -4,6 +4,7 @@
  */
 
 import { INTEGRATION } from "../config/integration";
+import { clearServerVipVolume } from "../fees";
 import { fetchWithTimeout } from "../fetchTimeout";
 import { isAllowedExchangeApiOrigin, isLoopbackOrigin } from "../sanitize";
 import type { OrderSide, PairId, Wallet } from "../types";
@@ -37,6 +38,7 @@ export type SessionRestoreResponse =
       ok: true;
       address: string;
       csrf_token: string;
+      expires_at?: string;
       session_ver?: number;
       totp?: { enabled: boolean; pending: boolean };
       note?: string;
@@ -206,9 +208,11 @@ export type OrderSubmitBody = {
 
 const CSRF_STORAGE_KEY = "hackme-ex-lab-csrf";
 const ADDR_STORAGE_KEY = "hackme-ex-lab-address";
+const EXPIRES_STORAGE_KEY = "hackme-ex-lab-expires-ms";
 
 let sessionCsrf = "";
 let sessionAddress = "";
+let sessionExpiresAtMs = 0;
 
 export function getLabSessionMeta(): { address: string; hasCsrf: boolean } {
   if (typeof sessionStorage !== "undefined" || typeof localStorage !== "undefined") {
@@ -220,6 +224,15 @@ export function getLabSessionMeta(): { address: string; hasCsrf: boolean } {
           "";
       } catch {
         sessionAddress = "";
+      }
+    }
+    if (!sessionExpiresAtMs) {
+      try {
+        const raw = sessionStorage.getItem(EXPIRES_STORAGE_KEY);
+        const n = raw ? Number(raw) : 0;
+        if (Number.isFinite(n) && n > 0) sessionExpiresAtMs = n;
+      } catch {
+        /* ignore */
       }
     }
     // CSRF stays memory-only; clear any legacy stored CSRF from older builds.
@@ -251,9 +264,12 @@ export function labSessionLabel(): { live: boolean; address: string; label: stri
 export function clearLabSessionMeta(): void {
   sessionCsrf = "";
   sessionAddress = "";
+  sessionExpiresAtMs = 0;
+  clearServerVipVolume();
   try {
     sessionStorage.removeItem(CSRF_STORAGE_KEY);
     sessionStorage.removeItem(ADDR_STORAGE_KEY);
+    sessionStorage.removeItem(EXPIRES_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -265,17 +281,42 @@ export function clearLabSessionMeta(): void {
 }
 
 /** Memory CSRF + address (tests / reconnect helpers). CSRF never written to storage. */
-export function setLabSessionMeta(address: string, csrf: string): void {
-  persistSession(address, csrf);
+export function setLabSessionMeta(address: string, csrf: string, expiresAtIso?: string): void {
+  persistSession(address, csrf, expiresAtIso);
 }
 
-function persistSession(address: string, csrf: string): void {
+/** JWT / session expiry from last verify or restore (0 if unknown). */
+export function getSessionExpiresAtMs(): number {
+  return sessionExpiresAtMs;
+}
+
+/** Milliseconds until session cookie expiry; null if unknown / not connected. */
+export function sessionMsRemaining(): number | null {
+  if (!sessionExpiresAtMs || sessionExpiresAtMs <= 0) return null;
+  return sessionExpiresAtMs - Date.now();
+}
+
+function parseExpiresAtMs(iso: unknown): number {
+  if (typeof iso !== "string" || !iso.trim()) return 0;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function persistSession(address: string, csrf: string, expiresAtIso?: string): void {
   sessionAddress = address;
   sessionCsrf = csrf;
+  if (expiresAtIso !== undefined) {
+    sessionExpiresAtMs = parseExpiresAtMs(expiresAtIso);
+  }
   try {
     // Address survives reload/tab close; CSRF stays memory-only (XSS→API).
     sessionStorage.setItem(ADDR_STORAGE_KEY, address);
     sessionStorage.removeItem(CSRF_STORAGE_KEY);
+    if (sessionExpiresAtMs > 0) {
+      sessionStorage.setItem(EXPIRES_STORAGE_KEY, String(sessionExpiresAtMs));
+    } else {
+      sessionStorage.removeItem(EXPIRES_STORAGE_KEY);
+    }
   } catch {
     /* ignore */
   }
@@ -635,7 +676,7 @@ export async function authSessionRestore(
     if (!res.ok) return asError(res.status, body, "session probe failed");
     const out = body as SessionRestoreResponse;
     if (out.ok && out.csrf_token && out.address) {
-      persistSession(out.address, out.csrf_token);
+      persistSession(out.address, out.csrf_token, out.expires_at);
     }
     return out;
   } catch (e) {
@@ -819,7 +860,7 @@ export async function authVerify(
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "verify failed");
     const ok = body as VerifyResponse;
-    if (ok.csrf_token) persistSession(ok.address, ok.csrf_token);
+    if (ok.csrf_token) persistSession(ok.address, ok.csrf_token, ok.expires_at);
     return ok;
   } catch (e) {
     return {
@@ -1359,7 +1400,7 @@ export async function listExchangeFills(
   pair?: string,
 ): Promise<{ ok: true; fills: ApiFill[]; source?: string } | ExchangeApiError> {
   const q = new URLSearchParams();
-  q.set("limit", String(Math.max(1, Math.min(500, limit))));
+  q.set("limit", String(Math.max(1, Math.min(100, limit))));
   if (pair) q.set("pair", pair);
   const url = apiUrl(`/fills?${q}`, baseOverride);
   if (!url) return disabled();
@@ -1373,6 +1414,65 @@ export async function listExchangeFills(
     if (!res.ok) return asError(res.status, body, "list fills failed");
     const data = body as { fills?: ApiFill[]; source?: string };
     return { ok: true, fills: data.fills ?? [], source: data.source };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      code: "unreachable",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+export type ApiVipTier = {
+  name: string;
+  maker_bps: number;
+  taker_bps: number;
+  min_vol_usdt_minor: number;
+};
+
+export type VipResponse = {
+  ok: true;
+  address: string;
+  /** 30d USDT volume in quote-minor units (1e8 = 1 USDT). */
+  volume_30d_usdt: number;
+  tier: ApiVipTier;
+  note?: string;
+};
+
+/** GET /vip — session 30d volume + fee tier (soft-launch source of truth). */
+export async function fetchExchangeVip(
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<VipResponse | ExchangeApiError> {
+  const url = apiUrl("/vip", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store", mode: "cors", credentials: "include", headers: { Accept: "application/json" } },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "vip lookup failed");
+    const data = body as Partial<VipResponse>;
+    const vol = Number(data.volume_30d_usdt ?? 0);
+    const tier = data.tier;
+    if (!tier || typeof tier !== "object") {
+      return { ok: false, status: res.status, code: "vip_error", message: "vip tier missing" };
+    }
+    return {
+      ok: true,
+      address: typeof data.address === "string" ? data.address : "",
+      volume_30d_usdt: Number.isFinite(vol) && vol > 0 ? vol : 0,
+      tier: {
+        name: String(tier.name ?? "Regular"),
+        maker_bps: Number(tier.maker_bps ?? 8),
+        taker_bps: Number(tier.taker_bps ?? 10),
+        min_vol_usdt_minor: Number(tier.min_vol_usdt_minor ?? 0),
+      },
+      note: typeof data.note === "string" ? data.note : undefined,
+    };
   } catch (e) {
     return {
       ok: false,
@@ -1416,6 +1516,46 @@ export async function fetchPublicTrades(
     if (!res.ok) return asError(res.status, body, "list trades failed");
     const data = body as { trades?: ApiMarketTrade[]; source?: string };
     return { ok: true, trades: data.trades ?? [], source: data.source };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      code: "unreachable",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** Public 24h ticker row from durable fills (GET /ticker · /tickers). */
+export type ApiMarketTicker = {
+  pair: string;
+  last?: number;
+  open_24h?: number;
+  high_24h?: number;
+  low_24h?: number;
+  volume_24h_base?: number;
+  volume_24h_quote?: number;
+  n_trades_24h?: number;
+  change_bps?: number;
+};
+
+/** GET /tickers — all pairs 24h stats from durable fills. */
+export async function fetchPublicTickers(
+  timeoutMs = 5_000,
+  baseOverride?: string,
+): Promise<{ ok: true; tickers: ApiMarketTicker[] } | ExchangeApiError> {
+  const url = apiUrl("/tickers", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store", mode: "cors", credentials: "include", headers: { Accept: "application/json" } },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "list tickers failed");
+    const data = body as { tickers?: ApiMarketTicker[] };
+    return { ok: true, tickers: data.tickers ?? [] };
   } catch (e) {
     return {
       ok: false,

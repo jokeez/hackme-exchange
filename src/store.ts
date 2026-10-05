@@ -1,4 +1,4 @@
-import type { Candle, DemoState, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
+import type { Candle, DemoState, EquitySnapshot, MarketSnapshot, MultiPanePairs, MultiPaneTfs, Order, OrderSide, PairId, Timeframe, Wallet } from "./types";
 import { DEFAULT_CHART_OVERLAYS, DEFAULT_CHART_SETTINGS, DEFAULT_FEE_CONFIG, DEFAULT_INDICATOR_CONFIG, DEFAULT_MULTI_PANE_PAIRS, DEFAULT_MULTI_PANE_TFS, STATE_VERSION, TIMEFRAMES, normalizeChartOverlays } from "./types";
 import { applyPaperClockToPairCandles, CANDLE_BASE_TF } from "./candles";
 import { DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID, midForPair } from "./market";
@@ -31,15 +31,97 @@ import {
 /** Candles are not persisted — rebuilt from shared paper clock. */
 const STORAGE_TRADES_CAP = 120;
 const STORAGE_LEDGER_CAP = 80;
-const STORAGE_EQUITY_CAP = 72;
+/** Soft upper bound after day-aware compaction (not a blind newest-N trim). */
+const STORAGE_EQUITY_CAP = 200;
+const STORAGE_EQUITY_CAP_AGGRESSIVE = 64;
 const STORAGE_ORDERS_CAP = 80;
+const EQUITY_HISTORY_MS = 32 * 86_400_000;
+
+function equityDayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Retain ~28–32d calendar coverage without blowing localStorage.
+ * Blind newest-N trim (old 72×1m snaps) wiped prior days after ~1h of activity.
+ * Keep first+last per calendar day, plus denser samples for the recent window.
+ */
+export function compactEquitySnapshots(
+  snaps: EquitySnapshot[],
+  aggressive = false,
+): EquitySnapshot[] {
+  const maxKeep = aggressive ? STORAGE_EQUITY_CAP_AGGRESSIVE : STORAGE_EQUITY_CAP;
+  const recentMs = aggressive ? 4 * 3_600_000 : 24 * 3_600_000;
+  const recentStepMs = aggressive ? 20 * 60_000 : 10 * 60_000;
+  const now = Date.now();
+  const cutoff = now - EQUITY_HISTORY_MS;
+
+  const sorted = snaps
+    .filter(
+      (s) =>
+        s &&
+        typeof s.ts === "number" &&
+        typeof s.equityUsdt === "number" &&
+        Number.isFinite(s.ts) &&
+        Number.isFinite(s.equityUsdt),
+    )
+    .sort((a, b) => a.ts - b.ts);
+  if (!sorted.length) return [];
+
+  let windowed = sorted.filter((s) => s.ts >= cutoff);
+  if (!windowed.length) windowed = sorted.slice(-Math.min(maxKeep, sorted.length));
+
+  const byDay = new Map<string, EquitySnapshot[]>();
+  for (const s of windowed) {
+    const k = equityDayKey(s.ts);
+    const arr = byDay.get(k);
+    if (arr) arr.push(s);
+    else byDay.set(k, [s]);
+  }
+
+  const selected = new Map<number, EquitySnapshot>();
+  const pick = (s: EquitySnapshot) => selected.set(s.ts, s);
+
+  for (const arr of byDay.values()) {
+    pick(arr[0]!);
+    pick(arr[arr.length - 1]!);
+  }
+
+  const recentCutoff = now - recentMs;
+  let lastKept = -Infinity;
+  for (const s of windowed) {
+    if (s.ts < recentCutoff) continue;
+    if (s.ts - lastKept >= recentStepMs) {
+      pick(s);
+      lastKept = s.ts;
+    }
+  }
+  pick(windowed[windowed.length - 1]!);
+
+  let out = [...selected.values()].sort((a, b) => b.ts - a.ts);
+  if (out.length <= maxKeep) return out;
+
+  // Prefer day anchors over dense recent samples when over budget.
+  const anchorTs = new Set<number>();
+  for (const arr of byDay.values()) {
+    anchorTs.add(arr[0]!.ts);
+    anchorTs.add(arr[arr.length - 1]!.ts);
+  }
+  const anchors = out.filter((s) => anchorTs.has(s.ts));
+  const extras = out.filter((s) => !anchorTs.has(s.ts));
+  // Newest-first: if anchors alone exceed max, keep most recent days.
+  const keptAnchors = anchors.slice(0, maxKeep);
+  const room = maxKeep - keptAnchors.length;
+  return [...keptAnchors, ...extras.slice(0, Math.max(0, room))].sort((a, b) => b.ts - a.ts);
+}
 
 function compactForStorage(state: DemoState, aggressive = false): DemoState {
   const s = structuredClone(state);
   s.orders = s.orders.slice(0, STORAGE_ORDERS_CAP);
   s.trades = s.trades.slice(0, aggressive ? 40 : STORAGE_TRADES_CAP);
   s.ledger = s.ledger.slice(0, aggressive ? 40 : STORAGE_LEDGER_CAP);
-  s.equitySnapshots = s.equitySnapshots.slice(0, aggressive ? 24 : STORAGE_EQUITY_CAP);
+  s.equitySnapshots = compactEquitySnapshots(s.equitySnapshots, aggressive);
   s.drawings = sanitizeDrawings(s.drawings, aggressive ? 40 : Math.min(120, MAX_DRAWINGS));
   // Never persist OHLC — paper clock rebuilds identical candles on every device.
   s.candles = {};
@@ -231,15 +313,16 @@ export function loadState(): DemoState {
           }))
         : [],
       equitySnapshots: Array.isArray(parsed.equitySnapshots)
-        ? parsed.equitySnapshots
-            .slice(0, STORAGE_EQUITY_CAP)
-            .filter(
-              (e) =>
-                e &&
+        ? compactEquitySnapshots(
+            parsed.equitySnapshots.filter(
+              (e): e is EquitySnapshot =>
+                !!e &&
                 typeof e === "object" &&
                 typeof (e as { ts?: unknown }).ts === "number" &&
                 typeof (e as { equityUsdt?: unknown }).equityUsdt === "number",
-            )
+            ),
+            false,
+          )
         : [],
       drawings: sanitizeDrawings(parsed.drawings ?? [], MAX_DRAWINGS),
       // Drop any persisted OHLC — shared paper clock is the only candle source.
@@ -354,7 +437,11 @@ export function saveState(state: DemoState): boolean {
   saveChartPrefs(chartPrefsFromState(state));
   const compact = compactForStorage(state);
   let raw = JSON.stringify(compact);
-  if (tryPersist(raw)) return true;
+  if (tryPersist(raw)) {
+    // Keep session memory aligned with what hit disk (day anchors survive).
+    state.equitySnapshots = compact.equitySnapshots;
+    return true;
+  }
 
   console.warn("[hackme-exchange] localStorage quota exceeded — compacting demo state");
   try {
@@ -364,7 +451,10 @@ export function saveState(state: DemoState): boolean {
   }
   const aggressive = compactForStorage(state, true);
   raw = JSON.stringify(aggressive);
-  if (tryPersist(raw)) return true;
+  if (tryPersist(raw)) {
+    state.equitySnapshots = aggressive.equitySnapshots;
+    return true;
+  }
 
   console.warn("[hackme-exchange] could not persist state — running in memory only");
   return false;

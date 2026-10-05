@@ -28,7 +28,7 @@ describe("chrome overlays menu", () => {
     const vol = menu!.querySelector("#ov-vol") as HTMLInputElement;
     const quick = menu!.querySelector("#ov-quick") as HTMLInputElement;
     const preview = menu!.querySelector("#ov-preview") as HTMLInputElement;
-    expect(vol.checked).toBe(true);
+    expect(vol.checked).toBe(false);
     expect(quick.checked).toBe(false);
     expect(preview.checked).toBe(false);
     expect(preview.disabled).toBe(true);
@@ -36,10 +36,10 @@ describe("chrome overlays menu", () => {
     quick.dispatchEvent(new Event("change", { bubbles: true }));
     expect(document.querySelector(".pop-menu")).toBeTruthy();
     expect(s.chartOverlays.quickOrder).toBe(true);
-    vol.checked = false;
+    vol.checked = true;
     vol.dispatchEvent(new Event("change", { bubbles: true }));
     expect(document.querySelector(".pop-menu")).toBeTruthy();
-    expect(s.chartOverlays.showVolume).toBe(false);
+    expect(s.chartOverlays.showVolume).toBe(true);
     expect(patches.length).toBe(2);
   });
 

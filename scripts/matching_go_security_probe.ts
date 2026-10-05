@@ -165,7 +165,13 @@ async function main() {
     const joined = setCookieLines.join("\n");
     if (!/HttpOnly/i.test(joined)) fail(`cookie missing HttpOnly: ${joined}`);
     else pass("session cookie HttpOnly");
-    if (!/SameSite=Strict/i.test(joined)) fail(`cookie missing SameSite=Strict: ${joined}`);
+    // Lab/loopback uses SameSite=Strict; public edge uses SameSite=None; Partitioned (CHIPS).
+    const publicEdge =
+      /SameSite=None/i.test(joined) && /Partitioned/i.test(joined);
+    const labStrict = /SameSite=Strict/i.test(joined);
+    if (!publicEdge && !labStrict) {
+      fail(`cookie missing SameSite=Strict or CHIPS (None; Partitioned): ${joined}`);
+    } else if (publicEdge) pass("session cookie SameSite=None; Partitioned (public edge)");
     else pass("session cookie SameSite=Strict");
     if (ORIGIN.startsWith("https:") && !/;\s*Secure/i.test(joined) && !/Secure;/i.test(joined)) {
       fail(`cookie missing Secure: ${joined}`);

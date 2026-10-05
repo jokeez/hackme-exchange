@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   activeVipTier,
   applyFeeToWallet,
   calcFee,
+  clearServerVipVolume,
   formatBps,
+  hasServerVipVolume,
   liquidityRole,
   nextVipProgress,
   sanitizeFeeConfig,
+  setServerVipVolumeUsdt,
+  vipTierForVolume,
   volume30dUsdt,
 } from "./fees";
 import { convert, type ConvertRoute } from "./convert";
@@ -72,6 +76,10 @@ const market = {
   targetMod: 1,
   totalPayoutHmc: 1000,
 };
+
+afterEach(() => {
+  clearServerVipVolume();
+});
 
 describe("fees", () => {
   it("maker vs taker roles", () => {
@@ -152,6 +160,63 @@ describe("fees", () => {
     expect(fee.paidInHmc).toBe(true);
     expect(fee.feeQuote).toBeCloseTo(0.75, 5);
     expect(fee.feeHmc).toBeGreaterThan(0);
+  });
+
+  it("HMC discount floors quote minors like API ApplyHMCDiscountPct", () => {
+    const s = baseState();
+    s.feeConfig.payFeesInHmc = true;
+    s.feeConfig.hmcDiscountPct = 25;
+    // feeQuoteMinor = ceil(7e-5 * 10 * 1e8 / 10000) = 7; disc = trunc(7*75/100) = 5
+    const fee = calcFee(s, { ...market, hmcUsdt: 1 }, "HMC_USDT", 7e-5, "taker");
+    expect(fee.feeQuote).toBe(5e-8);
+    expect(fee.feeHmc).toBe(5e-8);
+  });
+
+  it("honorPayFeesInHmc false skips HMC path (soft-launch until health advertises)", () => {
+    const s = baseState();
+    s.feeConfig.payFeesInHmc = true;
+    const fee = calcFee(s, market, "HMC_USDT", 1000, "taker", { honorPayFeesInHmc: false });
+    expect(fee.paidInHmc).toBe(false);
+    expect(fee.feeQuote).toBe(1);
+    expect(fee.feeHmc).toBe(0);
+  });
+
+  it("server VIP volume overrides local paper history for tier + progress", () => {
+    const s = baseState();
+    s.trades = [
+      {
+        id: "1",
+        pairId: "HMC_USDT",
+        side: "buy",
+        price: 1,
+        amountBase: 1,
+        amountQuote: 10_000_000,
+        feeQuote: 0,
+        feeHmc: 0,
+        feeRole: "taker",
+        feePaidInHmc: false,
+        ts: Date.now(),
+      },
+    ];
+    expect(activeVipTier(s).name).toBe("VIP 3");
+    setServerVipVolumeUsdt(50_000);
+    expect(hasServerVipVolume()).toBe(true);
+    expect(volume30dUsdt(s)).toBe(50_000);
+    expect(activeVipTier(s).name).toBe("Regular");
+    expect(activeVipTier(s).takerBps).toBe(10);
+    const prog = nextVipProgress(s);
+    expect(prog.next?.name).toBe("VIP 1");
+    expect(prog.remaining).toBe(50_000);
+    clearServerVipVolume();
+    expect(activeVipTier(s).name).toBe("VIP 3");
+  });
+
+  it("vipTierForVolume matches ECONOMICS floors", () => {
+    expect(vipTierForVolume(0).name).toBe("Regular");
+    expect(vipTierForVolume(99_999).makerBps).toBe(8);
+    expect(vipTierForVolume(100_000)).toMatchObject({ name: "VIP 1", makerBps: 6, takerBps: 8 });
+    expect(vipTierForVolume(1_000_000)).toMatchObject({ name: "VIP 2", makerBps: 4, takerBps: 6 });
+    expect(vipTierForVolume(10_000_000)).toMatchObject({ name: "VIP 3", makerBps: 2, takerBps: 4 });
   });
 
   it("formatBps readable", () => {

@@ -24,6 +24,26 @@ export function escapeHtml(s: string): string {
 }
 
 /**
+ * Allow only `otpauth:` authenticator URLs (TOTP enrollment).
+ * Rejects javascript:/data:/https: phishing links from a compromised API response.
+ */
+export function sanitizeOtpauthUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!s || s.length > 2048) return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "otpauth:") return null;
+    // Common authenticator schemes: otpauth://totp/... or otpauth://hotp/...
+    const host = (u.hostname || "").toLowerCase();
+    if (host && host !== "totp" && host !== "hotp") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Copy text with Clipboard API + textarea fallback (headless / denied permission).
  * Resolves true when any path succeeded.
  */

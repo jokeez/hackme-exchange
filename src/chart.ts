@@ -27,10 +27,11 @@ import type {
 } from "./types";
 import { CANDLE_SCHEME_PRESETS, DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { bumpTimeSyncPane } from "./chartTimeSync";
-import { chartLocalization, chartPriceFormatter } from "./format";
+import { chartLocalization, chartPriceFormatter, chartTickMarkFormatter } from "./format";
 import { bindLongPress, longPressRecentlyFired } from "./longPress";
 import { getPair } from "./registry";
 import { bollinger, ema, macd, rsi, sma, stochastic, toHeikin, vwap } from "./indicators";
+import { orderTypeLabel } from "./orders";
 import {
   computeMeasureStats,
   extendRayToBounds,
@@ -38,10 +39,21 @@ import {
   isMeaningfulMeasure,
   resolvePaintDrawings,
 } from "./chartDraw";
-import { MAX_CANDLES } from "./candles";
+import { ensureContiguousCandles, MAX_CANDLES } from "./candles";
+import {
+  clampPaintPriceSpan,
+  displayCapCandles,
+  logicalRangeToIndices,
+  paintMaxSpanFracForTf,
+  robustPriceRange,
+} from "./chartScale";
 import { candleAtTime } from "./chartCandleIndex";
-import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
-import { clearChartViewport, loadChartViewport, saveChartViewport } from "./chartViewport";
+import {
+  clearChartViewport,
+  loadChartViewport,
+  saveChartViewport,
+  viewportFollowsLive,
+} from "./chartViewport";
 import { chartInteractionOptions, isMobileLayout, mobileChartFooterOverlapPx } from "./mobile";
 
 const SCHEMES = CANDLE_SCHEME_PRESETS;
@@ -53,7 +65,8 @@ let lineSeries: ISeriesApi<"Line"> | null = null;
 let areaSeries: ISeriesApi<"Area"> | null = null;
 let volumeSeries: ISeriesApi<"Histogram"> | null = null;
 let overlaySeries: ISeriesApi<"Line">[] = [];
-let oscSeries: ISeriesApi<"Line">[] = [];
+let oscSeries: (ISeriesApi<"Line"> | ISeriesApi<"Histogram">)[] = [];
+let tipIndicatorRefreshN = 0;
 let priceLines: IPriceLine[] = [];
 let priceLineOwner:
   | ISeriesApi<"Candlestick">
@@ -134,7 +147,7 @@ const PRICE_WHEEL_SPAN_FACTOR = 0.03;
 /** Pixels that accumulate into one notch (mouse ≈100; bump so partial rolls need more). */
 const PRICE_WHEEL_UNIT = 140;
 /** Plot zoom: min/max bar spacing (px) — 3px floor keeps candles crisp on small TFs. */
-export const MIN_PLOT_BAR_SPACING = 3;
+export const MIN_PLOT_BAR_SPACING = 5;
 export const MAX_PLOT_BAR_SPACING = 56;
 /** Plot wheel: pixels for one full ±5% bar-spacing step (one mouse notch ≈ 120px). */
 export const PLOT_WHEEL_UNIT = 120;
@@ -262,6 +275,13 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   let panStartLogical: { from: number; to: number } | null = null;
   let panStartPrice: { from: number; to: number } | null = null;
   let panning = false;
+  let pinching = false;
+  let pinchStartDist = 0;
+  let pinchStartSpacing = 0;
+  let pinchStartPrice: { from: number; to: number } | null = null;
+  let pinchMidX = 0;
+  let pinchRaf = 0;
+  const pointers = new Map<number, { x: number; y: number }>();
   let ohlcRaf = 0;
   let ohlcX = 0;
   let ohlcY = 0;
@@ -298,11 +318,112 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     }
   };
 
+  const pointerDist = () => {
+    if (pointers.size < 2) return 0;
+    const [a, b] = [...pointers.values()];
+    return Math.hypot(a!.x - b!.x, a!.y - b!.y);
+  };
+  const pointerMidX = () => {
+    const pts = [...pointers.values()];
+    if (pts.length < 2) return pts[0]?.x ?? 0;
+    return (pts[0]!.x + pts[1]!.x) / 2;
+  };
+
+  const endPan = () => {
+    panning = false;
+    panStartLogical = null;
+    panStartPrice = null;
+    freeXh?.setPanning(false);
+  };
+
+  const beginPinch = () => {
+    if (!chart || !freeXh || pointers.size < 2) return;
+    endPan();
+    // Keep both fingers captured on the overlay so LWC never sees the gesture.
+    for (const id of pointers.keys()) {
+      try {
+        freeXh.el.setPointerCapture(id);
+      } catch {
+        /* ignore */
+      }
+    }
+    const dist = pointerDist();
+    if (!(dist > 8)) return;
+    pinching = true;
+    pinchStartDist = dist;
+    pinchStartSpacing = chart.timeScale().options().barSpacing || 8;
+    pinchMidX = pointerMidX();
+    try {
+      const pr = chart.priceScale("right").getVisibleRange();
+      pinchStartPrice = pr && pr.to > pr.from ? { from: pr.from, to: pr.to } : null;
+    } catch {
+      pinchStartPrice = null;
+    }
+    setChartPointerBusy(true);
+  };
+
+  const applyPinchNow = () => {
+    if (!pinching || !chart || !hostEl || !(pinchStartDist > 0)) return;
+    const dist = pointerDist();
+    if (!(dist > 4)) return;
+    // Dampen ratio so small finger jitter does not explode the viewport.
+    const raw = dist / pinchStartDist;
+    const ratio = Math.max(0.45, Math.min(2.2, Math.sqrt(raw)));
+    const ts = chart.timeScale();
+    const prev = ts.options().barSpacing || pinchStartSpacing || 8;
+    const next = Math.max(
+      MIN_PLOT_BAR_SPACING,
+      Math.min(MAX_PLOT_BAR_SPACING, Math.round(pinchStartSpacing * ratio * 100) / 100),
+    );
+    if (Math.abs(next - prev) >= 1e-4) {
+      const { x: plotX, width: plotW } = plotMetricsFromClient(pinchMidX || pointerMidX(), hostEl);
+      const deltaLogical = plotWheelAnchorShift(plotX, prev, next, plotW);
+      chart.applyOptions({
+        timeScale: { barSpacing: next, minBarSpacing: MIN_PLOT_BAR_SPACING, rightBarStaysOnScroll: false },
+      });
+      if (Math.abs(deltaLogical) >= 1e-6) {
+        try {
+          ts.scrollToPosition(ts.scrollPosition() + deltaLogical, false);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    // Soft vertical pinch (damped): only after meaningful scale change.
+    if (pinchStartPrice && Math.abs(ratio - 1) > 0.06) {
+      try {
+        const mid = (pinchStartPrice.from + pinchStartPrice.to) / 2;
+        const span = (pinchStartPrice.to - pinchStartPrice.from) / Math.max(0.45, ratio);
+        const half = span / 2;
+        const nextPr = { from: mid - half, to: mid + half };
+        const ref = refClosePrice();
+        const h = Math.max(40, Math.floor(freeXh?.el.clientHeight || hostEl.clientHeight || 400));
+        const clamped =
+          ref > 0 ? clampVisiblePriceRange(nextPr, ref, h, { manual: true, freePan: true }) : nextPr;
+        if (clamped.to > clamped.from) {
+          priceScaleManual = true;
+          const ps = chart.priceScale("right");
+          ps.setAutoScale(false);
+          ps.setVisibleRange(clamped);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  const applyPinch = () => {
+    if (pinchRaf) return;
+    pinchRaf = requestAnimationFrame(() => {
+      pinchRaf = 0;
+      applyPinchNow();
+    });
+  };
+
   const onMoveHair = (e: PointerEvent) => {
     if (!freeXh) return;
-    // Always stick the hair to the cursor (incl. mid-pan — pointer may be captured on overlay).
+    if (pinching) return;
     const local = freeXh.move(e.clientX, e.clientY);
-    // Don't jitter OHLC while dragging the pane.
     if (panning) return;
     ohlcX = local.x;
     ohlcY = local.y;
@@ -310,9 +431,17 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   };
 
   const onMovePan = (e: PointerEvent) => {
+    if (pointers.has(e.pointerId)) {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinching && pointers.size >= 2) {
+      applyPinch();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!panning || !chart || !panStartLogical) return;
     if (activeTool !== "cursor") return;
-    // Pointer is captured on free-xh — host move listener may not see this; keep hair glued.
     freeXh?.move(e.clientX, e.clientY);
     const dx = e.clientX - panStartX;
     const dy = e.clientY - panStartY;
@@ -323,7 +452,6 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
       ts.setVisibleLogicalRange(shiftLogicalRangeByPx(panStartLogical, dx, spacing));
       if (panStartPrice && Math.abs(dy) >= 1) {
         const ps = chart.priceScale("right");
-        // Use plot pane height (free-xh insets exclude time/price scales) so dy maps 1:1.
         const h = Math.max(
           40,
           Math.floor(
@@ -359,16 +487,28 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     freeXh?.hide();
     freeXh?.setPanning(false);
     panning = false;
+    pinching = false;
+    pointers.clear();
     panStartLogical = null;
     panStartPrice = null;
     setChartPointerBusy(false);
     lastOpts?.onCrosshair?.(null);
   };
   const onDown = (e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.pointerType === "mouse") return;
     if (!freeXh?.el.classList.contains("capturing")) return;
     if (activeTool !== "cursor") return;
     if (!chart) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Second finger → pinch zoom (both pointers stay captured on overlay).
+    if (pointers.size >= 2) {
+      beginPinch();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     const lr = chart.timeScale().getVisibleLogicalRange();
     if (!lr) return;
     let pr: { from: number; to: number } | null = null;
@@ -381,6 +521,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     freeXh.move(e.clientX, e.clientY);
     freeXh.setPanning(true);
     panning = true;
+    pinching = false;
     panStartX = e.clientX;
     panStartY = e.clientY;
     panStartLogical = { from: lr.from, to: lr.to };
@@ -393,10 +534,41 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     e.stopPropagation();
   };
   const onUp = (e: PointerEvent) => {
-    panning = false;
-    panStartLogical = null;
-    panStartPrice = null;
-    freeXh?.setPanning(false);
+    pointers.delete(e.pointerId);
+    if (pointers.size >= 2) {
+      beginPinch();
+      return;
+    }
+    if (pointers.size === 1 && pinching) {
+      // Drop back to 1-finger pan from remaining touch.
+      pinching = false;
+      pinchStartDist = 0;
+      const [id, pt] = [...pointers.entries()][0]!;
+      const lr = chart?.timeScale().getVisibleLogicalRange();
+      if (lr && chart) {
+        let pr: { from: number; to: number } | null = null;
+        try {
+          pr = chart.priceScale("right").getVisibleRange();
+        } catch {
+          pr = null;
+        }
+        panning = true;
+        freeXh?.setPanning(true);
+        panStartX = pt.x;
+        panStartY = pt.y;
+        panStartLogical = { from: lr.from, to: lr.to };
+        panStartPrice = pr && pr.to > pr.from ? { from: pr.from, to: pr.to } : null;
+        try {
+          freeXh?.el.setPointerCapture(id);
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
+    endPan();
+    pinching = false;
+    pinchStartDist = 0;
     freeXh?.move(e.clientX, e.clientY);
     try {
       freeXh?.el.releasePointerCapture(e.pointerId);
@@ -424,11 +596,11 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   freeXh.el.addEventListener("wheel", onWheel, { passive: false });
   host.addEventListener("pointerenter", onEnter);
   host.addEventListener("pointerleave", onLeave);
-  // Single hair listener on host — receives bubbled moves from overlay or LWC.
   host.addEventListener("pointermove", onMoveHair, { passive: true });
   window.addEventListener("resize", onResize);
   freeXhCleanup = () => {
     if (ohlcRaf) cancelAnimationFrame(ohlcRaf);
+    if (pinchRaf) cancelAnimationFrame(pinchRaf);
     freeXh?.el.removeEventListener("pointermove", onMovePan);
     freeXh?.el.removeEventListener("pointerdown", onDown);
     freeXh?.el.removeEventListener("pointerup", onUp);
@@ -722,7 +894,12 @@ function syncDrawingsStore(drawings: Drawing[]): void {
   if (lastOpts) lastOpts = { ...lastOpts, drawings: [...drawings] };
 }
 
-function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
+function prepCandles(
+  raw: Candle[],
+  mode: ChartMode,
+  tf?: Timeframe,
+  pairId?: PairId,
+): Candle[] {
   const sorted = [...raw].sort((a, b) => a.time - b.time);
   const deduped: Candle[] = [];
   for (const c of sorted) {
@@ -732,11 +909,20 @@ function prepCandles(raw: Candle[], mode: ChartMode, tf?: Timeframe): Candle[] {
   }
   // Paper clock / aggregate series are already finalized — only heal NaN / high-low vs body.
   // Re-running body/wick caps here would crush tip extremes and fork painted vs state OHLC.
-  const cleaned = deduped.map((c) => ({
+  let cleaned = deduped.map((c) => ({
     ...c,
     high: Math.max(c.high, c.open, c.close),
     low: Math.min(c.low, c.open, c.close),
   }));
+  // LWC leaves blank strips when UTC buckets skip — walk-fill before paint.
+  if (tf && cleaned.length >= 2) {
+    cleaned = ensureContiguousCandles(cleaned, tf, {
+      pairId: pairId ?? "HMC_USDT",
+      fillToNow: true,
+    });
+    // Display rebuild: CEX OHLC paint (continuity + real wicks + Soft-MM needle clip).
+    cleaned = displayCapCandles(cleaned, tf);
+  }
   return mode === "heikin" ? toHeikin(cleaned) : cleaned;
 }
 
@@ -755,12 +941,15 @@ function makeRobustAutoscaleProvider() {
       const { fromIdx, toIdx } = logicalRangeToIndices(lr.from, lr.to, currentCandles.length);
       const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
       if (!robust) return original();
-      // Pad the robust window slightly — do NOT force a huge empty floor that
-      // flattens lively tape into a thin ruler line in the middle of the pane.
-      const mid = (robust.minValue + robust.maxValue) / 2;
-      const rawSpan = robust.maxValue - robust.minValue;
-      const minSpan = mid > 0 ? mid * 0.0045 : 0; // ~45 bps floor
-      const span = Math.max(rawSpan * 1.12, minSpan);
+      const tip = currentCandles[currentCandles.length - 1]!.close;
+      const tf = lastOpts?.tf ?? "1m";
+      // Clamp Soft-MM cliffs only — keep multi-hour Soft-MM breathe filling the pane.
+      const clamped = clampPaintPriceSpan(robust, tip, paintMaxSpanFracForTf(tf));
+      const mid = (clamped.minValue + clamped.maxValue) / 2;
+      const rawSpan = clamped.maxValue - clamped.minValue;
+      // ~1.2% floor so quiet Soft-MM tape still shows body height (not flat dashes).
+      const minSpan = mid > 0 ? mid * 0.012 : 0;
+      const span = Math.max(rawSpan * 1.1, minSpan);
       return {
         priceRange: {
           minValue: mid - span / 2,
@@ -802,8 +991,10 @@ function applyIndicators(candles: Candle[], settings: ChartSettings, maConfig?: 
     s.setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.value })));
     if (scaleId && scaleId !== "right") {
       const hostH = hostEl?.clientHeight ?? 0;
-      const oscTop = isMobileLayout() && hostH > 0 && hostH < 460 ? 0.62 : 0.78;
-      chart!.priceScale(scaleId).applyOptions({ scaleMargins: { top: oscTop, bottom: 0.04 }, visible: false });
+      // Leave room under osc for optional volume strip (vol top≈0.82).
+      const hasVol = lastOpts?.overlays.showVolume !== false && lastOpts?.overlays.showVolume === true;
+      const oscTop = isMobileLayout() && hostH > 0 && hostH < 460 ? 0.58 : hasVol ? 0.72 : 0.78;
+      chart!.priceScale(scaleId).applyOptions({ scaleMargins: { top: oscTop, bottom: hasVol ? 0.1 : 0.04 }, visible: false });
     }
     return s;
   };
@@ -837,6 +1028,23 @@ function applyIndicators(candles: Candle[], settings: ChartSettings, maConfig?: 
   }
   if (ind.macd) {
     const m = macd(candles);
+    const histData = m.hist.map((p) => ({
+      time: p.time as UTCTimestamp,
+      value: p.value,
+      color: p.value >= 0 ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+    }));
+    const hist = chart!.addSeries(HistogramSeries, {
+      priceScaleId: "macd",
+      lastValueVisible: false,
+      priceLineVisible: false,
+      priceFormat: { type: "price", precision: 6, minMove: 1e-8 },
+    });
+    hist.setData(histData);
+    oscSeries.push(hist);
+    const hostH = hostEl?.clientHeight ?? 0;
+    const hasVol = lastOpts?.overlays.showVolume === true;
+    const oscTop = isMobileLayout() && hostH > 0 && hostH < 460 ? 0.58 : hasVol ? 0.72 : 0.78;
+    chart!.priceScale("macd").applyOptions({ scaleMargins: { top: oscTop, bottom: hasVol ? 0.1 : 0.04 }, visible: false });
     oscSeries.push(addLine(m.macd, "#4fc3f7", 1, "macd"));
     oscSeries.push(addLine(m.signal, "#ffb74d", 1, "macd"));
   }
@@ -862,6 +1070,7 @@ function renderOrderLines(
   if (overlays.showOrderLines) {
     for (const o of orders.filter((x) => x.status === "open" || x.status === "triggered")) {
       const color = o.side === "buy" ? "#00e676" : "#ff5252";
+      const kindLabel = orderTypeLabel(o.kind, o);
       priceLines.push(
         series.createPriceLine({
           price: o.price,
@@ -869,10 +1078,10 @@ function renderOrderLines(
           lineWidth: 2,
           lineStyle: 2,
           axisLabelVisible: true,
-          title: `${o.side} ${o.kind}`,
+          title: `${o.side} ${kindLabel}`,
         }),
       );
-      if (o.stopPrice) {
+      if (o.stopPrice && o.stopPrice !== o.price) {
         priceLines.push(
           series.createPriceLine({
             price: o.stopPrice,
@@ -880,7 +1089,7 @@ function renderOrderLines(
             lineWidth: 1,
             lineStyle: 3,
             axisLabelVisible: true,
-            title: "Stop",
+            title: o.ocoRole === "sl" ? "OCO SL stop" : "Stop",
           }),
         );
       }
@@ -901,9 +1110,18 @@ function renderOrderLines(
       );
     }
   }
-  if (yday && yday > 0) {
+  // Skip Yday when it sits far from Last — LWC priceLines expand Y and squash
+  // Soft-MM candles into a flat strip at the bottom (screenshot class).
+  const tipForYday = lastPrice && lastPrice > 0 ? lastPrice : currentCandles[currentCandles.length - 1]?.close;
+  const ydayNear =
+    yday &&
+    yday > 0 &&
+    tipForYday &&
+    tipForYday > 0 &&
+    Math.abs(yday - tipForYday) / tipForYday <= Math.max(paintMaxSpanFracForTf(lastOpts?.tf ?? "1m") * 1.25, 0.08);
+  if (ydayNear) {
     ydayPriceLine = series.createPriceLine({
-      price: yday,
+      price: yday!,
       color: "rgba(158, 176, 207, 0.55)",
       lineWidth: 1,
       lineStyle: 2,
@@ -918,7 +1136,7 @@ function renderOrderLines(
       color: lastUp ? "#00e676" : "#ff5252",
       lineWidth: 1,
       lineStyle: 0,
-      axisLabelVisible: false,
+      axisLabelVisible: true,
       title: "",
     });
     priceLines.push(lastPriceLine);
@@ -947,7 +1165,7 @@ export function orderOverlayFingerprint(
 ): string {
   const orderPart = orders
     .filter((x) => x.status === "open" || x.status === "triggered")
-    .map((o) => `${o.id}:${o.price}:${o.stopPrice ?? ""}:${o.side}:${o.kind}`)
+    .map((o) => `${o.id}:${o.price}:${o.stopPrice ?? ""}:${o.side}:${o.kind}:${o.ocoRole ?? ""}`)
     .join("|");
   const alertPart = (alerts ?? []).map((a) => `${a.price}:${a.fired ? 1 : 0}`).join("|");
   return [
@@ -2001,12 +2219,12 @@ export function visibleBarBudget(hostWidth: number, barSpacing: number): number 
 }
 
 export function barSpacingForWidth(hostWidth: number, tf: Timeframe): number {
-  // Slightly tighter than before — Binance/TV leave a hair of gap between bodies.
+  // Wider bodies — 3–5px Soft-MM bars read as dotted rulers on 1m.
   const base =
-    tf === "30s" ? 7.5 : tf === "1m" ? 7 : tf === "3m" || tf === "5m" ? 6.5 : tf === "1D" || tf === "1W" ? 8 : 7;
-  if (hostWidth < 400) return Math.max(8.5, base + 1.5);
-  if (hostWidth < 640) return Math.max(7.5, base + 1);
-  if (hostWidth < 720) return Math.max(6.5, base);
+    tf === "30s" ? 9 : tf === "1m" ? 8.5 : tf === "3m" || tf === "5m" ? 8 : tf === "1D" || tf === "1W" ? 9 : 8;
+  if (hostWidth < 400) return Math.max(10, base + 1.5);
+  if (hostWidth < 640) return Math.max(9, base + 1);
+  if (hostWidth < 720) return Math.max(8, base);
   if (hostWidth > 1600) return base;
   return base;
 }
@@ -2015,9 +2233,34 @@ function secondsVisibleForTf(tf: Timeframe): boolean {
   return tf === "30s" || tf === "1m" || tf === "3m" || tf === "5m";
 }
 
+/** Keep LWC time axis + spacing in lockstep with active TF (1D ≠ HH:MM ruler). */
+function applyTimeScaleForTf(tf: Timeframe, hostWidth?: number): void {
+  if (!chart) return;
+  const hostW = hostWidth ?? hostEl?.clientWidth ?? 800;
+  const spacing = barSpacingForWidth(hostW, tf);
+  try {
+    chart.applyOptions({
+      localization: chartLocalization(),
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: secondsVisibleForTf(tf),
+        rightOffset: chartRightOffset(hostW, tf),
+        barSpacing: spacing,
+        minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
+        rightBarStaysOnScroll: false,
+        tickMarkFormatter: chartTickMarkFormatter(tf),
+      },
+    });
+    lastAppliedBarSpacing = spacing;
+  } catch {
+    /* ignore */
+  }
+}
+
 export function chartRightOffset(hostWidth: number, tf: Timeframe): number {
-  if (tf === "1D" || tf === "1W") return hostWidth < 640 ? 2 : 3;
-  return hostWidth < 640 ? 4 : 6;
+  // Tight pad — large rightOffset read as «график на середине» after F5.
+  if (tf === "1D" || tf === "1W") return hostWidth < 640 ? 1 : 2;
+  return hostWidth < 640 ? 2 : 3;
 }
 
 function bindPaneDrawInteraction(host: PaneDrawHost, isMain: boolean): void {
@@ -2376,6 +2619,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
       rightOffset: chartRightOffset(hostW, opts.tf),
       barSpacing: spacing,
       rightBarStaysOnScroll: false,
+      tickMarkFormatter: chartTickMarkFormatter(opts.tf),
     },
     crosshair: crosshairPaintOptions(),
     localization: chartLocalization(),
@@ -2384,6 +2628,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   candleSeries = chart.addSeries(CandlestickSeries, {
     ...candleStyle,
     priceFormat: priceFormatOptions(),
+    // Custom last-price line owns the axis label — LWC lastValue doubles/stacks labels.
     lastValueVisible: false,
     priceLineVisible: false,
     visible: opts.mode === "candles" || opts.mode === "heikin",
@@ -2430,8 +2675,9 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   });
   chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
 
-  // Always re-anchor to the live candle after remount (TF/pair/mode).
-  // Never restore a previous TF's logical indices — that jumps into mid-history.
+  // F5 / full remount: always pin to the live tip. Restoring absolute logical
+  // indices from a prior series length jumps mid-history and leaves a blank
+  // right strip (user: «график на середине времени»).
   savedLogicalRange = null;
   setCandleData(candles, opts, { scrollToLive: false });
   firstDataApplied = true;
@@ -2457,9 +2703,9 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
   setupMobileChartPan(el);
   bindChartDebugProbe();
   bindChartViewportPersistence(opts.pairId, opts.tf);
-  if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
-    anchorToLatestCandle(visibleBarBudget(hostW, spacing));
-  }
+  // Keep zoom (barSpacing) only — never mid-history from/to after remount.
+  restoreChartBarSpacing(opts.pairId, opts.tf);
+  anchorToLatestCandle(visibleBarBudget(hostW, spacing));
 
   if (opts.onCrosshair) {
     let lastXhTime: number | null = null;
@@ -2775,7 +3021,9 @@ export function setCandleData(
     else rawCandlesCache.push(c);
   }
   if (rawCandlesCache.length > MAX_CANDLES) rawCandlesCache = rawCandlesCache.slice(-MAX_CANDLES);
-  currentCandles = prepCandles(rawCandlesCache, opts.mode, opts.tf);
+  currentCandles = prepCandles(rawCandlesCache, opts.mode, opts.tf, opts.pairId);
+  // TF switch / remount must refresh axis labels (1D → dates, not 16:10).
+  if (opts.tf) applyTimeScaleForTf(opts.tf);
   if (currentCandles.length < 2) {
     candleSeries.setData([]);
     barSeries.setData([]);
@@ -2898,7 +3146,8 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   } else return false;
 
   const mode = opts.mode ?? lastOpts?.mode ?? "candles";
-  currentCandles = prepCandles(rawCandlesCache, mode, tf);
+  const pairId = (opts.pairId ?? lastOpts?.pairId ?? "HMC_USDT") as PairId;
+  currentCandles = prepCandles(rawCandlesCache, mode, tf, pairId);
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
 
@@ -2919,12 +3168,17 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   } else {
     candleSeries.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
   }
-  if (lastOpts?.overlays.showVolume !== false) {
+  if (lastOpts?.overlays.showVolume === true) {
     volumeSeries?.update({
-    time: t,
+      time: t,
       value: d.volume,
       color: d.close >= d.open ? "rgba(0,230,118,0.35)" : "rgba(255,82,82,0.35)",
-  });
+    });
+  }
+  // Refresh overlays on tip every ~2s so RSI/MA/MACD track without full setData each tick.
+  tipIndicatorRefreshN = (tipIndicatorRefreshN + 1) % 8;
+  if (tipIndicatorRefreshN === 0 && lastOpts) {
+    applyIndicators(currentCandles, lastOpts.settings, lastOpts.indicatorConfig);
   }
   return true;
 }
@@ -3058,7 +3312,10 @@ export function healVisiblePriceScale(): boolean {
     );
     const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
     if (!robust) return false;
-    range = { from: robust.minValue, to: robust.maxValue };
+    const tip = currentCandles[currentCandles.length - 1]?.close ?? refPrice;
+    const tf = lastOpts?.tf ?? "1m";
+    const clamped = clampPaintPriceSpan(robust, tip, paintMaxSpanFracForTf(tf));
+    range = { from: clamped.minValue, to: clamped.maxValue };
   }
   if (!priceRangeNeedsHeal(range, refPrice)) return false;
   const next = clampVisiblePriceRange(range, refPrice, chartH, { manual: priceScaleManual });
@@ -3104,6 +3361,8 @@ function bindChartDebugProbe(): void {
   const w = window as Window & { __hackmeChart?: Record<string, unknown> };
   w.__hackmeChart = {
     getPriceScaleDebug,
+    getDisplayedLastCandle,
+    getDisplayedCandles: () => currentCandles.slice(),
     healVisiblePriceScale,
     clampVisiblePriceRange,
     zoomPriceRange,
@@ -3237,7 +3496,8 @@ export function setupPortableChartPan(
   };
   shell.addEventListener("touchstart", onTouchStart, { passive: true });
   shell.addEventListener("touchmove", onTouchMove, { passive: true });
-  shell.addEventListener("touchend", onTouchEnd, { passive: true });
+  // Non-passive so double-tap reset can preventDefault (iOS rubber-band / zoom).
+  shell.addEventListener("touchend", onTouchEnd, { passive: false });
   shell.addEventListener("touchcancel", onTouchEnd, { passive: true });
   cleanups.push(() => {
     shell.removeEventListener("touchstart", onTouchStart);
@@ -3493,7 +3753,10 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
         );
         const robust = robustPriceRange(currentCandles, fromIdx, toIdx);
         if (!robust) return;
-        range = { from: robust.minValue, to: robust.maxValue };
+        const tip = currentCandles[currentCandles.length - 1]?.close ?? refPrice;
+        const tf = lastOpts?.tf ?? "1m";
+        const clamped = clampPaintPriceSpan(robust, tip, paintMaxSpanFracForTf(tf));
+        range = { from: clamped.minValue, to: clamped.maxValue };
       }
       if (refPrice > 0 && priceRangeNeedsHeal(range, refPrice)) {
         range = clampVisiblePriceRange(range, refPrice, chartH, { manual: true });
@@ -3601,23 +3864,29 @@ export function anchorToLatestCandle(barCount?: number): void {
   const n = currentCandles.length;
   const hostW = hostEl?.clientWidth || 800;
   const tf = (lastOpts?.tf ?? "15m") as Timeframe;
-  const spacing = barSpacingForWidth(hostW, tf);
+  let spacing = barSpacingForWidth(hostW, tf);
   const rightPad = chartRightOffset(hostW, tf);
+  let budget = barCount ?? visibleBarBudget(hostW, spacing);
+  // Short 1D/1W history: densify bars so the pane is not a blank left «island».
+  if (n + 2 < budget) {
+    const fillSpacing = Math.min(28, Math.max(spacing, (hostW * 0.9) / Math.max(n + rightPad, 4)));
+    spacing = fillSpacing;
+    budget = visibleBarBudget(hostW, spacing);
+  }
   try {
     chart.timeScale().applyOptions({
       barSpacing: spacing,
       rightOffset: rightPad,
       minBarSpacing: Math.max(4, Math.floor(spacing * 0.45)),
     });
+    lastAppliedBarSpacing = spacing;
   } catch {
     /* ignore */
   }
-  const budget = barCount ?? visibleBarBudget(hostW, spacing);
-  // Logical window is always ~budget bars wide. When history is short, `from`
-  // goes negative → empty left space (Binance/TV), not inflated candle bodies.
-  // rightOffset already reserved whitespace — do not also push `to` far past tip.
-  const to = n - 1 + 2;
-  const from = to - budget;
+  // Keep tip at right; allow modest left pad only (not half-empty pane).
+  const to = n - 1 + 0.5;
+  const span = Math.min(budget, n + rightPad + 1);
+  const from = to - span;
   try {
     chart.timeScale().setVisibleLogicalRange({ from, to });
   } catch {
@@ -3738,13 +4007,28 @@ export function resizeChart(): void {
   });
 }
 
-function captureViewportState(): { barSpacing: number; from: number; to: number } | null {
+function captureViewportState(): {
+  barSpacing: number;
+  from: number;
+  to: number;
+  seriesLen: number;
+  followLive: boolean;
+} | null {
   if (!chart) return null;
   try {
     const ts = chart.timeScale();
     const lr = ts.getVisibleLogicalRange();
     if (!lr) return null;
-    return { barSpacing: ts.options().barSpacing ?? 8, from: lr.from as number, to: lr.to as number };
+    const n = currentCandles.length;
+    const to = lr.to as number;
+    const tip = n - 1;
+    return {
+      barSpacing: ts.options().barSpacing ?? 8,
+      from: lr.from as number,
+      to,
+      seriesLen: n,
+      followLive: n >= 2 && to >= tip - 1.5,
+    };
   } catch {
     return null;
   }
@@ -3757,22 +4041,10 @@ export function saveCurrentChartViewport(): void {
   saveChartViewport(lastOpts.pairId, lastOpts.tf, vp);
 }
 
-function tryRestoreChartViewport(pairId: string, tf: Timeframe): boolean {
+function restoreChartBarSpacing(pairId: string, tf: Timeframe): void {
+  if (!chart) return;
   const saved = loadChartViewport(pairId, tf);
-  if (!saved || !chart || currentCandles.length < 2) return false;
-  const n = currentCandles.length;
-  const span = Math.max(1, saved.to - saved.from);
-  let from = saved.from;
-  let to = saved.to;
-  const maxTo = n - 1 + 3;
-  if (to > maxTo || from > n - 1) {
-    to = Math.min(to, maxTo);
-    from = to - span;
-  }
-  if (from < -1) {
-    to += -1 - from;
-    from = -1;
-  }
+  if (!saved?.barSpacing || saved.barSpacing <= 0) return;
   const hostW = hostEl?.clientWidth || 800;
   const rightPad = chartRightOffset(hostW, tf);
   try {
@@ -3781,6 +4053,49 @@ function tryRestoreChartViewport(pairId: string, tf: Timeframe): boolean {
       rightOffset: rightPad,
       minBarSpacing: Math.max(4, Math.floor(saved.barSpacing * 0.45)),
     });
+    lastAppliedBarSpacing = saved.barSpacing;
+  } catch {
+    /* ignore */
+  }
+}
+
+function tryRestoreChartViewport(pairId: string, tf: Timeframe): boolean {
+  const saved = loadChartViewport(pairId, tf);
+  if (!saved || !chart || currentCandles.length < 2) return false;
+  const n = currentCandles.length;
+  const span = Math.max(1, saved.to - saved.from);
+  const hostW = hostEl?.clientWidth || 800;
+  const rightPad = chartRightOffset(hostW, tf);
+  try {
+    chart.timeScale().applyOptions({
+      barSpacing: saved.barSpacing,
+      rightOffset: rightPad,
+      minBarSpacing: Math.max(4, Math.floor(saved.barSpacing * 0.45)),
+    });
+    lastAppliedBarSpacing = saved.barSpacing;
+  } catch {
+    /* ignore */
+  }
+  // Follow-live (or legacy save without seriesLen near tip): always re-pin.
+  // Absolute from/to after candle growth parks the tip mid-pane with blank right.
+  if (viewportFollowsLive(saved) || saved.seriesLen == null) {
+    anchorToLatestCandle();
+    return true;
+  }
+  const oldTip = saved.seriesLen - 1;
+  const tipDelta = oldTip - saved.to; // >0 ⇒ scrolled left of tip
+  let to = n - 1 - tipDelta;
+  let from = to - span;
+  const maxTo = n - 1 + 3;
+  if (to > maxTo) {
+    to = maxTo;
+    from = to - span;
+  }
+  if (from < -1) {
+    to += -1 - from;
+    from = -1;
+  }
+  try {
     chart.timeScale().setVisibleLogicalRange({ from, to });
     return true;
   } catch {
@@ -3835,11 +4150,13 @@ export function switchChartTimeframe(candles: Candle[], opts: ChartMountOpts): b
   } catch {
     /* ignore */
   }
+  // Axis labels / seconds / spacing must flip with TF before data paint.
+  applyTimeScaleForTf(opts.tf);
   setCandleData(candles, opts, { scrollToLive: false });
   bindChartViewportPersistence(opts.pairId, opts.tf);
-  if (!tryRestoreChartViewport(opts.pairId, opts.tf)) {
-    anchorToLatestCandle();
-  }
+  // Never restore a 1m zoom window onto 1D (HH:MM strip) — always re-anchor on TF change.
+  clearChartViewport(opts.pairId, opts.tf);
+  anchorToLatestCandle();
   return true;
 }
 

@@ -151,12 +151,13 @@ describe("mobile layout helpers", () => {
     expect(app).not.toContain('getElementById("market-search")?.focus()');
     expect(css).toContain("html.mobile-layout .market-search");
     expect(css).toContain("font-size: 16px");
-    expect(css).toMatch(/ind-tabs\.compact[\s\S]*?min-height:\s*2\.75rem/);
+    // Desktop/tablet still size ind chips; mobile chart hides the row for height.
+    expect(css).toMatch(/\.ind-tabs\.compact \.ind[\s\S]*?min-height:\s*2\.25rem|html\.mobile-layout \.ind-tabs\.compact \.ind[\s\S]*?min-height:\s*2\.75rem/);
   });
 
-  it("stacks trade book under form on narrow phones and bumps order inputs to 16px", () => {
+  it("keeps Binance-style trade form|book side-by-side on phones and bumps inputs to 16px", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(css).toMatch(/@media \(max-width: 430px\)[\s\S]*?flex-direction: column !important/);
+    expect(css).toMatch(/@media \(max-width: 700px\)[\s\S]*?flex-direction: row !important/);
     expect(css).toMatch(/html\.mobile-layout input:not\(\[type="checkbox"\]\)[\s\S]*?font-size: 16px !important/);
     expect(css).toContain("html.mobile-layout .book-select");
     expect(css).toContain("min-width: 0");
@@ -197,7 +198,7 @@ describe("mobile layout helpers", () => {
     expect(loadMobileTradeSide()).toBe("buy");
   });
 
-  it("chartInteractionOptions enables pinch; price wheel is custom (not LWC native)", () => {
+  it("chartInteractionOptions disables LWC pinch (free-xh owns it); price wheel is custom", () => {
     const orig = window.matchMedia;
     window.matchMedia = ((q: string) =>
       ({
@@ -214,7 +215,7 @@ describe("mobile layout helpers", () => {
     expect(mobile.handleScale.axisPressedMouseMove.price).toBe(false);
     expect(mobile.handleScale.axisDoubleClickReset.price).toBe(true);
     expect(mobile.handleScale.mouseWheel).toBe(false);
-    expect(mobile.handleScale.pinch).toBe(true);
+    expect(mobile.handleScale.pinch).toBe(false);
     expect(mobile.handleScroll.horzTouchDrag).toBe(true);
     expect(mobile.handleScroll.vertTouchDrag).toBe(true);
     expect(mobile.handleScroll.mouseWheel).toBe(false);
@@ -237,6 +238,7 @@ describe("mobile layout helpers", () => {
     expect(desk.handleScale.axisPressedMouseMove.price).toBe(false);
     expect(desk.handleScroll.vertTouchDrag).toBe(true);
     expect(desk.handleScale.mouseWheel).toBe(false);
+    expect(desk.handleScale.pinch).toBe(false);
     expect(desk.handleScroll.mouseWheel).toBe(false);
     window.matchMedia = origDesk;
   });
@@ -264,6 +266,27 @@ describe("mobile CSS contracts", () => {
     // Mobile block after base must show the toggle again.
     expect(after).toMatch(/@media \(max-width: 1024px\)[\s\S]*?\.trade-side-toggle\s*\{[\s\S]*?display:\s*inline-flex/);
     expect(after).toMatch(/\.dual-order\s*\{[\s\S]*?grid-template-columns:\s*1fr\s*!important/);
+  });
+
+  it("mobile trade book stays side-by-side by 700px and hides depth chrome", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    expect(css).toContain("@media (max-width: 700px)");
+    expect(css).toMatch(/@media \(max-width: 700px\)[\s\S]*?max-width: 46%/);
+    expect(css).toContain('data-mobile-panel="trade"] .col-book .depth-wrap');
+    expect(css).toMatch(/\.col-book \.depth-wrap\s*,[\s\S]*?\.col-book \.book-group-row\s*\{[\s\S]*?display:\s*none\s*!important|\.col-book \.depth-wrap[\s\S]*?display:\s*none\s*!important/);
+    expect(css).toContain("@media (max-width: 380px)");
+    expect(css).toMatch(/\.ob-total\s*\{[\s\S]*?display:\s*none\s*!important/);
+    expect(css).toContain("text-overflow: ellipsis");
+    expect(css).toMatch(/\.free-crosshair\.capturing\s*\{[\s\S]*?touch-action:\s*none/);
+    expect(css).toMatch(/mobile-trade-tape-wrap\.is-empty[\s\S]*?display:\s*none\s*!important/);
+    expect(css).toMatch(/\.book-ladder\s*\{[\s\S]*?min-height:\s*13rem/);
+    expect(app).toContain("mobileBook");
+    expect(app).toContain('book-view-tabs segmented');
+    expect(app).toContain('wrap.classList.toggle("is-empty"');
+    expect(app).toContain("mobileBook ? \"\" :");
+    expect(readFileSync(resolve(process.cwd(), "src/chart.ts"), "utf8")).toContain("Math.sqrt(raw)");
+    expect(readFileSync(resolve(process.cwd(), "src/mobile.ts"), "utf8")).toMatch(/pinch:\s*false/);
   });
 
   it("mobile bottom nav keeps terminal before nav in spot shell", () => {
@@ -406,11 +429,19 @@ describe("mobile CSS contracts", () => {
     expect(app).toContain('id="btn-mobile-chart-more"');
     expect(app).toContain('id="chart-more-drop"');
     expect(app).toContain("showChartMoreDrop");
+    expect(app).toContain('data-chart-more="fullscreen"');
+    expect(app).toContain('data-chart-more="volume"');
+    expect(app).toContain("formatOhlcLegendText");
+    expect(app).toContain("hackme-ex-mobile-vol-boot-v1");
     expect(app).toContain("setMobileTradeSide");
     expect(app).toContain('id="mobile-trade-tape"');
     expect(css).toContain(".mobile-trade-tape-wrap");
     expect(css).toContain(".btn-mobile-chart-more");
     expect(css).toContain("html.mobile-layout .tb-stats");
+    expect(css).toContain('html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] #btn-fullscreen');
+    expect(css).toContain('html.mobile-layout.ex-chart-fs .mobile-footer-stack');
+    expect(css).toContain('html.mobile-layout[data-mobile-panel="markets"] .ticker-bar');
+    expect(css).toMatch(/ind-tabs\.compact\s*\{[\s\S]*?display:\s*none\s*!important/);
   });
 
   it("setMobileTradeSide syncs buy/sell tab", () => {

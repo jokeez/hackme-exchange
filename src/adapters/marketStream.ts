@@ -19,7 +19,7 @@ import {
   apiPriceToDisplay,
   minorToDisplay,
 } from "./exchangeApi";
-import { mergeServerFills, mergeServerOpenOrders, refreshLabBook } from "./labMatching";
+import { mergeServerFills, mergeServerOpenOrders, refreshLabBook, refreshServerVip } from "./labMatching";
 import { marketTradeToPrint, type TapePrint } from "../tape";
 
 export type StreamTransport = "ws" | "poll" | "local" | "idle";
@@ -78,6 +78,9 @@ function streamUrlFromHealth(health: HealthResponse, pairId: PairId): string | n
 export class MarketStream {
   private handlers: MarketStreamHandlers;
   private opts: MarketStreamOptions;
+  private tabId = `t${Math.random().toString(36).slice(2, 10)}`;
+  private bookLeaderKey = "hackme-ex-book-poll-leader-v1";
+  private isBookLeader = true;
   private transport: StreamTransport = "idle";
   private pollTimer: number | undefined;
   private ws: WebSocket | null = null;
@@ -179,6 +182,11 @@ export class MarketStream {
           this.setTransport("ws");
           if (this.pollTimer) clearInterval(this.pollTimer);
           this.pollTimer = undefined;
+          // WS alone may stay quiet — pull tape/book once so 24h Vol + L2 paint immediately.
+          void this.syncPublicTrades(pair);
+          void refreshLabBook(pair).then((r) => {
+            this.handlers.onEvent?.({ type: "book", pairId: pair, changed: r.changed });
+          });
           finish(true);
         };
         ws.onmessage = (ev) => this.onWsMessage(String(ev.data));
@@ -284,16 +292,38 @@ export class MarketStream {
     this.pollTimer = window.setInterval(() => void this.pollTick(), this.pollIntervalMs());
   }
 
+  private claimBookPollLeader(): boolean {
+    const now = Date.now();
+    try {
+      const raw = localStorage.getItem(this.bookLeaderKey);
+      const parsed = raw ? (JSON.parse(raw) as { id?: string; at?: number }) : null;
+      const stale = !parsed?.id || !parsed.at || now - parsed.at > 4_500;
+      if (stale || parsed.id === this.tabId) {
+        localStorage.setItem(this.bookLeaderKey, JSON.stringify({ id: this.tabId, at: now }));
+        this.isBookLeader = true;
+        return true;
+      }
+      this.isBookLeader = false;
+      return false;
+    } catch {
+      this.isBookLeader = true;
+      return true;
+    }
+  }
+
   private async pollTick(): Promise<void> {
     if (!this.running || !this.opts.isSpotView() || !this.liveBookOn()) return;
     const pairId = this.opts.getActivePair();
     const now = Date.now();
+    const leader = this.claimBookPollLeader();
 
-    // Public tape every tick (cheap, not on BookLimit) — guests must see prints.
+    // Public tape: leader every tick; followers every 3rd to cut multi-tab stampede.
     this.fillTick += 1;
-    await this.syncPublicTrades(pairId);
+    if (leader || this.fillTick % 3 === 0) {
+      await this.syncPublicTrades(pairId);
+    }
 
-    if (now >= this.bookBackoffUntil) {
+    if (leader && now >= this.bookBackoffUntil) {
       const book = await refreshLabBook(pairId);
       if (!book.ok && /rate.?limit|too many book/i.test(book.note ?? "")) {
         this.bookPollMs = Math.min(6_000, Math.max(2_000, this.bookPollMs * 1.5));
@@ -318,7 +348,7 @@ export class MarketStream {
   }
 
   private async syncPublicTrades(pairId: PairId): Promise<void> {
-    const res = await fetchPublicTrades(pairIdToApi(pairId), 40, 4_000);
+    const res = await fetchPublicTrades(pairIdToApi(pairId), 100, 4_000);
     if (!res.ok) return;
     const prints: TapePrint[] = [];
     for (const t of res.trades) {
@@ -355,6 +385,7 @@ export class MarketStream {
           state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
         }
       }
+      await refreshServerVip(added > 0);
     }
     if (changed) this.opts.saveState?.();
     return changed;

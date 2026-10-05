@@ -13,6 +13,7 @@ import {
   cancelExchangeOrder,
   fetchExchangeBalances,
   fetchExchangeBook,
+  fetchExchangeVip,
   getLabSessionMeta,
   listExchangeFills,
   listExchangeOrders,
@@ -27,10 +28,31 @@ import {
   type ApiOrder,
   type ExchangeApiError,
 } from "./exchangeApi";
-import { activeVipTier } from "../fees";
+import { activeVipTier, clearServerVipVolume, hasServerVipVolume, setServerVipVolumeUsdt } from "../fees";
 import { recordTradeLedger } from "../ledger";
 import { cancelOrder } from "../store";
 import { isDeskMatchingLive } from "../settingsModal";
+
+/** Throttle GET /vip — volume changes only on fills. */
+let serverVipFetchedAt = 0;
+const SERVER_VIP_TTL_MS = 15_000;
+
+/** Pull GET /vip into fee schedule (soft-launch VIP source of truth). */
+export async function refreshServerVip(force = false): Promise<boolean> {
+  if (!getLabSessionMeta().hasCsrf || !useServerMatching()) {
+    clearServerVipVolume();
+    serverVipFetchedAt = 0;
+    return false;
+  }
+  if (!force && hasServerVipVolume() && Date.now() - serverVipFetchedAt < SERVER_VIP_TTL_MS) {
+    return true;
+  }
+  const res = await fetchExchangeVip();
+  if (!res.ok) return false;
+  setServerVipVolumeUsdt(minorToDisplay(res.volume_30d_usdt));
+  serverVipFetchedAt = Date.now();
+  return true;
+}
 
 /**
  * True when loopback lab matching client is live (CSRF session).
@@ -150,13 +172,22 @@ export function labBookMid(pairId?: PairId): number {
 
 /** Last public print mid per pair — shared tape tip for candles when L2 flickers. */
 const lastPublicMidByPair = new Map<PairId, number>();
+const lastPublicTsByPair = new Map<PairId, number>();
 
-export function setLastPublicMid(pairId: PairId, mid: number): void {
-  if (mid > 0 && Number.isFinite(mid)) lastPublicMidByPair.set(pairId, mid);
+export function setLastPublicMid(pairId: PairId, mid: number, tsMs = Date.now()): void {
+  if (mid > 0 && Number.isFinite(mid)) {
+    lastPublicMidByPair.set(pairId, mid);
+    if (tsMs > 0 && Number.isFinite(tsMs)) lastPublicTsByPair.set(pairId, tsMs);
+  }
 }
 
 export function lastPublicMid(pairId: PairId): number {
   return lastPublicMidByPair.get(pairId) ?? 0;
+}
+
+/** Age of last public print (ms since epoch); 0 if never seen. */
+export function lastPublicTs(pairId: PairId): number {
+  return lastPublicTsByPair.get(pairId) ?? 0;
 }
 
 /**
@@ -569,6 +600,7 @@ export async function syncLabBalancesAndBook(
   let added = 0;
   if (fills.ok) added = mergeServerFills(state, fills.fills, bal.address, market ?? null);
 
+  await refreshServerVip(added > 0);
   await refreshLabBook(state.activePair);
 
   const openN = orders.ok ? orders.orders.length : 0;
@@ -632,6 +664,8 @@ export async function syncLabOrdersFillsLight(
       prevWallet.sup !== state.wallet.sup ||
       prevWallet.btc !== state.wallet.btc;
   }
+
+  await refreshServerVip(added > 0);
 
   const bookRes = await refreshLabBook(state.activePair);
   const ordersAfter = state.orders.filter((o) => o.status === "open" || o.status === "triggered").length;

@@ -9,6 +9,8 @@ export type ChartContextAction =
   | "sell_stop"
   | "create_order"
   | "add_alert"
+  | "cancel_nearest"
+  | "cancel_all"
   | "reset_view"
   | "copy_price"
   | "paste"
@@ -21,6 +23,7 @@ export type ChartContextHandlers = {
   baseSymbol: string;
   indicatorCount: number;
   marksHidden: boolean;
+  openOrderCount?: number;
   onAction: (action: ChartContextAction, price: number) => void;
   onOpen?: (price: number) => void;
   onClose?: () => void;
@@ -61,6 +64,7 @@ export function showChartContextMenu(
   const priceStr = formatPrice(price);
   const base = escapeHtml(handlers.baseSymbol);
   const indN = handlers.indicatorCount;
+  const openN = handlers.openOrderCount ?? 0;
 
   const menu = document.createElement("div");
   menu.className = "chart-ctx-menu glass";
@@ -73,6 +77,9 @@ export function showChartContextMenu(
     <button type="button" class="ctx-item" data-a="create_order">Create new order…</button>
     <button type="button" class="ctx-item alert" data-a="add_alert">Add Alert @ ${priceStr}</button>
     <div class="ctx-sep"></div>
+    <button type="button" class="ctx-item" data-a="cancel_nearest" ${openN === 0 ? "disabled" : ""}>Cancel nearest order</button>
+    <button type="button" class="ctx-item" data-a="cancel_all" ${openN === 0 ? "disabled" : ""}>Cancel all open (${openN})</button>
+    <div class="ctx-sep"></div>
     <button type="button" class="ctx-item" data-a="reset_view"><span>Reset chart view</span><kbd>Alt+R</kbd></button>
     <div class="ctx-sep"></div>
     <button type="button" class="ctx-item" data-a="copy_price">Copy price ${priceStr}</button>
@@ -80,7 +87,7 @@ export function showChartContextMenu(
     <div class="ctx-sep"></div>
     <button type="button" class="ctx-item" data-a="object_tree">Object Tree…</button>
     <button type="button" class="ctx-item" data-a="remove_indicators" ${indN === 0 ? "disabled" : ""}>Remove ${indN} indicator${indN === 1 ? "" : "s"}</button>
-    <button type="button" class="ctx-item" data-a="toggle_marks">${handlers.marksHidden ? "Show" : "Hide"} marks on bars</button>
+    <button type="button" class="ctx-item" data-a="toggle_marks">${handlers.marksHidden ? "Show" : "Hide"} volume on bars</button>
     <div class="ctx-sep"></div>
     <button type="button" class="ctx-item" data-a="settings"><span>⚙ Settings…</span></button>
   `;

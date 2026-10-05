@@ -64,6 +64,8 @@ export function ledgerDayCashflow(ledger: LedgerEntry[]): Map<string, number> {
   const byDay = new Map<string, number>();
   for (const e of ledger) {
     if (e.kind === "trade") continue; // trade usdtValue is notional, not PnL
+    // Deposits/withdrawals move equity by transfer, not trading PnL — skip for day heat.
+    if (e.kind === "deposit" || e.kind === "withdrawal" || e.kind === "transfer") continue;
     const key = dayKeyFromTs(e.ts);
     byDay.set(key, (byDay.get(key) ?? 0) + (Number.isFinite(e.usdtValue) ? e.usdtValue : 0));
   }
@@ -115,13 +117,13 @@ export function dailyPnlCalendar(state: DemoState, m: MarketSnapshot, days = 28)
       if (prevClose != null && prevClose >= 1 && entry.last / prevClose < 0.05 && prevClose - entry.last > 0.5) {
         pnl = entry.last - entry.first;
       }
-      // Flat equity snap but fees/deposits today — surface cashflow.
-      if (Math.abs(pnl) < 1e-9 && Math.abs(flow) > 1e-9) {
+      // Flat equity snap but meaningful fee burn today — surface cashflow (ignore dust).
+      if (Math.abs(pnl) < 1e-9 && Math.abs(flow) >= 0.01) {
         pnl = flow;
       }
       prevClose = entry.last;
-    } else if (Math.abs(flow) > 1e-9) {
-      // No equity snapshot that day — show fee/deposit/withdraw cashflow as soft signal.
+    } else if (Math.abs(flow) >= 0.01) {
+      // No equity snapshot that day — show fee cashflow only when material.
       hasData = true;
       pnl = flow;
     }
@@ -155,6 +157,46 @@ export function volumeRatio5m(
   return { buyPct, sellPct: 100 - buyPct, buyVol, sellVol };
 }
 
+/** Order-book depth imbalance from visible L2 quote notional (not fake 50/50). */
+export function bookDepthRatio(
+  bids: { totalQuote: number; amountBase?: number }[],
+  asks: { totalQuote: number; amountBase?: number }[],
+): { buyPct: number; sellPct: number; buyVol: number; sellVol: number; known: boolean } {
+  let buyVol = 0;
+  let sellVol = 0;
+  for (const l of bids) buyVol += Math.max(0, Number(l.totalQuote) || 0);
+  for (const l of asks) sellVol += Math.max(0, Number(l.totalQuote) || 0);
+  const total = buyVol + sellVol;
+  if (!(total > 0)) return { buyPct: 50, sellPct: 50, buyVol: 0, sellVol: 0, known: false };
+  const buyPct = (buyVol / total) * 100;
+  return { buyPct, sellPct: 100 - buyPct, buyVol, sellVol, known: true };
+}
+
+/** Tape B/S volume from arbitrary prints (public tape + local fills). */
+export function volumeRatioFromPrints(
+  prints: { pairId?: string; ts: number; side: "buy" | "sell"; amountBase: number; price?: number }[],
+  pairId: string,
+  windowMs = 5 * 60_000,
+  useQuoteNotional = false,
+): { buyPct: number; sellPct: number; buyVol: number; sellVol: number; known: boolean } {
+  const since = Date.now() - windowMs;
+  let buyVol = 0;
+  let sellVol = 0;
+  for (const t of prints) {
+    if (t.pairId && t.pairId !== pairId) continue;
+    if (t.ts < since) continue;
+    const w =
+      useQuoteNotional && t.price && t.price > 0 ? t.amountBase * t.price : t.amountBase;
+    if (!(w > 0)) continue;
+    if (t.side === "buy") buyVol += w;
+    else sellVol += w;
+  }
+  const total = buyVol + sellVol;
+  if (!(total > 0)) return { buyPct: 50, sellPct: 50, buyVol: 0, sellVol: 0, known: false };
+  const buyPct = (buyVol / total) * 100;
+  return { buyPct, sellPct: 100 - buyPct, buyVol, sellVol, known: true };
+}
+
 function formatCalPnl(pnl: number): string {
   const a = Math.abs(pnl);
   const sign = pnl >= 0 ? "+" : "-";
@@ -185,7 +227,7 @@ export function renderPnlCalendarHtml(days: DayPnl[]): string {
     </div>
     <p class="muted small pnl-cal-note">${
       hasAny
-        ? "Equity day-change · local snapshots (+ fees/deposits when no snap)"
+        ? "Equity day-change from local snapshots (fees only when ≥0.01 USDT and no snap move)"
         : "Tracking starts after trades or a longer session — cells fill as equity moves"
     }</p>
     <div class="pnl-cal-weekdays" aria-hidden="true">${weekdays.map((w) => `<span>${w}</span>`).join("")}</div>

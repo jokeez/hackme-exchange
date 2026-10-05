@@ -84,6 +84,60 @@ export function maxBarsSinceGenesis(tf: Timeframe, nowMs = Date.now()): number {
   return Math.floor((nowB - g) / sec) + 1;
 }
 
+/** Median positive step between bar times (seconds). */
+export function medianBarStepSec(candles: Candle[]): number {
+  if (candles.length < 3) return 0;
+  const steps: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const d = candles[i]!.time - candles[i - 1]!.time;
+    if (d > 0) steps.push(d);
+  }
+  if (!steps.length) return 0;
+  steps.sort((a, b) => a - b);
+  return steps[Math.floor(steps.length / 2)]!;
+}
+
+/**
+ * True when series spacing matches TF (guards 1D watermark + 1m data bugs).
+ * Window is tight enough to reject adjacent TFs (1H↔2H, 30s↔1m) while still
+ * tolerating a sparse gap or two.
+ */
+export function seriesMatchesTf(candles: Candle[], tf: Timeframe): boolean {
+  const med = medianBarStepSec(candles);
+  if (!(med > 0)) return true;
+  const expect = TF_SEC[tf];
+  if (!(med >= expect * 0.65 && med <= expect * 1.55)) return false;
+  // Nearest TF_SEC must be this tf (belt-and-suspenders vs mid-window collisions).
+  let best: Timeframe = tf;
+  let bestDist = Math.abs(Math.log(med / expect));
+  for (const [k, sec] of Object.entries(TF_SEC) as [Timeframe, number][]) {
+    const dist = Math.abs(Math.log(med / sec));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = k;
+    }
+  }
+  return best === tf;
+}
+
+/**
+ * If `tf` series has wrong cadence (e.g. 1m steps labeled 1D), rebuild from 1m base.
+ */
+export function ensureTfSeriesCadence(
+  candlesByTf: Partial<Record<Timeframe, Candle[]>>,
+  pairId: PairId,
+  tf: Timeframe,
+  nowMs = Date.now(),
+): Partial<Record<Timeframe, Candle[]>> {
+  const series = candlesByTf[tf];
+  if (!series || series.length < 3 || seriesMatchesTf(series, tf)) return candlesByTf;
+  const base = candlesByTf[CANDLE_BASE_TF];
+  if (!base || base.length < 3) return candlesByTf;
+  const rebuilt = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
+  reaggregateLiveBarsFromBase(rebuilt, rebuilt[CANDLE_BASE_TF] ?? base);
+  return { ...candlesByTf, ...rebuilt };
+}
+
 /** Bars per TF — capped by real history since genesis (no fake Nov/Dec 2025). */
 export function barCountForTf(tf: Timeframe, nowMs = Date.now()): number {
   let want: number;
@@ -509,7 +563,9 @@ export function tipBarFromPaperClock(
       low = Math.min(low, px);
     }
   }
-  const wick = wickSpread(open, tipMid, pairId, tf, bucketT);
+  // Phase wick seed so Soft-MM sticky tips still breathe H/L within the bucket.
+  const phaseT = bucketT + Math.max(1, Math.floor(elapsed * sec));
+  const wick = wickSpread(open, tipMid, pairId, tf, phaseT);
   high = Math.max(high, wick.high);
   low = Math.min(low, wick.low);
   return constrainBarToOpen(
@@ -553,7 +609,14 @@ export function applyPaperClockToPairCandles(
   nowMs = Date.now(),
 ): Partial<Record<Timeframe, Candle[]>> {
   const mid = paperPairMid(pairId, nowMs);
-  const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
+  let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
+  if (prevBase.length >= 2 && !candlesAreContiguous(prevBase, CANDLE_BASE_TF)) {
+    prevBase = ensureContiguousCandles(prevBase, CANDLE_BASE_TF, {
+      pairId,
+      fillToNow: true,
+      nowMs,
+    });
+  }
   const t = bucket(nowMs, CANDLE_BASE_TF);
   const tipTime = prevBase[prevBase.length - 1]?.time ?? 0;
   const tipClose = prevBase[prevBase.length - 1]?.close ?? 0;
@@ -574,21 +637,16 @@ export function applyPaperClockToPairCandles(
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
     nextBase = [...prevBase.slice(0, -1), tip];
   } else {
-    // Multi-bucket walk: finalize close at boundary from the CEX walk (not ticker sine).
+    // Multi-bucket walk: finalize each closed tip with an independent step so Soft-MM
+    // sticky mid does not glue every historical close to Last (шильдики).
     nextBase = prevBase.slice(0, -1);
     for (let bt = tipTime; bt < t; bt += baseSec) {
       const prior = prevBase.find((c) => c.time === bt) ?? nextBase[nextBase.length - 1];
-      const close = walkPriceAt(pairId, CANDLE_BASE_TF, bt + baseSec, t, mid);
       if (prior && prior.time === bt) {
-        nextBase.push({
-          ...prior,
-          close,
-          high: Math.max(prior.high, prior.open, close),
-          low: Math.min(prior.low, prior.open, close),
-          volume: candleVolume(pairId, CANDLE_BASE_TF, bt),
-        });
+        nextBase.push(finalizeClosedTip(pairId, CANDLE_BASE_TF, prior, mid));
       } else {
-        nextBase.push(closedBarFromPaperClock(pairId, CANDLE_BASE_TF, bt, t, mid));
+        const prevClose = nextBase[nextBase.length - 1]?.close ?? mid;
+        nextBase.push(walkClosedFromPrev(pairId, CANDLE_BASE_TF, bt, prevClose));
       }
     }
     const tip = tipBarFromPaperClock(pairId, CANDLE_BASE_TF, t, nowMs, mid);
@@ -708,6 +766,7 @@ export function upsertTick(
   mid: number,
   pairId: PairId,
   prevMid?: number,
+  opts?: { syntheticVolume?: boolean },
 ): Candle[] {
   const t = bucket(Date.now(), tf);
   const sec = TF_SEC[tf];
@@ -718,11 +777,14 @@ export function upsertTick(
   const ref = last?.close ?? (finiteMid(prevMid) ? prevMid! : mid);
   const disc = isPriceDiscontinuity(mid, ref, maxJump);
   let safeMid = clampTickMid(mid, ref, maxJump);
-  const openRef = last && last.time === t ? last.open : ref;
-  if (finiteMid(openRef) && !disc) {
-    safeMid = clampTickMid(safeMid, openRef, maxBody);
+  // Body-clamp Last only while updating an in-progress tip. After gap heal / rollover the
+  // prior close can walk past maxBody — clamping here would pin tip.close off Soft-MM Last;
+  // textureLiveBar adjusts tip open so close can stay on mid.
+  if (last && last.time === t && finiteMid(last.open) && !disc) {
+    safeMid = clampTickMid(safeMid, last.open, maxBody);
   }
-  const tickVol = 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200;
+  const addVol = opts?.syntheticVolume !== false;
+  const tickVol = addVol ? 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200 : 0;
   const wickCap = maxWickFracForTf(tf);
 
   const finish = (bar: Candle): Candle => {
@@ -769,14 +831,21 @@ export function upsertTick(
   }
 
   if (!last || last.time < t) {
+    // Soft-MM sticky Last: while live, tip.close = mid. On rollover we MUST finalize
+    // that bar to a walked close — otherwise every closed candle keeps the same
+    // close (шильдики glued to the last-price line).
+    if (last && last.time < t) {
+      copy[copy.length - 1] = finalizeClosedTip(pairId, tf, last, safeMid);
+    }
     if (last && last.time + sec < t) {
-      const bridgePx = last.close > 0 ? last.close : safeMid;
+      // Idle UTC holes → flat hold (not synthetic walk). Walk fills painted spike forests.
       for (let bt = last.time + sec; bt < t; bt += sec) {
-        copy.push(walkGapBar(pairId, tf, bt, bridgePx));
+        const prevClose = copy[copy.length - 1]?.close ?? safeMid;
+        copy.push(flatGapBar(bt, prevClose > 0 ? prevClose : safeMid));
         if (copy.length >= MAX_CANDLES) break;
       }
     }
-    // Always continue from previous close — never leave a visual gap between bars.
+    // New tip: open = finalized prior close; close tracks live Last.
     const open = copy[copy.length - 1]?.close ?? last?.close ?? safeMid;
     const close = clampTickMid(safeMid, open, maxBody);
     copy.push(
@@ -896,17 +965,61 @@ export function applyMidToPairCandles(
   pairId: PairId,
   mid: number,
   prevMid?: number,
+  opts?: { syntheticVolume?: boolean },
 ): Partial<Record<Timeframe, Candle[]>> {
-  const prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
-  const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid);
-  const tipRaw = nextRaw[nextRaw.length - 1];
-  const nextBase = sanitizeCandlesForChart(nextRaw, pairId, CANDLE_BASE_TF);
-  // Preserve tip intrabar extremes through sanitize (forming candle must not shrink).
-  if (tipRaw && nextBase.length) {
-    const tip = { ...nextBase[nextBase.length - 1]! };
-    tip.high = Math.max(tip.high, tipRaw.high, tip.open, tip.close);
-    tip.low = Math.min(tip.low, tipRaw.low, tip.open, tip.close);
-    nextBase[nextBase.length - 1] = tip;
+  let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
+  // Inactive pairs / stale cache can carry holes — tip-only upsert never backfills them.
+  if (prevBase.length >= 2 && !candlesAreContiguous(prevBase, CANDLE_BASE_TF)) {
+    prevBase = ensureContiguousCandles(prevBase, CANDLE_BASE_TF, {
+      pairId,
+      fillToNow: true,
+    });
+  }
+  const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid, opts);
+  // Tip-run heal for Soft-MM шильдики — avoid full-history rewrite (spike forests).
+  const healedRaw = healFlatPaperBars(pairId, CANDLE_BASE_TF, nextRaw, mid, Date.now(), {
+    scope: "tipRun",
+  });
+  const nextBase = sanitizeCandlesForChart(healedRaw, pairId, CANDLE_BASE_TF);
+  // Keep only clear print spikes from pre-heal raw. Always re-clip — unclipped
+  // Soft-MM deep-take highs painted the long needle combs on 1m/15m.
+  const rawByT = new Map(nextRaw.map((c) => [c.time, c]));
+  const bodyCap = maxBodyFracForTf(CANDLE_BASE_TF);
+  const wickCap = maxWickFracForTf(CANDLE_BASE_TF);
+  for (let i = 0; i < nextBase.length; i++) {
+    const bar = { ...nextBase[i]! };
+    const raw = rawByT.get(bar.time);
+    if (!raw) continue;
+    const midPx = Math.max(raw.close, bar.close, 1e-12);
+    const rawSpan = (raw.high - raw.low) / midPx;
+    const healedSpan = (bar.high - bar.low) / midPx;
+    if (rawSpan > 0.018 && rawSpan > healedSpan * 1.5) {
+      bar.high = Math.max(bar.high, raw.high, bar.open, bar.close);
+      bar.low = Math.min(bar.low, raw.low, bar.open, bar.close);
+      nextBase[i] = constrainBarToOpen(bar, bodyCap, wickCap);
+    }
+  }
+  // Sanitize/heal must never yank tip.close off Soft-MM / tape Last.
+  const tipIdx = nextBase.length - 1;
+  if (tipIdx >= 0 && mid > 0 && Number.isFinite(mid)) {
+    const tipBar = nextBase[tipIdx]!;
+    const pinned = constrainBarToOpen(
+      {
+        ...tipBar,
+        close: mid,
+        high: Math.max(tipBar.high, tipBar.open, mid),
+        low: Math.min(tipBar.low, tipBar.open, mid),
+      },
+      bodyCap,
+      wickCap,
+    );
+    // constrain may soften close toward open — force Last, keep clipped wicks.
+    nextBase[tipIdx] = {
+      ...pinned,
+      close: mid,
+      high: Math.max(pinned.high, pinned.open, mid),
+      low: Math.min(pinned.low, pinned.open, mid),
+    };
   }
   const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
   reaggregateLiveBarsFromBase(all, nextBase);
@@ -916,8 +1029,15 @@ export function applyMidToPairCandles(
       all[tf] = nextBase;
       continue;
     }
-    const series = all[tf];
-    if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
+    let series = all[tf];
+    if (!series?.length) continue;
+    series = finalizeTfSeries(tf, series, pairId);
+    // Coarser TF holes after idle rotate — walk-fill so every market stays contiguous.
+    if (series.length >= 2 && !candlesAreContiguous(series, tf)) {
+      series = ensureContiguousCandles(series, tf, { pairId, fillToNow: true });
+      series = finalizeTfSeries(tf, series, pairId);
+    }
+    all[tf] = series;
   }
   return all;
 }
@@ -926,16 +1046,84 @@ function finiteMid(n: number | undefined): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
 
+/** Idle UTC hole — hold prior close. Tiny wick so LWC paints a visible tick (not blank strip). */
 function flatGapBar(t: number, px: number): Candle {
-  return { time: t, open: px, high: px, low: px, close: px, volume: 0 };
+  const p = px > 0 && Number.isFinite(px) ? px : 1e-12;
+  // ~8 bps body floor — 1.2 bps dojis painted Soft-MM «dotted ruler» lines on 1m.
+  const body = p * 0.0008;
+  const wick = p * 0.00035;
+  const close = p + body;
+  return {
+    time: t,
+    open: p,
+    high: close + wick,
+    low: Math.max(p - wick, p * 1e-6),
+    close,
+    volume: 0,
+  };
+}
+
+/**
+ * Idle gap with a gentle constrained walk — real candle bodies, no spike forest.
+ * Prefer this over flatGapBar when pairId is known (contiguous heal / paint).
+ */
+function idleHoldBar(pairId: PairId, tf: Timeframe, t: number, prevClose: number): Candle {
+  const open = prevClose > 0 && Number.isFinite(prevClose) ? prevClose : 1e-12;
+  const walked = walkClosedFromPrev(pairId, tf, t, open);
+  // Tight caps: breathe like liquid spot, never mile-long Soft-MM needles.
+  return constrainBarToOpen(walked, 0.0025, 0.0018);
+}
+
+/**
+ * Display floor so LWC never paints Soft-MM hairline dojis as a dotted ruler.
+ * Tip close stays on Last; only open is nudged when the tip is flat.
+ */
+export function ensurePaintableBodies(candles: Candle[], tf: Timeframe): Candle[] {
+  if (candles.length < 2) return candles;
+  // Floor bodies high enough that LWC still paints when Y-span covers a Soft-MM swing.
+  const minBody =
+    tf === "30s" || tf === "1m"
+      ? 0.0024
+      : tf === "3m" || tf === "5m"
+        ? 0.0026
+        : tf === "15m"
+          ? 0.0028
+          : 0.0032;
+  const out = candles.map((c) => ({ ...c }));
+  const tipIdx = out.length - 1;
+  for (let i = 0; i < tipIdx; i++) {
+    const c = out[i]!;
+    const mid = Math.max(Math.abs(c.close), Math.abs(c.open), 1e-12);
+    if (Math.abs(c.close - c.open) / mid >= minBody) continue;
+    const sign = Math.sign(c.close - c.open) || (stableSigned([tf, c.time, "body"], 0.5) >= 0 ? 1 : -1);
+    const close = c.open * (1 + sign * minBody);
+    out[i] = {
+      ...c,
+      close,
+      high: Math.max(c.high, c.open, close),
+      low: Math.min(c.low, c.open, close),
+    };
+  }
+  const tip = out[tipIdx]!;
+  const tipMid = tip.close > 0 ? tip.close : tip.open;
+  if (tipMid > 0 && Math.abs(tip.close - tip.open) / tipMid < minBody * 0.7) {
+    const sign = tip.open <= tip.close ? -1 : 1;
+    const open = tipMid * (1 + sign * minBody * 0.75);
+    out[tipIdx] = {
+      ...tip,
+      open,
+      high: Math.max(tip.high, open, tip.close),
+      low: Math.min(tip.low, open, tip.close),
+    };
+  }
+  return out;
 }
 
 /**
  * Live Soft-MM mids often move &lt;3 bps — raw tip close=mid looks like a ruler.
- * Keep close on L2 mid (honest), but paint deterministic walk open/wicks so
- * the chart stays CEX-lively when the book is sticky.
- * Intra-bar phase (seconds into the bucket) must evolve — otherwise tip is frozen
- * for the whole minute when Soft-MM mid does not move.
+ * Tip close always tracks Last (`tipMid`); open/wicks from paper-clock (+ lived extremes).
+ * Print fills must pass tipMid=fill (via liveLastPrice) — do not keep a drifted bar.close
+ * from synthetic tickVol / gap clamp (that painted false «print energy»).
  */
 export function textureLiveBar(
   pairId: PairId,
@@ -946,47 +1134,216 @@ export function textureLiveBar(
 ): Candle {
   const mid = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : bar.close;
   if (!(mid > 0)) return bar;
-  const sec = TF_SEC[tf];
-  const elapsedSec = Math.max(0, Math.min(sec, nowMs / 1000 - bar.time));
-  // Advance walk endpoint through the bucket so open/wicks breathe every second.
-  const phaseEnd = bar.time + Math.max(1, Math.floor(elapsedSec) || 1);
-  const openWalk = walkPriceAt(pairId, tf, bar.time, phaseEnd, mid);
-  // Prefer prior continuity when we already have a real open; else walk open.
-  // Once the bar has aged past the first second, keep the painted open stable.
-  let open = bar.open > 0 && elapsedSec >= 1 ? bar.open : openWalk;
-  if (!(open > 0)) open = mid;
-  const bodyBps = (Math.abs(mid - open) / mid) * 10_000;
-  if (bodyBps < 2.5 && elapsedSec < 1) {
-    // Nudge open away from mid with walk so the body is visible (~4–12 bps).
-    const nudge = openWalk - mid || mid * barReturn(pairId, tf, bar.time) * 0.85;
-    open = mid + Math.sign(nudge || 1) * Math.max(Math.abs(nudge), mid * 0.00035);
+
+  const painted = tipBarFromPaperClock(pairId, tf, bar.time, nowMs, mid);
+  const maxBody = maxBodyFracForTf(tf);
+  // Keep lived open when it still allows tip.close = Last inside the body cap.
+  // After a long gap walk, prior close can drift past maxBody — fall back to a modest
+  // paper open (not a far paper-clock open that paints Soft-MM needle floors).
+  const livedOpenOk =
+    bar.open > 0 &&
+    Math.abs(bar.open - mid) / mid > 0.00025 &&
+    Math.abs(bar.open - mid) / mid <= maxBody * 0.98;
+  let open = livedOpenOk ? bar.open : painted.open;
+  if (!(open > 0) || Math.abs(open - mid) / mid > maxBody * 0.98) {
+    // Soft-MM sticky Last: small body only — far opens become the red needle comb.
+    const sign = open > mid ? 1 : -1;
+    open = mid * (1 + sign * maxBody * 0.35);
   }
   const close = mid;
-  // Wick seed includes phase second so high/low expand while mid is sticky.
-  const wick = wickSpread(open, close, pairId, tf, phaseEnd);
-  const breath = mid * (0.00004 + 0.00012 * stableUnit([pairId, tf, phaseEnd, "breath"]));
+  // Sticky Soft-MM (<5 bps tip move): never import paper-clock wick extremes —
+  // those painted the flat-bottom needle forest glued to Last. Keep lived print
+  // highs/lows; only drop synthetic paper-clock expansion.
+  const sticky =
+    Number.isFinite(bar.close) &&
+    bar.close > 0 &&
+    Math.abs(bar.close - mid) / mid < 0.0005;
+  const livedHigh = Number.isFinite(bar.high) ? bar.high : 0;
+  const livedLow = Number.isFinite(bar.low) ? bar.low : Infinity;
+  const high = sticky
+    ? Math.max(open, close, livedHigh)
+    : Math.max(painted.high, open, close, livedHigh);
+  const low = sticky
+    ? Math.min(open, close, livedLow)
+    : Math.min(painted.low, open, close, livedLow);
   return constrainBarToOpen(
     {
       time: bar.time,
       open,
-      high: Math.max(wick.high, open, close, Number.isFinite(bar.high) ? bar.high : 0, close + breath),
-      low: Math.min(wick.low, open, close, Number.isFinite(bar.low) ? bar.low : Infinity, close - breath),
+      high,
+      low,
       close,
-      volume: bar.volume > 0 ? bar.volume : candleVolume(pairId, tf, bar.time),
+      volume: bar.volume > 0 ? bar.volume : painted.volume,
+    },
+    maxBody,
+    maxWickFracForTf(tf),
+  );
+}
+
+/** True when a candle is a doji tick (Soft-MM peg / flat gap fill). */
+function barLooksFlat(c: Candle, mid: number): boolean {
+  const m = mid > 0 ? mid : c.close;
+  if (!(m > 0)) return true;
+  // ≤1.5 bps body = Soft-MM comb / peg. Real paper-walk bodies are larger.
+  return Math.abs(c.close - c.open) / m < 0.00015;
+}
+
+/**
+ * Finalize a just-closed tip: freeze a walked close from the lived open.
+ * Never leave Soft-MM Last as the eternal close (шильдики on the last-price line).
+ */
+export function finalizeClosedTip(
+  pairId: PairId,
+  tf: Timeframe,
+  tip: Candle,
+  _tipMid: number,
+): Candle {
+  const sec = TF_SEC[tf];
+  const open = tip.open > 0 && Number.isFinite(tip.open) ? tip.open : tip.close;
+  if (!(open > 0)) return tip;
+  let close = open * Math.exp(barReturn(pairId, tf, tip.time + sec));
+  if (!(close > 0) || !Number.isFinite(close)) close = open;
+  // Guarantee a visible body so Soft-MM quiet minutes still close as real candles.
+  const minBody = open * 0.00035;
+  if (Math.abs(close - open) < minBody) {
+    const sign = Math.sign(barReturn(pairId, tf, tip.time) || 1) || 1;
+    close = open + sign * minBody;
+  }
+  return constrainBarToOpen(
+    {
+      time: tip.time,
+      open,
+      high: Math.max(tip.high, open, close),
+      low: Math.min(tip.low, open, close),
+      close,
+      volume: tip.volume > 0 ? tip.volume : candleVolume(pairId, tf, tip.time),
     },
     maxBodyFracForTf(tf),
     maxWickFracForTf(tf),
   );
 }
 
-/** Walk-fill idle gaps instead of flat doji rulers (tab background / slow poll). */
-function walkGapBar(pairId: PairId, tf: Timeframe, t: number, tipMid: number): Candle {
-  return textureLiveBar(
+/** One closed bar stepped from prior close (O(1) — no tip-pin O(n) walk). */
+function walkClosedFromPrev(pairId: PairId, tf: Timeframe, t: number, prevClose: number): Candle {
+  const open = prevClose > 0 ? prevClose : 1e-12;
+  let close = open * Math.exp(barReturn(pairId, tf, t + TF_SEC[tf]));
+  if (!(close > 0) || !Number.isFinite(close)) close = open;
+  return makeBar(pairId, t, open, close, tf);
+}
+
+/**
+ * Replace Soft-MM «шильдики» runs — closes glued to one peg (even if opens/wicks vary).
+ * Also heals classic doji combs. Uses incremental walk so closed bars keep distinct closes;
+ * only the live tip stays pinned to tipMid.
+ *
+ * `scope: "tipRun"` (default for live desk) only rewrites the trailing stuck-close run that
+ * includes the tip — mid-history rewrites painted crooked spike forests after idle Soft-MM.
+ * Pass `scope: "all"` for paper seed / unit tests that still want full-history heal.
+ */
+export function healFlatPaperBars(
+  pairId: PairId,
+  tf: Timeframe,
+  candles: Candle[],
+  tipMid: number,
+  nowMs = Date.now(),
+  opts?: { scope?: "all" | "tipRun" },
+): Candle[] {
+  if (candles.length < 6) return candles;
+  const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : candles[candles.length - 1]!.close;
+  if (!(tip > 0)) return candles;
+  const tipIdx = candles.length - 1;
+  const scope = opts?.scope ?? "all";
+
+  // Stuck-close run: consecutive bars share nearly the same close (шильдики / dotted ruler).
+  type Run = { start: number; end: number };
+  const runs: Run[] = [];
+  let runStart = 0;
+  let runAnchor = candles[0]!.close;
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i]!;
+    // Soft-MM peg often drifts <3 bps — treat as stuck ruler (was 4 bps).
+    const stuck = runAnchor > 0 && Math.abs(c.close - runAnchor) / runAnchor < 0.00055;
+    if (stuck) continue;
+    if (i - runStart >= 3) runs.push({ start: runStart, end: i - 1 });
+    runStart = i;
+    runAnchor = c.close > 0 ? c.close : runAnchor;
+  }
+  if (candles.length - runStart >= 3) {
+    runs.push({ start: runStart, end: candles.length - 1 });
+  }
+  // tipRun: heal tip-stuck run + mid-history Soft-MM rulers (≥5 bars).
+  const scoped =
+    scope === "tipRun"
+      ? runs.filter((r) => (r.start <= tipIdx && tipIdx <= r.end) || r.end - r.start >= 4)
+      : runs;
+  // No stuck-close run to rewrite — leave series alone (esp. print highs on the tip bar).
+  if (!scoped.length) return candles;
+
+  const out = candles.map((c) => ({ ...c }));
+  const healBody = Math.min(0.004, maxBodyFracForTf(tf));
+  const healWick = Math.min(0.0025, maxWickFracForTf(tf));
+  for (const { start, end } of scoped) {
+    let px =
+      start > 0 && out[start - 1]!.close > 0
+        ? out[start - 1]!.close
+        : out[start]!.open > 0
+          ? out[start]!.open
+          : tip;
+    for (let i = start; i <= end; i++) {
+      if (i === tipIdx) continue;
+      const lived = out[i]!;
+      const walked = walkClosedFromPrev(pairId, tf, lived.time, px);
+      // Keep modest print extremes; constrain so heal never paints spike forests.
+      out[i] = constrainBarToOpen(
+        {
+          ...walked,
+          high: Math.max(walked.high, lived.high, walked.open, walked.close),
+          low: Math.min(walked.low, lived.low, walked.open, walked.close),
+          volume: lived.volume > 0 ? lived.volume : walked.volume,
+        },
+        healBody,
+        healWick,
+      );
+      px = out[i]!.close;
+    }
+    if (end + 1 < out.length && end + 1 !== tipIdx) {
+      const bridge = out[end]!;
+      const next = out[end + 1]!;
+      next.open = bridge.close;
+      next.high = Math.max(next.high, next.open, next.close);
+      next.low = Math.min(next.low, next.open, next.close);
+    }
+  }
+
+  // Live tip always tracks Last; open continues from healed prior close.
+  const prevClose = out[tipIdx - 1]?.close;
+  out[tipIdx] = textureLiveBar(
     pairId,
     tf,
-    { time: t, open: tipMid, high: tipMid, low: tipMid, close: tipMid, volume: 0 },
-    tipMid,
+    {
+      ...out[tipIdx]!,
+      open: prevClose && prevClose > 0 ? prevClose : out[tipIdx]!.open,
+      high: Math.max(out[tipIdx]!.high, prevClose || 0, tip),
+      low: Math.min(out[tipIdx]!.low, prevClose || tip, tip),
+      close: tip,
+    },
+    tip,
+    nowMs,
   );
+  return out;
+}
+
+/** Walk-fill idle gaps with closed paper-clock bars (never flat dojis). */
+function walkGapBar(
+  pairId: PairId,
+  tf: Timeframe,
+  t: number,
+  tipMid: number,
+  tipBucket?: number,
+): Candle {
+  void tipBucket;
+  // Prefer O(1) step from tipMid as open — tip-pin walk made just-closed close=mid again.
+  return walkClosedFromPrev(pairId, tf, t, tipMid > 0 ? tipMid : 1e-12);
 }
 
 /** Close ÷ tip close — shared silhouette check across pairs (scale-invariant). */
@@ -1069,10 +1426,26 @@ export function ensureContiguousCandles(
       out.push(hit);
       px = hit.close;
     } else {
-      out.push(flatGapBar(t, px));
+      // Idle UTC hole: constrained walk (pair known) or fattened hold — never 1bps doji rulers.
+      const open = px > 0 ? px : tipPxFallback(byBucket, times, px);
+      const fill =
+        pairId != null
+          ? idleHoldBar(pairId, tf, t, open > 0 ? open : 1e-12)
+          : flatGapBar(t, open > 0 ? open : 1e-12);
+      out.push(fill);
+      px = fill.close;
     }
   }
   return sanitizeCandleVolumes(out.slice(-MAX_CANDLES), pairId);
+}
+
+function tipPxFallback(
+  byBucket: Map<number, Candle>,
+  times: number[],
+  px: number,
+): number {
+  const last = byBucket.get(times[times.length - 1]!);
+  return last && last.close > 0 ? last.close : px > 0 ? px : 1e-12;
 }
 
 /** True when every adjacent pair differs by exactly one TF step. */
@@ -1171,4 +1544,188 @@ function finalizeTfSeries(
   if (!series.length) return series;
   if (tf === CANDLE_BASE_TF) return sanitizeCandlesForChart(series, pairId, tf);
   return sanitizeDerivedCandlesForChart(series, pairId);
+}
+
+/** Public tape / fill print for OHLC hydration after F5. */
+export type CandlePrint = {
+  ts: number;
+  price: number;
+  amountBase?: number;
+};
+
+/** v13: discard v12 after backward-tip paint (ceiling+needles Soft-MM on 1D/all TF). */
+const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v13:";
+
+/** Persist 1m series across F5 (sessionStorage — survives reload, not cross-browser). */
+export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
+  if (typeof sessionStorage === "undefined" || !base1m.length) return;
+  try {
+    const slim = base1m.slice(-360).map((c) => ({
+      t: c.time,
+      o: c.open,
+      h: c.high,
+      l: c.low,
+      c: c.close,
+      v: c.volume,
+    }));
+    sessionStorage.setItem(LIVE_CANDLE_CACHE_PREFIX + pairId, JSON.stringify({ at: Date.now(), bars: slim }));
+  } catch {
+    /* quota */
+  }
+}
+
+export function loadLiveCandleCache(pairId: PairId, maxAgeMs = 6 * 60 * 60_000): Candle[] | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      at?: number;
+      bars?: { t: number; o: number; h: number; l: number; c: number; v: number }[];
+    };
+    if (!parsed?.bars?.length || !Array.isArray(parsed.bars)) return null;
+    if (parsed.at && Date.now() - parsed.at > maxAgeMs) return null;
+    const out: Candle[] = [];
+    for (const b of parsed.bars) {
+      const t = Number(b?.t);
+      const o = Number(b?.o);
+      const h = Number(b?.h);
+      const l = Number(b?.l);
+      const c = Number(b?.c);
+      const v = Number(b?.v);
+      if (!(t > 0) || ![o, h, l, c].every((n) => Number.isFinite(n) && n > 0)) continue;
+      if (!(h >= Math.max(o, c) && l <= Math.min(o, c))) continue;
+      out.push({
+        time: t,
+        open: o,
+        high: h,
+        low: l,
+        close: c,
+        volume: Number.isFinite(v) && v >= 0 ? v : 0,
+      });
+    }
+    return out.length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build 1m OHLC from public prints, merge session cache, pad short history with
+ * paper walk, then derive all TFs. Used on live desk after F5 so spikes survive.
+ */
+export function hydrateLiveCandlesFromPrints(
+  pairId: PairId,
+  prints: CandlePrint[],
+  tipMid: number,
+  nowMs = Date.now(),
+  cached1m?: Candle[] | null,
+): Record<Timeframe, Candle[]> {
+  const sec = TF_SEC[CANDLE_BASE_TF];
+  const byBucket = new Map<number, Candle>();
+
+  const ingest = (rows: Candle[]) => {
+    for (const c of rows) {
+      if (!(c.time > 0) || !(c.close > 0)) continue;
+      if (c.time < CHART_GENESIS_UNIX) continue;
+      const prev = byBucket.get(c.time);
+      if (!prev) {
+        byBucket.set(c.time, { ...c });
+      } else {
+        // Prefer later close; expand high/low.
+        prev.high = Math.max(prev.high, c.high, c.open, c.close);
+        prev.low = Math.min(prev.low, c.low, c.open, c.close);
+        prev.close = c.close;
+        prev.volume = Math.max(prev.volume, c.volume);
+      }
+    }
+  };
+
+  if (cached1m?.length) ingest(cached1m);
+
+  const sorted = [...prints]
+    .filter((p) => p.price > 0 && Number.isFinite(p.price) && p.ts > 0)
+    .sort((a, b) => a.ts - b.ts);
+  for (const p of sorted) {
+    const t = Math.floor(p.ts / 1000 / sec) * sec;
+    if (t < CHART_GENESIS_UNIX) continue;
+    const vol = p.amountBase && p.amountBase > 0 ? p.amountBase : 0;
+    const prev = byBucket.get(t);
+    if (!prev) {
+      byBucket.set(t, {
+        time: t,
+        open: p.price,
+        high: p.price,
+        low: p.price,
+        close: p.price,
+        volume: vol,
+      });
+    } else {
+      prev.high = Math.max(prev.high, p.price);
+      prev.low = Math.min(prev.low, p.price);
+      prev.close = p.price;
+      prev.volume += vol;
+    }
+  }
+
+  let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
+  const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
+
+  // Pad short real history with paper walk ending at first real open / tip.
+  const want = Math.min(barCountForTf(CANDLE_BASE_TF, nowMs), 400);
+  if (base.length < 24 && tip > 0) {
+    const seedMid = chartAnchorMid(base[0]?.open || tip) || tip;
+    const seeded = seedCandles(pairId, CANDLE_BASE_TF, seedMid, want, nowMs);
+    const firstReal = base[0]?.time;
+    if (firstReal) {
+      base = [...seeded.filter((c) => c.time < firstReal), ...base];
+    } else {
+      base = seeded;
+    }
+  }
+
+  // Ensure forming tip bucket exists. Never overwrite print close with Soft-MM tipMid.
+  if (tip > 0) {
+    const tNow = bucket(nowMs, CANDLE_BASE_TF);
+    const last = base[base.length - 1];
+    if (!last || last.time < tNow) {
+      const open = last?.close ?? tip;
+      base.push({
+        time: tNow,
+        open,
+        high: Math.max(open, tip),
+        low: Math.min(open, tip),
+        close: tip,
+        volume: 0,
+      });
+    } else if (last.time === tNow) {
+      const hasPrintVol = (last.volume || 0) > 0;
+      // Extend range toward tip mid, but keep print-driven close when this bar traded.
+      last.high = Math.max(last.high, tip, last.open, last.close);
+      last.low = Math.min(last.low, tip, last.open, last.close);
+      if (!hasPrintVol) {
+        last.close = tip;
+        last.high = Math.max(last.high, tip, last.open);
+        last.low = Math.min(last.low, tip, last.open);
+      }
+    }
+  }
+
+  base = sanitizeDerivedCandlesForChart(base.slice(-MAX_CANDLES), pairId);
+  // Print islands / stale cache leave UTC holes — flat-fill before any tip heal.
+  if (base.length >= 2 && !candlesAreContiguous(base, CANDLE_BASE_TF)) {
+    base = ensureContiguousCandles(base, CANDLE_BASE_TF, {
+      pairId,
+      fillToNow: true,
+      nowMs,
+    });
+  }
+  // Tip-run only — never rewrite mid-history print/seed into fake chop.
+  if (tip > 0) {
+    base = healFlatPaperBars(pairId, CANDLE_BASE_TF, base, tip, nowMs, { scope: "tipRun" });
+  }
+  const all = deriveAllTimeframes(base, pairId);
+  reaggregateLiveBarsFromBase(all, base);
+  all[CANDLE_BASE_TF] = base;
+  return all as Record<Timeframe, Candle[]>;
 }

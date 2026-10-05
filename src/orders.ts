@@ -201,6 +201,22 @@ function limitShouldFill(order: Order, mid: number): boolean {
   return false;
 }
 
+/** Triggered stop/OCO-SL: fill when limit is marketable, or mid gapped through the limit. */
+function triggeredStopShouldFill(order: Order, mid: number): boolean {
+  if (limitShouldFill(order, mid)) return true;
+  // Adverse gap past limit (stop==limit attached SL, or flash crash through slip buffer).
+  if (order.side === "sell" && mid < order.price) return true;
+  if (order.side === "buy" && mid > order.price) return true;
+  return false;
+}
+
+/** Gap-aware fill price — never worse than limit for protective stops; use mid when gapped through. */
+function triggeredStopFillPrice(order: Order, mid: number): number {
+  if (order.side === "sell" && mid < order.price) return mid;
+  if (order.side === "buy" && mid > order.price) return mid;
+  return order.price;
+}
+
 function stopTriggered(order: Order, mid: number): boolean {
   if (order.kind === "stop_limit" || order.kind === "stop_market" || (order.kind === "oco" && order.ocoRole === "sl")) {
     const stop = order.stopPrice ?? order.price;
@@ -249,20 +265,27 @@ export function processOpenOrders(state: DemoState, m: MarketSnapshot, tickers: 
     }
 
     const live = order.status === "open" || order.status === "triggered";
+    const isTriggeredStop =
+      order.status === "triggered" &&
+      (order.kind === "stop_limit" || (order.kind === "oco" && order.ocoRole === "sl"));
     const readyLimit =
       live &&
       (order.kind === "limit" ||
         (order.kind === "oco" && order.ocoRole === "tp") ||
-        (order.kind === "oco" && order.ocoRole === "sl" && order.status === "triggered") ||
-        (order.status === "triggered" && order.kind === "stop_limit"));
+        isTriggeredStop);
 
-    if (readyLimit && limitShouldFill(order, mid)) {
-      // Resting book hits are always maker. Placement-time crosses already
-      // execute via executeFill(..., immediateFill=true) in the UI path —
-      // never re-classify by mid at fill time (that would make every maker a taker).
-      const triggered = order.status === "triggered";
-      if (fillOrder(state, m, order, order.price, triggered, false)) {
-        notes.push(`Filled ${order.kind} ${order.side}`);
+    if (readyLimit) {
+      const shouldFill = isTriggeredStop ? triggeredStopShouldFill(order, mid) : limitShouldFill(order, mid);
+      if (shouldFill) {
+        // Resting book hits are always maker. Placement-time crosses already
+        // execute via executeFill(..., immediateFill=true) in the UI path —
+        // never re-classify by mid at fill time (that would make every maker a taker).
+        // Triggered stops that gap through limit fill at mid (protective).
+        const triggered = order.status === "triggered";
+        const fillPx = isTriggeredStop ? triggeredStopFillPrice(order, mid) : order.price;
+        if (fillOrder(state, m, order, fillPx, triggered, false)) {
+          notes.push(`Filled ${order.kind} ${order.side}`);
+        }
       }
     }
 

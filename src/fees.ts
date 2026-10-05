@@ -26,6 +26,42 @@ export const VIP_TIERS: VipTier[] = [
   { name: "Regular", makerBps: 8, takerBps: 10, minVolUsdt: 0 },
 ];
 
+/**
+ * Soft-launch / lab: 30d USDT volume from GET /vip (whole USDT).
+ * When set, VIP UI + calcFee use this instead of local paper trade history.
+ */
+let serverVipVolumeUsdt: number | null = null;
+
+/** Apply server 30d volume (whole USDT). Pass null to fall back to local trades. */
+export function setServerVipVolumeUsdt(volWholeUsdt: number | null): void {
+  if (volWholeUsdt == null || !Number.isFinite(volWholeUsdt) || volWholeUsdt < 0) {
+    serverVipVolumeUsdt = null;
+    return;
+  }
+  serverVipVolumeUsdt = volWholeUsdt;
+}
+
+export function clearServerVipVolume(): void {
+  serverVipVolumeUsdt = null;
+}
+
+export function hasServerVipVolume(): boolean {
+  return serverVipVolumeUsdt != null;
+}
+
+export function getServerVipVolumeUsdt(): number | null {
+  return serverVipVolumeUsdt;
+}
+
+/** Tier for an explicit 30d USDT volume (shared by paper + server paths). */
+export function vipTierForVolume(volUsdt: number): VipTier {
+  const vol = Number.isFinite(volUsdt) && volUsdt > 0 ? volUsdt : 0;
+  for (const tier of VIP_TIERS) {
+    if (vol >= tier.minVolUsdt) return tier;
+  }
+  return VIP_TIERS[VIP_TIERS.length - 1]!;
+}
+
 /** Clamp imported fee settings — blocks negative/zero-fee abuse via state import. */
 export function sanitizeFeeConfig(raw: Partial<FeeConfig> | undefined): FeeConfig {
   const d = DEFAULT_FEE_CONFIG;
@@ -40,6 +76,7 @@ export function sanitizeFeeConfig(raw: Partial<FeeConfig> | undefined): FeeConfi
 }
 
 export function volume30dUsdt(state: DemoState, market?: MarketSnapshot | null): number {
+  if (serverVipVolumeUsdt != null) return serverVipVolumeUsdt;
   const cutoff = Date.now() - 30 * 86_400_000;
   return state.trades
     .filter((t) => t.ts >= cutoff)
@@ -54,11 +91,7 @@ export function volume30dUsdt(state: DemoState, market?: MarketSnapshot | null):
 }
 
 export function activeVipTier(state: DemoState, market?: MarketSnapshot | null): VipTier {
-  const vol = volume30dUsdt(state, market);
-  for (const tier of VIP_TIERS) {
-    if (vol >= tier.minVolUsdt) return tier;
-  }
-  return VIP_TIERS[VIP_TIERS.length - 1];
+  return vipTierForVolume(volume30dUsdt(state, market));
 }
 
 export function liquidityRole(kind: OrderKind, triggered = false, immediateFill = false): LiquidityRole {
@@ -94,29 +127,49 @@ export function quoteAssetForPair(pairId: PairId): keyof DemoState["wallet"] {
   return walletKeyForPair(pairId, "quote");
 }
 
+export type CalcFeeOpts = {
+  /**
+   * Soft-launch: when false, preview/settle estimate skips HMC pay even if the
+   * toggle is on (server will not honor until /health advertises hmc_fee_pay).
+   * Omit on paper — paper always honors the local toggle.
+   */
+  honorPayFeesInHmc?: boolean;
+};
+
 export function calcFee(
   state: DemoState,
   m: MarketSnapshot,
   pairId: PairId,
   quoteAmount: number,
   role: LiquidityRole,
+  opts?: CalcFeeOpts,
 ): FeeQuote {
   // Pass market so BTC/SUP quote volume converts to USDT for VIP (matches UI progress).
+  // Soft-launch: volume30dUsdt prefers GET /vip when synced.
   const tier = activeVipTier(state, m);
   const bps = role === "maker" ? tier.makerBps : tier.takerBps;
   // Match server QuoteFee: ceil to 1e8-scale minor, then back to display.
-  let feeQuote = Math.ceil(quoteAmount * (bps / 10_000) * 1e8) / 1e8;
+  const feeQuoteMinor = Math.ceil(quoteAmount * bps * 1e8 / 10_000);
+  const feeQuote = feeQuoteMinor / 1e8;
 
-  if (state.feeConfig.payFeesInHmc && m.hmcUsdt > 0) {
-    const discount = state.feeConfig.hmcDiscountPct;
-    // M5: ceil discounted quote + HMC conversion to 1e8 (same as quote fee path).
-    const discounted = Math.ceil(feeQuote * (1 - discount / 100) * 1e8) / 1e8;
-    const feeHmc = Math.ceil((discounted / m.hmcUsdt) * 1e8) / 1e8;
+  const wantHmc =
+    opts?.honorPayFeesInHmc !== undefined ? opts.honorPayFeesInHmc : state.feeConfig.payFeesInHmc;
+  const payHmc = !!wantHmc && m.hmcUsdt > 0;
+
+  if (payHmc) {
+    const discount = Math.min(25, Math.max(0, Math.floor(state.feeConfig.hmcDiscountPct)));
+    // Match API ApplyHMCDiscountPct: integer floor on quote minors.
+    const discMinor = Math.trunc((feeQuoteMinor * (100 - discount)) / 100);
+    const discounted = discMinor / 1e8;
+    // Match API QuoteToHMC: ceil(discMinor * PriceScale / hmcMid).
+    const hmcMidMinor = Math.round(m.hmcUsdt * 1e8);
+    const feeHmcMinor =
+      hmcMidMinor > 0 ? Math.floor((discMinor * 1e8 + hmcMidMinor - 1) / hmcMidMinor) : 0;
     return {
       role,
       bps,
       feeQuote: discounted,
-      feeHmc,
+      feeHmc: feeHmcMinor / 1e8,
       paidInHmc: true,
       vipName: tier.name,
       hmcDiscountPct: discount,
@@ -162,7 +215,8 @@ export function formatBps(bps: number): string {
 
 export function feeScheduleLabel(state: DemoState, market?: MarketSnapshot | null): string {
   const tier = activeVipTier(state, market);
-  return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name} (demo VIP · local history)`;
+  const src = hasServerVipVolume() ? "desk VIP · server volume" : "demo VIP · local history";
+  return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name} (${src})`;
 }
 
 export function nextVipProgress(

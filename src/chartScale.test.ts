@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampPaintPriceSpan,
   clampTickMid,
   clipBarWicks,
+  displayCapCandles,
   isPriceDiscontinuity,
   logicalRangeToIndices,
   maxBodyFracForTf,
   maxJumpFracForTf,
+  maxWickFracForTf,
+  paintMaxBodyFracForTf,
+  paintMaxSpanFracForTf,
   robustPriceRange,
   sanitizeCandleExtremes,
 } from "./chartScale";
@@ -60,8 +65,8 @@ describe("clipBarWicks / sanitizeCandleExtremes", () => {
       if (up > 1e-9 || dn > 1e-9) withWick += 1;
     }
     expect(withWick).toBeGreaterThan(20);
-    // Soft cap for 15m is 1.0% beyond body mid.
-    expect(maxWickFrac).toBeLessThanOrEqual(0.012);
+    // Soft cap for 15m is 0.75% beyond body mid.
+    expect(maxWickFrac).toBeLessThanOrEqual(0.008);
     const closes = candles.map((c) => c.close);
     const cMin = Math.min(...closes);
     const cMax = Math.max(...closes);
@@ -123,15 +128,195 @@ describe("robustPriceRange", () => {
     expect(range.minValue).toBeGreaterThan(50);
   });
 
-  it("does not expand Y-axis for outlier last close", () => {
+  it("keeps Last on-scale even after Soft-MM tip cliff", () => {
     const candles = Array.from({ length: 40 }, (_, i) => {
       const px = 0.0009;
       return bar(i, px, px * 1.0001, px * 0.9999, px);
     });
     candles[39] = bar(39, 0.0009, 0.0009, 0.00055, 0.00055);
-    // Without sanitize — range must still ignore the cliff last.close
     const range = robustPriceRange(candles)!;
-    expect(range.minValue).toBeGreaterThan(0.00075);
+    // Tip must stay visible (empty-top / flat-bottom squash root cause).
+    expect(range.minValue).toBeLessThanOrEqual(0.00055);
+    // Autoscale still clamps extreme cliffs via clampPaintPriceSpan.
+    const tip = candles[39]!.close;
+    const clamped = clampPaintPriceSpan(range, tip, paintMaxSpanFracForTf("1m"));
+    const span = clamped.maxValue - clamped.minValue;
+    const mid = (clamped.maxValue + clamped.minValue) / 2;
+    // Tip-centered cliff window — slightly wider than maxSpanFrac due to 40/60 split.
+    expect(span / mid).toBeLessThanOrEqual(paintMaxSpanFracForTf("1m") + 0.025);
+    expect(clamped.minValue).toBeLessThanOrEqual(tip);
+    expect(clamped.maxValue).toBeGreaterThanOrEqual(tip);
+  });
+
+  it("body-weighted range keeps quiet bars visible after a dump cliff", () => {
+    const candles: Candle[] = [];
+    for (let i = 0; i < 60; i++) {
+      const px = 0.05 + Math.sin(i / 7) * 0.0004;
+      candles.push(bar(1_700_000_000 + i * 60, px, px * 1.001, px * 0.999, px));
+    }
+    // Screenshot-class Soft-MM dump that previously blew Y into island blanks.
+    candles[30] = bar(candles[30]!.time, 0.0502, 0.0502, 0.0445, 0.0448);
+    const painted = displayCapCandles(candles, "1m");
+    const dumpBody =
+      Math.abs(painted[30]!.close - painted[30]!.open) / Math.max(painted[30]!.open, 1e-12);
+    const dumpCap = Math.max(paintMaxBodyFracForTf("1m"), maxBodyFracForTf("1m") * 0.85);
+    expect(dumpBody).toBeLessThanOrEqual(dumpCap + 1e-9);
+    // Continuity: every open bridges prior close.
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 10);
+    }
+    // Dump needle low must NOT survive into paint (ceiling-comb root cause).
+    expect(painted[30]!.low).toBeGreaterThan(0.048);
+  });
+
+  it("kills Soft-MM ceiling + hanging needles across sticky peg (all TFs)", () => {
+    const tip = 0.0009;
+    const candles: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      // Sticky Last ceiling with occasional Soft-MM dump needles (screenshot class).
+      const dump = i % 7 === 3;
+      const close = tip;
+      const open = tip;
+      const high = tip * 1.001;
+      const low = dump ? tip * 0.82 : tip * 0.999;
+      candles.push(bar(1_700_000_000 + i * 86_400, open, high, low, close));
+    }
+    for (const tf of ["1m", "15m", "1H", "1D"] as const) {
+      const painted = displayCapCandles(candles, tf);
+      expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 10);
+      // Continuity through closed bars; tip open may be nudged for a readable body.
+      for (let i = 1; i < painted.length - 1; i++) {
+        expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+      }
+      // Soft-MM 18% dump needles clipped to TF wick cap.
+      for (const c of painted) {
+        const bodyLo = Math.min(c.open, c.close);
+        const wickFrac = (bodyLo - c.low) / Math.max(bodyLo, 1e-12);
+        expect(wickFrac).toBeLessThanOrEqual(maxWickFracForTf(tf) + 1e-4);
+        const bodyFrac = Math.abs(c.close - c.open) / Math.max(c.open, 1e-12);
+        expect(bodyFrac).toBeLessThanOrEqual(paintMaxBodyFracForTf(tf) + 1e-6);
+      }
+      // Sticky peg breathes into real candle bodies (not a dashed ruler).
+      const bodies = painted.slice(0, -1).map((c) => Math.abs(c.close - c.open) / c.open);
+      expect(Math.max(...bodies)).toBeGreaterThan(0.0005);
+    }
+  });
+
+  it("SUP sticky peg also paints continuous ribbon", () => {
+    const tip = 0.25;
+    const candles = Array.from({ length: 30 }, (_, i) => {
+      const dump = i === 12;
+      return bar(1_700_000_000 + i * 60, tip, tip, dump ? tip * 0.7 : tip, tip);
+    });
+    const painted = displayCapCandles(candles, "1m");
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+    }
+    expect(Math.min(...painted.map((c) => c.low))).toBeGreaterThan(tip * 0.95);
+  });
+
+  it("1m CEX paint keeps real wicks (not Soft-MM Renko tip-walk)", () => {
+    const candles: Candle[] = [];
+    let px = 0.05;
+    for (let i = 0; i < 40; i++) {
+      const open = px;
+      const close = px * (1 + (i % 5 === 0 ? 0.006 : i % 5 === 1 ? -0.004 : 0.0015));
+      const high = Math.max(open, close) * 1.002;
+      const low = Math.min(open, close) * 0.998;
+      candles.push(bar(1_700_000_000 + i * 60, open, high, low, close));
+      px = close;
+    }
+    const painted = displayCapCandles(candles, "1m");
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+    }
+    const withWick = painted.filter(
+      (c) => c.high > Math.max(c.open, c.close) * 1.0002 || c.low < Math.min(c.open, c.close) * 0.9998,
+    );
+    expect(withWick.length).toBeGreaterThan(8);
+    // History must NOT collapse into tip-only Renko ribbon.
+    const closes = painted.map((c) => c.close);
+    const pathSpan = (Math.max(...closes) - Math.min(...closes)) / closes[closes.length - 1]!;
+    expect(pathSpan).toBeGreaterThan(0.01);
+    const bodies = painted.map((c) => Math.abs(c.close - c.open) / c.open);
+    expect(new Set(bodies.map((b) => b.toFixed(4))).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("1H CEX paint keeps wicks (not Soft-MM tip-walk Renko)", () => {
+    const candles: Candle[] = [];
+    let px = 0.0008;
+    for (let i = 0; i < 24; i++) {
+      const open = px;
+      const close = px * (1 + (i % 4 === 0 ? 0.008 : i % 4 === 1 ? -0.005 : 0.002));
+      const high = Math.max(open, close) * 1.004;
+      const low = Math.min(open, close) * 0.996;
+      candles.push(bar(1_700_000_000 + i * 3600, open, high, low, close));
+      px = close;
+    }
+    const painted = displayCapCandles(candles, "1H");
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+    }
+    const withWick = painted.filter(
+      (c) => c.high > Math.max(c.open, c.close) * 1.0003 || c.low < Math.min(c.open, c.close) * 0.9997,
+    );
+    expect(withWick.length).toBeGreaterThan(5);
+    const bodies = painted.map((c) => Math.abs(c.close - c.open) / c.open);
+    expect(new Set(bodies.map((b) => b.toFixed(4))).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("1W tip Soft-MM dump keeps open bridged (no tip island)", () => {
+    const candles: Candle[] = [];
+    let px = 0.22;
+    for (let i = 0; i < 12; i++) {
+      const open = px;
+      const close = px * (1 + (i % 2 === 0 ? 0.01 : -0.008));
+      candles.push(bar(1_700_000_000 + i * 604_800, open, Math.max(open, close) * 1.01, Math.min(open, close) * 0.99, close));
+      px = close;
+    }
+    // Tip Last dumped ~18% vs prior week — old paint moved tip open → island.
+    const tip = px * 0.82;
+    candles[candles.length - 1] = bar(
+      candles[candles.length - 1]!.time,
+      candles[candles.length - 1]!.open,
+      candles[candles.length - 1]!.high,
+      tip * 0.99,
+      tip,
+    );
+    const painted = displayCapCandles(candles, "1W");
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 10);
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+    }
+  });
+
+  it("1D CEX paint keeps wicks and avoids Renko ladder bodies", () => {
+    const candles: Candle[] = [];
+    let px = 0.0008;
+    for (let i = 0; i < 20; i++) {
+      const open = px;
+      const close = px * (1 + (i % 3 === 0 ? 0.012 : i % 3 === 1 ? -0.008 : 0.003));
+      const high = Math.max(open, close) * 1.006;
+      const low = Math.min(open, close) * 0.994;
+      candles.push(bar(1_700_000_000 + i * 86_400, open, high, low, close));
+      px = close;
+    }
+    const painted = displayCapCandles(candles, "1D");
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(candles[candles.length - 1]!.close, 10);
+    for (let i = 1; i < painted.length; i++) {
+      expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
+    }
+    // Real wicks survive (not body-only Renko blocks).
+    const withWick = painted.filter(
+      (c) => c.high > Math.max(c.open, c.close) * 1.0005 || c.low < Math.min(c.open, c.close) * 0.9995,
+    );
+    expect(withWick.length).toBeGreaterThan(5);
+    // Bodies must vary — uniform ladder steps fail this.
+    const bodies = painted.map((c) => Math.abs(c.close - c.open) / c.open);
+    const uniq = new Set(bodies.map((b) => b.toFixed(4)));
+    expect(uniq.size).toBeGreaterThanOrEqual(3);
+    // Not a uniform Renko step size.
+    expect(Math.max(...bodies) - Math.min(...bodies.filter((b) => b > 0))).toBeGreaterThan(0.002);
   });
 });
 

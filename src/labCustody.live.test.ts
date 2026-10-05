@@ -168,7 +168,7 @@ describe("live lab custody e2e", () => {
       if (!credit.ok) return;
       expect(credit.balance_after).toBeGreaterThan(0);
 
-      expect(custody.validateLabWithdrawDestination("SUP", "HMC-ffffffffffffffff").ok).toBe(false);
+      expect(custody.validateLabWithdrawDestination("SUP", "HMC-ffffffffffffffff").ok).toBe(true);
       expect(custody.validateLabWithdrawDestination("USDT", "<script>x</script>").ok).toBe(false);
       expect(custody.validateLabWithdrawDestination("HMC", "paper-usdt-ops-wallet-01").ok).toBe(false);
 

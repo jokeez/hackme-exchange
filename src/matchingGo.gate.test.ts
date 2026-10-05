@@ -87,4 +87,12 @@ describe("Matching GO SPA gates", () => {
     );
     expect(src).toMatch(/clearLabBookCache\(\);/);
   });
+
+  it("hashchange restores prevTf before setPaneTf (tf buttons + series)", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/app.ts"), "utf8");
+    // Same trap as pair: setPaneTf early-returns when tf === state.activeTf.
+    expect(src).toMatch(
+      /const nextTf = state\.activeTf;\s*state\.activeTf = prevTf;\s*setPaneTf\(1, nextTf\);/,
+    );
+  });
 });

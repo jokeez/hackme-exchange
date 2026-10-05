@@ -107,7 +107,7 @@ describe("layout presets", () => {
     const p = applyLayoutPreset("chart");
     expect(p.bookCollapsed).toBe(true);
     expect(p.rightCollapsed).toBe(true);
-    expect(p.bottomCollapsed).toBe(true);
+    expect(p.bottomCollapsed).toBe(false);
   });
 
   it("scalper widens book and activity", () => {

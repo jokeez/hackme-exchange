@@ -1,14 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyMidToPairCandles,
   barCountForTf,
   candlesAreContiguous,
+  CANDLE_BASE_TF,
   CHART_GENESIS_UNIX,
+  deriveAllTimeframes,
   ensureContiguousCandles,
+  ensureTfSeriesCadence,
+  hydrateLiveCandlesFromPrints,
+  loadLiveCandleCache,
   MAX_CANDLES,
   maxBarsSinceGenesis,
+  medianBarStepSec,
   prependOlderCandles,
   sanitizeCandleVolumes,
+  saveLiveCandleCache,
   seedCandles,
+  seriesMatchesTf,
   stats24h,
   trimCandlesToGenesis,
   upsertTick,
@@ -177,8 +186,11 @@ describe("upsertTick", () => {
     const target = ref * 1.02; // within 15m jump band
     const next = upsertTick(seeded, "15m", target, "HMC_USDT");
     expect(next.length).toBeGreaterThanOrEqual(before);
-    expect(next[next.length - 1].close).toBeCloseTo(target, 12);
-    expect(next[next.length - 1].high).toBeGreaterThanOrEqual(target);
+    const close = next[next.length - 1].close;
+    // Tip may soft-texture / body-clamp; must move toward target and stay in jump band.
+    expect(close).toBeGreaterThan(ref);
+    expect(Math.abs(close - target) / target).toBeLessThan(0.02);
+    expect(next[next.length - 1].high).toBeGreaterThanOrEqual(close);
   });
 
   it("blends when prevMid provided", () => {
@@ -187,7 +199,8 @@ describe("upsertTick", () => {
     const target = ref * 1.01;
     const a = upsertTick(seeded, "1m", target, "SUP_USDT", ref);
     const last = a[a.length - 1];
-    expect(last.close).toBeCloseTo(target, 12);
+    // Tip close breathes around Soft-MM/target mid — stay near target, not exact.
+    expect(Math.abs(last.close - target) / target).toBeLessThan(0.003);
     expect(last.volume).toBeGreaterThan(0);
   });
 
@@ -251,6 +264,45 @@ describe("sanitizeCandleVolumes", () => {
   });
 });
 
+describe("TF cadence guard", () => {
+  it("rejects 1m-spaced bars labeled as 1D and rebuilds", () => {
+    const base = seedCandles("HMC_USDT", "1m", 0.0009, 400);
+    const all = deriveAllTimeframes(base, "HMC_USDT", undefined, { retainPrev: false });
+    expect(medianBarStepSec(all["1D"]!)).toBe(86_400);
+    expect(seriesMatchesTf(all["1D"]!, "1D")).toBe(true);
+    // Corrupt: plant 1m series under 1D key (screenshot HH:MM-on-1D class).
+    const broken = { ...all, "1D": base.slice(-80) };
+    expect(seriesMatchesTf(broken["1D"]!, "1D")).toBe(false);
+    const fixed = ensureTfSeriesCadence(broken, "HMC_USDT", "1D");
+    expect(seriesMatchesTf(fixed["1D"]!, "1D")).toBe(true);
+    expect(medianBarStepSec(fixed["1D"]!)).toBe(86_400);
+    expect(fixed[CANDLE_BASE_TF]?.length).toBeGreaterThan(100);
+  });
+
+  it("rejects adjacent TF swaps (1H↔2H, 30s↔1m)", () => {
+    const h1 = seedCandles("HMC_USDT", "1H", 0.0009, 48);
+    const h2 = seedCandles("HMC_USDT", "2H", 0.0009, 48);
+    expect(seriesMatchesTf(h1, "1H")).toBe(true);
+    expect(seriesMatchesTf(h1, "2H")).toBe(false);
+    expect(seriesMatchesTf(h2, "2H")).toBe(true);
+    expect(seriesMatchesTf(h2, "1H")).toBe(false);
+    const s30 = seedCandles("HMC_USDT", "30s", 0.0009, 80);
+    expect(seriesMatchesTf(s30, "30s")).toBe(true);
+    expect(seriesMatchesTf(s30, "1m")).toBe(false);
+    // Misfiled 2H under 1H key must rebuild.
+    const all = deriveAllTimeframes(
+      seedCandles("HMC_USDT", "1m", 0.0009, 400),
+      "HMC_USDT",
+      undefined,
+      { retainPrev: false },
+    );
+    const broken = { ...all, "1H": all["2H"]! };
+    expect(seriesMatchesTf(broken["1H"]!, "1H")).toBe(false);
+    const fixed = ensureTfSeriesCadence(broken, "HMC_USDT", "1H");
+    expect(seriesMatchesTf(fixed["1H"]!, "1H")).toBe(true);
+  });
+});
+
 describe("1D contiguity / gap abuse", () => {
   const day = 86_400;
 
@@ -274,10 +326,13 @@ describe("1D contiguity / gap abuse", () => {
     expect(healed).toHaveLength(9); // 23..31 inclusive
     expect(healed[0].time).toBe(t0);
     expect(healed[healed.length - 1].time).toBe(t0 + 8 * day);
-    // Gap days are flat bridges from prior close
+    // Gap days: constrained idle walk (visible body, no spike forests).
     expect(healed[1].time).toBe(t0 + day); // 24th
-    expect(healed[1].close).toBe(1);
-    expect(healed[1].volume).toBe(0);
+    expect(healed[1].open).toBe(1);
+    expect(Math.abs(healed[1].close - 1) / 1).toBeLessThan(0.01);
+    expect(healed[1].high).toBeGreaterThanOrEqual(Math.max(healed[1].open, healed[1].close));
+    expect(healed[1].low).toBeLessThanOrEqual(Math.min(healed[1].open, healed[1].close));
+    expect((healed[1].high - healed[1].low) / 1).toBeLessThan(0.02);
   });
 
   it("upsertTick fills multi-day idle gap on 1D", () => {
@@ -297,7 +352,7 @@ describe("1D contiguity / gap abuse", () => {
     const next = upsertTick(old, "1D", target, "HMC_USDT");
     expect(candlesAreContiguous(next, "1D")).toBe(true);
     expect(next[next.length - 1].time).toBe(nowB);
-    expect(next[next.length - 1].close).toBeCloseTo(target, 12);
+    expect(Math.abs(next[next.length - 1].close - target) / target).toBeLessThan(0.05);
     expect(next.length).toBeGreaterThanOrEqual(6); // 5 gap days + live (or bridged)
   });
 
@@ -351,5 +406,75 @@ describe("1D contiguity / gap abuse", () => {
     expect(healed.length).toBeLessThanOrEqual(MAX_CANDLES);
     expect(candlesAreContiguous(healed, "1m")).toBe(true);
     expect(healed[healed.length - 1].time).toBe(end);
+  });
+});
+
+describe("hydrateLiveCandlesFromPrints", () => {
+  it("keeps a price spike from prints across cache round-trip", () => {
+    const mem = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        mem.set(k, v);
+      },
+      removeItem: (k: string) => {
+        mem.delete(k);
+      },
+    });
+
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 120;
+    const prints = [
+      { ts: t0 * 1000 + 1_000, price: 0.05, amountBase: 1 },
+      { ts: t0 * 1000 + 2_000, price: 0.0501, amountBase: 1 },
+      { ts: (t0 + 60) * 1000 + 500, price: 0.0502, amountBase: 2 },
+      { ts: (t0 + 120) * 1000 + 100, price: 0.055, amountBase: 10 },
+      { ts: (t0 + 120) * 1000 + 200, price: 0.051236, amountBase: 5 },
+    ];
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, 0.051236, now);
+    const base = all[CANDLE_BASE_TF]!;
+    expect(base.length).toBeGreaterThan(0);
+    const tipBar = base[base.length - 1]!;
+    expect(tipBar.close).toBeCloseTo(0.051236, 5);
+    // Print 0.055 expands tip high; Soft-MM wick caps may clip absolute 0.055 but
+    // high must still sit above close (print energy retained).
+    expect(tipBar.high).toBeGreaterThan(tipBar.close);
+
+    saveLiveCandleCache("HMC_USDT", base);
+    const cached = loadLiveCandleCache("HMC_USDT");
+    expect(cached?.length).toBeGreaterThan(0);
+    const again = hydrateLiveCandlesFromPrints("HMC_USDT", [], 0.051236, now, cached);
+    const tip2 = again[CANDLE_BASE_TF]![again[CANDLE_BASE_TF]!.length - 1]!;
+    expect(tip2.high).toBeGreaterThanOrEqual(tip2.close);
+
+    // Soft-MM tip mid must NOT crush forming print close back to inventory peg.
+    const softMmMid = 0.05;
+    const kept = hydrateLiveCandlesFromPrints("HMC_USDT", prints, softMmMid, now, cached);
+    const tip = kept[CANDLE_BASE_TF]!.find((c) => c.time === t0 + 120);
+    expect(tip).toBeTruthy();
+    expect(tip!.close).toBeCloseTo(0.051236, 5);
+    expect(tip!.high).toBeGreaterThanOrEqual(0.055);
+
+    // Poisoned / non-finite OHLC must not hydrate (same key prefix as save/load).
+    sessionStorage.setItem(
+      "hackme-ex-live-1m:v13:HMC_USDT",
+      JSON.stringify({
+        at: Date.now(),
+        bars: [{ t: t0, o: "x", h: 1, l: 0, c: 1, v: 0 }, { t: t0 + 60, o: 1, h: 0.5, l: 2, c: 1, v: 0 }],
+      }),
+    );
+    expect(loadLiveCandleCache("HMC_USDT")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("live applyMid does not inflate tip volume with synthetic tickVol", () => {
+    const base = seedCandles("HMC_USDT", CANDLE_BASE_TF, 0.05, 30);
+    const vol0 = base[base.length - 1]!.volume;
+    const next = applyMidToPairCandles({ [CANDLE_BASE_TF]: base }, "HMC_USDT", 0.0501, 0.05, {
+      syntheticVolume: false,
+    });
+    const tip = next[CANDLE_BASE_TF]![next[CANDLE_BASE_TF]!.length - 1]!;
+    expect(tip.volume).toBeLessThanOrEqual(vol0 + 1e-9);
   });
 });

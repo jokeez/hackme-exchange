@@ -254,7 +254,15 @@ export function buildAssetPortfolioRows(state: DemoState, market: MarketSnapshot
       costBasisUsdt = usdtValue;
     }
     const floatingPnl = usdtValue - costBasisUsdt;
-    const floatingPnlPct = costBasisUsdt > 1e-9 ? (floatingPnl / costBasisUsdt) * 100 : 0;
+    let floatingPnlPct = costBasisUsdt > 1e-9 ? (floatingPnl / costBasisUsdt) * 100 : 0;
+    // Deposit/sync with no trade lots: cost was marked at spot → honest flat, not fake 0.00%.
+    const markedInAtSpot =
+      amount > 0 &&
+      !(lot.qty > 1e-12 && lot.costUsdt > 1e-9) &&
+      Math.abs(floatingPnl) < Math.max(1e-6, usdtValue * 1e-9);
+    if (markedInAtSpot) {
+      floatingPnlPct = 0;
+    }
     return {
       symbol: a.sym,
       name: a.name,
@@ -263,7 +271,7 @@ export function buildAssetPortfolioRows(state: DemoState, market: MarketSnapshot
       price,
       usdtValue,
       costBasisUsdt,
-      floatingPnl,
+      floatingPnl: markedInAtSpot ? 0 : floatingPnl,
       floatingPnlPct,
     };
   });
@@ -271,8 +279,11 @@ export function buildAssetPortfolioRows(state: DemoState, market: MarketSnapshot
 
 /** Absolute floating PnL that doesn't collapse tiny USDT moves to "+0". */
 export function formatFloatingPnlDisplay(absUsdt: number, pct: number): string {
-  const sign = absUsdt >= 0 ? "+" : "-";
   const a = Math.abs(absUsdt);
+  const p = Math.abs(pct);
+  // No real mark-vs-cost move — show flat instead of "+0.00 (0.00%)" / "00%".
+  if (a < 1e-9 && p < 5e-3) return "flat";
+  const sign = absUsdt >= 0 ? "+" : "-";
   let absStr: string;
   if (a >= 1) absStr = formatNum(a, 2);
   else if (a >= 0.01) absStr = formatNum(a, 4);
@@ -388,7 +399,12 @@ export function renderAssetTableRows(
       const priceStr = r.symbol === "USDT" ? "1.00" : formatPrice(r.price);
       const valueStr = formatNum(r.usdtValue, 2);
       const costStr = formatNum(r.costBasisUsdt, 2);
-      const pnlCls = r.floatingPnl >= 0 ? "up" : "down";
+      const pnlCls =
+        Math.abs(r.floatingPnl) < 1e-9 && Math.abs(r.floatingPnlPct) < 5e-3
+          ? "flat"
+          : r.floatingPnl >= 0
+            ? "up"
+            : "down";
       const pnlStr = formatFloatingPnlDisplay(r.floatingPnl, r.floatingPnlPct);
       const allocPct = eq > 0 ? (r.usdtValue / eq) * 100 : 0;
       return `<tr class="acct-asset-row" data-asset="${r.symbol}" data-usdt-value="${r.usdtValue.toFixed(4)}">

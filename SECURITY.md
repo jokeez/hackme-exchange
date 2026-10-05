@@ -1,4 +1,4 @@
-# Security policy — HackMe Spot (paper terminal)
+# Security policy — HackMe Spot (soft-launch desk)
 
 ## Supported
 
@@ -13,10 +13,12 @@ Current `main` / published desk at [exchange.hackme.tech](https://exchange.hackm
 
 ## Scope
 
-In scope: XSS, auth/session issues in the SPA, supply-chain issues in dependencies,
-leaks of secrets via the client.
+In scope: XSS, auth/session issues in the SPA, desk seed handling, CSRF/cookie bugs,
+supply-chain issues in dependencies, leaks of secrets via the client.
 
 Out of scope: paper-trading P&L disputes, third-party wallet extensions, phishing
 clones of the desk (report those to us + the host).
 
-**Reminder:** this product is **PAPER only** — no custody, no public matching API.
+**Soft-launch:** public matching + HMC/SUP custody (deposit / TOTP withdraw) are live
+behind soft caps. USDT/BTC real custody remains HOLD. Treat the browser desk seed as a
+private key (durable in `localStorage` until Clear wallet / Logout).

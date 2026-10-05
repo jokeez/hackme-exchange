@@ -17,9 +17,9 @@ Threat checklist for this **open-source SPA**. Soft-launch matching / HMC·SUP c
 
 **Residual (accepted for paper offline):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
 
-**Desk Connect (soft-launch):** browser-local ephemeral Ed25519 seed in `sessionStorage` (never lab fixture, never in paper dist); optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Matching / deposit / withdraw follow server health; withdraw requires per-user TOTP.
+**Desk Connect (soft-launch):** browser-local Ed25519 seed is **durable in `localStorage`** (sessionStorage mirror) so reload/tab-close keeps the wallet; Logout / Clear wallet wipe both. Optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Matching / deposit / withdraw follow server health; withdraw requires per-user TOTP.
 
-**Residual (accepted for desk):** XSS in the SPA origin that can read `sessionStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps, HTTP CSP, no durable seed in `localStorage`, user-confirm on export, never embed fixture seeds in paper builds. Treat exported backup JSON as a private key. Soft-launch caps + ops withdraw complete limit blast radius.
+**Residual (accepted for desk):** XSS in the SPA origin that can read `localStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps / `sanitizeOtpauthUrl`, HTTP CSP, user-confirm on export, never embed fixture seeds in paper builds, clear seed on logout. Treat exported backup JSON as a private key. Soft-launch caps + ops withdraw complete limit blast radius.
 
 **This is not a licensed financial system.** Soft-launch caps apply; USDT/BTC custody is not live.
 

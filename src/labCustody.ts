@@ -29,7 +29,7 @@ export type WithdrawDestCheck = { ok: true } | { ok: false; hint: string };
 
 /**
  * Client-side withdraw destination gate (mirrors API).
- * HMC → on-chain address. SUP/USDT/BTC → paper ops stubs (not HMC- / not deposit stubs).
+ * HMC/SUP → on-chain HMC- + 16 hex. USDT/BTC → paper ops stubs (not HMC- / not deposit stubs).
  * Optional `selfAddress` rejects withdrawing to the session account (API ErrWithdrawSelfDest).
  */
 export function validateLabWithdrawDestination(
@@ -49,13 +49,14 @@ export function validateLabWithdrawDestination(
   if (self && dest.toLowerCase() === self.toLowerCase()) {
     return { ok: false, hint: "Cannot withdraw to your own account address" };
   }
-  if (a === "HMC") {
+  // HMC + SUP share the Ed25519 rail (API ValidateWithdrawDestination).
+  if (a === "HMC" || a === "SUP") {
     if (!HMC_DEST_RE.test(dest)) {
-      return { ok: false, hint: "HMC destination must be HMC- + 16 hex (e.g. HMC-ffffffffffffffff)" };
+      return { ok: false, hint: `${a} destination must be HMC- + 16 hex (e.g. HMC-ffffffffffffffff)` };
     }
     return { ok: true };
   }
-  if (a === "USDT" || a === "BTC" || a === "SUP") {
+  if (a === "USDT" || a === "BTC") {
     if (dest.toUpperCase().startsWith("HMC-") || looksLikeLabDepositStub(dest) || dest.length < 8) {
       return {
         ok: false,

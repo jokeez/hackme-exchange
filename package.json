@@ -15,6 +15,8 @@
     "test:e2e": "node scripts/g10_visual_pass.mjs",
     "test:e2e:full": "node scripts/mega_ui_audit.mjs",
     "smoke:live": "node scripts/live_smoke.mjs",
+    "smoke:chart-soak": "node scripts/chart_soak_live.mjs",
+    "smoke:candle-paint": "npx vite-node scripts/live_candle_paint_probe.ts",
     "smoke:desk": "npx tsx scripts/desk-connect-smoke.ts",
     "smoke:matching-sec": "npx tsx scripts/matching_go_security_probe.ts",
     "smoke:matching-go": "npx tsx scripts/matching_go_acceptance_smoke.ts",

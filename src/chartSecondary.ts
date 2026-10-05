@@ -9,16 +9,22 @@ import {
 } from "lightweight-charts";
 import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
-import { chartLocalization, chartPriceFormatter } from "./format";
+import { chartLocalization, chartPriceFormatter, chartTickMarkFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
-import { logicalRangeToIndices, robustPriceRange } from "./chartScale";
+import { displayCapCandles, logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isChartPointerBusy, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, noteChartPointerBusy, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
+import { ensureContiguousCandles } from "./candles";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
+import { orderTypeLabel } from "./orders";
 import { chartInteractionOptions, isMobileLayout } from "./mobile";
 import { bindLongPress, longPressRecentlyFired } from "./longPress";
+
+function secondarySecondsVisible(tf: Timeframe): boolean {
+  return tf === "30s" || tf === "1m" || tf === "3m" || tf === "5m";
+}
 
 export type SecondaryMountOpts = {
   pairId: PairId;
@@ -113,6 +119,7 @@ export function refreshSecondaryPaneOrderLines(hostId: string, opts: SecondaryPa
   if (overlays.showOrderLines) {
     for (const o of opts.orders.filter((x) => x.status === "open" || x.status === "triggered")) {
       const color = o.side === "buy" ? "#00e676" : "#ff5252";
+      const kindLabel = orderTypeLabel(o.kind, o);
       slot.orderPriceLines.push(
         slot.series.createPriceLine({
           price: o.price,
@@ -120,10 +127,10 @@ export function refreshSecondaryPaneOrderLines(hostId: string, opts: SecondaryPa
           lineWidth: 2,
           lineStyle: 2,
           axisLabelVisible: true,
-          title: `${o.side} ${o.kind}`,
+          title: `${o.side} ${kindLabel}`,
         }),
       );
-      if (o.stopPrice) {
+      if (o.stopPrice && o.stopPrice !== o.price) {
         slot.orderPriceLines.push(
           slot.series.createPriceLine({
             price: o.stopPrice,
@@ -131,7 +138,7 @@ export function refreshSecondaryPaneOrderLines(hostId: string, opts: SecondaryPa
             lineWidth: 1,
             lineStyle: 3,
             axisLabelVisible: true,
-            title: "Stop",
+            title: o.ocoRole === "sl" ? "OCO SL stop" : "Stop",
           }),
         );
       }
@@ -293,6 +300,32 @@ function bindResize(slot: Slot): void {
   requestAnimationFrame(apply);
 }
 
+/** High/low hygiene only — keep raw cadence for tip-update bookkeeping. */
+function normalizeSecondaryBars(candles: Candle[]): Candle[] {
+  return candles.map((c) => ({
+    ...c,
+    high: Math.max(c.high, c.open, c.close),
+    low: Math.min(c.low, c.open, c.close),
+  }));
+}
+
+/**
+ * Display paint matching main chart. Contiguous-fill only for real Unix buckets
+ * (epoch stubs in unit tests must not be genesis-wiped to a single bar).
+ */
+function paintSecondaryBars(slot: Slot, candles: Candle[]): Candle[] {
+  let cleaned = normalizeSecondaryBars(candles);
+  if (cleaned.length < 2) return cleaned;
+  const first = cleaned[0]!.time;
+  if (first > 1_000_000_000) {
+    cleaned = ensureContiguousCandles(cleaned, slot.tf, {
+      pairId: slot.pairId,
+      fillToNow: true,
+    });
+  }
+  return displayCapCandles(cleaned, slot.tf);
+}
+
 function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended = 0): void {
   if (candles.length < 2) return;
   if (!fit) rememberRange(slot);
@@ -302,19 +335,24 @@ function setSecondaryData(slot: Slot, candles: Candle[], fit = false, prepended 
       to: ((slot.savedRange.to as number) + prepended) as LogicalRange["to"],
     };
   }
-  const cleaned = candles.map((c) => ({
-    ...c,
-    high: Math.max(c.high, c.open, c.close),
-    low: Math.min(c.low, c.open, c.close),
-  }));
-  slot.candles = cleaned;
-  slot.series.setData(candlePoints(cleaned));
+  const raw = normalizeSecondaryBars(candles);
+  const painted = paintSecondaryBars(slot, raw);
+  slot.candles = raw;
+  slot.series.setData(candlePoints(painted));
   if (fit) {
-    const n = cleaned.length;
+    const n = painted.length;
     const w = slot.shell.clientWidth || 320;
     const spacing = barSpacingForWidth(w, slot.tf);
     try {
-      slot.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 4, minBarSpacing: MIN_PLOT_BAR_SPACING });
+      slot.chart.applyOptions({
+        timeScale: {
+          barSpacing: spacing,
+          rightOffset: 4,
+          minBarSpacing: MIN_PLOT_BAR_SPACING,
+          secondsVisible: secondarySecondsVisible(slot.tf),
+          tickMarkFormatter: chartTickMarkFormatter(slot.tf),
+        },
+      });
     } catch {
       /* ignore */
     }
@@ -381,10 +419,11 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
       borderVisible: true,
       borderColor: "rgba(255,255,255,0.1)",
       timeVisible: true,
-      secondsVisible: resolved.tf === "30s" || resolved.tf === "1m" || resolved.tf === "3m" || resolved.tf === "5m",
+      secondsVisible: secondarySecondsVisible(resolved.tf),
       rightOffset: 4,
       barSpacing: spacing,
       rightBarStaysOnScroll: false,
+      tickMarkFormatter: chartTickMarkFormatter(resolved.tf),
     },
     handleScale: {
       mouseWheel: false,
@@ -727,6 +766,19 @@ export function syncSecondaryChart(el: HTMLElement, candles: Candle[], opts: Sec
       existing.pairLabel = opts.pairLabel;
       updateSecondaryPaneMeta(key, { pairId: opts.pairId, tf: opts.tf });
       paintChrome(el, opts);
+      // Re-bind axis formatter on TF switch — otherwise 15m→1D keeps HH:MM ticks.
+      try {
+        const w = existing.shell.clientWidth || 320;
+        existing.chart.applyOptions({
+          timeScale: {
+            barSpacing: barSpacingForWidth(w, opts.tf),
+            secondsVisible: secondarySecondsVisible(opts.tf),
+            tickMarkFormatter: chartTickMarkFormatter(opts.tf),
+          },
+        });
+      } catch {
+        /* ignore */
+      }
       setSecondaryData(existing, candles, true);
       return;
     }
@@ -776,18 +828,20 @@ export function updateSecondaryChart(candles: Candle[], hostId?: string): void {
     // Same tip bucket — series.update only
     if (prev && last.time === prev.time && lenDelta === 0) {
       if (isChartPointerBusy()) {
-        slot.candles = candles;
+        slot.candles = normalizeSecondaryBars(candles);
         return;
       }
       try {
+        const painted = paintSecondaryBars(slot, candles);
+        const tip = painted[painted.length - 1] ?? last;
         slot.series.update({
-          time: last.time as UTCTimestamp,
-          open: last.open,
-          high: last.high,
-          low: last.low,
-          close: last.close,
+          time: tip.time as UTCTimestamp,
+          open: tip.open,
+          high: tip.high,
+          low: tip.low,
+          close: tip.close,
         });
-        slot.candles = candles;
+        slot.candles = normalizeSecondaryBars(candles);
       } catch {
         setSecondaryData(slot, candles, false);
       }
@@ -797,14 +851,16 @@ export function updateSecondaryChart(candles: Candle[], hostId?: string): void {
     // Adjacent new bar (+1)
     if (prev && last.time === prev.time + tfSec && lenDelta === 1) {
       try {
+        const painted = paintSecondaryBars(slot, candles);
+        const tip = painted[painted.length - 1] ?? last;
         slot.series.update({
-          time: last.time as UTCTimestamp,
-          open: last.open,
-          high: last.high,
-          low: last.low,
-          close: last.close,
+          time: tip.time as UTCTimestamp,
+          open: tip.open,
+          high: tip.high,
+          low: tip.low,
+          close: tip.close,
         });
-        slot.candles = candles;
+        slot.candles = normalizeSecondaryBars(candles);
         if (wasLive && slot.savedRange) {
           const span = Math.max(1, (slot.savedRange.to as number) - (slot.savedRange.from as number));
           const to = candles.length - 1 + 2;

@@ -18,6 +18,6 @@ describe("portfolioChart honesty", () => {
   it("formatChartDeltaUsdt keeps micro PnL visible", () => {
     expect(formatChartDeltaUsdt(0.00045)).toMatch(/\+0\.00045/);
     expect(formatChartDeltaUsdt(0.00045)).toMatch(/USDT/);
-    expect(formatChartDeltaUsdt(0)).toMatch(/\+0/);
+    expect(formatChartDeltaUsdt(0)).toBe("flat USDT");
   });
 });

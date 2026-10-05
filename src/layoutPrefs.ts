@@ -32,7 +32,8 @@ export const LAYOUT_PRESETS: Record<LayoutPresetId, LayoutPrefs> = {
     bookCollapsed: true,
     rightCollapsed: true,
     toolsCollapsed: false,
-    bottomCollapsed: true,
+    // Keep Orders/Fills/Cancel visible — chart focus must not orphan the activity panel.
+    bottomCollapsed: false,
   },
   scalper: {
     ...LAYOUT_DEFAULTS,
@@ -56,7 +57,7 @@ const MAX_W = 380;
 const BOTTOM_MIN_H = 136;
 const BOTTOM_MAX_H = 360;
 /** Bump when layout shape changes so stale localStorage widths cannot break the desk. */
-const KEY = `${STORAGE_KEY}-layout-v3`;
+const KEY = `${STORAGE_KEY}-layout-v4`;
 
 function clampWidth(n: number): number {
   if (!Number.isFinite(n)) return LAYOUT_DEFAULTS.bookWidth;

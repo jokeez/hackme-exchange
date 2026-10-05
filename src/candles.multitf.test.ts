@@ -187,9 +187,9 @@ describe("multi-TF CEX audit (all timeframes)", () => {
   it("upsert tip does not shrink established high after flat close", () => {
     const mid = 0.05;
     const t0 = Math.floor(Date.now() / 1000 / 60) * 60;
-    // Within 1m wick pad (0.45%) — must survive mean-revert close.
-    const hi = mid * 1.004;
-    const lo = mid * 0.996;
+    // Within 1m wick pad (0.32%) — must survive mean-revert close.
+    const hi = mid * 1.003;
+    const lo = mid * 0.997;
     const base = [
       {
         time: t0,

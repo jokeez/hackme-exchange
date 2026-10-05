@@ -1,14 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateCandles,
   applyMidToPairCandles,
   CANDLE_BASE_TF,
   chartAnchorMid,
   deriveAllTimeframes,
+  healFlatPaperBars,
   prependOlderCandles,
   seedAllTimeframes,
   seedCandles,
   textureLiveBar,
+  upsertTick,
 } from "./candles";
 import { TIMEFRAMES, type Timeframe } from "./types";
 
@@ -20,30 +22,168 @@ describe("chartAnchorMid", () => {
 });
 
 describe("textureLiveBar", () => {
-  it("keeps tip close on sticky Soft-MM mid but paints a visible body/wicks", () => {
+  it("keeps tip close at sticky Soft-MM mid but paints a visible body/wicks", () => {
     const mid = 0.0507;
-    const flat = { time: 1_700_000_000, open: mid, high: mid, low: mid, close: mid, volume: 10 };
+    const flat = { time: 1_700_000_000, open: mid, high: mid, low: mid, close: mid, volume: 0 };
     const textured = textureLiveBar("HMC_USDT", "1m", flat, mid, 1_700_000_000_000);
-    expect(textured.close).toBeCloseTo(mid, 10);
+    // Paper-clock tip close = Soft-MM mid (Last); body comes from walked open.
+    expect(Math.abs(textured.close - mid) / mid).toBeLessThan(1e-9);
     expect(textured.high).toBeGreaterThan(textured.low);
     expect(Math.abs(textured.close - textured.open)).toBeGreaterThan(mid * 0.0002);
   });
 
-  it("evolves tip wicks within the same 1m bucket when Soft-MM mid is sticky", () => {
+  it("sticky Soft-MM tip does not grow paper-clock needle wicks over the minute", () => {
     const mid = 0.0507;
     const t0 = 1_700_000_000;
-    const flat = { time: t0, open: mid, high: mid, low: mid, close: mid, volume: 10 };
+    const flat = { time: t0, open: mid, high: mid, low: mid, close: mid, volume: 0 };
     const a = textureLiveBar("HMC_USDT", "1m", flat, mid, t0 * 1000 + 1_000);
     const b = textureLiveBar("HMC_USDT", "1m", a, mid, t0 * 1000 + 25_000);
-    expect(a.close).toBeCloseTo(mid, 10);
-    expect(b.close).toBeCloseTo(mid, 10);
-    // High/low or open should breathe as the minute progresses.
-    const changed =
-      Math.abs(a.high - b.high) > 1e-12 ||
-      Math.abs(a.low - b.low) > 1e-12 ||
-      Math.abs(a.open - b.open) > 1e-12;
-    expect(changed).toBe(true);
+    expect(Math.abs(a.close - mid) / mid).toBeLessThan(1e-9);
+    expect(Math.abs(b.close - mid) / mid).toBeLessThan(1e-9);
+    // Open locks; sticky path must NOT expand into Soft-MM needle forests.
+    expect(Math.abs(a.open - b.open)).toBeLessThan(1e-12);
+    expect(Math.abs(a.high - b.high) / mid).toBeLessThan(0.0005);
+    expect(Math.abs(a.low - b.low) / mid).toBeLessThan(0.0005);
+    expect((b.high - b.low) / mid).toBeLessThan(0.012);
   });
+
+  it("idle gap + sticky mid upsert stays contiguous without spike forests", () => {
+    const mid = 0.053116;
+    // Pin wall clock — tip open vs Soft-MM mid is deterministic per bucket.
+    const fixedNow = 1_704_067_200_000; // 2023-11-26T12:00:00Z
+    vi.spyOn(Date, "now").mockReturnValue(fixedNow);
+    const t0 = Math.floor(fixedNow / 1000 / 60) * 60 - 20 * 60;
+    let series = [
+      {
+        time: t0,
+        open: mid * 0.98,
+        high: mid * 1.02,
+        low: mid * 0.97,
+        close: mid,
+        volume: 1000,
+      },
+    ];
+    // Simulate ~15 minutes of sticky Soft-MM tip ticks after a long idle gap.
+    for (let i = 0; i < 15; i++) {
+      series = upsertTick(series, "1m", mid, "HMC_USDT", mid);
+    }
+    expect(series.length).toBeGreaterThanOrEqual(16);
+    // Idle buckets are flat holds (vol=0) — no synthetic walk wick forests.
+    const gapBars = series.slice(1, -1);
+    expect(gapBars.every((c) => c.volume === 0 || Math.abs(c.close - c.open) / mid < 0.01)).toBe(
+      true,
+    );
+    for (let i = 1; i < series.length; i++) {
+      expect(series[i]!.time - series[i - 1]!.time).toBe(60);
+    }
+    const tip = series[series.length - 1]!;
+    expect(Math.abs(tip.close - mid) / mid).toBeLessThan(0.002);
+  });
+
+  it("healFlatPaperBars rewrites a trailing doji ruler", () => {
+    const mid = 0.053116;
+    const t0 = 1_700_000_000;
+    const flat = Array.from({ length: 20 }, (_, i) => ({
+      time: t0 + i * 60,
+      open: mid,
+      high: mid,
+      low: mid,
+      close: mid,
+      volume: 0,
+    }));
+    const healed = healFlatPaperBars("HMC_USDT", "1m", flat, mid, (t0 + 19 * 60) * 1000 + 30_000);
+    let fatBodies = 0;
+    for (const c of healed.slice(0, -1)) {
+      if (Math.abs(c.close - c.open) / mid > 0.0004) fatBodies++;
+    }
+    expect(fatBodies).toBeGreaterThan(8);
+    expect(Math.abs(healed[healed.length - 1]!.close - mid) / mid).toBeLessThan(0.002);
+  });
+
+  it("healFlatPaperBars rewrites a mid-history Soft-MM comb (wicks + flat closes)", () => {
+    const mid = 0.0538;
+    const t0 = 1_700_000_000;
+    const series = [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        time: t0 + i * 60,
+        open: mid * (1 - 0.01 + i * 0.002),
+        high: mid * 1.02,
+        low: mid * 0.97,
+        close: mid * (1 - 0.008 + i * 0.002),
+        volume: 100,
+      })),
+      // Comb: doji bodies, upper wicks only, stuck close — classic Soft-MM ruler.
+      ...Array.from({ length: 40 }, (_, i) => ({
+        time: t0 + (5 + i) * 60,
+        open: mid,
+        high: mid * 1.0015,
+        low: mid,
+        close: mid,
+        volume: 50,
+      })),
+      ...Array.from({ length: 8 }, (_, i) => ({
+        time: t0 + (45 + i) * 60,
+        open: mid * (1 - i * 0.001),
+        high: mid * (1 - i * 0.001 + 0.002),
+        low: mid * (1 - i * 0.001 - 0.002),
+        close: mid * (1 - (i + 1) * 0.001),
+        volume: 80,
+      })),
+    ];
+    const healed = healFlatPaperBars(
+      "HMC_USDT",
+      "1m",
+      series,
+      series[series.length - 1]!.close,
+      Date.now(),
+      { scope: "all" },
+    );
+    const comb = healed.slice(5, 45);
+    let fatBodies = 0;
+    const closes = new Set(comb.map((c) => c.close.toFixed(8)));
+    for (const c of comb) {
+      if (Math.abs(c.close - c.open) / mid > 0.00015) fatBodies++;
+    }
+    expect(fatBodies).toBeGreaterThan(20);
+    // Closed bars must not all share one Soft-MM close (шильдики).
+    expect(closes.size).toBeGreaterThan(8);
+  });
+
+  it("sticky Soft-MM tip rollover finalizes distinct closed closes", () => {
+    const mid = 0.05279729;
+    const t0 = 1_800_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(t0 * 1000);
+    let series = [
+      {
+        time: t0,
+        open: mid * 0.99,
+        high: mid * 1.01,
+        low: mid * 0.98,
+        close: mid,
+        volume: 100,
+      },
+    ];
+    for (let i = 1; i <= 20; i++) {
+      vi.setSystemTime((t0 + i * 60) * 1000 + 15_000);
+      series = upsertTick(series, "1m", mid, "HMC_USDT", mid);
+    }
+    vi.useRealTimers();
+    const closed = series.slice(0, -1);
+    expect(closed.length).toBeGreaterThan(10);
+    const uniqueCloses = new Set(closed.map((c) => c.close.toFixed(8)));
+    expect(uniqueCloses.size).toBeGreaterThan(5);
+    // Tip may equal Soft-MM Last; closed bars must not all equal tip mid.
+    const glued = closed.filter((c) => Math.abs(c.close - mid) / mid < 0.00005).length;
+    expect(glued).toBeLessThan(closed.length * 0.35);
+    const tip = series[series.length - 1]!;
+    expect(Math.abs(tip.close - mid) / mid).toBeLessThan(0.002);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("nudgeCloseTowardFill", () => {
@@ -102,8 +242,8 @@ describe("multi-TF aggregation (one market)", () => {
     const tip1d = all["1D"]![all["1D"]!.length - 1]!;
     expect(tip5m.close).toBeCloseTo(tip1m.close, 10);
     expect(tip1d.close).toBeCloseTo(tip1m.close, 10);
-    // Body still sane on daily
-    expect(Math.abs(tip1d.close - tip1d.open) / tip1d.open).toBeLessThan(0.08);
+    // Body tracks the ~9.5% mid walk (0.0007 → 0.00063371); allow day-tip range.
+    expect(Math.abs(tip1d.close - tip1d.open) / tip1d.open).toBeLessThan(0.12);
   });
 
   it("deriveAllTimeframes pads 1D to a CEX-like history length", () => {
