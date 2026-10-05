@@ -8642,34 +8642,10 @@ function microTickPrices(): void {
     market = applyLivePaperMids(market, DEFAULT_REFERENCE_MID, DEFAULT_SUP_REFERENCE_MID);
   }
 
-  // Scrubbing: do NOT run applyPaperClock×all pairs / series.update / DOM.
-  if (state.mainView === "spot" && isChartPointerBusy()) {
-    liveTickN += 1;
-    const mid = labLive
-      ? labBookMid(state.activePair) || prevMids[state.activePair] || 0
-      : midForPair(market, state.activePair);
-    if (tickers[state.activePair] && mid > 0) {
-      if (labLive) {
-        const book = getLabBookCache(state.activePair);
-        tickers[state.activePair] = {
-          ...tickers[state.activePair]!,
-          mid,
-          bid: book?.bids[0]?.price ?? tickers[state.activePair]!.bid,
-          ask: book?.asks[0]?.price ?? tickers[state.activePair]!.ask,
-        };
-      } else {
-        tickers[state.activePair] = {
-          ...tickers[state.activePair]!,
-          mid,
-          bid: mid * 0.9995,
-          ask: mid * 1.0005,
-        };
-      }
-    }
-    evaluatePriceAlerts(mid);
-    updateLivePriceHud(mid, true, candleCountdown(state.activeTf));
-    return;
-  }
+  // Scrubbing: still roll candle UTC buckets (otherwise time freezes while the
+  // pointer rests on the chart). Defer only heavy DOM below — tip paint already
+  // buffers via pendingLiveTip / setCandleData on rollover.
+  const scrubbingEarly = state.mainView === "spot" && isChartPointerBusy();
 
   if (state.mainView !== "spot") {
     for (const p of PAIRS) {
@@ -8741,11 +8717,13 @@ function microTickPrices(): void {
   const candles = state.candles[state.activePair]?.[state.activeTf] ?? [];
   const last = candles[candles.length - 1];
   const opts = chartOpts();
-  const scrubbing = isChartPointerBusy();
+  const scrubbing = scrubbingEarly || isChartPointerBusy();
   if (chartNeedsFullReplace || !last) {
     setCandleData(candles, opts, { scrollToLive: chartNeedsFullReplace });
     chartNeedsFullReplace = false;
   } else if (!updateLastCandle(last, opts)) {
+    // New UTC bucket / heal rewrite — always paint (even while scrubbing) so the
+    // time axis never freezes at the last closed bar while the hair is over the pane.
     setCandleData(candles, opts, { preserveLogicalRange: true });
   }
   if (!scrubbing && state.multiChartLayout !== "1" && liveTickN % 2 === 0) {

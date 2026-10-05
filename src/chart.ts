@@ -237,6 +237,8 @@ export function flushChartLivePaint(): void {
   const tip = pendingLiveTip;
   pendingLiveTip = null;
   if (tip) {
+    // Same-bucket tip paint. Rollover while scrubbing already went through
+    // setCandleData from microTickPrices — do not invent a partial series here.
     updateLastCandle(tip.c, tip.opts);
   }
   const hud = pendingHud;
