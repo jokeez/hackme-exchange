@@ -7724,3 +7724,226 @@ html {
   .spinner { animation: none !important; }
   .bg-glow { opacity: 0.12; filter: none; }
 }
+
+/* —— CEX-style deposit / withdraw funds panels —— */
+.cex-funds { gap: 0.7rem; }
+.cex-limits {
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(77, 228, 255, 0.28);
+  background:
+    linear-gradient(135deg, rgba(77, 228, 255, 0.09), transparent 55%),
+    rgba(0, 0, 0, 0.28);
+}
+.cex-limits-head {
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(77, 228, 255, 0.92);
+  margin-bottom: 0.45rem;
+}
+.cex-limits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.65rem;
+}
+@media (max-width: 560px) {
+  .cex-limits-grid { grid-template-columns: 1fr; }
+}
+.cex-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+.cex-limit-k {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.cex-limit-v {
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 650;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.cex-limits-note {
+  margin: 0.55rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(180, 198, 220, 0.88);
+}
+.cex-asset-pills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+@media (max-width: 480px) {
+  .cex-asset-pills { grid-template-columns: 1fr; }
+}
+.cex-asset-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(87, 118, 168, 0.35);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+.cex-asset-pill:hover:not(:disabled) {
+  border-color: rgba(77, 228, 255, 0.45);
+  background: rgba(77, 228, 255, 0.08);
+}
+.cex-asset-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.cex-asset-pill.active {
+  border-color: rgba(0, 192, 115, 0.55);
+  background: linear-gradient(145deg, rgba(0, 192, 115, 0.14), rgba(0, 0, 0, 0.22));
+  box-shadow: inset 0 0 0 1px rgba(0, 192, 115, 0.2);
+}
+.cex-asset-pill--usdt.active {
+  border-color: rgba(38, 161, 123, 0.65);
+}
+.cex-asset-pill-sym {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.cex-asset-pill-net {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.cex-asset-hint { margin: 0; }
+.cex-dep-panel {
+  padding: 0.75rem !important;
+  border-radius: 14px !important;
+}
+.cex-dep-panel-top {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  align-items: start;
+}
+@media (max-width: 560px) {
+  .cex-dep-panel-top { grid-template-columns: 1fr; justify-items: center; }
+  .cex-dep-addr-col { width: 100%; }
+}
+.cex-dep-qr-wrap {
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(87, 118, 168, 0.25);
+}
+.cex-dep-qr {
+  display: block;
+  border-radius: 6px;
+}
+.cex-dep-addr-col { min-width: 0; width: 100%; }
+.cex-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+.cex-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.22rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(87, 118, 168, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(210, 225, 245, 0.95);
+}
+.cex-chip--net {
+  border-color: rgba(77, 228, 255, 0.4);
+  color: #9aebff;
+  background: rgba(77, 228, 255, 0.1);
+}
+.cex-chip--min {
+  border-color: rgba(255, 179, 71, 0.45);
+  color: #ffc478;
+  background: rgba(255, 179, 71, 0.1);
+}
+.cex-steps {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.55rem 0.55rem 1.35rem;
+  border-radius: 10px;
+  border: 1px dashed rgba(87, 118, 168, 0.35);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(190, 208, 230, 0.92);
+}
+.cex-steps li { margin: 0.15rem 0; }
+.cex-steps--wd { margin-top: 0.15rem; }
+.cex-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.cex-callout strong { font-weight: 700; }
+.cex-callout--warn {
+  border: 1px solid rgba(255, 179, 71, 0.4);
+  background: rgba(255, 179, 71, 0.08);
+  color: rgba(255, 210, 150, 0.98);
+}
+.cex-callout--info {
+  border: 1px solid rgba(77, 228, 255, 0.28);
+  background: rgba(77, 228, 255, 0.06);
+  color: rgba(200, 220, 240, 0.95);
+}
+.cex-callout-login {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  opacity: 0.9;
+  word-break: break-all;
+}
+.cex-fee-quote {
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(87, 118, 168, 0.3);
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(200, 215, 235, 0.95);
+  min-height: 2.4rem;
+}
+.cex-wd-form { margin-top: 0.1rem; }
+.cex-wd-actions { margin-top: 0.15rem; }
+.cex-wd-history {
+  margin-top: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(87, 118, 168, 0.2);
+}
+.cex-wd-history-head {
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.acct-cash-card.withdraw .cex-limits {
+  border-color: rgba(255, 140, 160, 0.32);
+  background:
+    linear-gradient(135deg, rgba(219, 68, 85, 0.1), transparent 55%),
+    rgba(0, 0, 0, 0.28);
+}
+.acct-cash-card.withdraw .cex-limits-head {
+  color: rgba(255, 160, 175, 0.95);
+}

@@ -50,6 +50,7 @@ import {
 } from "./product/multiWallet";
 import { renderSpotEmptyState } from "./product/emptyStates";
 import { formatDeskMatchingLabel, isDeskMatchingLive } from "./settingsModal";
+import { depositLimitsPlateHtml, withdrawLimitsPlateHtml, USDT_DEPOSIT_MIN, USDT_CONFIRMATIONS } from "./custodyLimits";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
 export type AccountPageOpts = {
@@ -278,12 +279,12 @@ function renderDepositCard(
   const deskCustodyOn = !labOn && isDeskConnectEnabled() && !!deskEdge?.depositEnabled;
   const deskLive = !labOn && isDeskConnectEnabled() && session.live;
   return `
-        <article class="acct-cash-card deposit">
+        <article class="acct-cash-card deposit cex-funds">
           <div class="acct-cash-title">
             <span class="acct-cash-ico deposit" aria-hidden="true">↓</span>
             <div>
               <h4>Deposit</h4>
-              <p class="muted small">Add funds to trade on Spot / Convert</p>
+              <p class="muted small">Choose asset → copy address → send only on the listed network</p>
             </div>
           </div>
           ${
@@ -306,28 +307,57 @@ function renderDepositCard(
               : `<p class="muted small acct-cash-hint">Lab live · <strong>+100 HMC mint</strong> credits ledger via <code>POST /lab/deposit</code> · HMC address is on-chain deposit · USDT/BTC are paper stubs.</p>`
           }`
               : deskCustodyOn
-                ? `<div class="acct-cash-actions">
-            <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-hmc"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show HMC deposit</button>
-            <button type="button" class="btn-sm" id="btn-desk-dep-sup"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show SUP deposit</button>
-            <button type="button" class="btn-sm" id="btn-desk-dep-usdt"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>Show USDT deposit (BEP-20)</button>
+                ? `${depositLimitsPlateHtml()}
+          <div class="cex-asset-pills" role="group" aria-label="Deposit asset">
+            <button type="button" class="cex-asset-pill" id="btn-desk-dep-hmc" data-asset="HMC"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>
+              <span class="cex-asset-pill-sym">HMC</span>
+              <span class="cex-asset-pill-net">HackMe chain</span>
+            </button>
+            <button type="button" class="cex-asset-pill" id="btn-desk-dep-sup" data-asset="SUP"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>
+              <span class="cex-asset-pill-sym">SUP</span>
+              <span class="cex-asset-pill-net">HackMe chain</span>
+            </button>
+            <button type="button" class="cex-asset-pill cex-asset-pill--usdt" id="btn-desk-dep-usdt" data-asset="USDT"${deskLive ? "" : " disabled title=\"Connect desk wallet first\""}>
+              <span class="cex-asset-pill-sym">USDT</span>
+              <span class="cex-asset-pill-net">BEP-20 · BSC 56</span>
+            </button>
           </div>
-          <div class="acct-dep-reveal" id="lab-deposit-reveal" hidden>
-            <label class="lab-field lab-field-wide" for="lab-deposit-addr">Deposit address <span class="muted">(send here)</span>
-              <input id="lab-deposit-addr" class="mono" type="text" readonly spellcheck="false" autocomplete="off" value="" />
-            </label>
-            <p id="lab-deposit-meta" class="muted small mono acct-dep-meta" hidden></p>
-            <div class="lab-action-row">
-              <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy deposit address</button>
+          <p class="muted small cex-asset-hint">Show USDT deposit (BEP-20) · HMC / SUP via node-watch</p>
+          <div class="acct-dep-reveal cex-dep-panel" id="lab-deposit-reveal" hidden>
+            <div class="cex-dep-panel-top">
+              <div class="cex-dep-qr-wrap" id="lab-deposit-qr-host" hidden>
+                <img id="lab-deposit-qr" class="cex-dep-qr" alt="Deposit address QR" width="148" height="148" hidden />
+              </div>
+              <div class="cex-dep-addr-col">
+                <div class="cex-chip-row" id="lab-deposit-chips" hidden></div>
+                <label class="lab-field lab-field-wide" for="lab-deposit-addr">Deposit address <span class="muted">(send here only)</span>
+                  <input id="lab-deposit-addr" class="mono" type="text" readonly spellcheck="false" autocomplete="off" value="" />
+                </label>
+                <p id="lab-deposit-meta" class="muted small mono acct-dep-meta" hidden></p>
+                <div class="lab-action-row cex-dep-actions">
+                  <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy address</button>
+                </div>
+              </div>
             </div>
+            <ol class="cex-steps" id="lab-deposit-steps" hidden>
+              <li>Send only the selected asset on the listed network</li>
+              <li>Wait for confirmations (USDT ≥${USDT_CONFIRMATIONS} on BSC)</li>
+              <li>Balance appears after HOLD → KYT → release</li>
+            </ol>
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
-          <p class="muted small acct-cash-hint acct-dep-warn"><strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.</p>
-          <p class="muted small acct-cash-hint">HMC/SUP: credits via node-watch (not instant). <strong>USDT:</strong> BEP-20 on <strong>BSC mainnet</strong> (chain 56) — your own <code>0x…</code>; watcher → <strong>HOLD</strong> → KYT → release before trade. Never TRC-20 / ERC-20 / testnet / other tokens.</p>
-          ${
-            session.address
-              ? `<p class="muted small mono acct-cash-hint">Login only: <code>${escapeHtml(session.address)}</code></p>`
-              : `<p class="muted small acct-cash-hint">Connect desk wallet first, then show deposit address.</p>`
-          }`
+          <div class="cex-callout cex-callout--warn" role="note">
+            <strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.
+            ${
+              session.address
+                ? `<span class="mono cex-callout-login">Login only: ${escapeHtml(session.address)}</span>`
+                : `<span>Connect desk wallet first, then show a deposit address.</span>`
+            }
+          </div>
+          <div class="cex-callout cex-callout--info" role="note">
+            <strong>USDT:</strong> BEP-20 on BSC mainnet (chain 56) · min <strong class="mono">${USDT_DEPOSIT_MIN} USDT</strong> · watcher → HOLD → KYT → release.
+            Never TRC-20 / ERC-20 / testnet / other tokens. Wrong chain = permanent loss.
+          </div>`
               : `<div class="acct-cash-actions">
             <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" id="link-acct-wallet" target="_blank" rel="noopener noreferrer">${isHubEmbed() ? "Open Hub wallet" : "Open node wallet"}</a>
@@ -349,14 +379,14 @@ function renderWithdrawCard(
   const showForm = labOn || deskWd;
   const enableBtns = labOn ? labLive : deskLive;
   return `
-        <article class="acct-cash-card withdraw">
+        <article class="acct-cash-card withdraw cex-funds">
           <div class="acct-cash-title">
             <span class="acct-cash-ico withdraw" aria-hidden="true">↑</span>
             <div>
               <h4>Withdraw</h4>
               <p class="muted small">${
                 deskWd
-                  ? "Request + TOTP · stays pending until ops sends on-chain (not automatic)"
+                  ? "Request + TOTP · pending until ops sends on-chain (not automatic)"
                   : labOn
                     ? "Request only · pending until ops CLI complete"
                     : "Edge withdraw HOLD"
@@ -365,12 +395,13 @@ function renderWithdrawCard(
           </div>
           ${
             showForm
-              ? `<div class="lab-withdraw-form">
+              ? `${deskWd ? withdrawLimitsPlateHtml("HMC") : ""}
+          <div class="lab-withdraw-form cex-wd-form">
             <label class="lab-field">Asset
               <select id="lab-wd-asset" class="mono">
                 <option value="HMC">HMC</option>
                 <option value="SUP">SUP</option>
-                <option value="USDT">USDT</option>
+                <option value="USDT">USDT · BEP-20</option>
                 <option value="BTC">BTC</option>
               </select>
             </label>
@@ -380,14 +411,19 @@ function renderWithdrawCard(
             <label class="lab-field lab-field-wide">Destination
               <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" data-ph-btc="lab-ops-btc-01" />
             </label>
-            <p class="muted small lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT → <strong>BEP-20 (BSC)</strong> <code>0x…</code> (TRC-20 later) · min <strong>15 USDT</strong> · fee <strong>1.5 USDT</strong> on top · no auto hot-send until bridge live</p>
+            <p class="muted small lab-wd-dest-hint" id="lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT → <strong>BEP-20 (BSC)</strong> <code>0x…</code> · min <strong>15 USDT</strong> · fee <strong>1.5 USDT</strong> on top · no auto hot-send</p>
             <label class="lab-field">2FA code
-              <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="6 digits or recovery" />
+              <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="TOTP or recovery code" />
             </label>
           </div>
+          <ol class="cex-steps cex-steps--wd">
+            <li>Request + TOTP — funds reserved</li>
+            <li>Outbound KYT (USDT) — approve or reject</li>
+            <li>Ops broadcast from hot wallet — then complete</li>
+          </ol>
           ${
             deskWd
-              ? `<p class="muted small lab-wd-limits mono" id="lab-wd-limits">${escapeHtml(
+              ? `<p class="muted small lab-wd-limits mono" id="lab-wd-limits" hidden>${escapeHtml(
                   [
                     deskEdge?.minNotional && deskEdge.minNotional > 0 ? `min notional ${deskEdge.minNotional}` : "",
                     deskEdge?.maxOpenOrders && deskEdge.maxOpenOrders > 0 ? `max open ${deskEdge.maxOpenOrders}` : "",
@@ -398,15 +434,18 @@ function renderWithdrawCard(
                 )}</p>`
               : ""
           }
-          <p id="lab-wd-fee-quote" class="muted small lab-fee-quote" role="status">Fee quote appears after amount · GET /fees/custody</p>
+          <div class="cex-fee-quote" id="lab-wd-fee-quote" role="status">Enter amount · Quote fee for custody total</div>
           <p id="lab-custody-pause" class="muted small lab-pause-hint" hidden></p>
-          <div class="lab-action-row">
+          <div class="lab-action-row cex-wd-actions">
             <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-wd-request"${enableBtns ? "" : ` disabled title="${deskWd ? "Connect desk wallet first" : "Connect fixture first"}"`}>Request withdraw</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-refresh"${enableBtns ? "" : " disabled"}>↻ List</button>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-quote"${enableBtns ? "" : " disabled"}>Quote fee</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-refresh"${enableBtns ? "" : " disabled"}>↻ History</button>
           </div>
           <p id="lab-wd-msg" class="muted small sync-msg" role="status"></p>
-          <ul id="lab-wd-list" class="lab-wd-list mono small" aria-live="polite"><li class="dim">No withdraw requests yet</li></ul>`
+          <div class="cex-wd-history">
+            <div class="cex-wd-history-head">Withdraw history</div>
+            <ul id="lab-wd-list" class="lab-wd-list mono small" aria-live="polite"><li class="dim">No withdraw requests yet</li></ul>
+          </div>`
               : `<p class="muted small acct-cash-hint">Withdraw stays <strong>HOLD</strong> on this edge. Enroll 2FA under Desk session so you're ready when it opens. Move HMC/SUP via node / Hub wallet for now.</p>
           <div class="acct-cash-actions">
             <a class="btn-sm btn-secondary" href="${escapeHtml(nodeWalletUrl())}" target="_blank" rel="noopener noreferrer">Node wallet →</a>

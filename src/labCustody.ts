@@ -3,7 +3,10 @@
  * hackme-exchange-api `ledger.ValidateWithdrawDestination`.
  */
 
+import { NATIVE_WITHDRAW_MIN, USDT_WITHDRAW_MIN } from "./custodyLimits";
+
 const HMC_DEST_RE = /^HMC-[0-9a-fA-F]{16}$/;
+const EVM_DEST_RE = /^0x[0-9a-fA-F]{40}$/;
 
 /** Matches API `IsLabStubDepositAddress` / labdep prefix rejection for paper outs. */
 function looksLikeLabDepositStub(dest: string): boolean {
@@ -56,11 +59,25 @@ export function validateLabWithdrawDestination(
     }
     return { ok: true };
   }
-  if (a === "USDT" || a === "BTC") {
+  if (a === "USDT") {
+    // Desk / mainnet bridge: real BEP-20 0x. Lab paper still accepts ops stubs.
+    if (EVM_DEST_RE.test(dest)) return { ok: true };
     if (dest.toUpperCase().startsWith("HMC-") || looksLikeLabDepositStub(dest) || dest.length < 8) {
       return {
         ok: false,
-        hint: `${a} needs a paper stub dest (e.g. paper-usdt-ops-wallet-01) — not HMC- or deposit addresses`,
+        hint: "USDT needs a BSC 0x… address (BEP-20) — not HMC- or deposit stubs",
+      };
+    }
+    if (!safePaperWithdrawDest(dest)) {
+      return { ok: false, hint: "Invalid destination characters (no markup / URI schemes)" };
+    }
+    return { ok: true };
+  }
+  if (a === "BTC") {
+    if (dest.toUpperCase().startsWith("HMC-") || looksLikeLabDepositStub(dest) || dest.length < 8) {
+      return {
+        ok: false,
+        hint: "BTC needs a paper stub dest (e.g. lab-ops-btc-01) — not HMC- or deposit addresses",
       };
     }
     if (!safePaperWithdrawDest(dest)) {
@@ -72,14 +89,16 @@ export function validateLabWithdrawDestination(
 }
 
 /** Soft min for UI — matches API default EXCHANGE_WITHDRAW_MIN (1e6 minor = 0.01). */
-export const LAB_WITHDRAW_MIN_DISPLAY = 0.01;
+export const LAB_WITHDRAW_MIN_DISPLAY = NATIVE_WITHDRAW_MIN;
 
-export function validateLabWithdrawAmount(displayAmount: number): WithdrawDestCheck {
+export function validateLabWithdrawAmount(displayAmount: number, asset?: string): WithdrawDestCheck {
   if (!(displayAmount > 0) || !Number.isFinite(displayAmount)) {
     return { ok: false, hint: "Amount and destination required" };
   }
-  if (displayAmount < LAB_WITHDRAW_MIN_DISPLAY) {
-    return { ok: false, hint: `Minimum withdraw is ${LAB_WITHDRAW_MIN_DISPLAY}` };
+  const a = (asset || "").trim().toUpperCase();
+  const min = a === "USDT" ? USDT_WITHDRAW_MIN : LAB_WITHDRAW_MIN_DISPLAY;
+  if (displayAmount < min) {
+    return { ok: false, hint: `Minimum withdraw is ${min}${a ? ` ${a}` : ""}` };
   }
   return { ok: true };
 }

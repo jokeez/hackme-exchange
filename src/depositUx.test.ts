@@ -33,10 +33,13 @@ describe("deposit UX contracts", () => {
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
     expect(html).toMatch(/Do not send to Connect|Login addr ≠ deposit/);
-    expect(html).toMatch(/Show HMC deposit/);
-    expect(html).toMatch(/Show SUP deposit/);
-    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
+    expect(html).toContain("btn-desk-dep-hmc");
+    expect(html).toContain("btn-desk-dep-sup");
     expect(html).toContain("btn-desk-dep-usdt");
+    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
+    expect(html).toMatch(/Deposit limits/);
+    expect(html).toMatch(/USDT min/);
+    expect(html).toMatch(/0\.1 USDT/);
     expect(html).toContain("HMC-09dc5f553bfff940");
     expect(html).toMatch(/Login only/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);

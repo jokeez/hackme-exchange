@@ -2,6 +2,13 @@ import "./styles.css";
 import QRCode from "qrcode";
 import { patchAccountFundsDom, renderAccountPage, wireAccountFunding } from "./account";
 import { validateLabWithdrawDestination, validateLabWithdrawAmount } from "./labCustody";
+import {
+  USDT_DEPOSIT_MIN,
+  USDT_CONFIRMATIONS,
+  withdrawLimitsPlateHtml,
+  withdrawDestHint,
+  withdrawMinForAsset,
+} from "./custodyLimits";
 import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
 import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
@@ -4466,8 +4473,17 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   const reveal = document.getElementById("lab-deposit-reveal");
   const addrInp = document.getElementById("lab-deposit-addr") as HTMLInputElement | null;
   const metaEl = document.getElementById("lab-deposit-meta");
+  const chipsEl = document.getElementById("lab-deposit-chips");
+  const stepsEl = document.getElementById("lab-deposit-steps");
+  const qrHost = document.getElementById("lab-deposit-qr-host");
+  const qrImg = document.getElementById("lab-deposit-qr") as HTMLImageElement | null;
   if (reveal) reveal.hidden = false;
   if (addrInp) addrInp.value = dep;
+  if (stepsEl) stepsEl.hidden = false;
+  // Mark active asset pill
+  document.querySelectorAll(".cex-asset-pill").forEach((el) => {
+    el.classList.toggle("active", (el as HTMLElement).dataset.asset === res.asset);
+  });
   if (metaEl) {
     if (res.kind === "evm_bep20" || res.asset === "USDT") {
       const bits = [
@@ -4483,11 +4499,44 @@ async function showDepositAddrUi(asset: string): Promise<void> {
       metaEl.textContent = "";
     }
   }
+  if (chipsEl) {
+    const chips: string[] = [];
+    if (res.asset === "USDT" || res.kind === "evm_bep20") {
+      chips.push(`<span class="cex-chip">${escapeHtml(res.standard || "BEP-20")}</span>`);
+      chips.push(
+        `<span class="cex-chip cex-chip--net">${escapeHtml(
+          res.chain_id === 56 ? "BSC mainnet · 56" : res.chain_id === 97 ? "BSC testnet · 97" : `chain ${res.chain_id ?? "?"}`,
+        )}</span>`,
+      );
+      chips.push(`<span class="cex-chip cex-chip--min">min ${USDT_DEPOSIT_MIN} USDT</span>`);
+      chips.push(`<span class="cex-chip">≥${USDT_CONFIRMATIONS} conf</span>`);
+    } else {
+      chips.push(`<span class="cex-chip">${escapeHtml(res.asset)}</span>`);
+      chips.push(`<span class="cex-chip cex-chip--net">HackMe chain</span>`);
+    }
+    chipsEl.hidden = false;
+    chipsEl.innerHTML = chips.join("");
+  }
+  if (qrImg && qrHost) {
+    try {
+      qrImg.src = await QRCode.toDataURL(dep, {
+        width: 148,
+        margin: 1,
+        errorCorrectionLevel: "M",
+        color: { dark: "#061018", light: "#ffffff" },
+      });
+      qrImg.hidden = false;
+      qrHost.hidden = false;
+    } catch {
+      qrImg.hidden = true;
+      qrHost.hidden = true;
+    }
+  }
   if (msg) {
     const creditHint =
       res.kind === "evm_bep20"
         ? res.chain_id === 56
-          ? "MAINNET BSC · watcher → HOLD → KYT → release; send only USDT BEP-20 (not testnet/TRC/ERC)"
+          ? `MAINNET BSC · min ${USDT_DEPOSIT_MIN} USDT · watcher → HOLD → KYT → release; send only USDT BEP-20 (not testnet/TRC/ERC)`
           : "watcher → HOLD → KYT screen → release; send only USDT BEP-20 on this network"
         : "credits usually within ~30s after chain confirm";
     msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${
@@ -4689,7 +4738,7 @@ async function labWithdrawRequestUi(): Promise<void> {
   const destination = ((document.getElementById("lab-wd-dest") as HTMLInputElement | null)?.value || "").trim();
   const totp = ((document.getElementById("lab-wd-2fa") as HTMLInputElement | null)?.value || "").trim();
   const amount = displayToMinor(amtDisp);
-  const amtCheck = validateLabWithdrawAmount(amtDisp);
+  const amtCheck = validateLabWithdrawAmount(amtDisp, asset);
   if (!amtCheck.ok) {
     if (msg) msg.textContent = amtCheck.hint;
     toast(amtCheck.hint, "warn");
@@ -4760,7 +4809,7 @@ async function labWithdrawQuoteUi(): Promise<void> {
   const amtDisp = Number((document.getElementById("lab-wd-amt") as HTMLInputElement | null)?.value || 0);
   const amount = displayToMinor(amtDisp);
   if (!(amount > 0)) {
-    if (quoteEl) quoteEl.textContent = "Enter amount to quote custody fee";
+    if (quoteEl) quoteEl.textContent = "Enter amount · Quote fee for custody total";
     return;
   }
   const res = await fetchCustodyFees({ side: "withdraw", asset, amount });
@@ -5312,16 +5361,29 @@ function wireLabApiButtons(): void {
   if (assetSel) {
     const next = assetSel.cloneNode(true) as HTMLSelectElement;
     assetSel.replaceWith(next);
-    next.addEventListener("change", () => {
+    const syncWdAssetUi = () => {
+      const asset = (next.value || "HMC").toUpperCase();
       const dest = document.getElementById("lab-wd-dest") as HTMLInputElement | null;
       if (dest) {
-        const a = (next.value || "HMC").toLowerCase();
+        const a = asset.toLowerCase();
         const ph = dest.getAttribute(`data-ph-${a}`) || dest.getAttribute("data-ph-hmc") || "HMC-ffffffffffffffff";
         dest.placeholder = ph;
         if (!dest.value.trim()) dest.value = "";
       }
+      const hint = document.getElementById("lab-wd-dest-hint");
+      if (hint) hint.textContent = withdrawDestHint(asset);
+      const plate = document.getElementById("lab-wd-limits-plate");
+      if (plate) {
+        plate.outerHTML = withdrawLimitsPlateHtml(asset);
+      }
+      const amtInp = document.getElementById("lab-wd-amt") as HTMLInputElement | null;
+      if (amtInp) {
+        amtInp.placeholder = String(withdrawMinForAsset(asset));
+        amtInp.min = String(withdrawMinForAsset(asset));
+      }
       void labWithdrawQuoteUi();
-    });
+    };
+    next.addEventListener("change", syncWdAssetUi);
   }
   const amt = document.getElementById("lab-wd-amt");
   if (amt) {

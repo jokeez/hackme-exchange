@@ -121,6 +121,9 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("btn-desk-dep-sup");
     expect(html).toContain("btn-desk-dep-usdt");
     expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
+    expect(html).toMatch(/Deposit limits/);
+    expect(html).toMatch(/Withdraw limits/);
+    expect(html).toMatch(/min <strong class="mono">0\.1 USDT/);
     expect(html).toMatch(/USDT:<\/strong> BEP-20/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
@@ -143,6 +146,7 @@ describe("Account desk session (HOLD)", () => {
     // Withdraw form follows edge health when withdraw.enabled
     expect(html).toContain("btn-lab-wd-request");
     expect(html).toContain("lab-wd-2fa");
+    expect(html).toContain("lab-wd-limits-plate");
     expect(html).toContain("acct-2fa-manage-grid");
   });
 });
