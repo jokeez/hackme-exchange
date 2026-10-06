@@ -322,7 +322,7 @@ function renderDepositCard(
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
           <p class="muted small acct-cash-hint acct-dep-warn"><strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.</p>
-          <p class="muted small acct-cash-hint">HMC/SUP: credits via node-watch (not instant). <strong>USDT:</strong> BEP-20 on <strong>BSC</strong> — your own <code>0x…</code> per account; watcher credits to <strong>HOLD</strong> after confirmations (ops release before trade). Don’t send TRC-20 / ERC-20 / other tokens / wrong network.</p>
+          <p class="muted small acct-cash-hint">HMC/SUP: credits via node-watch (not instant). <strong>USDT:</strong> BEP-20 on <strong>BSC</strong> — your own <code>0x…</code> per account; watcher → <strong>HOLD</strong> → KYT screen → release before trade. Don’t send TRC-20 / ERC-20 / other tokens / wrong network.</p>
           ${
             session.address
               ? `<p class="muted small mono acct-cash-hint">Login only: <code>${escapeHtml(session.address)}</code></p>`
