@@ -17,7 +17,7 @@ Threat checklist for this **open-source SPA**. Soft-launch matching / HMC·SUP c
 
 **Residual (accepted for paper offline):** synthetic book/tape, client-side paper balances, meta CSP with `'unsafe-inline'`.
 
-**Desk Connect (soft-launch):** browser-local Ed25519 seed is **durable in `localStorage`** (sessionStorage mirror) so reload/tab-close keeps the wallet; Logout / Clear wallet wipe both. Optional user-initiated seed export/import JSON for multi-device; cookie session + memory-only CSRF against same-origin `/desk-api`. Matching / deposit / withdraw follow server health; withdraw requires per-user TOTP.
+**Desk Connect (soft-launch):** browser Ed25519 seed is **sessionStorage-only** (survives reload in the same tab; cleared on tab close). Logout / Clear wallet wipe it. Export JSON backup for multi-device durability. Cookie session + memory-only CSRF against same-origin `/desk-api`. Matching / deposit / withdraw follow server health; withdraw requires per-user TOTP.
 
 **Residual (accepted for desk):** XSS in the SPA origin that can read `localStorage` can exfiltrate the desk seed and sign Connect challenges as that `HMC-…` address. Mitigations: `escapeHtml` / import clamps / `sanitizeOtpauthUrl`, HTTP CSP, user-confirm on export, never embed fixture seeds in paper builds, clear seed on logout. Treat exported backup JSON as a private key. Soft-launch caps + ops withdraw complete limit blast radius.
 

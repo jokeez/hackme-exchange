@@ -1,9 +1,10 @@
 /**
  * Browser-local HMC wallet for public desk Connect (soft-launch matching).
  *
- * Seed is durable in localStorage (survives reload + tab close) with a
- * sessionStorage mirror. Logout / clear-wallet wipes both. Treat like a private key:
- * XSS on this origin can read it — keep escapeHtml / CSP tight; export JSON is SECRET.
+ * Seed lives in sessionStorage only (survives reload within the tab session).
+ * localStorage copies are cleared on read (H-11 — no durable dual-store XSS harvest).
+ * Export JSON backup is the durable recovery path. Treat like a private key:
+ * XSS on this origin can read it while the tab is open — keep escapeHtml / CSP tight.
  */
 
 import * as ed from "@noble/ed25519";
@@ -15,6 +16,9 @@ import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../c
 ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 
 const SEED_KEY = "hackme.desk.wallet.seed.v1";
+
+/** In-tab memory mirror so same-tick races after clear still work. */
+let memorySeed: string | null = null;
 
 function bytesToHex(b: Uint8Array): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -39,18 +43,21 @@ export function normalizeDeskSeedHex(raw: string): string | null {
   return h;
 }
 
-function readStoredDeskSeed(): string | null {
+function scrubLegacyLocalStorage(): void {
   try {
-    const fromLocal = normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "");
-    if (fromLocal) return fromLocal;
+    localStorage.removeItem(SEED_KEY);
   } catch {
     /* ignore */
   }
+}
+
+function readStoredDeskSeed(): string | null {
+  scrubLegacyLocalStorage();
+  if (memorySeed) return memorySeed;
   try {
     const fromSession = normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "");
     if (fromSession) {
-      // Migrate session → local so reload/tab-close keeps the wallet.
-      persistDeskSeed(fromSession);
+      memorySeed = fromSession;
       return fromSession;
     }
   } catch {
@@ -59,18 +66,15 @@ function readStoredDeskSeed(): string | null {
   return null;
 }
 
-/** True when a desk seed is stored (localStorage preferred). */
+/** True when a desk seed is stored (session/memory). */
 export function hasDeskSeed(): boolean {
   return !!readStoredDeskSeed();
 }
 
 /** Where the active seed lives — for security chrome / docs honesty. */
 export function deskSeedStorageKind(): "local" | "session" | "none" {
-  try {
-    if (normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "")) return "local";
-  } catch {
-    /* ignore */
-  }
+  scrubLegacyLocalStorage();
+  if (memorySeed) return "session";
   try {
     if (normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "")) return "session";
   } catch {
@@ -90,11 +94,8 @@ export function loadOrCreateDeskSeed(): string {
 }
 
 export function clearDeskSeed(): void {
-  try {
-    localStorage.removeItem(SEED_KEY);
-  } catch {
-    /* ignore */
-  }
+  memorySeed = null;
+  scrubLegacyLocalStorage();
   try {
     sessionStorage.removeItem(SEED_KEY);
   } catch {
@@ -102,22 +103,18 @@ export function clearDeskSeed(): void {
   }
 }
 
-/** Persist desk seed to localStorage (survives reload + tab close). */
+/** Persist desk seed to sessionStorage (+ memory). Export backup for durability. */
 export function persistDeskSeed(seedHex: string): string {
   const n = normalizeDeskSeedHex(seedHex);
   if (!n) throw new Error("seed must be 32-byte hex");
   // Prove it is a valid Ed25519 seed before writing.
   ed.getPublicKey(hexToBytes(n));
+  memorySeed = n;
+  scrubLegacyLocalStorage();
   try {
-    localStorage.setItem(SEED_KEY, n);
-  } catch {
-    /* ignore quota */
-  }
-  try {
-    // Keep session copy for older code paths / same-tab races.
     sessionStorage.setItem(SEED_KEY, n);
   } catch {
-    /* ignore */
+    /* ignore quota — memory still holds it for this tab */
   }
   return n;
 }
@@ -140,7 +137,7 @@ export function buildDeskSeedBackup(seedHex = loadOrCreateDeskSeed()): DeskSeedB
     seed_hex: id.seedHex,
     created_at: new Date().toISOString(),
     warning:
-      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Soft-launch seed is durable in this browser until Clear wallet / Logout.",
+      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Soft-launch seed is session-only until you export a backup; Clear wallet / Logout wipes it.",
   };
 }
 

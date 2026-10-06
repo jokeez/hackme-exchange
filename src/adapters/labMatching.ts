@@ -450,7 +450,7 @@ export async function placeLabOrder(
     return {
       ok: false,
       reason: isDeskConnectEnabled()
-        ? "Public matching HOLD — Connect does not enable live book yet"
+        ? "Public matching not live — Connect does not enable live book yet"
         : "Lab matching requires Connect DEMO/LAB fixture",
     };
   }
@@ -519,7 +519,7 @@ export async function cancelLabOrder(
     return {
       ok: false,
       reason: isDeskConnectEnabled()
-        ? "Public matching HOLD — cannot cancel server orders"
+        ? "Public matching not live — cannot cancel server orders"
         : "Lab session required",
     };
   }
@@ -588,7 +588,7 @@ export async function syncLabBalancesAndBook(
     const holdNote = isDeskConnectEnabled()
       ? usePublicDeskBook()
         ? `Desk sync · ${bal.address.slice(0, 14)}… · matching live · Connect to trade${bookNote}`
-        : `Desk sync · ${bal.address.slice(0, 14)}… · matching HOLD · paper Spot kept`
+        : `Desk sync · ${bal.address.slice(0, 14)}… · live book · paper Spot until Connect`
       : `API sync · ${bal.address.slice(0, 14)}… · matching off`;
     return { ok: true, note: holdNote };
   }
@@ -636,7 +636,7 @@ export async function syncLabOrdersFillsLight(
     }
     return {
       ok: true,
-      note: isDeskConnectEnabled() ? "desk HOLD — skip matching stream" : "matching off — skip stream",
+      note: isDeskConnectEnabled() ? "desk matching off — skip matching stream" : "matching off — skip stream",
       changed: false,
       bookChanged: false,
     };

@@ -40,7 +40,7 @@ describe("deskWallet", () => {
     }));
     const { loadOrCreateDeskSeed, clearDeskSeed, deskWalletIdentity, deskSeedStorageKind } = await import("./deskWallet");
     const first = deskWalletIdentity(loadOrCreateDeskSeed()).address;
-    expect(deskSeedStorageKind()).toBe("local");
+    expect(deskSeedStorageKind()).toBe("session");
     clearDeskSeed();
     expect(deskSeedStorageKind()).toBe("none");
     const second = deskWalletIdentity(loadOrCreateDeskSeed()).address;

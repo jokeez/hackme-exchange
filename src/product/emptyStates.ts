@@ -13,7 +13,7 @@ function spotModeBody(paperDefault: string): string {
     if (usePublicDeskBook()) {
       return "Desk matching is live — Connect desk wallet on Account, then place orders. Live L2 is on the book.";
     }
-    return "Matching HOLD — Connect desk wallet on Account when you want a session. Spot stays local preview.";
+    return "Matching not live yet — Connect desk wallet on Account for a session. Spot stays local preview.";
   }
   if (isLabLoopbackApi()) {
     return "Lab Spot — connect fixture on Account for server matching; without a session this UI is paper preview.";
@@ -39,7 +39,7 @@ export function renderSpotEmptyState(ctx: EmptySpotContext): string {
         : deskBook
           ? "Connect + deposit HMC/SUP, then trade. Avbl is your exchange ledger — not Copy addr."
           : isDeskConnectEnabled()
-            ? "Matching HOLD — paper balances stay local until Matching GO."
+            ? "Matching not live — paper balances stay local until Matching GO."
             : isLabLoopbackApi()
               ? "Lab fills update the connected ledger. Without a session, paper balances stay local."
               : "Spot fills update paper balances instantly. Track equity on Account.",

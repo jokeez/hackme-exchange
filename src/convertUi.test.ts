@@ -120,7 +120,7 @@ describe("convertUi recent empty", () => {
   it("renders desk HOLD empty copy", () => {
     const html = renderConvertRecentList([], "desk");
     expect(html).toContain('data-empty="convert"');
-    expect(html).toContain("matching is HOLD");
+    expect(html).toContain("paper balances until health advertises convert");
   });
 
   it("mentions primary pairs in paper empty copy", () => {

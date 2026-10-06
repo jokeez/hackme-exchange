@@ -482,8 +482,8 @@ function renderCashDock(
           .filter(Boolean)
           .join(" · ")}`
       : deskOn
-        ? "Desk Connect · matching/deposit/withdraw HOLD — paper funds here; Connect for a session"
-        : "Paper funds · live exchange deposit/withdraw on HOLD · optional node Sync for HMC/SUP";
+        ? "Desk Connect · paper funds until Connect — live book when matching is GO"
+        : "Paper funds · live exchange deposit/withdraw follow server health · optional node Sync for HMC/SUP";
   const dockClass = [
     labOn ? "lab-custody-card" : "",
     deskOn && !labOn && !deskCustodyOn && !deskWdOn ? "desk-hold-card" : "",

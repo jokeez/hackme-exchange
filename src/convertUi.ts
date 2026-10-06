@@ -106,9 +106,9 @@ export function renderConvertRecentList(
   if (!rows.length) {
     const body =
       mode === "desk"
-        ? "Paper Convert stays available while public matching is HOLD."
+        ? "Convert stays on paper balances until health advertises convert — Spot matching can still be live."
         : mode === "lab"
-          ? "Lab convert uses seed mid after you connect the fixture on Account."
+          ? "Lab convert uses last-trade mid after you connect the fixture on Account."
           : "Pick HMC/USDT or HMC/SUP and Convert at mid — fees follow your VIP schedule.";
     return `<div class="cv-recent-empty product-empty" data-empty="convert">
       <p class="empty-title">No converts yet</p>

@@ -1490,6 +1490,11 @@ function spotMidForPair(pairId: PairId): number {
   if (useLiveBook()) {
     const last = liveLastPrice(pairId);
     if (last > 0) return last;
+    const book = labBookMid(pairId);
+    if (book > 0) return book;
+    const api = deskApiTickers.get(pairId);
+    if (api && api.last > 0) return api.last;
+    // Live book expected — never fall back to paper/oracle 0.05 seed (H-13).
     return 0;
   }
   const blended = prevMids[pairId];
@@ -2474,10 +2479,10 @@ function renderConvert(): string {
 
   const holdBanner = isDeskConnectEnabled()
     ? serverReady
-      ? `<p class="muted small convert-hold-banner" role="status">Desk convert uses server mid + VIP taker on HMC/USDT and HMC/SUP.</p>`
+      ? `<p class="muted small convert-hold-banner" role="status">Desk convert uses last-trade mid + VIP taker on HMC/USDT and HMC/SUP.</p>`
       : isDeskMatchingLive(deskEdgeSnap.matching)
-        ? `<p class="muted small convert-hold-banner" role="status">Desk matching is live for Spot — Convert stays on paper until health advertises convert. Primary pairs: HMC/USDT · HMC/SUP.</p>`
-        : `<p class="muted small convert-hold-banner" role="status">Matching HOLD on this edge — Convert uses local paper balances · HMC/USDT · HMC/SUP.</p>`
+        ? `<p class="muted small convert-hold-banner" role="status">Spot matching is live — Convert stays on paper balances until health advertises convert. Primary pairs: HMC/USDT · HMC/SUP.</p>`
+        : `<p class="muted small convert-hold-banner" role="status">Matching not live on this edge yet — Convert uses local paper balances · HMC/USDT · HMC/SUP.</p>`
     : "";
 
   return `
@@ -3323,14 +3328,18 @@ function renderSpot(): string {
             ? "VIP from server GET /vip (30d USDT fills)"
             : useServerMatching()
               ? "VIP pending server sync — local estimate"
-              : "VIP from local paper trade history"
+              : useLiveBook()
+                ? "Live book — Connect to sync desk VIP volume"
+                : "VIP from local paper trade history"
         }">${escapeHtml(vip.name)}</span>
         ${
           hasServerVipVolume()
             ? `<span class="vip-demo muted small">live</span>`
             : useServerMatching()
               ? `<span class="vip-demo muted small">sync…</span>`
-              : `<span class="vip-demo muted small">paper</span>`
+              : useLiveBook()
+                ? `<span class="vip-demo muted small">live</span>`
+                : `<span class="vip-demo muted small">paper</span>`
         }
         <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
         <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
@@ -4028,7 +4037,7 @@ async function syncLabLedgerUi(): Promise<void> {
   if (msgEl) msgEl.textContent = res.note;
   if (desk && !isLabLoopbackApi()) {
     toast(
-      useServerMatching() ? "Desk ledger synced · live matching" : "Desk ledger synced · matching HOLD",
+      useServerMatching() ? "Desk ledger synced · live matching" : useLiveBook() ? "Desk ledger synced · live book (Connect to trade)" : "Desk ledger synced · paper Spot",
       "info",
     );
   } else {
@@ -4164,7 +4173,7 @@ async function deskWalletConnectUi(): Promise<void> {
     toast(`Desk Connect: ${res.message}`, "warn");
     return;
   }
-  if (msg) msg.textContent = `Connected ${res.wallet.address} · ${useServerMatching() ? "matching live" : "matching HOLD"}`;
+  if (msg) msg.textContent = `Connected ${res.wallet.address} · ${useServerMatching() ? "matching live" : useLiveBook() ? "live book · Connect to trade" : "paper Spot"}`;
   toast(`Desk wallet connected · ${res.wallet.address.slice(0, 14)}…`, "ok");
   // Sync desk ledger (or HOLD probe). Cookie must ride for /balances.
   {
@@ -6459,8 +6468,8 @@ function startSessionExpiryWatch(): void {
       chip.hidden = false;
       chip.textContent = rem < 60_000 ? `Session <1m` : `Session ~${mins}m`;
       chip.title =
-        deskSeedStorageKind() === "local"
-          ? "JWT cookie expiry · browser seed is durable until Clear wallet"
+        deskSeedStorageKind() === "session"
+          ? "JWT cookie expiry · browser seed is session-only (export backup to keep)"
           : "JWT cookie expiry";
     }
     if (rem <= 15 * 60_000 && rem > 2 * 60_000 && !warned15) {
