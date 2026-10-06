@@ -337,7 +337,7 @@ function renderDepositCard(
                 </label>
                 <p id="lab-deposit-meta" class="muted small mono acct-dep-meta" hidden></p>
                 <div class="lab-action-row cex-dep-actions">
-                  <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy address</button>
+                  <button type="button" class="btn-sm btn-primary" id="btn-desk-dep-copy">Copy deposit address</button>
                 </div>
               </div>
             </div>
@@ -349,7 +349,7 @@ function renderDepositCard(
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
           <div class="cex-callout cex-callout--warn" role="note">
-            <strong>Login addr ≠ deposit.</strong> Never send coins to Connect / Copy addr.
+            <strong>Login addr ≠ deposit.</strong> Never send coins to Connect / login address — use <strong>Copy address</strong> on the deposit panel below.
             ${
               session.address
                 ? `<span class="mono cex-callout-login">Login only: ${escapeHtml(session.address)}</span>`

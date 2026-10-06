@@ -1419,7 +1419,10 @@ a:hover { text-decoration: underline; }
   .demo-badge { font-size: 0.5rem; }
   .mp-tab { font-size: 0.68rem; padding: 0.4rem 0.25rem; }
   .kbd-hint { display: none !important; }
+  .nav-btn .nav-label-full { display: none; }
+  .nav-btn .nav-label-short { display: inline; }
 }
+.nav-btn .nav-label-short { display: none; }
 .col-book, .col-center, .col-right {
   border-right: 1px solid var(--edge);
   display: flex; flex-direction: column; overflow: hidden;

@@ -1685,6 +1685,7 @@ function refreshOrderZone(): void {
   syncPctMarks("buy");
   syncPctMarks("sell");
   updatePreview();
+  syncExecButtonsEnabled();
 }
 
 function wireOrderPanelEvents(): void {
@@ -3563,7 +3564,7 @@ function render(): void {
     <nav class="ex-nav" id="main-nav">
       <button type="button" class="nav-btn ${view === "spot" ? "active" : ""}" data-view="spot">Spot</button>
       <button type="button" class="nav-btn ${view === "convert" ? "active" : ""}" data-view="convert">Convert</button>
-      <button type="button" class="nav-btn ${view === "account" ? "active" : ""}" data-view="account">Account</button>
+      <button type="button" class="nav-btn ${view === "account" ? "active" : ""}" data-view="account"><span class="nav-label-full">Account</span><span class="nav-label-short" aria-hidden="true">Acct</span></button>
       <button type="button" class="nav-btn ${view === "pool" ? "active" : ""}" data-view="pool">Pool</button>
     </nav>
     <div class="ex-actions">
@@ -6573,6 +6574,24 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
 function updatePreview(): void {
   updatePreviewForSide("buy");
   updatePreviewForSide("sell");
+  syncExecButtonsEnabled();
+}
+
+/** Disable Buy/Sell when Avbl is 0 — avoid POST /orders 400 (M-24). */
+function syncExecButtonsEnabled(): void {
+  const av = availBalance();
+  for (const side of ["buy", "sell"] as const) {
+    const btn = document.getElementById(`btn-${side}`) as HTMLButtonElement | null;
+    if (!btn) continue;
+    const need = side === "buy" ? av.quote : av.base;
+    const dead = !(need > 0);
+    btn.disabled = dead;
+    if (dead) {
+      btn.title = side === "buy" ? "Avbl 0 quote — deposit first" : "Avbl 0 base — deposit or free reserves";
+    } else {
+      btn.removeAttribute("title");
+    }
+  }
 }
 
 /** Paper TP/SL attached after a resting entry fills. */
@@ -6692,6 +6711,12 @@ function flushPendingTpslAttaches(): boolean {
 function submitOrder(side: "buy" | "sell"): void {
   if (orderInFlight) {
     toast("Order already in progress", "info");
+    return;
+  }
+  const av = availBalance();
+  const need = side === "buy" ? av.quote : av.base;
+  if (!(need > 0)) {
+    setOrderMsg(side, side === "buy" ? "Avbl 0 quote — deposit first" : "Avbl 0 base — deposit first", "err");
     return;
   }
   const form = readOrderForm(side);
