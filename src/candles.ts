@@ -526,6 +526,7 @@ export function seedAllTimeframes(
     tip.high = Math.max(tip.high, tip.open, tipMid);
     tip.low = Math.min(tip.low, tip.open, tipMid);
   }
+  pinAllTfTipsToBase(all, all[CANDLE_BASE_TF] ?? base);
   return all;
 }
 
@@ -670,6 +671,7 @@ export function applyPaperClockToPairCandles(
     const series = all[tf];
     if (series?.length) all[tf] = finalizeTfSeries(tf, series, pairId);
   }
+  pinAllTfTipsToBase(all, nextBase);
   return all;
 }
 
@@ -1021,7 +1023,7 @@ export function applyMidToPairCandles(
       low: Math.min(pinned.low, pinned.open, mid),
     };
   }
-  const all = deriveAllTimeframes(nextBase, pairId, candlesByTf);
+  const all = deriveAllTimeframes(nextBase, pairId, undefined, { retainPrev: false });
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
     if (tf === CANDLE_BASE_TF) {
@@ -1039,6 +1041,7 @@ export function applyMidToPairCandles(
     }
     all[tf] = series;
   }
+  pinAllTfTipsToBase(all, nextBase);
   return all;
 }
 
@@ -1566,8 +1569,8 @@ export type CandlePrint = {
   amountBase?: number;
 };
 
-/** v17: 24h durable tape + ticker dayRange envelope for pumps. */
-const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v17:";
+/** v18: prints-first OHLC (session cache never forks open vs other devices). */
+const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v18:";
 
 /** Durable 24h ticker envelope — widens print OHLC when tape window is shorter than 24h. */
 export type LiveDayRange = { high?: number; low?: number; open?: number };
@@ -1688,8 +1691,9 @@ export function clearLiveCandleCache(pairId: PairId): void {
   if (typeof sessionStorage === "undefined") return;
   try {
     sessionStorage.removeItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v15:" + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v17:" + pairId);
     sessionStorage.removeItem("hackme-ex-live-1m:v16:" + pairId);
+    sessionStorage.removeItem("hackme-ex-live-1m:v15:" + pairId);
     sessionStorage.removeItem("hackme-ex-live-1m:v14:" + pairId);
     sessionStorage.removeItem("hackme-ex-live-1m:v13:" + pairId);
   } catch {
@@ -1754,6 +1758,9 @@ export function loadLiveCandleCache(pairId: PairId, maxAgeMs = 6 * 60 * 60_000):
 /**
  * Build 1m OHLC from public prints, merge session cache, pad short history with
  * paper walk, then derive all TFs. Used on live desk after F5 so spikes survive.
+ *
+ * Cross-device rule: print buckets are rebuilt from tape only (first=open, last=close).
+ * Session cache may fill *empty* buckets only — never override print open/H/L.
  */
 export function hydrateLiveCandlesFromPrints(
   pairId: PairId,
@@ -1773,30 +1780,14 @@ export function hydrateLiveCandlesFromPrints(
       : sortedPrints[sortedPrints.length - 1]?.price ?? 0;
   cached1m = pruneLiveCacheForHydration(cached1m, tipEarly, sortedPrints);
   const byBucket = new Map<number, Candle>();
+  const printBuckets = new Set<number>();
 
-  const ingest = (rows: Candle[]) => {
-    for (const c of rows) {
-      if (!(c.time > 0) || !(c.close > 0)) continue;
-      if (c.time < CHART_GENESIS_UNIX) continue;
-      const prev = byBucket.get(c.time);
-      if (!prev) {
-        byBucket.set(c.time, { ...c });
-      } else {
-        // Prefer later close; expand high/low.
-        prev.high = Math.max(prev.high, c.high, c.open, c.close);
-        prev.low = Math.min(prev.low, c.low, c.open, c.close);
-        prev.close = c.close;
-        prev.volume = Math.max(prev.volume, c.volume);
-      }
-    }
-  };
-
-  if (cached1m?.length) ingest(cached1m);
-
+  // 1) Tape is source of truth — rebuild each print bucket from scratch.
   for (const p of sortedPrints) {
     const t = Math.floor(p.ts / 1000 / sec) * sec;
     if (t < CHART_GENESIS_UNIX) continue;
     const vol = p.amountBase && p.amountBase > 0 ? p.amountBase : 0;
+    printBuckets.add(t);
     const prev = byBucket.get(t);
     if (!prev) {
       byBucket.set(t, {
@@ -1815,6 +1806,18 @@ export function hydrateLiveCandlesFromPrints(
     }
   }
 
+  // 2) Session cache fills gaps only (same tip scale) — never forks print opens.
+  if (cached1m?.length) {
+    for (const c of cached1m) {
+      if (!(c.time > 0) || !(c.close > 0)) continue;
+      if (c.time < CHART_GENESIS_UNIX) continue;
+      if (printBuckets.has(c.time)) continue;
+      if (byBucket.has(c.time)) continue;
+      if (tipEarly > 0 && Math.abs(c.close - tipEarly) / tipEarly > 0.14) continue;
+      byBucket.set(c.time, { ...c });
+    }
+  }
+
   let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
   const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
 
@@ -1824,7 +1827,7 @@ export function hydrateLiveCandlesFromPrints(
     sortedPrints.length > 0
       ? medianPrintPrice(sortedPrints) || sortedPrints[0]!.price
       : 0;
-  const printBucketsN = byBucket.size;
+  const printBucketsN = printBuckets.size;
   if (base.length < 24 && printBucketsN < 12 && tip > 0) {
     const open24 = dayRange?.open && dayRange.open > 0 ? dayRange.open : 0;
     const anchor =
@@ -1854,7 +1857,7 @@ export function hydrateLiveCandlesFromPrints(
         volume: 0,
       });
     } else if (last.time === tNow) {
-      const hasPrintVol = (last.volume || 0) > 0;
+      const hasPrintVol = (last.volume || 0) > 0 || printBuckets.has(last.time);
       // Extend range toward tip mid, but keep print-driven close when this bar traded.
       last.high = Math.max(last.high, tip, last.open, last.close);
       last.low = Math.min(last.low, tip, last.open, last.close);
@@ -1907,5 +1910,25 @@ export function hydrateLiveCandlesFromPrints(
     }
   }
   all[CANDLE_BASE_TF] = base;
+  // Cross-TF tip parity: every resolution's forming close tracks 1m tip (CEX desk).
+  pinAllTfTipsToBase(all, base);
   return all as Record<Timeframe, Candle[]>;
+}
+
+/** Force every TF tip close/H/L envelope to match the 1m tip close. */
+export function pinAllTfTipsToBase(
+  all: Partial<Record<Timeframe, Candle[]>>,
+  base1m: Candle[],
+): void {
+  const baseTip = base1m[base1m.length - 1];
+  if (!baseTip || !(baseTip.close > 0)) return;
+  const pin = baseTip.close;
+  for (const tf of TIMEFRAMES) {
+    const series = all[tf];
+    if (!series?.length) continue;
+    const tip = series[series.length - 1]!;
+    tip.close = pin;
+    tip.high = Math.max(tip.high, tip.open, pin);
+    tip.low = Math.min(tip.low, tip.open, pin);
+  }
 }

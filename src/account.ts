@@ -58,6 +58,8 @@ export type AccountPageOpts = {
   feeWallet?: string | null;
   /** Optional node wallet snapshot for multi-wallet row. */
   nodeWallet?: { hmc: number; sup: number } | null;
+  /** Spot balances for withdraw available hint. */
+  wallet?: Wallet | null;
   /** Last /health edge snapshot for desk HOLD badges. */
   deskEdge?: {
     matching: string;
@@ -373,11 +375,13 @@ function renderWithdrawCard(
   labLive: boolean,
   session: ReturnType<typeof labSessionLabel>,
   deskEdge?: AccountPageOpts["deskEdge"],
+  wallet?: Wallet | null,
 ): string {
   const deskWd = !labOn && isDeskConnectEnabled() && !!deskEdge?.withdrawEnabled;
   const deskLive = deskWd && session.live;
   const showForm = labOn || deskWd;
   const enableBtns = labOn ? labLive : deskLive;
+  const availHmc = wallet?.hmc ?? 0;
   return `
         <article class="acct-cash-card withdraw cex-funds">
           <div class="acct-cash-title">
@@ -396,6 +400,7 @@ function renderWithdrawCard(
           ${
             showForm
               ? `${deskWd ? withdrawLimitsPlateHtml("HMC") : ""}
+          <p class="cex-wd-avail mono" id="lab-wd-avail" data-hmc="${availHmc}" data-sup="${wallet?.sup ?? 0}" data-usdt="${wallet?.usdt ?? 0}" data-btc="${wallet?.btc ?? 0}">Available: <strong>${formatNum(availHmc, 4)} HMC</strong></p>
           <div class="lab-withdraw-form cex-wd-form">
             <label class="lab-field">Asset
               <select id="lab-wd-asset" class="mono">
@@ -509,7 +514,7 @@ function renderCashDock(
         ${renderDepositCard(labOn, labLive, session, opts?.deskEdge)}
       </div>
       <div class="acct-cash-panel" data-cash-panel="withdraw" id="acct-cash-withdraw" hidden>
-        ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge)}
+        ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge, opts?.wallet ?? null)}
       </div>
       ${
         labOn

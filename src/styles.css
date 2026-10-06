@@ -7947,3 +7947,76 @@ html {
 .acct-cash-card.withdraw .cex-limits-head {
   color: rgba(255, 160, 175, 0.95);
 }
+
+/* —— Mobile funds / chart polish —— */
+html.mobile-layout .acct-cash-dock {
+  padding: 0.75rem 0.7rem 1.1rem;
+  margin-bottom: 0.35rem;
+}
+html.mobile-layout .cex-asset-pills {
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+}
+html.mobile-layout .cex-asset-pill {
+  min-height: 3rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+}
+html.mobile-layout .cex-asset-pill-sym { font-size: 1.05rem; }
+html.mobile-layout .cex-limits-grid { grid-template-columns: 1fr; }
+html.mobile-layout .cex-dep-panel-top {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+html.mobile-layout .cex-wd-actions,
+html.mobile-layout .cex-dep-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+html.mobile-layout .cex-wd-actions .btn-lab,
+html.mobile-layout .cex-dep-actions .btn-sm {
+  min-height: 2.75rem;
+  flex: 1 1 auto;
+}
+html.mobile-layout .cex-wd-avail {
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(87, 118, 168, 0.28);
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.8rem;
+}
+.cex-wd-avail {
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(87, 118, 168, 0.28);
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 0.78rem;
+  color: rgba(200, 215, 235, 0.95);
+}
+.cex-wd-avail strong { color: var(--text); }
+html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .chart-chrome {
+  gap: 0.35rem;
+}
+html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .tf-block {
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  padding-bottom: 0.2rem;
+}
+html.mobile-layout .terminal.mobile-stack[data-mobile-panel="chart"] .tfq {
+  scroll-snap-align: start;
+  min-height: 2.35rem;
+  min-width: 2.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+html.mobile-layout .mobile-chart-trade-bar .mctb {
+  min-height: 3.05rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+html.mobile-layout .acct-desk-cash-cta {
+  padding: 0.55rem 0.6rem;
+}

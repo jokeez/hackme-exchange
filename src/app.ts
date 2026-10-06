@@ -3588,7 +3588,7 @@ function render(): void {
       </div>
     </div>
   </header>
-  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
+  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap, wallet: state.wallet }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
   ${view === "pool" && !embed ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
@@ -5375,6 +5375,13 @@ function wireLabApiButtons(): void {
       const plate = document.getElementById("lab-wd-limits-plate");
       if (plate) {
         plate.outerHTML = withdrawLimitsPlateHtml(asset);
+      }
+      const availEl = document.getElementById("lab-wd-avail");
+      if (availEl) {
+        const key = asset.toLowerCase() as "hmc" | "sup" | "usdt" | "btc";
+        const raw = Number(availEl.getAttribute(`data-${key}`) || 0);
+        const decimals = key === "btc" ? 8 : key === "usdt" ? 4 : 4;
+        availEl.innerHTML = `Available: <strong>${raw.toFixed(decimals)} ${asset}</strong>`;
       }
       const amtInp = document.getElementById("lab-wd-amt") as HTMLInputElement | null;
       if (amtInp) {

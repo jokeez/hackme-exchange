@@ -12,6 +12,7 @@ import {
   hydrateLiveCandlesFromPrints,
   liveCandleCacheFitsTip,
   loadLiveCandleCache,
+  clearLiveCandleCache,
   MAX_CANDLES,
   maxBarsSinceGenesis,
   medianBarStepSec,
@@ -459,8 +460,9 @@ describe("hydrateLiveCandlesFromPrints", () => {
     expect(tip!.high).toBeGreaterThanOrEqual(0.055);
 
     // Poisoned / non-finite OHLC must not hydrate (same key prefix as save/load).
+    clearLiveCandleCache("HMC_USDT");
     sessionStorage.setItem(
-      "hackme-ex-live-1m:v17:HMC_USDT",
+      "hackme-ex-live-1m:v18:HMC_USDT",
       JSON.stringify({
         at: Date.now(),
         bars: [{ t: t0, o: "x", h: 1, l: 0, c: 1, v: 0 }, { t: t0 + 60, o: 1, h: 0.5, l: 2, c: 1, v: 0 }],
