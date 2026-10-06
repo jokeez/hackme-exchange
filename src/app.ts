@@ -4486,7 +4486,9 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   if (msg) {
     const creditHint =
       res.kind === "evm_bep20"
-        ? "watcher → HOLD → KYT screen → release; send only USDT BEP-20 on this network"
+        ? res.chain_id === 56
+          ? "MAINNET BSC · watcher → HOLD → KYT → release; send only USDT BEP-20 (not testnet/TRC/ERC)"
+          : "watcher → HOLD → KYT screen → release; send only USDT BEP-20 on this network"
         : "credits usually within ~30s after chain confirm";
     msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${
       res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
