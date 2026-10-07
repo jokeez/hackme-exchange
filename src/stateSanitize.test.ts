@@ -51,9 +51,11 @@ describe("paper build CSP (FE-M-CSP)", () => {
     const csp = m![1];
     expect(csp).not.toContain("127.0.0.1:18443");
     expect(csp).not.toContain("localhost:18443");
-    expect(csp).toContain("connect-src 'self' https://hackme.tech https://api.binance.com");
-    expect(csp).toContain("https://static.cloudflareinsights.com");
-    expect(csp).toContain("https://api.binance.com");
+    expect(csp).toContain("connect-src 'self' https://hackme.tech;");
+    expect(csp).not.toContain("exchange-api.hackme.tech");
+    expect(csp).not.toContain("api.binance.com");
+    expect(csp).not.toContain("cloudflareinsights.com");
+    expect(csp).not.toContain("static.cloudflareinsights.com");
     expect(csp).toContain("frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080");
   });
 

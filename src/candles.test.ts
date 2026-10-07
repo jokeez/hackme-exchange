@@ -462,7 +462,7 @@ describe("hydrateLiveCandlesFromPrints", () => {
     // Poisoned / non-finite OHLC must not hydrate (same key prefix as save/load).
     clearLiveCandleCache("HMC_USDT");
     sessionStorage.setItem(
-      "hackme-ex-live-1m:v18:HMC_USDT",
+      "hackme-ex-live-1m:v19:HMC_USDT",
       JSON.stringify({
         at: Date.now(),
         bars: [{ t: t0, o: "x", h: 1, l: 0, c: 1, v: 0 }, { t: t0 + 60, o: 1, h: 0.5, l: 2, c: 1, v: 0 }],
@@ -495,6 +495,34 @@ describe("hydrateLiveCandlesFromPrints", () => {
     expect(pumpBar!.volume).toBeGreaterThan(0);
   });
 
+  it("keeps ticker 24h high on 1D after Soft-MM tip dump when print aged out of tape", () => {
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 120 * 60;
+    // Prints only around the dumped tip — the 0.096324 fill already fell out of /trades window.
+    const prints = [
+      { ts: (t0 + 100 * 60) * 1000, price: 0.052, amountBase: 3 },
+      { ts: (t0 + 110 * 60) * 1000, price: 0.051, amountBase: 2 },
+      { ts: (t0 + 115 * 60) * 1000, price: 0.050884, amountBase: 4 },
+    ];
+    const tip = 0.050884;
+    const dayHi = 0.096324;
+    const dayLo = 0.048157;
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, null, {
+      high: dayHi,
+      low: dayLo,
+      open: 0.059713,
+    });
+    const day = all["1D"]!;
+    expect(day.length).toBeGreaterThan(0);
+    const tipDay = day[day.length - 1]!;
+    expect(tipDay.high).toBeGreaterThanOrEqual(dayHi * 0.999);
+    expect(tipDay.low).toBeLessThanOrEqual(dayLo * 1.001);
+    expect(tipDay.close).toBeCloseTo(tip, 4);
+    // Higher-TF constrain must not crush volume-backed day bar to tip×1.22 (~0.061).
+    expect(tipDay.high).toBeGreaterThan(tip * 1.5);
+  });
+
   it("clamps synthetic pad highs that never traded on the tape", () => {
     const tip = 0.055;
     const fake: Candle[] = [
@@ -512,14 +540,15 @@ describe("hydrateLiveCandlesFromPrints", () => {
     expect(out[2]!.close).toBeCloseTo(tip, 5);
   });
 
-  it("drops stale session cache when live last moved to a new price band", () => {
+  it("keeps tape-envelope session cache when Soft-MM tip pumps away from median", () => {
     const now = Date.now();
     const sec = 60;
     const t0 = Math.floor(now / 1000 / sec) * sec - 3600;
-    const stale: Candle[] = [];
+    // Cache already contains the real path 0.05 → 0.068 (what the user watched).
+    const path: Candle[] = [];
     for (let i = 0; i < 120; i++) {
-      const px = 0.051 + (i % 3) * 0.00001;
-      stale.push({ time: t0 + i * sec, open: px, high: px * 1.001, low: px * 0.999, close: px, volume: 1 });
+      const px = 0.051 + (i / 119) * (0.068 - 0.051);
+      path.push({ time: t0 + i * sec, open: px, high: px * 1.001, low: px * 0.999, close: px, volume: i % 5 === 0 ? 1 : 0 });
     }
     const prints = [
       { ts: (t0 + 3500) * 1000, price: 0.068, amountBase: 2 },
@@ -527,12 +556,71 @@ describe("hydrateLiveCandlesFromPrints", () => {
       { ts: (t0 + 3560) * 1000, price: 0.0679, amountBase: 3 },
     ];
     const tip = 0.068;
-    expect(liveCandleCacheFitsTip(stale, tip, prints)).toBe(false);
-    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, stale);
+    expect(liveCandleCacheFitsTip(path, tip, prints)).toBe(true);
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, path);
     const base = all[CANDLE_BASE_TF]!;
-    const med = base.slice(0, -5).map((c) => c.close);
-    const medClose = med.sort((a, b) => a - b)[Math.floor(med.length / 2)]!;
-    expect(medClose).toBeGreaterThan(0.06);
+    expect(base.length).toBeGreaterThan(60);
+    // Early path bars must survive — not get wiped and replaced by a tip-anchored seed.
+    const early = base.find((c) => c.time === t0 + 10 * sec);
+    expect(early).toBeTruthy();
+    expect(early!.close).toBeLessThan(0.058);
+    expect(base[base.length - 1]!.close).toBeCloseTo(tip, 3);
+  });
+
+  it("does not rewrite mid-history print Soft-MM pegs on re-hydrate", () => {
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 600;
+    const prints: { ts: number; price: number; amountBase: number }[] = [];
+    // Flat Soft-MM peg for 8 minutes — real tape, not a paper ruler to heal away.
+    for (let i = 0; i < 8; i++) {
+      prints.push({ ts: (t0 + i * sec) * 1000 + 100, price: 0.05501, amountBase: 2 });
+      prints.push({ ts: (t0 + i * sec) * 1000 + 400, price: 0.05502, amountBase: 1 });
+    }
+    prints.push({ ts: (t0 + 9 * sec) * 1000, price: 0.056, amountBase: 3 });
+    const tip = 0.056;
+    const first = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now);
+    const again = hydrateLiveCandlesFromPrints(
+      "HMC_USDT",
+      prints,
+      tip,
+      now,
+      first[CANDLE_BASE_TF],
+    );
+    const a = first[CANDLE_BASE_TF]!;
+    const b = again[CANDLE_BASE_TF]!;
+    for (let i = 0; i < 8; i++) {
+      const ta = a.find((c) => c.time === t0 + i * sec);
+      const tb = b.find((c) => c.time === t0 + i * sec);
+      expect(ta).toBeTruthy();
+      expect(tb).toBeTruthy();
+      expect(tb!.open).toBeCloseTo(ta!.open, 8);
+      expect(tb!.high).toBeCloseTo(ta!.high, 8);
+      expect(tb!.low).toBeCloseTo(ta!.low, 8);
+      expect(tb!.close).toBeCloseTo(ta!.close, 8);
+      expect(tb!.volume).toBeGreaterThan(0);
+    }
+  });
+
+  it("rejects orphan cache on a totally different band than tip+tape", () => {
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 3600;
+    const orphan: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      const px = 0.012;
+      orphan.push({ time: t0 + i * sec, open: px, high: px, low: px, close: px, volume: 0 });
+    }
+    const prints = [
+      { ts: (t0 + 3500) * 1000, price: 0.068, amountBase: 2 },
+      { ts: (t0 + 3560) * 1000, price: 0.0679, amountBase: 3 },
+    ];
+    const tip = 0.068;
+    expect(liveCandleCacheFitsTip(orphan, tip, prints)).toBe(false);
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, orphan);
+    const base = all[CANDLE_BASE_TF]!;
+    const orphanBar = base.find((c) => c.time === t0 && Math.abs(c.close - 0.012) < 1e-6);
+    expect(orphanBar).toBeFalsy();
     expect(base[base.length - 1]!.close).toBeCloseTo(tip, 3);
   });
 

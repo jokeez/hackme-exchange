@@ -205,22 +205,30 @@ export function localFallbackMarket(
   );
 }
 
-/** Best-effort public BTC/USDT mark for HMC/BTC + SUP/BTC sync. */
+/** Best-effort public BTC/USDT mark for HMC/BTC + SUP/BTC sync (same-origin proxy). */
 export async function fetchBtcUsd(): Promise<number> {
-  try {
-    const r = await fetchWithTimeout(
-      "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-      {},
-      3_500,
-    );
-    if (!r.ok) return DEFAULT_BTC_USD;
-    const j = (await r.json()) as { price?: string };
-    const n = Number(j.price);
-    if (!Number.isFinite(n) || n < 1_000 || n > 5_000_000) return DEFAULT_BTC_USD;
-    return n;
-  } catch {
-    return DEFAULT_BTC_USD;
+  const urls: string[] = [];
+  if (typeof window !== "undefined" && window.location?.origin) {
+    // Prefer same-origin mark proxy — keeps api.binance.com out of CSP connect-src.
+    urls.push(`${window.location.origin}/mark-proxy/btc`);
   }
+  // Dev/lab only — production builds drop this branch (no Binance host in the bundle path).
+  if (import.meta.env.DEV) {
+    urls.push("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT");
+  }
+  for (const url of urls) {
+    try {
+      const r = await fetchWithTimeout(url, {}, 3_500);
+      if (!r.ok) continue;
+      const j = (await r.json()) as { price?: string };
+      const n = Number(j.price);
+      if (!Number.isFinite(n) || n < 1_000 || n > 5_000_000) continue;
+      return n;
+    } catch {
+      /* try next */
+    }
+  }
+  return DEFAULT_BTC_USD;
 }
 
 export async function fetchMarket(

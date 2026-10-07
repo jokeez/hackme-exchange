@@ -20,9 +20,7 @@ import {
   clampFillWickPx,
   deriveAllTimeframes,
   ensureTfSeriesCadence,
-  clearLiveCandleCache,
   hydrateLiveCandlesFromPrints,
-  liveCandleCacheFitsTip,
   loadLiveCandleCache,
   nudgeCloseTowardFill,
   prependOlderCandles,
@@ -750,21 +748,24 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     if (pairId === state.activePair) patchTickerBar();
   }
   const prints = [...apiPrints, ...candlePrintsFromLocalTape(pairId)];
+  // Prefer last trade over Soft-MM book mid — mid can lag Last by 1–3% and desync the tip bar.
+  const lastPrint = prints.length
+    ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.price ?? 0
+    : 0;
   const tip =
-    tipMid > 0
-      ? tipMid
-      : lastPublicMid(pairId) ||
-        labBookMid(pairId) ||
-        prints[prints.length - 1]?.price ||
-        cached?.[cached.length - 1]?.close ||
-        0;
+    lastPrint > 0
+      ? lastPrint
+      : tipMid > 0
+        ? tipMid
+        : lastPublicMid(pairId) ||
+          labBookMid(pairId) ||
+          cached?.[cached.length - 1]?.close ||
+          0;
   // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
   if (!prints.length && !(cached?.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
-  if (cached?.length && !liveCandleCacheFitsTip(cached, tip, prints)) {
-    clearLiveCandleCache(pairId);
-    cached = null;
-  }
+  // Never wipe session cache here — pruneLiveCacheForHydration inside hydrate keeps the
+  // tape envelope. Clearing on tip drift was reseeding fake bars over real Soft-MM history.
   state.candles[pairId] = hydrateLiveCandlesFromPrints(
     pairId,
     prints,
@@ -785,10 +786,8 @@ function restoreLiveCandlesFromCache(pairId: PairId, tipMid: number): boolean {
   if (!cached?.length) return false;
   const tip = tipMid > 0 ? tipMid : cached[cached.length - 1]?.close ?? 0;
   if (!(tip > 0)) return false;
-  if (tipMid > 0 && !liveCandleCacheFitsTip(cached, tipMid, candlePrintsFromLocalTape(pairId))) {
-    clearLiveCandleCache(pairId);
-    return false;
-  }
+  // Pass cache through even on tip drift — hydrate prunes to the tape envelope.
+  // Do not clear sessionStorage: a later /trades hydrate needs those bars for gap fill.
   state.candles[pairId] = hydrateLiveCandlesFromPrints(
     pairId,
     candlePrintsFromLocalTape(pairId),
@@ -940,11 +939,11 @@ function deskVol24hBase(pairId: PairId = state.activePair): number {
     const fromTk = t?.volume24hBase ?? 0;
     return fromTk > 0 ? fromTk : candleVol24hFallback(pairId);
   }
-  // Live: durable fills ticker first, then short public-tape ring. Never seed/candle vol.
+  // Live: durable /tickers is SoT; tape can only raise (never undercut) while WS catches up.
   const api = deskApiTickers.get(pairId);
-  if (api && api.volume24hBase > 0) return api.volume24hBase;
+  const apiVol = api && api.volume24hBase > 0 ? api.volume24hBase : 0;
   const tape = deskVolTapeBase(pairId);
-  if (tape > 0) return tape;
+  if (apiVol > 0 || tape > 0) return Math.max(apiVol, tape);
   if (api) return 0;
   return 0;
 }
@@ -6356,7 +6355,13 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
         // Tip MUST be the print — Soft-MM mid flattens the chart after re-peg.
         const tip = newest.price;
         const baseLen = state.candles[ev.pairId]?.[CANDLE_BASE_TF]?.length ?? 0;
-        const needHydrate = baseLen < 24 || !liveHydratedPairs.has(ev.pairId);
+        // Full hydrate needs a dense tape. Sparse WS bursts + seed pad were wiping the chart
+        // the user was watching — only rebuild when we already have a long series to merge
+        // or enough local prints; otherwise upsert the print onto the existing series.
+        const localPrints = candlePrintsFromLocalTape(ev.pairId);
+        const needHydrate =
+          (!liveHydratedPairs.has(ev.pairId) && (baseLen < 12 || localPrints.length >= 40)) ||
+          (baseLen < 8 && localPrints.length >= 20);
         if (needHydrate) {
           const cached =
             state.candles[ev.pairId]?.[CANDLE_BASE_TF] ?? loadLiveCandleCache(ev.pairId);
@@ -6375,8 +6380,8 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
               amountBase: p.amountBase > 0 ? p.amountBase : 0,
             });
           }
-          for (const p of candlePrintsFromLocalTape(ev.pairId)) pushPrint(p);
-          if (prints.length) {
+          for (const p of localPrints) pushPrint(p);
+          if (prints.length >= 8) {
             state.candles[ev.pairId] = hydrateLiveCandlesFromPrints(
               ev.pairId,
               prints,
