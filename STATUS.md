@@ -2,7 +2,7 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-10-02 · **Source:** public · **Product:** paper SPA + soft-launch desk · **Matching / HMC·SUP custody:** **GO**
+**Updated:** 2026-10-09 · **Source:** public · **Product:** soft-launch desk · **Matching / HMC·SUP custody:** **Full GO**
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
@@ -21,10 +21,11 @@
 |-------|--------|
 | **This repo (source)** | Open (AGPL) — Spot SPA (paper + desk Connect) |
 | **Paper / desk site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) + same-origin `/desk-api` |
-| **Desk matching** | **GO (soft-launch)** — `matching: ok` · caps `max_open_orders` (default 20, prod may raise) · `price_band_bps=1500` · `min_notional=1e6` · book **600**/min |
-| **Desk deposit** | **GO** — HMC/SUP deposit addresses (`hmc_ed25519` / `sup_ed25519`); Connect addr ≠ deposit |
+| **Desk matching** | **GO** — `matching: ok` · `max_open_orders=96` · `price_band_bps=1500` · `min_notional=1e6` · Soft-MM tape |
+| **Desk deposit** | **GO** — HMC/SUP deposit addresses; Connect addr ≠ deposit; node-watch via ops-admin |
 | **Desk withdraw** | **GO** — request + **per-user TOTP/recovery**; ops completes via loopback admin (`:18445`) |
-| **USDT / BTC custody** | **HOLD** — paper stubs / lab bridge only until partner bridge |
+| **USDT** | BSC BEP-20 **watch** + stub KYT **manual** (no Didit / no hot-send) |
+| **BTC custody** | **HOLD** until dedicated cutover |
 | **Live mode in SPA** | **Blocked** (no `VITE_INTEGRATION_MODE=live` on public) |
 | **Desk Connect** | `VITE_PUBLIC_DESK_CONNECT=1` → `/desk-api` · seed export/import · 2FA enroll |
 

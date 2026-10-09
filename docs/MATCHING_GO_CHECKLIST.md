@@ -1,7 +1,8 @@
 # Matching GO checklist (public desk)
 
-**Status:** **GO (soft-launch)** — matching `ok` · deposit/withdraw **ON** (TOTP + ops complete) · USDT/BTC real custody still **HOLD**.  
-**Scope:** public desk live book/orders + HMC/SUP custody. Soft-launch caps: `max_open_orders=20`, `price_band_bps=1500`, `min_notional=1e6`.
+**Status:** **Full GO (2026-10-09)** — matching `ok` · deposit/withdraw **ON** · USDT BSC watch + stub KYT manual · BTC hot custody **HOLD**.  
+**Scope:** public desk live book/orders + HMC/SUP custody. Caps: `max_open_orders=96`, `price_band_bps=1500`, `min_notional=1e6`.  
+Ops canon: `hackme-exchange-ops/docs/FULL_GO_CHECKLIST.md`.
 
 Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `89.150.41.40`.
 

@@ -38,8 +38,8 @@
 | Role | Host |
 |------|------|
 | Paper SPA / Caddy | `89.150.41.40` · `exchange.hackme.tech` |
-| Same-origin desk proxy | `https://exchange.hackme.tech/desk-api/*` → private desk API (Strict cookies) |
-| Public desk API | `exchange-api.hackme.tech` (CF) · `api.exchange.hackme.tech` fallback |
+| Same-origin desk proxy | `https://exchange.hackme.tech/desk-api/*` → loopback API (Strict cookies; SPA CSP `connect-src 'self'`) |
+| Public desk API | `exchange-api.hackme.tech` (CF) for ops/probes — **not** in SPA CSP |
 | Private C2 API (loopback) | **same** `89.150.41.40` — soft-launch trading ON |
 | Mining hub / node | `132.243.112.100` — **not** exchange edge |
 
