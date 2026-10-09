@@ -89,9 +89,11 @@ async function main() {
   else pass("withdraw.enabled=true");
   if (h.public_edge !== true) fail("public_edge");
   else pass("public_edge");
-  if (h.max_open_orders !== 20 && h.max_open_orders !== 40) {
-    fail(`max_open_orders ${h.max_open_orders} (want 20 or 40 soft-launch)`);
-  } else pass(`max_open_orders=${h.max_open_orders}`);
+  // Soft-MM 5 pairs × 3 levels needs headroom (48–96 live). Cap must be set and ≤256.
+  const mo = h.max_open_orders ?? 0;
+  if (mo < 20 || mo > 256) {
+    fail(`max_open_orders ${mo} (want 20..256 soft-launch)`);
+  } else pass(`max_open_orders=${mo}`);
 
   for (const path of ["/metrics", "/openapi.yaml", "/lab/deposit", "/admin/credit", "/admin/node-watch-sync", "/admin/withdraw/complete"]) {
     const r = await fetch(`${BASE}${path}`, {
@@ -124,13 +126,25 @@ async function main() {
   if (depSup.status !== 200 || !supBody.deposit_address?.startsWith("HMC-")) fail(`SUP deposit ${depSup.status}`);
   else pass(`deposit address SUP ${supBody.deposit_address}`);
 
-  // USDT stub must be labeled stub if returned
+  // Soft-launch: BSC BEP-20 watch (mainnet) or legacy lab stub — both OK if labeled clearly.
   const depUsdt = await fetch(`${BASE}/deposit/address?asset=USDT`, { headers: s.hdr() });
-  const usdtBody = (await depUsdt.json()) as { kind?: string; bridge_model?: string; code?: string };
+  const usdtBody = (await depUsdt.json()) as {
+    kind?: string;
+    bridge_model?: string;
+    network?: string;
+    warning?: string;
+    code?: string;
+  };
   if (depUsdt.status === 200) {
-    if (usdtBody.kind !== "lab_stub" && usdtBody.bridge_model !== "paper_bridge_stub") {
-      fail(`USDT address not labeled stub ${JSON.stringify(usdtBody)}`);
-    } else pass("USDT deposit labeled lab_stub");
+    const stub =
+      usdtBody.kind === "lab_stub" || usdtBody.bridge_model === "paper_bridge_stub";
+    const bscWatch =
+      usdtBody.bridge_model === "bsc_usdt_watch" ||
+      usdtBody.kind === "evm_bep20" ||
+      (usdtBody.network === "BSC" && /MAINNET|BEP-20|USDT/i.test(String(usdtBody.warning || "")));
+    if (!stub && !bscWatch) {
+      fail(`USDT address unlabeled ${JSON.stringify(usdtBody)}`);
+    } else pass(stub ? "USDT deposit labeled lab_stub" : "USDT deposit labeled BSC BEP-20 watch");
   } else pass(`USDT deposit ${depUsdt.status} (paused/unsupported OK)`);
 
   // Withdraw without 2FA — must not silently succeed without enrollment; expect 401 2fa_required or 400 insufficient
