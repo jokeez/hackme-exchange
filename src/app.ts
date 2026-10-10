@@ -112,6 +112,7 @@ import {
   fetchPublicTrades,
   fetchPublicTickers,
   formatExchangeReject,
+  getLedgerHolds,
   hubEmbedSessionBlockedHint,
   isSessionRequiredError,
   listExchangeFills,
@@ -462,7 +463,8 @@ let deskEdgeSnap: {
   minNotional: number;
   priceBandBps: number;
 } = {
-  matching: "HOLD",
+  // Pending until first /health — avoid false Deposit·HOLD flash on cold load.
+  matching: "…",
   depositEnabled: false,
   withdrawEnabled: false,
   maxOpenOrders: 0,
@@ -1049,14 +1051,14 @@ function renderAnnounce(): string {
         : deskBook
           ? "Soft-launch Spot — live book · Connect to trade"
           : desk
-            ? "Desk Connect — paper Spot until you connect"
+            ? "Soft-launch Spot — Connect wallet to trade when matching is GO"
             : "Paper Spot — simulated balances · reference mids";
   const detail = lab
     ? "lab ledger"
     : deskLive || deskBook
       ? "live L2 · public tape"
       : desk
-        ? "browser wallet · Spot paper until session"
+        ? "browser wallet · Connect for live session"
         : "paper balances in localStorage";
   const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
@@ -2437,7 +2439,7 @@ function renderConvert(): string {
   const serverReady = useServerConvert();
   const serverAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useServerMatching();
   const feeNote = serverReady
-    ? `Server <code>GET/POST /convert</code> · mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
+    ? `Server <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
     : serverAvail
       ? `Server convert ready — Connect on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
       : isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching)
@@ -2711,7 +2713,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
         hint.textContent =
           avail < amt
             ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
-            : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · server seed mid`;
+            : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · desk mid (Soft-MM / last trade)`;
       }
       const maxOk = maxConvertibleFrom();
       paintConvertCta(go, amt, avail < amt || amt > maxOk + 1e-12);
@@ -2731,7 +2733,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
           : q.code === "invalid_order"
             ? `${reject} — try a smaller size (pair qty/price caps)`
             : q.code === "convert_inventory"
-              ? `${reject} — try Spot book or a smaller convert`
+              ? `${reject} — clamp Max or open Spot book`
               : reject;
     }
     paintConvertCta(go, amt, true);
@@ -3025,12 +3027,15 @@ function softPatchFeePayChrome(): void {
   if (lead) {
     const labReady = tradingGuards.convertFeeServer && useLabMatching();
     const labAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useLabMatching();
-    const feeNote = labReady
-      ? `Lab <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
-      : labAvail
-        ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
-        : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
-    lead.innerHTML = `Swap at mid · ${feeNote}. No book, no futures.`;
+    const deskReady = tradingGuards.convertFeeServer && useServerMatching();
+    const feeNote = deskReady
+      ? `Server <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
+      : labReady
+        ? `Lab <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
+        : labAvail
+          ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+          : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
+    lead.innerHTML = `Swap at desk mid · ${feeNote}. No book, no futures.`;
   }
   // Keep Spot + Account checkboxes in sync when either is toggled.
   const acct = document.getElementById("acct-pay-hmc") as HTMLInputElement | null;
@@ -3599,7 +3604,7 @@ function render(): void {
       </div>
     </div>
   </header>
-  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap, wallet: state.wallet }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
+  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap, wallet: state.wallet, totpEnabled: labUser2faEnabled }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
   ${view === "pool" && !embed ? `<div class="mining-strip mono" id="mining-strip">
     ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
   </div>` : ""}`;
@@ -4550,7 +4555,11 @@ async function showDepositAddrUi(asset: string): Promise<void> {
           ? `MAINNET BSC · min ${USDT_DEPOSIT_MIN} USDT · watcher → HOLD → KYT → release; send only USDT BEP-20 (not testnet/TRC/ERC)`
           : "watcher → HOLD → KYT screen → release; send only USDT BEP-20 on this network"
         : "credits usually within ~30s after chain confirm";
-    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${
+    const usdtHoldHint =
+      res.kind === "evm_bep20"
+        ? ` · after ≥${USDT_CONFIRMATIONS} confs USDT stays in screening hold until ops approve KYT (manual — not instant)`
+        : "";
+    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${usdtHoldHint}${
       res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
     }`;
   }
@@ -4558,17 +4567,21 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   void copyTextToClipboard(dep).then((ok) => {
     if (ok) toast(`${asset} deposit address copied`, "info");
   });
-  // Poll ledger briefly so on-chain → node-watch credits appear without a manual Sync.
-  void watchDeskBalancesAfterDeposit();
+  // Poll ledger so on-chain → node-watch / BSC watch credits appear without a manual Sync.
+  void watchDeskBalancesAfterDeposit(asset);
 }
 
 let depositWatchTimer: number | undefined;
 let depositWatchLeft = 0;
+let depositWatchAsset = "";
 
-async function watchDeskBalancesAfterDeposit(): Promise<void> {
+async function watchDeskBalancesAfterDeposit(asset = ""): Promise<void> {
   if (depositWatchTimer) window.clearInterval(depositWatchTimer);
-  depositWatchLeft = 8; // ~8 × 8s ≈ 64s covers the ~30s credit window
+  depositWatchAsset = (asset || "").toUpperCase();
+  // USDT needs BSC confs + KYT — poll longer; HMC/SUP ~30s node-watch.
+  depositWatchLeft = depositWatchAsset === "USDT" ? 24 : 10; // ×8s
   const prev = { ...state.wallet };
+  const prevHolds = getLedgerHolds().map((h) => `${h.asset}:${h.hold}`).join("|");
   const tick = async () => {
     depositWatchLeft -= 1;
     const sync = await syncLabBalancesAndBook(state, market);
@@ -4579,10 +4592,19 @@ async function watchDeskBalancesAfterDeposit(): Promise<void> {
         state.wallet.hmc > prev.hmc ||
         state.wallet.sup > prev.sup ||
         state.wallet.btc > prev.btc;
+      const holdNow = getLedgerHolds().map((h) => `${h.asset}:${h.hold}`).join("|");
+      const holdGrew = holdNow !== prevHolds && getLedgerHolds().some((h) => h.hold > 0);
       if (grew) {
-        toast("Deposit credited — balance updated", "ok");
+        toast("Deposit credited — Available updated", "ok");
         refreshAccountAfterLab();
         patchAvailChips();
+        if (depositWatchTimer) window.clearInterval(depositWatchTimer);
+        depositWatchTimer = undefined;
+        return;
+      }
+      if (holdGrew && depositWatchAsset === "USDT") {
+        toast("USDT seen — screening hold until ops approve KYT (manual)", "info");
+        refreshAccountAfterLab();
         if (depositWatchTimer) window.clearInterval(depositWatchTimer);
         depositWatchTimer = undefined;
         return;
@@ -4592,6 +4614,29 @@ async function watchDeskBalancesAfterDeposit(): Promise<void> {
     if (depositWatchLeft <= 0 && depositWatchTimer) {
       window.clearInterval(depositWatchTimer);
       depositWatchTimer = undefined;
+      const stillHeld = getLedgerHolds().some((h) => h.hold > 0 && (!depositWatchAsset || h.asset === depositWatchAsset));
+      if (stillHeld) {
+        toast("Deposit in screening hold — waiting for ops KYT approve (not automatic)", "info");
+        const msg = document.getElementById("lab-deposit-msg");
+        if (msg) {
+          msg.textContent =
+            "Screening hold — ops must approve KYT before Available updates (manual soft-launch; not automatic).";
+        }
+      } else if (depositWatchAsset === "USDT") {
+        toast("No USDT credit yet — after ≥15 BSC confs it lands in hold for manual KYT", "info");
+        const msg = document.getElementById("lab-deposit-msg");
+        if (msg) {
+          msg.textContent =
+            "Watching BSC… after ≥15 confs USDT lands in screening hold for manual KYT — Sync on Account if status looks stale.";
+        }
+      } else if (depositWatchAsset) {
+        toast(`${depositWatchAsset} not credited yet — node-watch can take a bit; Sync on Account or wait`, "info");
+        const msg = document.getElementById("lab-deposit-msg");
+        if (msg) {
+          msg.textContent = `${depositWatchAsset} not credited yet — node-watch can take a bit; Sync on Account or wait.`;
+        }
+      }
+      if (state.mainView === "account") refreshAccountAfterLab();
     }
   };
   void tick();
@@ -4700,12 +4745,17 @@ function renderLabWithdrawList(
       const st = String(w.status || "").toLowerCase();
       const age = w.created_at ? Date.parse(w.created_at) : NaN;
       const ageMin = Number.isFinite(age) ? Math.max(0, Math.round((Date.now() - age) / 60_000)) : null;
+      const assetU = String(w.asset || "").toUpperCase();
       const statusLabel =
         st === "pending"
-          ? `pending${ageMin != null ? ` · ${ageMin}m` : ""} · waiting ops on-chain`
-          : st === "failed"
-            ? `failed${w.fail_reason ? ` · ${escapeHtml(String(w.fail_reason).slice(0, 40))}` : ""}`
-            : escapeHtml(w.status);
+          ? assetU === "USDT"
+            ? `pending${ageMin != null ? ` · ${ageMin}m` : ""} · KYT / ops broadcast (no auto hot-send)`
+            : `pending${ageMin != null ? ` · ${ageMin}m` : ""} · waiting ops on-chain`
+          : st === "kyt_pending" || st === "submitted"
+            ? `KYT review${ageMin != null ? ` · ${ageMin}m` : ""}`
+            : st === "failed"
+              ? `failed${w.fail_reason ? ` · ${escapeHtml(String(w.fail_reason).slice(0, 40))}` : ""}`
+              : escapeHtml(w.status);
       const tone = st === "pending" ? "warn" : st === "completed" ? "up" : st === "failed" ? "down" : "dim";
       return `<li><span class="dim">${escapeHtml(w.id.slice(0, 8))}…</span> ${escapeHtml(w.asset)} ${minorToDisplay(w.amount)} → ${escapeHtml(w.destination.slice(0, 18))}… <strong class="${tone}">${statusLabel}</strong></li>`;
     })
@@ -4761,6 +4811,11 @@ async function labWithdrawRequestUi(): Promise<void> {
   }
   // Public desk always requires TOTP/recovery; lab requires once enrolled.
   const deskNeeds2fa = deskOk && !labOk;
+  if (deskNeeds2fa && !labUser2faEnabled) {
+    toast("Enable 2FA first — enroll Authenticator under Desk session", "warn");
+    document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   if (!totp && (labUser2faEnabled || deskNeeds2fa)) {
     toast("2FA code required — enter TOTP or recovery code", "warn");
     document.getElementById("lab-wd-2fa")?.focus();
@@ -5227,10 +5282,12 @@ function applyLabCustodyPauseUi(): void {
     else el.removeAttribute("title");
   };
   const wdAllow = labWithdrawEnabled && (useLabMatching() || deskEdgeSnap.withdrawEnabled);
+  const deskNeeds2faEnroll = isDeskConnectEnabled() && !useLabMatching() && !labUser2faEnabled;
+  const wdRequestAllow = wdAllow && !deskNeeds2faEnroll;
   const depAllow = labDepositEnabled && (useLabMatching() || deskEdgeSnap.depositEnabled);
-  gate("btn-lab-wd-request", wdAllow, "Withdrawals paused");
+  gate("btn-lab-wd-request", wdRequestAllow, deskNeeds2faEnroll ? "Enable 2FA first" : "Withdrawals paused");
   gate("btn-lab-wd-refresh", wdAllow, "Withdrawals paused");
-  gate("btn-lab-wd-quote", wdAllow, "Withdrawals paused");
+  gate("btn-lab-wd-quote", wdRequestAllow, deskNeeds2faEnroll ? "Enable 2FA first" : "Withdrawals paused");
   gate("btn-lab-mint-hmc", depAllow && useLabMatching(), "Deposits paused");
   gate("btn-lab-dep-hmc", depAllow, "Deposits paused");
   gate("btn-lab-dep-usdt", depAllow && useLabMatching(), "Deposits paused");
@@ -5324,6 +5381,11 @@ function wireLabApiButtons(): void {
   click("btn-lab-wd-request", () => void labWithdrawRequestUi());
   click("btn-lab-wd-refresh", () => void labWithdrawRefreshUi());
   click("btn-lab-wd-quote", () => void labWithdrawQuoteUi());
+  click("btn-acct-jump-2fa", () => {
+    document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.getElementById("acct-desk")?.setAttribute("open", "");
+    document.getElementById("acct-lab")?.setAttribute("open", "");
+  });
   click("btn-lab-fills-refresh", () => void labFillsRefreshUi());
   click("btn-lab-2fa-setup", () => void lab2faSetupUi());
   click("btn-lab-2fa-confirm", () => void lab2faConfirmUi());

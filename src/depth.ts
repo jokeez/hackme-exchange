@@ -135,7 +135,7 @@ export function renderDepthPanel(
     return `
   <div class="depth-panel depth-empty">
     <p class="empty-title">No depth</p>
-    <p class="muted small">${labLive ? "Waiting for lab book depth…" : "Waiting for oracle mid to build the book."}</p>
+    <p class="muted small">${labLive ? "Waiting for live desk depth…" : "Waiting for oracle mid to build the book."}</p>
   </div>`;
   }
   const stats = depthStats(bids, asks);
@@ -152,7 +152,7 @@ export function renderDepthPanel(
   const maxCum = Math.max(bidCum, askCum, 1);
   const pairLit = `<span class="notranslate" translate="no">${base}/${quote}</span>`;
   const note = labLive
-    ? `Cumulative market depth · ${pairLit} · live L2`
+    ? `Cumulative market depth · ${pairLit} · Soft-MM / live L2`
     : `Cumulative market depth · ${pairLit} · demo liquidity from pool oracle`;
 
   return `

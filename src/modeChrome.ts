@@ -2,7 +2,7 @@
 
 import { INTEGRATION, isDeskConnectEnabled, isLiveModeBlocked, isStagingMode } from "./config/integration";
 import { getDeskMatchingStatus, useDeskMatching, useLabMatching, usePublicDeskBook } from "./adapters/labMatching";
-import { isDeskMatchingLive } from "./settingsModal";
+import { isDeskEdgePending, isDeskMatchingLive } from "./settingsModal";
 
 export function modeChromeLabel(): string {
   if (isLiveModeBlocked()) return "Live blocked — use paper/lab/staging, not public live";
@@ -14,7 +14,10 @@ export function modeChromeLabel(): string {
   if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) {
     return "Soft-launch Spot — Connect wallet to trade";
   }
-  if (isDeskConnectEnabled()) return "Desk Connect · paper Spot until session";
+  if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) {
+    return "Soft-launch Spot — checking edge…";
+  }
+  if (isDeskConnectEnabled()) return "Desk Connect — Connect wallet to trade when matching is GO";
   switch (INTEGRATION.mode) {
     case "paper":
       return "Paper Spot — simulated balances";
@@ -29,6 +32,8 @@ export function modeStatusPill(): string {
   if (useLabMatching()) return "◎ Lab";
   if (useDeskMatching()) return "◎ Desk · live";
   if (usePublicDeskBook()) return "◎ Desk · Connect";
-  if (isDeskConnectEnabled()) return "◎ Desk · paper";
+  if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) return "◎ Desk · Connect";
+  if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) return "◎ Desk · …";
+  if (isDeskConnectEnabled()) return "◎ Desk · Connect";
   return "◎ Paper";
 }

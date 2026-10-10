@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   formatDeskMatchingLabel,
+  isDeskEdgePending,
   isDeskMatchingLive,
   patchSettingsWalletSessionChrome,
   renderUnifiedSettingsModal,
@@ -13,13 +14,18 @@ import { baseState } from "./testFixtures";
 import { LAYOUT_DEFAULTS } from "./layoutPrefs";
 
 describe("desk matching labels", () => {
-  it("normalizes disabled/off to HOLD", () => {
+  it("normalizes disabled/off to HOLD; empty/pending stay …", () => {
     expect(formatDeskMatchingLabel("disabled")).toBe("HOLD");
     expect(formatDeskMatchingLabel("off")).toBe("HOLD");
-    expect(formatDeskMatchingLabel("")).toBe("HOLD");
+    expect(formatDeskMatchingLabel("")).toBe("…");
+    expect(formatDeskMatchingLabel("pending")).toBe("…");
+    expect(formatDeskMatchingLabel("…")).toBe("…");
     expect(formatDeskMatchingLabel("ok")).toBe("ok");
     expect(isDeskMatchingLive("ok")).toBe(true);
     expect(isDeskMatchingLive("disabled")).toBe(false);
+    expect(isDeskEdgePending("")).toBe(true);
+    expect(isDeskEdgePending("…")).toBe(true);
+    expect(isDeskEdgePending("ok")).toBe(false);
   });
 });
 
@@ -48,10 +54,13 @@ describe("Settings → Wallet pane", () => {
     expect(html).toContain("Reconnect");
     expect(html).toContain("set-desk-export");
     expect(html).toContain("set-desk-import");
+    expect(html).toContain("Copy login");
+    expect(html).toContain("NOT for deposits");
     expect(html).toContain("Open Account · 2FA");
     expect(html).not.toMatch(/id="set-open-2fa"[^>]*disabled/);
     expect(html).toContain("HMC-abcdef0123456789");
     expect(html).toContain("settings-action-row");
+    expect(html).toContain("Reference mid");
     expect(html).not.toContain("<script>");
   });
 

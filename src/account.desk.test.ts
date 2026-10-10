@@ -148,5 +148,34 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("lab-wd-2fa");
     expect(html).toContain("lab-wd-limits-plate");
     expect(html).toContain("acct-2fa-manage-grid");
+    // Soft-launch: no BTC rail; 2FA gate until enrolled
+    expect(html).not.toContain('<option value="BTC">');
+    expect(html).toContain("Enable 2FA first");
+    expect(html).toContain("btn-acct-jump-2fa");
+    expect(html).toMatch(/id="btn-lab-wd-request"[^>]*disabled/);
+  });
+
+  it("pending edge health avoids false Deposit·HOLD flash", () => {
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      deskEdge: { matching: "…", depositEnabled: false, withdrawEnabled: false },
+    });
+    expect(html).toContain("Deposit…");
+    expect(html).toContain("Withdraw…");
+    expect(html).toContain("deposit · …");
+    expect(html).toContain("withdraw · …");
+    expect(html).toContain("Checking edge health");
+    expect(html).not.toContain("Deposit · HOLD");
+  });
+
+  it("withdraw unlocks after TOTP enrolled", () => {
+    setLabSessionMeta("HMC-bbbbbbbbbbbbbbbb", "csrf-2fa");
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+      totpEnabled: true,
+      wallet: { usdt: 100, hmc: 10, sup: 0, btc: 0 },
+    });
+    expect(html).not.toContain("Enable 2FA first");
+    expect(html).not.toContain("btn-acct-jump-2fa");
+    expect(html).not.toMatch(/id="btn-lab-wd-request"[^>]*disabled/);
   });
 });

@@ -56,7 +56,7 @@ describe("hardening UI contracts", () => {
       deskEdgeLive: true,
       deskSession: false,
     });
-    expect(html).toContain(">LIVE</span>");
+    expect(html).toContain(">DESK</span>");
     expect(html).toContain('aria-label="Buy HMC — Connect to trade · live book"');
     expect(html).not.toContain("PAPER");
   });

@@ -49,7 +49,7 @@ import {
   type WalletSlice,
 } from "./product/multiWallet";
 import { renderSpotEmptyState } from "./product/emptyStates";
-import { formatDeskMatchingLabel, isDeskMatchingLive } from "./settingsModal";
+import { formatDeskMatchingLabel, isDeskEdgePending, isDeskMatchingLive } from "./settingsModal";
 import { depositLimitsPlateHtml, withdrawLimitsPlateHtml, USDT_DEPOSIT_MIN, USDT_CONFIRMATIONS } from "./custodyLimits";
 import type { DemoState, MarketSnapshot, Wallet } from "./types";
 
@@ -69,6 +69,8 @@ export type AccountPageOpts = {
     minNotional?: number;
     priceBandBps?: number;
   };
+  /** Desk TOTP enrolled — gates withdraw CTA copy. */
+  totpEnabled?: boolean;
 };
 
 /** Read-only lab fee sink row — empty when address missing (graceful hide). */
@@ -239,6 +241,7 @@ function renderScreeningHoldBanner(): string {
 
 function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const matching = formatDeskMatchingLabel(edge?.matching);
+  const pending = isDeskEdgePending(edge?.matching);
   const dep = !!edge?.depositEnabled;
   const wd = !!edge?.withdrawEnabled;
   const live = isDeskMatchingLive(edge?.matching);
@@ -251,13 +254,15 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
       ? `<p class="muted small mono acct-desk-caps" title="Soft-launch caps from /health">${escapeHtml(caps.join(" · "))}</p>`
       : live
         ? `<p class="muted small acct-desk-caps">Soft-launch caps apply (see API health)</p>`
-        : "";
+        : pending
+          ? `<p class="muted small acct-desk-caps">Checking edge health…</p>`
+          : "";
   return `<div class="settings-edge-card acct-desk-edge" aria-live="polite">
         <div class="settings-edge-top"><strong>Edge status</strong></div>
         <div class="settings-hold-row acct-desk-hold">
         <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
-        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${dep ? "on" : "HOLD"}</span>
-        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${wd ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${pending ? "…" : dep ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${pending ? "…" : wd ? "on" : "HOLD"}</span>
       </div>${capsLine}</div>`;
 }
 
@@ -391,12 +396,21 @@ function renderWithdrawCard(
   session: ReturnType<typeof labSessionLabel>,
   deskEdge?: AccountPageOpts["deskEdge"],
   wallet?: Wallet | null,
+  totpEnabled = false,
 ): string {
   const deskWd = !labOn && isDeskConnectEnabled() && !!deskEdge?.withdrawEnabled;
   const deskLive = deskWd && session.live;
   const showForm = labOn || deskWd;
   const enableBtns = labOn ? labLive : deskLive;
+  const need2faBanner = deskWd && !totpEnabled;
+  const wdReady = enableBtns && !need2faBanner;
+  const wdDisabledTitle = need2faBanner
+    ? "Enable 2FA first"
+    : deskWd
+      ? "Connect desk wallet first"
+      : "Connect fixture first";
   const availHmc = wallet?.hmc ?? 0;
+  const btcOpt = labOn ? `<option value="BTC">BTC</option>` : "";
   return `
         <article class="acct-cash-card withdraw cex-funds">
           <div class="acct-cash-title">
@@ -405,7 +419,7 @@ function renderWithdrawCard(
               <h4>Withdraw</h4>
               <p class="muted small">${
                 deskWd
-                  ? "Request + TOTP · pending until ops sends on-chain (not automatic)"
+                  ? "Request + TOTP · reserved until ops broadcasts (no auto hot-send)"
                   : labOn
                     ? "Request only · pending until ops CLI complete"
                     : "Edge withdraw HOLD"
@@ -415,31 +429,39 @@ function renderWithdrawCard(
           ${
             showForm
               ? `${deskWd ? withdrawLimitsPlateHtml("HMC") : ""}
+          ${
+            need2faBanner
+              ? `<div class="cex-callout cex-callout--warn" role="status">
+            <strong>Enable 2FA first</strong> — enroll Authenticator under Desk session, then return here.
+            <button type="button" class="btn-sm btn-primary" id="btn-acct-jump-2fa">Open 2FA ↓</button>
+          </div>`
+              : ""
+          }
           <p class="cex-wd-avail mono" id="lab-wd-avail" data-hmc="${availHmc}" data-sup="${wallet?.sup ?? 0}" data-usdt="${wallet?.usdt ?? 0}" data-btc="${wallet?.btc ?? 0}">Available: <strong>${formatNum(availHmc, 4)} HMC</strong></p>
           <div class="lab-withdraw-form cex-wd-form">
             <label class="lab-field">Asset
-              <select id="lab-wd-asset" class="mono">
+              <select id="lab-wd-asset" class="mono"${need2faBanner ? " disabled" : ""}>
                 <option value="HMC">HMC</option>
                 <option value="SUP">SUP</option>
                 <option value="USDT">USDT · BEP-20</option>
-                <option value="BTC">BTC</option>
+                ${btcOpt}
               </select>
             </label>
             <label class="lab-field">Amount
-              <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.05" />
+              <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.05" ${need2faBanner ? "disabled" : ""} />
             </label>
             <label class="lab-field lab-field-wide">Destination
-              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" data-ph-btc="lab-ops-btc-01" />
+              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" data-ph-btc="lab-ops-btc-01" ${need2faBanner ? "disabled" : ""} />
             </label>
             <p class="muted small lab-wd-dest-hint" id="lab-wd-dest-hint">HMC/SUP → external <code>HMC-</code> wallet · USDT → <strong>BEP-20 (BSC)</strong> <code>0x…</code> · min <strong>15 USDT</strong> · fee <strong>1.5 USDT</strong> on top · no auto hot-send</p>
             <label class="lab-field">2FA code
-              <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="TOTP or recovery code" />
+              <input id="lab-wd-2fa" class="mono acct-2fa-code-inp acct-2fa-code-inp--wide" type="text" inputmode="text" autocomplete="one-time-code" placeholder="${need2faBanner ? "enable 2FA first" : "TOTP or recovery code"}" ${need2faBanner ? "disabled" : ""} />
             </label>
           </div>
           <ol class="cex-steps cex-steps--wd">
             <li>Request + TOTP — funds reserved</li>
-            <li>Outbound KYT (USDT) — approve or reject</li>
-            <li>Ops broadcast from hot wallet — then complete</li>
+            <li>Outbound KYT (USDT) — ops approve or reject</li>
+            <li>Ops broadcast (manual) — then complete</li>
           </ol>
           ${
             deskWd
@@ -457,8 +479,8 @@ function renderWithdrawCard(
           <div class="cex-fee-quote" id="lab-wd-fee-quote" role="status">Enter amount · Quote fee for custody total</div>
           <p id="lab-custody-pause" class="muted small lab-pause-hint" hidden></p>
           <div class="lab-action-row cex-wd-actions">
-            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-wd-request"${enableBtns ? "" : ` disabled title="${deskWd ? "Connect desk wallet first" : "Connect fixture first"}"`}>Request withdraw</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-quote"${enableBtns ? "" : " disabled"}>Quote fee</button>
+            <button type="button" class="btn-lab btn-lab-primary" id="btn-lab-wd-request"${wdReady ? "" : ` disabled title="${wdDisabledTitle}"`}>Request withdraw</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-quote"${wdReady ? "" : " disabled"}>Quote fee</button>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-wd-refresh"${enableBtns ? "" : " disabled"}>↻ History</button>
           </div>
           <p id="lab-wd-msg" class="muted small sync-msg" role="status"></p>
@@ -529,7 +551,7 @@ function renderCashDock(
         ${renderDepositCard(labOn, labLive, session, opts?.deskEdge)}
       </div>
       <div class="acct-cash-panel" data-cash-panel="withdraw" id="acct-cash-withdraw" hidden>
-        ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge, opts?.wallet ?? null)}
+        ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge, opts?.wallet ?? null, !!opts?.totpEnabled)}
       </div>
       ${
         labOn
@@ -802,7 +824,9 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <div class="acct-vip-pill" title="${
         hasServerVipVolume()
           ? "VIP from server GET /vip (30d USDT fills)"
-          : "Demo VIP from local paper trade history"
+          : deskOn
+            ? "VIP syncs from desk fills after Connect — local estimate until then"
+            : "Demo VIP from local paper trade history"
       }">
         <span class="vip-badge"><span class="vip-name">${escapeHtml(vip.name)}</span></span>
         <span class="muted small mono">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
@@ -827,14 +851,23 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <div id="acct-denom-host">${renderDenomRing(denom)}</div>
           <div class="acct-quick-actions">
             ${
-              labOn || (!!deskOn && (!!opts?.deskEdge?.depositEnabled || !!opts?.deskEdge?.withdrawEnabled))
-                ? labOn
-                  ? `<button type="button" class="acct-qa-btn primary" id="btn-acct-deposit" data-cash-tab="deposit">Deposit</button>
-            <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>`
-                  : `<button type="button" class="acct-qa-btn ${opts?.deskEdge?.depositEnabled ? "primary" : "muted"}" id="btn-acct-deposit" data-cash-tab="deposit"${opts?.deskEdge?.depositEnabled ? "" : ' title="Live deposit on HOLD"'}>${opts?.deskEdge?.depositEnabled ? "Deposit" : "Deposit · HOLD"}</button>
-            <button type="button" class="acct-qa-btn ${opts?.deskEdge?.withdrawEnabled ? "primary" : "muted"}" id="btn-acct-withdraw" data-cash-tab="withdraw"${opts?.deskEdge?.withdrawEnabled ? ' title="Requires TOTP / recovery"' : ' title="Live withdraw on HOLD"'}>${opts?.deskEdge?.withdrawEnabled ? "Withdraw" : "Withdraw · HOLD"}</button>`
-                : `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Live deposit on HOLD">Deposit · HOLD</button>
-            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Live withdraw on HOLD">Withdraw · HOLD</button>`
+              (() => {
+                const edgePending = !!deskOn && isDeskEdgePending(opts?.deskEdge?.matching);
+                if (labOn) {
+                  return `<button type="button" class="acct-qa-btn primary" id="btn-acct-deposit" data-cash-tab="deposit">Deposit</button>
+            <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>`;
+                }
+                if (edgePending) {
+                  return `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Checking edge health…">Deposit…</button>
+            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Checking edge health…">Withdraw…</button>`;
+                }
+                if (deskOn && (!!opts?.deskEdge?.depositEnabled || !!opts?.deskEdge?.withdrawEnabled)) {
+                  return `<button type="button" class="acct-qa-btn ${opts?.deskEdge?.depositEnabled ? "primary" : "muted"}" id="btn-acct-deposit" data-cash-tab="deposit"${opts?.deskEdge?.depositEnabled ? "" : ' title="Live deposit on HOLD"'}>${opts?.deskEdge?.depositEnabled ? "Deposit" : "Deposit · HOLD"}</button>
+            <button type="button" class="acct-qa-btn ${opts?.deskEdge?.withdrawEnabled ? "primary" : "muted"}" id="btn-acct-withdraw" data-cash-tab="withdraw"${opts?.deskEdge?.withdrawEnabled ? ' title="Requires TOTP / recovery"' : ' title="Live withdraw on HOLD"'}>${opts?.deskEdge?.withdrawEnabled ? "Withdraw" : "Withdraw · HOLD"}</button>`;
+                }
+                return `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Live deposit on HOLD">Deposit · HOLD</button>
+            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Live withdraw on HOLD">Withdraw · HOLD</button>`;
+              })()
             }
             <button type="button" class="acct-qa-btn" data-goto-view="convert">Convert</button>
             <button type="button" class="acct-qa-btn muted" id="btn-acct-history">History</button>

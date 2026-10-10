@@ -136,7 +136,7 @@ describe("tradingGuards", () => {
         code: "no_mid",
         message: "",
       }),
-    ).toBe("No seed mid for this pair");
+    ).toBe("Desk mid unavailable — wait for live ticker");
     expect(
       formatExchangeReject({
         ok: false,

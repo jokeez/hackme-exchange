@@ -52,7 +52,7 @@ export type SettingsWalletChrome = {
 /** Server may say `disabled` — UI shows HOLD until matching is truly `ok`. */
 export function formatDeskMatchingLabel(raw?: string): string {
   const v = (raw || "").trim();
-  if (!v) return "HOLD";
+  if (!v || v === "…" || v.toLowerCase() === "pending") return "…";
   const lower = v.toLowerCase();
   if (lower === "disabled" || lower === "hold" || lower === "off") return "HOLD";
   return v;
@@ -60,6 +60,12 @@ export function formatDeskMatchingLabel(raw?: string): string {
 
 export function isDeskMatchingLive(raw?: string): boolean {
   return (raw || "").trim().toLowerCase() === "ok";
+}
+
+/** True until first /health paints real edge badges (avoid false HOLD flash). */
+export function isDeskEdgePending(raw?: string): boolean {
+  const v = (raw || "").trim();
+  return !v || v === "…" || v.toLowerCase() === "pending";
 }
 
 /** Live-update Wallet pane controls while Settings stays open. */
@@ -94,11 +100,18 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
     twoFa.disabled = !canOpen;
     twoFa.textContent = canOpen ? "Open Account · 2FA" : "Unavailable";
   }
+  const pending = isDeskEdgePending(wallet.matching);
   const matching = formatDeskMatchingLabel(wallet.matching);
   const vals = [
     { on: isDeskMatchingLive(wallet.matching), text: `matching · ${matching}` },
-    { on: !!wallet.depositEnabled, text: `deposit · ${wallet.depositEnabled ? "on" : "HOLD"}` },
-    { on: !!wallet.withdrawEnabled, text: `withdraw · ${wallet.withdrawEnabled ? "on" : "HOLD"}` },
+    {
+      on: !!wallet.depositEnabled,
+      text: `deposit · ${pending ? "…" : wallet.depositEnabled ? "on" : "HOLD"}`,
+    },
+    {
+      on: !!wallet.withdrawEnabled,
+      text: `withdraw · ${pending ? "…" : wallet.withdrawEnabled ? "on" : "HOLD"}`,
+    },
   ];
   root.querySelectorAll("#set-desk-hold .settings-hold-pill").forEach((el, i) => {
     const v = vals[i];
@@ -237,8 +250,8 @@ export function renderUnifiedSettingsModal(
             </div>
             <div class="settings-hold-row">
               <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">matching · ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}</span>
-              <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${wallet?.depositEnabled ? "on" : "HOLD"}</span>
-              <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${isDeskEdgePending(wallet?.matching) ? "…" : wallet?.depositEnabled ? "on" : "HOLD"}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${isDeskEdgePending(wallet?.matching) ? "…" : wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
             </div>
             <p class="muted small mono" id="set-desk-caps"${
               wallet?.maxOpenOrders || wallet?.priceBandBps || wallet?.minNotional ? "" : " hidden"
@@ -259,7 +272,7 @@ export function renderUnifiedSettingsModal(
               </div>
               <div class="settings-action-btns">
                 <button type="button" class="btn-sm btn-primary" id="set-desk-connect" ${deskOn ? "" : "disabled"}>${deskOn ? (wallet?.sessionLive ? "Reconnect" : "Connect") : "Unavailable"}</button>
-                <button type="button" class="btn-sm" id="set-desk-copy" ${deskOn && wallet?.deskAddress ? "" : "disabled"} title="Copy HMC address">Copy</button>
+                <button type="button" class="btn-sm" id="set-desk-copy" ${deskOn && wallet?.deskAddress ? "" : "disabled"} title="Copy login address — NOT for deposits">Copy login</button>
               </div>
             </div>
             <div class="settings-action-row">
@@ -335,14 +348,22 @@ export function renderUnifiedSettingsModal(
 
         <div class="modal-pane${oracleP.active}" id="pane-oracle" role="tabpanel"${oracleP.hidden}>
           <header class="settings-pane-head">
-            <h4>Paper oracle</h4>
-            <p class="muted small">Shared reference mid — locked for cross-device sync.</p>
+            <h4>${deskOn ? "Reference mid" : "Paper oracle"}</h4>
+            <p class="muted small">${
+              deskOn
+                ? "Soft-launch mids come from Soft-MM / last trade — this pane is a legacy paper fallback only."
+                : "Shared reference mid — locked for cross-device sync."
+            }</p>
           </header>
           <div class="settings-oracle-card">
             <label for="set-anchor">USDT per HMC
               <input class="inp mono" id="set-anchor" type="number" step="0.001" value="${anchor}" readonly disabled />
             </label>
-            <p class="muted small">Display-only. Every device uses <strong>0.05</strong> USDT/HMC on paper Spot.</p>
+            <p class="muted small">${
+              deskOn
+                ? "Not used while desk matching / public book is live. Spot chart follows the live book mid."
+                : "Display-only. Every device uses <strong>0.05</strong> USDT/HMC on paper Spot."
+            }</p>
             <button type="button" class="btn-sm" id="set-oracle-save" aria-label="Oracle reference mid locked at 0.05" disabled title="Locked for cross-device sync">Locked at 0.05</button>
           </div>
         </div>

@@ -3,10 +3,16 @@
  * hackme-exchange-api `ledger.ValidateWithdrawDestination`.
  */
 
+import { isDeskConnectEnabled, isLabLoopbackApi } from "./config/integration";
 import { NATIVE_WITHDRAW_MIN, USDT_WITHDRAW_MIN } from "./custodyLimits";
 
 const HMC_DEST_RE = /^HMC-[0-9a-fA-F]{16}$/;
 const EVM_DEST_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/** Soft-launch desk (not lab loopback): USDT outs must be real BEP-20 0x. */
+function deskRequiresEvmUsdt(): boolean {
+  return isDeskConnectEnabled() && !isLabLoopbackApi();
+}
 
 /** Matches API `IsLabStubDepositAddress` / labdep prefix rejection for paper outs. */
 function looksLikeLabDepositStub(dest: string): boolean {
@@ -60,8 +66,14 @@ export function validateLabWithdrawDestination(
     return { ok: true };
   }
   if (a === "USDT") {
-    // Desk / mainnet bridge: real BEP-20 0x. Lab paper still accepts ops stubs.
+    // Desk / mainnet bridge: real BEP-20 0x only. Lab paper still accepts ops stubs.
     if (EVM_DEST_RE.test(dest)) return { ok: true };
+    if (deskRequiresEvmUsdt()) {
+      return {
+        ok: false,
+        hint: "USDT needs a BSC 0x… address (BEP-20) — paper stubs not accepted on desk",
+      };
+    }
     if (dest.toUpperCase().startsWith("HMC-") || looksLikeLabDepositStub(dest) || dest.length < 8) {
       return {
         ok: false,

@@ -229,7 +229,7 @@ export function previewConvert(
   const r = ROUTES[route];
   if (!r) return { ok: false, reason: "Unknown route" };
   const mid = midForPair(market, r.pair);
-  if (!(mid > 0)) return { ok: false, reason: "No mid" };
+  if (!(mid > 0)) return { ok: false, reason: "Mid unavailable — wait for live ticker" };
   const got = r.invert ? amountFrom / mid : amountFrom * mid;
   if (!Number.isFinite(got) || got <= 0) return { ok: false, reason: "Invalid rate" };
   const quoteNotional = convertQuoteNotional(amountFrom, got, r.invert);

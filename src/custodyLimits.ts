@@ -60,7 +60,7 @@ export function depositLimitsPlateHtml(): string {
         <span class="cex-limit-v">No fixed min · node-watch (ops sync)</span>
       </div>
     </div>
-    <p class="cex-limits-note">USDT is not instant credit — screening hold until ops approve. Amounts below the asset minimum stay on the deposit address until a qualifying transfer.</p>
+    <p class="cex-limits-note">USDT is not instant credit — after ≥${USDT_CONFIRMATIONS} BSC confs it is held until ops approve KYT (manual). Amounts below ${USDT_DEPOSIT_MIN} USDT stay on the deposit address until a qualifying transfer.</p>
   </div>`;
 }
 
@@ -100,6 +100,6 @@ export function withdrawLimitsPlateHtml(asset = "HMC"): string {
       </div>
       ${usdtExtra}
     </div>
-    <p class="cex-limits-note">${dest}</p>
+    <p class="cex-limits-note">${dest}. Funds reserved until ops completes (no auto hot-send).</p>
   </div>`;
 }

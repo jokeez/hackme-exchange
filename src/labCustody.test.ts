@@ -34,6 +34,13 @@ describe("validateLabWithdrawDestination (API-aligned)", () => {
     }
   });
 
+  it("desk soft-launch rejects USDT paper stubs — BEP-20 0x only", async () => {
+    const { isDeskConnectEnabled, isLabLoopbackApi } = await import("./config/integration");
+    if (!isDeskConnectEnabled() || isLabLoopbackApi()) return;
+    expect(validateLabWithdrawDestination("USDT", "paper-usdt-ops-wallet-01").ok).toBe(false);
+    expect(validateLabWithdrawDestination("USDT", "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0").ok).toBe(true);
+  });
+
   it("rejects XSS / URI scheme paper destinations", () => {
     const bad = [
       "<script>alert(1)</script>",

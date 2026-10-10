@@ -39,7 +39,7 @@ describe("depth", () => {
 
   it("empty lab depth copy", () => {
     const html = renderDepthPanel([], [], "HMC", "USDT", { labLive: true });
-    expect(html).toContain("lab book");
+    expect(html).toContain("live desk depth");
   });
 
   it("empty books produce empty svg shell", () => {
