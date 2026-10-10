@@ -53,14 +53,14 @@ export function depositLimitsPlateHtml(): string {
       </div>
       <div class="cex-limit">
         <span class="cex-limit-k">Credit path</span>
-        <span class="cex-limit-v">≥${USDT_CONFIRMATIONS} conf → HOLD → KYT → available</span>
+        <span class="cex-limit-v">≥${USDT_CONFIRMATIONS} conf → hold → manual KYT → available</span>
       </div>
       <div class="cex-limit">
         <span class="cex-limit-k">HMC / SUP</span>
-        <span class="cex-limit-v">No fixed min · node-watch (not instant)</span>
+        <span class="cex-limit-v">No fixed min · node-watch (ops sync)</span>
       </div>
     </div>
-    <p class="cex-limits-note">Amounts below the asset minimum are ignored on-chain (funds stay on the deposit address until a qualifying transfer).</p>
+    <p class="cex-limits-note">USDT is not instant credit — screening hold until ops approve. Amounts below the asset minimum stay on the deposit address until a qualifying transfer.</p>
   </div>`;
 }
 

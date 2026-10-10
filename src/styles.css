@@ -2826,6 +2826,11 @@ html.mobile-layout .market-search {
   border: 1px solid rgba(255, 179, 71, 0.28);
   background: rgba(255, 179, 71, 0.06);
 }
+.convert-hold-banner--live {
+  border-color: rgba(77, 228, 255, 0.32);
+  background: rgba(77, 228, 255, 0.07);
+  color: rgba(200, 230, 245, 0.96);
+}
 .cv-recent-empty.product-empty {
   padding: 0.55rem 0.65rem;
   border: 1px dashed rgba(87, 118, 168, 0.35);
@@ -7908,6 +7913,14 @@ html {
   border: 1px solid rgba(77, 228, 255, 0.28);
   background: rgba(77, 228, 255, 0.06);
   color: rgba(200, 220, 240, 0.95);
+}
+.cex-callout--muted {
+  border: 1px solid rgba(87, 118, 168, 0.32);
+  background: rgba(30, 42, 64, 0.45);
+  color: rgba(190, 208, 230, 0.92);
+}
+.acct-screening-hold {
+  margin: 0 0 0.65rem;
 }
 .cex-callout-login {
   display: block;

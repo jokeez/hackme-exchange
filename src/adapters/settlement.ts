@@ -8,6 +8,7 @@ import {
   formatExchangeReject,
   getLabSessionMeta,
   mergeApiBalancesIntoWallet,
+  rememberLedgerHolds,
   postExchangeOrder,
 } from "./exchangeApi";
 import { isLabSessionStale } from "./labMatching";
@@ -68,6 +69,7 @@ export const liveSettlement: SettlementAdapter = {
       // FE-M03: fail closed — do not merge node into lab wallet (hybrid balances lie).
       return { wallet: demo, note: `Lab API: ${bal.message} — balances frozen (no node merge)` };
     }
+    rememberLedgerHolds(bal.balances ?? []);
     return {
       wallet: mergeApiBalancesIntoWallet(demo, bal.balances ?? [], { labAuthoritative: true }),
       note: `Server settlement balances · ${bal.address.slice(0, 14)}… (lab liveSettlement)`,

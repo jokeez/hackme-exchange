@@ -117,10 +117,11 @@ describe("convertUi dropdowns", () => {
 });
 
 describe("convertUi recent empty", () => {
-  it("renders desk HOLD empty copy", () => {
+  it("renders desk empty copy for live convert path", () => {
     const html = renderConvertRecentList([], "desk");
     expect(html).toContain('data-empty="convert"');
-    expect(html).toContain("paper balances until health advertises convert");
+    expect(html).toContain("server mid + VIP taker");
+    expect(html).not.toContain("paper balances until health advertises convert");
   });
 
   it("mentions primary pairs in paper empty copy", () => {

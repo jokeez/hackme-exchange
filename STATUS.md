@@ -85,7 +85,8 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 | **D0 Paper** | Static SPA — **shipped** |
 | **Soft-launch matching** | Caps + desk book/orders — **GO** |
 | **HMC/SUP custody** | Deposit addr + withdraw+2FA + ops complete — **GO** |
-| **USDT/BTC custody** | Partner bridge — **HOLD** |
+| **USDT custody** | BSC watch + stub KYT **manual** (no Didit / no hot-send) |
+| **BTC custody** | Partner rail — **HOLD** |
 | **Full GO** | Raise/remove soft-launch caps after soak |
 
 ## Docs

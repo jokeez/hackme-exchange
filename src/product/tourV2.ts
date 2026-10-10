@@ -11,7 +11,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to HackMe Exchange",
-    body: "Desk soft-launch: Connect on Account, send to your deposit address (not Copy addr), then trade. Soft-launch caps apply — not full production custody.",
+    body: "Soft-launch desk: Connect on Account, send to your deposit address (never Copy/login addr), then trade live L2. Caps apply (open orders / band / min notional).",
   },
   {
     id: "chart",
@@ -22,7 +22,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "convert",
     title: "Convert desk",
-    body: "Convert HMC/USDT and HMC/SUP at mid (paper until convert GO; server mid when advertised). Spot uses the live book after Connect.",
+    body: "Convert HMC/USDT and HMC/SUP at server mid + VIP taker after Connect. Spot uses the live book; Convert does not touch the order book.",
   },
   {
     id: "pool",
@@ -32,7 +32,7 @@ export const TOUR_V2_STEPS: TourStep[] = [
   {
     id: "account",
     title: "Account & deposit",
-    body: "Connect, then Deposit → Show HMC address. Never send coins to Copy addr (login only).",
+    body: "Connect, then Deposit → show HMC/SUP/USDT address. USDT stays in screening hold until ops approve KYT. Never send to Copy/login addr.",
   },
   {
     id: "pwa",

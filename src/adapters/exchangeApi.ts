@@ -1808,6 +1808,28 @@ export function balancesToWalletPartial(balances: BalanceRow[]): Partial<Wallet>
   return out;
 }
 
+/** Screening quarantine (USDT KYT etc.) — display units, not minor. */
+export type LedgerHoldRow = { asset: string; hold: number };
+
+let cachedLedgerHolds: LedgerHoldRow[] = [];
+
+export function rememberLedgerHolds(balances: BalanceRow[] | null | undefined): LedgerHoldRow[] {
+  const rows: LedgerHoldRow[] = [];
+  for (const row of balances ?? []) {
+    const holdMinor = typeof row.hold === "number" ? row.hold : 0;
+    if (!(holdMinor > 0)) continue;
+    const asset = String(row.asset || "").toUpperCase();
+    if (!asset) continue;
+    rows.push({ asset, hold: minorToDisplay(holdMinor) });
+  }
+  cachedLedgerHolds = rows;
+  return rows;
+}
+
+export function getLedgerHolds(): LedgerHoldRow[] {
+  return cachedLedgerHolds.slice();
+}
+
 /** Merge server balances into demo wallet.
  * Lab session: server is authoritative — missing assets become 0 (no paper inflate).
  */

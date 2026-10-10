@@ -15,6 +15,7 @@ import {
   apiPairToId,
   fetchExchangeBalances,
   mergeApiBalancesIntoWallet,
+  rememberLedgerHolds,
   fetchPublicTrades,
   apiPriceToDisplay,
   minorToDisplay,
@@ -383,6 +384,7 @@ export class MarketStream {
         const bal = await fetchExchangeBalances();
         if (bal.ok) {
           state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+          rememberLedgerHolds(bal.balances ?? []);
         }
       }
       await refreshServerVip(added > 0);

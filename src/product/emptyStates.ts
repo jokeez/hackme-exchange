@@ -35,11 +35,11 @@ export function renderSpotEmptyState(ctx: EmptySpotContext): string {
     positions: {
       title: "No spot inventory yet",
       body: deskLive
-        ? "Spot fills update the desk ledger. Soft-launch caps apply until full GO."
+        ? "Spot fills update the desk ledger. Soft-launch caps (open orders / band / min notional) still apply."
         : deskBook
-          ? "Connect + deposit HMC/SUP, then trade. Avbl is your exchange ledger — not Copy addr."
+          ? "Connect + deposit HMC/SUP (or USDT BEP-20), then trade. Avbl is your exchange ledger — not Copy/login addr."
           : isDeskConnectEnabled()
-            ? "Matching not live — paper balances stay local until Matching GO."
+            ? "Matching not live on this edge — Connect after GO for a session. Local preview stays paper."
             : isLabLoopbackApi()
               ? "Lab fills update the connected ledger. Without a session, paper balances stay local."
               : "Spot fills update paper balances instantly. Track equity on Account.",

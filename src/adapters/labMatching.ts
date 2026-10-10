@@ -18,6 +18,7 @@ import {
   listExchangeFills,
   listExchangeOrders,
   mergeApiBalancesIntoWallet,
+  rememberLedgerHolds,
   minorToDisplay,
   pairIdToApi,
   postExchangeOrder,
@@ -574,6 +575,7 @@ export async function syncLabBalancesAndBook(
   state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], {
     labAuthoritative: authoritative,
   });
+  rememberLedgerHolds(bal.balances ?? []);
 
   // Public desk HOLD: balances probe only — skip order/fill that hammers 503.
   // Still refresh public L2 when matching edge is GO (no CSRF required for /book).
@@ -658,6 +660,7 @@ export async function syncLabOrdersFillsLight(
   let balChanged = false;
   if (bal.ok) {
     state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], { labAuthoritative: true });
+    rememberLedgerHolds(bal.balances ?? []);
     balChanged =
       prevWallet.usdt !== state.wallet.usdt ||
       prevWallet.hmc !== state.wallet.hmc ||

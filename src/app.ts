@@ -2437,13 +2437,15 @@ function renderConvert(): string {
   const serverReady = useServerConvert();
   const serverAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useServerMatching();
   const feeNote = serverReady
-    ? `Server <code>GET/POST /convert</code> · seed mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
+    ? `Server <code>GET/POST /convert</code> · mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
     : serverAvail
       ? `Server convert ready — Connect on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
-      : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
+      : isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching)
+        ? `Local preview · Connect for server convert · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+        : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
   const hmcPay =
     state.feeConfig.payFeesInHmc
-      ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · paper only until health advertises hmc_fee_pay"}`
+      ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · enabled when health advertises hmc_fee_pay"}`
       : `Fees in quote asset · toggle HMC (−${state.feeConfig.hmcDiscountPct}%) on Account or Spot`;
 
   const activePair = convertPrimaryPair(convertFrom, convertTo);
@@ -2469,7 +2471,7 @@ function renderConvert(): string {
     ? serverReady
       ? "Instant swap · desk convert live"
       : isDeskMatchingLive(deskEdgeSnap.matching)
-        ? "Instant swap · desk matching live · Convert paper until convert GO"
+        ? "Instant swap · Connect for server convert"
         : "Instant swap · paper balances"
     : isLabLoopbackApi()
       ? serverReady
@@ -2479,9 +2481,9 @@ function renderConvert(): string {
 
   const holdBanner = isDeskConnectEnabled()
     ? serverReady
-      ? `<p class="muted small convert-hold-banner" role="status">Desk convert uses last-trade mid + VIP taker on HMC/USDT and HMC/SUP.</p>`
+      ? `<p class="muted small convert-hold-banner convert-hold-banner--live" role="status">Desk convert uses server mid + VIP taker on HMC/USDT and HMC/SUP (inventory-backed · not the spot book).</p>`
       : isDeskMatchingLive(deskEdgeSnap.matching)
-        ? `<p class="muted small convert-hold-banner" role="status">Spot matching is live — Convert stays on paper balances until health advertises convert. Primary pairs: HMC/USDT · HMC/SUP.</p>`
+        ? `<p class="muted small convert-hold-banner" role="status">Spot matching is live — Connect on Account to unlock server Convert (HMC/USDT · HMC/SUP). Until then local preview only.</p>`
         : `<p class="muted small convert-hold-banner" role="status">Matching not live on this edge yet — Convert uses local paper balances · HMC/USDT · HMC/SUP.</p>`
     : "";
 
@@ -9455,7 +9457,7 @@ function maybeShowTour(): void {
     {
       t: "Welcome · 60s tour",
       d: deskOn
-        ? "Desk soft-launch: Connect wallet on Account, deposit to the deposit address (not Copy addr), then trade live L2. Soft-launch caps apply."
+        ? "Soft-launch desk: Connect on Account, deposit to the deposit address (not Copy/login addr), then trade live L2. Caps apply."
         : labOn
           ? "HackMe Spot can run as paper or private DEMO/LAB matching. Connect a fixture on Account for live L2 — still not production custody."
           : "HackMe Spot is a paper preview. Spot mids are shared references (±drift) — not a live CEX matching engine.",
@@ -9475,7 +9477,7 @@ function maybeShowTour(): void {
     {
       t: "Convert & Pool",
       d: deskOn
-        ? "Convert is HMC/USDT + HMC/SUP — paper until convert GO, then server mid. Pool shows live hashrate telemetry only."
+        ? "Convert HMC/USDT + HMC/SUP at server mid after Connect. Pool shows live hashrate telemetry only (does not drive spot)."
         : labOn
           ? "Convert (HMC/USDT · HMC/SUP) uses server seed mid + inventory when LAB is connected (not BBO). Pool page shows live hashrate as telemetry only."
           : "Convert HMC/USDT and HMC/SUP at mid. Pool page shows live hashrate as telemetry — it does not feed spot mids.",

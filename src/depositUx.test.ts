@@ -40,12 +40,26 @@ describe("deposit UX contracts", () => {
     expect(html).toMatch(/Deposit limits/);
     expect(html).toMatch(/USDT min/);
     expect(html).toMatch(/0\.1 USDT/);
+    expect(html).toMatch(/manual.*KYT|manual<\/em> KYT/i);
+    expect(html).toMatch(/screening hold/i);
+    expect(html).toMatch(/HMC \/ SUP/i);
     expect(html).toContain("HMC-09dc5f553bfff940");
     expect(html).toMatch(/Login only/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     // Copy-addr path must stay labeled as login-only when custody is live
     expect(html).toMatch(/Copy login ≠ deposit|NOT for deposits/);
     expect(html).toMatch(/NOT for deposits/);
+  });
+
+  it("shows screening hold banner when ledger hold is cached", async () => {
+    const { rememberLedgerHolds } = await import("./adapters/exchangeApi");
+    rememberLedgerHolds([{ asset: "USDT", available: 0, reserved: 0, hold: 50_000_000, amount: 50_000_000 }]);
+    setLabSessionMeta("HMC-09dc5f553bfff940", "csrf-hold");
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(html).toMatch(/Screening hold/i);
+    expect(html).toMatch(/0\.5 USDT/);
   });
 
   it("HOLD edge still shows Deposit · HOLD quick actions", () => {

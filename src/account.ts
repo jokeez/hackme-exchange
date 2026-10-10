@@ -1,5 +1,5 @@
 import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
-import { labSessionLabel } from "./adapters/exchangeApi";
+import { getLedgerHolds, labSessionLabel } from "./adapters/exchangeApi";
 import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
@@ -225,6 +225,18 @@ function renderSecurity2faCard(
       </article>`;
 }
 
+/** USDT (etc.) stuck in KYT screening hold — visible on Assets so users know why Avbl is low. */
+function renderScreeningHoldBanner(): string {
+  const holds = getLedgerHolds().filter((h) => h.hold > 0);
+  if (!holds.length) return "";
+  const bits = holds
+    .map((h) => `<strong class="mono">${escapeHtml(formatNum(h.hold, 4))} ${escapeHtml(h.asset)}</strong>`)
+    .join(" · ");
+  return `<div class="cex-callout cex-callout--warn acct-screening-hold" role="status" aria-live="polite">
+    <strong>Screening hold</strong> — ${bits} is not tradable yet. USDT deposits stay held until ops approve KYT (manual soft-launch; not automatic).
+  </div>`;
+}
+
 function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const matching = formatDeskMatchingLabel(edge?.matching);
   const dep = !!edge?.depositEnabled;
@@ -343,8 +355,8 @@ function renderDepositCard(
             </div>
             <ol class="cex-steps" id="lab-deposit-steps" hidden>
               <li>Send only the selected asset on the listed network</li>
-              <li>Wait for confirmations (USDT ≥${USDT_CONFIRMATIONS} on BSC)</li>
-              <li>Balance appears after HOLD → KYT → release</li>
+              <li>USDT: wait ≥${USDT_CONFIRMATIONS} BSC confirmations · HMC/SUP: node-watch (ops sync)</li>
+              <li>USDT lands in <strong>screening hold</strong> until ops approve KYT — then Available</li>
             </ol>
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Choose an asset to reveal your deposit address.</p>
@@ -357,8 +369,11 @@ function renderDepositCard(
             }
           </div>
           <div class="cex-callout cex-callout--info" role="note">
-            <strong>USDT:</strong> BEP-20 on BSC mainnet (chain 56) · min <strong class="mono">${USDT_DEPOSIT_MIN} USDT</strong> · watcher → HOLD → KYT → release.
+            <strong>USDT:</strong> BEP-20 on BSC mainnet (chain 56) · min <strong class="mono">${USDT_DEPOSIT_MIN} USDT</strong> · auto-watch → hold → <em>manual</em> KYT approve (not instant).
             Never TRC-20 / ERC-20 / testnet / other tokens. Wrong chain = permanent loss.
+          </div>
+          <div class="cex-callout cex-callout--muted" role="note">
+            <strong>HMC / SUP:</strong> send to your deposit address, then wait for node-watch credit (ops may sync). Not the same path as USDT KYT.
           </div>`
               : `<div class="acct-cash-actions">
             <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
@@ -850,6 +865,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </header>
 
       <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds"${acctTab !== "assets" ? " hidden" : ""}>
+        ${renderScreeningHoldBanner()}
         ${!hasSpotInventory ? `<div class="acct-positions-empty">${renderSpotEmptyState("positions")}</div>` : ""}
         <table class="acct-asset-table data-table">
           <thead>
