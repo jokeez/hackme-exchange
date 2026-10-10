@@ -29,7 +29,8 @@
 |------|--------|
 | Public matching (book/orders live) | **GO** (soft-launch caps) |
 | HMC/SUP deposit + withdraw + TOTP | **GO** (ops-gated complete) |
-| Real USDT / BTC on-chain custody | **HOLD** — partner bridge |
+| USDT auto hot-send / Didit KYT | **HOLD** — BSC watch + stub KYT **manual** is live |
+| BTC hot custody | **HOLD** — paper stub only |
 | Merging SPA into HackMe hub git | Sidecar only |
 | Foreign CEX “listing” claims | Not this product |
 
@@ -59,4 +60,5 @@
 | This source repo | Public (AGPL) |
 | Paper / desk product | Live SPA + soft-launch matching |
 | Matching / HMC·SUP custody | **GO** |
-| USDT/BTC custody | **HOLD** |
+| USDT watch + manual KYT | **GO** (no Didit / no hot-send) |
+| BTC hot custody | **HOLD** |

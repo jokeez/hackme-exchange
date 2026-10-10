@@ -113,7 +113,7 @@ Global notional soft-launch: rely on min notional + open-order cap + trade rate;
 | Hub embed still paper-safe if matching OFF | [x] `useLabMatching` loopback-only + `useDeskMatching` health-gated + hold probes |
 | GO flag-flip runbook | [x] `hackme-exchange-ops/docs/RUNBOOK_MATCHING_GO.md` |
 | Staging live→rollback drill | [x] `scripts/matching_go_staging_drill.sh` (**2026-10-01** re-run green — live window + HOLD restored) |
-| Public slim health soft-launch caps | [x] Redeployed edge — `max_open_orders=20` while matching HOLD |
+| Public slim health soft-launch caps | [x] Live Full GO — `max_open_orders=96`, deposit/withdraw ON |
 
 **Rollback drill (required before GO):** enable matching on staging → place/cancel → disable → confirm 503 + SPA HOLD badges within one health poll.
 

@@ -1,6 +1,6 @@
 # Docs — HackMe Exchange (SPA)
 
-Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT/BTC real custody remains **HOLD**.
+Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT = BSC watch + stub KYT **manual**; BTC hot custody remains **HOLD** (no Didit / no auto hot-send).
 
 ## Ecosystem
 
@@ -38,7 +38,7 @@ Open-source Spot UI. Soft-launch matching + HMC/SUP custody are **GO**; USDT/BTC
 |-----|---------|
 | [LAB_API.md](LAB_API.md) | SPA ↔ loopback API |
 
-**Rule:** Public edge ships the desk SPA + same-origin `/desk-api` soft-launch. USDT/BTC real custody stays HOLD — see [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md) and sibling API docs.
+**Rule:** Public edge ships the desk SPA + same-origin `/desk-api` soft-launch. Didit / USDT hot-send / BTC hot custody stay HOLD — see [MATCHING_GO_CHECKLIST.md](MATCHING_GO_CHECKLIST.md) and sibling API docs.
 
 ## UI polish notes
 
