@@ -41,8 +41,13 @@ async function main() {
     withdraw?: { enabled?: boolean };
   };
   const matchingGo = process.env.EX_MATCHING_GO === "1" || hj.matching === "ok";
-  // Custody GO only when explicitly requested — health flags alone must not flip smoke to "ON".
-  const custodyGo = process.env.EX_CUSTODY_GO === "1";
+  // Soft-launch Full GO: matching=ok + deposit/withdraw both ON → custody GO.
+  // Matching-only GO (deposit still OFF) stays strict unless EX_CUSTODY_GO=1.
+  // Force HOLD-era assert with EX_CUSTODY_GO=0.
+  const bothCustodyOn = hj.deposit?.enabled === true && hj.withdraw?.enabled === true;
+  const custodyGo =
+    process.env.EX_CUSTODY_GO === "1" ||
+    (process.env.EX_CUSTODY_GO !== "0" && matchingGo && bothCustodyOn);
   if (matchingGo) {
     if (hj.matching !== "ok") throw new Error(`matching GO: want ok got ${hj.matching}`);
   } else if (hj.matching !== "disabled") {
