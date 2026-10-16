@@ -12,6 +12,7 @@ import {
   formatRewardPerM,
   formatUiAbs,
   formatUiSigned,
+  formatInputQty,
   formatVol,
   formatVolBase,
 } from "./format";
@@ -66,6 +67,12 @@ describe("formatPrice", () => {
     const s = chartPriceFormatter(6.4123e-9);
     expect(s).not.toMatch(/e/i);
     expect(s).not.toBe("—");
+  });
+
+  it("formatInputQty never uses scientific notation", () => {
+    expect(formatInputQty(1.36e-6)).toBe("0.00000136");
+    expect(formatInputQty(1.36e-6)).not.toMatch(/e/i);
+    expect(formatInputQty(12.5)).toBe("12.5");
   });
 
   it("formatUiAbs / formatUiSigned never use scientific notation", () => {

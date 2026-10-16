@@ -93,6 +93,17 @@ export function formatUiSigned(n: number): string {
   return `${sign}${formatUiAbs(n)}`;
 }
 
+/**
+ * Plain decimal for input fields / clipboard — never scientific notation,
+ * never grouping commas (safe for `<input type="number">` and paste).
+ */
+export function formatInputQty(n: number, maxFrac = 10): string {
+  if (!Number.isFinite(n)) return "";
+  if (Math.abs(n) < 1e-12) return "0";
+  const sign = n < 0 ? "-" : "";
+  return sign + trimZeros(Math.abs(n).toFixed(maxFrac));
+}
+
 /** Book / depth qty — never round sub-1 amounts to 0 (was formatNum(_, 0)). */
 export function formatBookQty(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";

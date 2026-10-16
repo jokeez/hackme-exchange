@@ -1,4 +1,4 @@
-import { formatPrice } from "./format";
+import { formatBookQty, formatPrice } from "./format";
 import { hapticError, hapticLight, hapticSuccess } from "./haptic";
 import { escapeHtml } from "./sanitize";
 
@@ -189,7 +189,7 @@ export function showQuickOrderPopup(
     pendingSide = side;
     pendingAmt = amt;
     const verb = side === "buy" ? "Buy" : "Sell";
-    confirmText.textContent = `${verb} ${amt} ${handlers.baseSymbol} @ ${priceStr} ${handlers.quoteSymbol}`;
+    confirmText.textContent = `${verb} ${formatBookQty(amt)} ${handlers.baseSymbol} @ ${priceStr} ${handlers.quoteSymbol}`;
     confirmBtn.textContent = `Confirm ${verb}`;
     confirmBtn.classList.toggle("buy", side === "buy");
     confirmBtn.classList.toggle("sell", side === "sell");

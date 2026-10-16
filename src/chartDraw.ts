@@ -115,7 +115,7 @@ export function extendRayToBounds(
 export function measureHudLines(st: MeasureStats): [string, string, string] {
   const sign = st.up ? "+" : "";
   return [
-    `${sign}${st.dPrice.toPrecision(6)}`,
+    `${sign}${Number.isFinite(st.dPrice) ? Math.abs(st.dPrice).toFixed(8).replace(/\.?0+$/, "") : "0"}`,
     `${sign}${st.dPct.toFixed(2)}%`,
     `${st.bars} bars · ${st.timeLabel}`,
   ];

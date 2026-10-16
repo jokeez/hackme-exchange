@@ -6,7 +6,13 @@
  */
 
 import { MINOR_UNIT_SCALE, type HealthResponse } from "./adapters/exchangeApi";
+import { formatUiAbs } from "./format";
 export { formatExchangeReject as formatOrderReject } from "./adapters/exchangeApi";
+
+/** Guard reject strings — never scientific notation. */
+function formatGuardNum(n: number): string {
+  return formatUiAbs(n);
+}
 
 /** Display-unit min notional (1 whole quote ≈ 1 USDT). */
 export const DEFAULT_MIN_NOTIONAL_QUOTE = 1;
@@ -234,7 +240,7 @@ export function validatePaperTradingGuards(
     if (notional < g.minNotionalQuote) {
       return {
         ok: false,
-        reason: `Min notional ${g.minNotionalQuote} ${quote} (got ${notional.toPrecision(4)})`,
+        reason: `Min notional ${g.minNotionalQuote} ${quote} (got ${formatGuardNum(notional)})`,
       };
     }
   }
@@ -248,7 +254,7 @@ export function validatePaperTradingGuards(
     if (opts.price < lo || opts.price > hi) {
       return {
         ok: false,
-        reason: `Price outside ±${(g.priceBandBps / 100).toFixed(0)}% band of mid (allowed ${lo.toPrecision(6)}–${hi.toPrecision(6)})`,
+        reason: `Price outside ±${(g.priceBandBps / 100).toFixed(0)}% band of mid (allowed ${formatGuardNum(lo)}–${formatGuardNum(hi)})`,
       };
     }
   }

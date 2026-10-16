@@ -267,12 +267,13 @@ import {
   formatVolBase,
   formatBookQty,
   formatUiAbs,
+  formatInputQty,
   localFallbackMarket,
   midForPair,
   pctTone,
   tickerFromMarket,
 } from "./market";
-import { renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
+import { formatAssetQty, formatTxTime, renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
 import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { LANES, PAIRS, pairById } from "./pairs";
 import {
@@ -1781,7 +1782,7 @@ function wireOrderPanelEvents(): void {
       } else {
         const add = Number(qs);
         const cur = Number(amtInp.value) || 0;
-        amtInp.value = String(cur + add);
+        amtInp.value = formatInputQty(cur + add);
       }
       updatePreviewForSide(side);
     });
@@ -2328,7 +2329,7 @@ function feeFillToast(
     ? `${formatNum(fee.feeHmc, 4)} HMC`
     : `${formatPrice(fee.feeQuote)} ${quoteAsset}`;
   toast(
-    `${side.toUpperCase()} ${formatNum(amt, 0)} ${base} · ${fee.role} ${formatBps(fee.bps)} · fee ${feeStr}`,
+    `${side.toUpperCase()} ${formatBookQty(amt)} ${base} · ${fee.role} ${formatBps(fee.bps)} · fee ${feeStr}`,
     "ok",
   );
 }
@@ -3120,7 +3121,7 @@ function wireConvertDesk(): void {
   });
 
   document.getElementById("cv-max")?.addEventListener("click", () => {
-    convertAmtStr = String(maxConvertibleFrom());
+    convertAmtStr = formatInputQty(maxConvertibleFrom());
     amtInp.value = convertAmtStr;
     markConvertPct(100);
     persistConvertDesk();
@@ -4983,11 +4984,15 @@ async function labFillsRefreshUi(): Promise<void> {
                 : "?";
             const side = escapeHtml(mySide);
             const pair = escapeHtml(f.pair || "");
+            const baseSym = String(f.pair || "")
+              .split(/[/_]/)[0]
+              ?.toUpperCase() || "";
             const px = formatPrice(minorToDisplay(Number(f.price || 0)));
-            const qty = formatUiAbs(minorToDisplay(Number(f.qty || 0)));
+            const qty = formatAssetQty(minorToDisplay(Number(f.qty || 0)), baseSym);
             const id = escapeHtml(truncateMid(String(f.id || ""), 8, 4));
-            const when = f.created_at
-              ? ` <span class="dim">${escapeHtml(String(f.created_at).replace("T", " ").slice(0, 16))}</span>`
+            const whenMs = f.created_at ? Date.parse(f.created_at) : NaN;
+            const when = Number.isFinite(whenMs)
+              ? ` <span class="dim">${escapeHtml(formatTxTime(whenMs))}</span>`
               : "";
             return `<li><span class="dim">${id}</span> ${pair} ${side} <strong class="mono">${qty}</strong> @ <span class="mono">${px}</span>${when}</li>`;
           })
@@ -5975,7 +5980,7 @@ function handleChartContextAction(
       toast("Chart view reset", "info");
       break;
     case "copy_price":
-      void copyTextToClipboard(String(price)).then((ok) => {
+      void copyTextToClipboard(formatInputQty(price, 12)).then((ok) => {
         if (ok) toast(`Copied ${formatPrice(price)}`, "ok");
         else toast("Clipboard blocked", "warn");
       });
@@ -6647,11 +6652,11 @@ function updatePreviewForSide(side: "buy" | "sell"): void {
     const role =
       uiType === "limit" && isMarketableLimit(side, form.price, mid) ? "taker" : previewFeeRole(uiType);
     const fee = calcFee(state, market, state.activePair, total, role, feeOpts);
-    setOrderPreview(side, `${formatNum(form.amt, 0)} @ ${formatPriceCompact(form.price)} · ${previewFeeLabel(fee, pair.quote)}`);
+    setOrderPreview(side, `${formatBookQty(form.amt)} @ ${formatPriceCompact(form.price)} · ${previewFeeLabel(fee, pair.quote)}`);
     return;
   }
   if (uiType === "trailing_stop") {
-    setOrderPreview(side, `Trail ${form.trail}% · ${formatNum(form.amt, 0)} ${pair.base}`);
+    setOrderPreview(side, `Trail ${form.trail}% · ${formatBookQty(form.amt)} ${pair.base}`);
     return;
   }
   if (uiType === "oco") {
@@ -7297,7 +7302,13 @@ function wireOrderAmendButtons(): void {
       inp.className = "inp mono act-edit-inp";
       inp.step = "any";
       inp.value =
-        field === "price" ? String(o.price) : field === "stop" ? String(o.stopPrice ?? "") : String(o.amountBase);
+        field === "price"
+          ? formatInputQty(o.price, 12)
+          : field === "stop"
+            ? o.stopPrice != null
+              ? formatInputQty(o.stopPrice, 12)
+              : ""
+            : formatInputQty(o.amountBase);
       const commit = () => {
         if (cancelled) return;
         amendOpenOrder(id, field, inp.value);
@@ -7493,7 +7504,7 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
     return;
   }
   const sized = maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid);
-  amtInp.value = sized > 0 ? String(sized) : "0";
+  amtInp.value = sized > 0 ? formatInputQty(sized) : "0";
   if (pct > 0 && sized <= 0) {
     const pair = pairById(state.activePair);
     const need = side === "buy" ? pair.quote : pair.base;
