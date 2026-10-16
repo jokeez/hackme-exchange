@@ -124,7 +124,10 @@ async function main() {
 
   const bookRes = await fetch(`${BASE}/book?pair=HMC/USDT`);
   if (bookRes.status !== 200) throw new Error(`book want 200 got ${bookRes.status}`);
-  const book = (await bookRes.json()) as { bids?: unknown[]; asks?: unknown[] };
+  const book = (await bookRes.json()) as {
+    bids?: { price?: number }[] | [number, ...unknown[]][];
+    asks?: { price?: number }[] | [number, ...unknown[]][];
+  };
   console.log(`PASS  book 200 (bids=${book.bids?.length ?? 0} asks=${book.asks?.length ?? 0})`);
 
   const fundAmt = 50_000_000_000; // 500 USDT minor
@@ -145,11 +148,33 @@ async function main() {
     throw new Error(`lab deposit ${dep.status} ${await dep.text()}`);
   }
 
-  const mid = 5_000_000; // 0.05
-  const price = mid - 50_000; // below mid buy
+  const levelPx = (lvl: unknown): number | null => {
+    if (lvl == null) return null;
+    if (Array.isArray(lvl) && typeof lvl[0] === "number") return lvl[0];
+    if (typeof lvl === "object" && typeof (lvl as { price?: number }).price === "number") {
+      return (lvl as { price: number }).price;
+    }
+    return null;
+  };
+  const bb = levelPx(book.bids?.[0]);
+  const ba = levelPx(book.asks?.[0]);
+  let mid: number;
+  if (bb != null && ba != null && bb > 0 && ba > 0) {
+    mid = Math.floor((bb + ba) / 2);
+  } else {
+    const tk = (await (await fetch(`${BASE}/ticker?pair=HMC%2FUSDT`)).json().catch(() => ({}))) as {
+      last?: number;
+    };
+    mid = typeof tk.last === "number" && tk.last > 0 ? tk.last : 5_000_000;
+    console.log(`WARN  empty book — mid from ticker/fallback=${mid}`);
+  }
+  // Passive buy well inside band (±bandBps) but below mid so it rests on the book.
+  const bandBps = typeof health.price_band_bps === "number" ? health.price_band_bps : 1500;
+  const insideBps = Math.min(200, Math.max(50, Math.floor(bandBps / 10)));
+  const price = Math.max(1, Math.floor(mid * (1 - insideBps / 10_000)));
   const minN = typeof health.min_notional === "number" ? health.min_notional : 1_000_000;
   const qty = Math.max(100_000_000, Math.ceil((minN * 100_000_000) / price / 100_000_000) * 100_000_000);
-  const bandBps = typeof health.price_band_bps === "number" ? health.price_band_bps : 1500;
+  console.log(`INFO  mid=${mid} place_px=${price} (-${insideBps}bps) qty=${qty}`);
 
   const badCsrf = await fetch(`${BASE}/orders`, {
     method: "POST",
@@ -242,7 +267,7 @@ async function main() {
           pair: "HMC/USDT",
           side: "buy",
           type: "limit",
-          price: mid - 200_000,
+          price: Math.max(1, Math.floor(mid * (1 - (insideBps + 50) / 10_000))),
           qty: 100_000_000,
           client_order_id: `rl-${i}-${Date.now()}`,
         }),

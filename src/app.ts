@@ -1,6 +1,6 @@
 import "./styles.css";
 import QRCode from "qrcode";
-import { patchAccountFundsDom, renderAccountPage, wireAccountFunding } from "./account";
+import { patchAccountFundsDom, patchDeskHoldPills, renderAccountPage, wireAccountFunding } from "./account";
 import { validateLabWithdrawDestination, validateLabWithdrawAmount } from "./labCustody";
 import {
   USDT_DEPOSIT_MIN,
@@ -94,7 +94,7 @@ import { destroySecondaryChart, resizeSecondaryCharts, resetSecondaryPaneView, s
 import { detectMultiChartLayout, listChartPaneHosts } from "./chartScreenshot";
 import { registerCrosshairPane, setCrosshairSyncEnabled, getCrosshairSyncDebug } from "./chartCrosshairSync";
 import { clearTimeSyncRegistry, registerTimeSyncPane, setTimeSyncEnabled, getTimeSyncDebug } from "./chartTimeSync";
-import { showUnifiedSettingsModal, patchSettingsWalletSessionChrome, formatDeskMatchingLabel, isDeskMatchingLive, type SettingsWalletChrome } from "./settingsModal";
+import { showUnifiedSettingsModal, patchSettingsWalletSessionChrome, formatDeskMatchingLabel, isDeskMatchingLive, isDeskEdgePending, type SettingsWalletChrome } from "./settingsModal";
 import {
   auth2faConfirm,
   auth2faDisable,
@@ -2159,13 +2159,13 @@ function renderBook(): string {
   if (!bids.length && !asks.length) {
     const emptyHint = labLive
       ? lab && !waitingLive
-        ? "Live book empty — place a limit or wait for resting depth"
-        : "Loading live L2 depth…"
+        ? "Live book empty — place a limit or wait for Soft-MM depth · open Markets for full ladder"
+        : "Refreshing book… Soft-MM depth usually returns in a few seconds"
       : "Waiting for oracle mid…";
     const emptyTitle = labLive
       ? lab && !waitingLive
         ? "Live book empty"
-        : "Live book"
+        : "Refreshing book"
       : "Order book unavailable";
     return `<div class="book-view-tabs segmented">
       <button type="button" class="bv ${bookView !== "depth" ? "active" : ""}" data-bv="book">Book</button>
@@ -2438,13 +2438,17 @@ function renderConvert(): string {
   const vip = activeVipTier(state, market ?? undefined);
   const serverReady = useServerConvert();
   const serverAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useServerMatching();
+  const deskPending = isDeskConnectEnabled() && isDeskEdgePending(deskEdgeSnap.matching);
+  const deskBook = isDeskConnectEnabled() && usePublicDeskBook();
   const feeNote = serverReady
     ? `Server <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
     : serverAvail
       ? `Server convert ready — Connect on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
-      : isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching)
-        ? `Local preview · Connect for server convert · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
-        : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
+      : deskPending
+        ? `Checking edge… · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+        : deskBook || (isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching))
+          ? `Local preview · Connect for server convert · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+          : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
   const hmcPay =
     state.feeConfig.payFeesInHmc
       ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · enabled when health advertises hmc_fee_pay"}`
@@ -2472,9 +2476,11 @@ function renderConvert(): string {
   const kicker = isDeskConnectEnabled()
     ? serverReady
       ? "Instant swap · desk convert live"
-      : isDeskMatchingLive(deskEdgeSnap.matching)
-        ? "Instant swap · Connect for server convert"
-        : "Instant swap · paper balances"
+      : deskPending
+        ? "Instant swap · checking edge…"
+        : deskBook || isDeskMatchingLive(deskEdgeSnap.matching)
+          ? "Instant swap · Connect for server convert"
+          : "Instant swap · local preview"
     : isLabLoopbackApi()
       ? serverReady
         ? "Instant swap · lab convert"
@@ -2484,9 +2490,11 @@ function renderConvert(): string {
   const holdBanner = isDeskConnectEnabled()
     ? serverReady
       ? `<p class="muted small convert-hold-banner convert-hold-banner--live" role="status">Desk convert uses server mid + VIP taker on HMC/USDT and HMC/SUP (inventory-backed · not the spot book).</p>`
-      : isDeskMatchingLive(deskEdgeSnap.matching)
-        ? `<p class="muted small convert-hold-banner" role="status">Spot matching is live — Connect on Account to unlock server Convert (HMC/USDT · HMC/SUP). Until then local preview only.</p>`
-        : `<p class="muted small convert-hold-banner" role="status">Matching not live on this edge yet — Convert uses local paper balances · HMC/USDT · HMC/SUP.</p>`
+      : deskPending
+        ? `<p class="muted small convert-hold-banner" role="status">Checking edge health… Convert unlocks when the desk advertises server convert.</p>`
+        : deskBook || isDeskMatchingLive(deskEdgeSnap.matching)
+          ? `<p class="muted small convert-hold-banner" role="status">Spot matching is live — Connect on Account to unlock server Convert (HMC/USDT · HMC/SUP). Until then local preview only.</p>`
+          : `<p class="muted small convert-hold-banner" role="status">Connect desk wallet for server Convert · HMC/USDT · HMC/SUP. Local preview until then.</p>`
     : "";
 
   return `
@@ -2733,7 +2741,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
           : q.code === "invalid_order"
             ? `${reject} — try a smaller size (pair qty/price caps)`
             : q.code === "convert_inventory"
-              ? `${reject} — clamp Max or open Spot book`
+              ? `${reject} — try a smaller size or open Spot`
               : reject;
     }
     paintConvertCta(go, amt, true);
@@ -2924,7 +2932,13 @@ async function runConvertDesk(): Promise<void> {
       return;
     }
     // Session + advertised /convert: don't invent balances — surface API error.
-    toast(formatExchangeReject(apiRes), "warn");
+    const reject = formatExchangeReject(apiRes);
+    toast(
+      apiRes.code === "convert_inventory"
+        ? `${reject} — try a smaller size or open Spot`
+        : reject,
+      "warn",
+    );
     return;
   }
 
@@ -3028,14 +3042,20 @@ function softPatchFeePayChrome(): void {
     const labReady = tradingGuards.convertFeeServer && useLabMatching();
     const labAvail = tradingGuards.convertFeeServer && isLabApiEnabled() && !useLabMatching();
     const deskReady = tradingGuards.convertFeeServer && useServerMatching();
+    const deskPending = isDeskConnectEnabled() && isDeskEdgePending(deskEdgeSnap.matching);
+    const deskBook = isDeskConnectEnabled() && usePublicDeskBook();
     const feeNote = deskReady
       ? `Server <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
       : labReady
         ? `Lab <code>GET/POST /convert</code> · desk mid · VIP taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) · net shown`
         : labAvail
           ? `Lab convert ready — connect fixture on Account · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
-          : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
-    lead.innerHTML = `Swap at desk mid · ${feeNote}. No book, no futures.`;
+          : deskPending
+            ? `Checking edge… · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+            : deskBook || (isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching))
+              ? `Local preview · Connect for server convert · taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)})`
+              : `Paper convert · spot taker ${formatBps(vip.takerBps)} (${escapeHtml(vip.name)}) — same VIP schedule as Spot`;
+    lead.innerHTML = `Swap at mid · ${feeNote}. No book, no futures.`;
   }
   // Keep Spot + Account checkboxes in sync when either is toggled.
   const acct = document.getElementById("acct-pay-hmc") as HTMLInputElement | null;
@@ -3335,7 +3355,7 @@ function renderSpot(): string {
             ? "VIP from server GET /vip (30d USDT fills)"
             : useServerMatching()
               ? "VIP pending server sync — local estimate"
-              : useLiveBook()
+              : useLiveBook() || usePublicDeskBook()
                 ? "Live book — Connect to sync desk VIP volume"
                 : "VIP from local paper trade history"
         }">${escapeHtml(vip.name)}</span>
@@ -3344,8 +3364,8 @@ function renderSpot(): string {
             ? `<span class="vip-demo muted small">live</span>`
             : useServerMatching()
               ? `<span class="vip-demo muted small">sync…</span>`
-              : useLiveBook()
-                ? `<span class="vip-demo muted small">live</span>`
+              : useLiveBook() || usePublicDeskBook()
+                ? `<span class="vip-demo muted small">sync…</span>`
                 : `<span class="vip-demo muted small">paper</span>`
         }
         <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
@@ -4165,11 +4185,10 @@ async function deskWalletConnectUi(): Promise<void> {
   const paperEq =
     state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
   if (paperEq > 0 && !useServerMatching()) {
-    if (
-      !window.confirm(
-        "Connect desk wallet?\n\nPaper Spot balances stay in this browser until matching is live. Desk Connect opens a session only — it will not wipe your paper funds.",
-      )
-    ) {
+    const confirmCopy = useLiveBook() || usePublicDeskBook()
+      ? "Connect desk wallet?\n\nBrowser paper balances stay local until ledger sync. Desk Connect opens a session and pulls exchange balances — it will not wipe your paper funds."
+      : "Connect desk wallet?\n\nPaper Spot balances stay in this browser. Desk Connect opens a session only — it will not wipe your paper funds.";
+    if (!window.confirm(confirmCopy)) {
       if (msg) msg.textContent = "Connect canceled";
       return;
     }
@@ -4180,7 +4199,15 @@ async function deskWalletConnectUi(): Promise<void> {
     toast(`Desk Connect: ${res.message}`, "warn");
     return;
   }
-  if (msg) msg.textContent = `Connected ${res.wallet.address} · ${useServerMatching() ? "matching live" : useLiveBook() ? "live book · Connect to trade" : "paper Spot"}`;
+  if (msg) {
+    msg.textContent = `Connected ${res.wallet.address} · ${
+      useServerMatching()
+        ? "matching live · syncing desk ledger"
+        : useLiveBook() || usePublicDeskBook()
+          ? "session connected · syncing desk ledger"
+          : "paper Spot"
+    }`;
+  }
   toast(`Desk wallet connected · ${res.wallet.address.slice(0, 14)}…`, "ok");
   // Sync desk ledger (or HOLD probe). Cookie must ride for /balances.
   {
@@ -4378,7 +4405,10 @@ async function refreshDeskEdgeHealthUi(): Promise<boolean> {
   const changed =
     before.matching !== deskEdgeSnap.matching ||
     before.depositEnabled !== deskEdgeSnap.depositEnabled ||
-    before.withdrawEnabled !== deskEdgeSnap.withdrawEnabled;
+    before.withdrawEnabled !== deskEdgeSnap.withdrawEnabled ||
+    before.maxOpenOrders !== deskEdgeSnap.maxOpenOrders ||
+    before.priceBandBps !== deskEdgeSnap.priceBandBps ||
+    before.minNotional !== deskEdgeSnap.minNotional;
   // If health failed silently (unreachable), snap stays default/previous — still refresh DOM.
   const row = document.getElementById("set-desk-hold");
   if (row) {
@@ -4395,6 +4425,7 @@ async function refreshDeskEdgeHealthUi(): Promise<boolean> {
       el.textContent = v.text;
     });
   }
+  patchDeskHoldPills(deskEdgeSnap);
   patchOpenSettingsWalletChrome();
   // Treat unchanged default HOLD after failed probe as soft fail when API wired but backoff set.
   if (isDeskConnectEnabled() || isLabApiEnabled()) {

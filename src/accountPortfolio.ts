@@ -1,3 +1,4 @@
+import { getLedgerHolds } from "./adapters/exchangeApi";
 import { freeBalance, reservedBalances } from "./balance";
 import { formatNum, formatPct, formatPrice } from "./market";
 import { assetBadgeLg } from "./icons";
@@ -407,6 +408,8 @@ export function renderAssetTableRows(
             : "down";
       const pnlStr = formatFloatingPnlDisplay(r.floatingPnl, r.floatingPnlPct);
       const allocPct = eq > 0 ? (r.usdtValue / eq) * 100 : 0;
+      const screenHold = getLedgerHolds().find((h) => h.asset === r.symbol && h.hold > 0)?.hold ?? 0;
+      const holdStr = formatNum(screenHold, decimals);
       return `<tr class="acct-asset-row" data-asset="${r.symbol}" data-usdt-value="${r.usdtValue.toFixed(4)}">
         <td class="acct-asset-cell">
           <button type="button" class="acct-asset-expand" data-asset-expand="${r.symbol}" aria-expanded="false" aria-label="Details ${r.symbol}">›</button>
@@ -430,6 +433,11 @@ export function renderAssetTableRows(
             <span>Allocation <strong class="mono">${allocPct.toFixed(1)}%</strong></span>
             <span>Reserved <strong class="mono" data-raw="${escapeHtml(formatNum(r.reserved, decimals))}" data-raw-slot="reserved">${maskBalance(formatNum(r.reserved, decimals), hidden)}</strong></span>
             <span>Available <strong class="mono" data-raw="${escapeHtml(formatNum(Math.max(0, r.amount - r.reserved), decimals))}" data-raw-slot="avail">${maskBalance(formatNum(Math.max(0, r.amount - r.reserved), decimals), hidden)}</strong></span>
+            ${
+              screenHold > 0
+                ? `<span>Screening hold <strong class="mono" data-raw="${escapeHtml(holdStr)}" data-raw-slot="hold">${maskBalance(holdStr, hidden)}</strong></span>`
+                : ""
+            }
             <a class="acct-asset-trade" href="#spot/${r.symbol === "BTC" ? "BTC_USDT" : r.symbol === "SUP" ? "SUP_USDT" : "HMC_USDT"}/15m" data-goto-spot="${r.symbol}">Trade →</a>
           </div>
         </td>

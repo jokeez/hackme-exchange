@@ -16,7 +16,7 @@ vi.mock("./config/integration", async (importOriginal) => {
 
 import { clearLabSessionMeta, setLabSessionMeta } from "./adapters/exchangeApi";
 import { setDeskMatchingStatus } from "./adapters/labMatching";
-import { patchAccountFundsDom, renderAccountPage } from "./account";
+import { patchAccountFundsDom, patchScreeningHoldBanner, renderAccountPage } from "./account";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("deposit UX contracts", () => {
@@ -60,6 +60,27 @@ describe("deposit UX contracts", () => {
     });
     expect(html).toMatch(/Screening hold/i);
     expect(html).toMatch(/0\.5 USDT/);
+    expect(html).toMatch(/Screening hold/i);
+  });
+
+  it("patchAccountFundsDom injects screening hold after deposit poll", async () => {
+    const { rememberLedgerHolds } = await import("./adapters/exchangeApi");
+    rememberLedgerHolds([]);
+    setLabSessionMeta("HMC-09dc5f553bfff940", "csrf-hold-patch");
+    const s = baseState();
+    const m = sampleMarket();
+    document.body.innerHTML = renderAccountPage(s, m, {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(document.querySelector(".acct-screening-hold")).toBeNull();
+    rememberLedgerHolds([{ asset: "USDT", available: 0, reserved: 0, hold: 50_000_000, amount: 50_000_000 }]);
+    patchAccountFundsDom(s, m, {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(document.querySelector(".acct-screening-hold")?.textContent).toMatch(/0\.5 USDT/);
+    rememberLedgerHolds([]);
+    patchScreeningHoldBanner();
+    expect(document.querySelector(".acct-screening-hold")).toBeNull();
   });
 
   it("HOLD edge still shows Deposit · HOLD quick actions", () => {

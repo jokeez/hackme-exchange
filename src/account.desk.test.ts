@@ -14,6 +14,7 @@ vi.mock("./config/integration", async (importOriginal) => {
 });
 
 import { clearLabSessionMeta, setLabSessionMeta } from "./adapters/exchangeApi";
+import { setDeskMatchingStatus } from "./adapters/labMatching";
 import { renderAccountPage } from "./account";
 import { baseState, sampleMarket } from "./testFixtures";
 
@@ -101,14 +102,26 @@ describe("Account desk session (HOLD)", () => {
         matching: "disabled",
         depositEnabled: false,
         withdrawEnabled: false,
-        maxOpenOrders: 20,
+        maxOpenOrders: 96,
         priceBandBps: 1500,
         minNotional: 0.01,
       },
     });
     expect(html).toContain("acct-desk-caps");
-    expect(html).toContain("max open 20");
+    expect(html).toContain("max open 96");
     expect(html).toContain("±1500 bps");
+  });
+
+  it("desk promo uses live convert copy (not paper)", () => {
+    setDeskMatchingStatus("ok");
+    const html = renderAccountPage(baseState(), sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(html).toContain("Convert at desk mid");
+    expect(html).not.toContain("Paper convert between assets");
+    expect(html).toContain("VIP schedule from desk");
+    expect(html).toContain("sync…");
+    expect(html).not.toMatch(/vip-demo[^>]*>\s*demo\s*</);
   });
 
   it("renders desk custody GO deposit buttons when deposit enabled", () => {

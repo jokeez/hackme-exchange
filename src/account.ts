@@ -239,6 +239,25 @@ function renderScreeningHoldBanner(): string {
   </div>`;
 }
 
+/** Soft-update screening banner after deposit poll / balance patch (no full remount). */
+export function patchScreeningHoldBanner(): void {
+  const panel = document.getElementById("account-funds");
+  if (!panel) return;
+  const html = renderScreeningHoldBanner();
+  const existing = panel.querySelector(".acct-screening-hold");
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) {
+    existing.outerHTML = html;
+    return;
+  }
+  const anchor = panel.querySelector(".acct-positions-empty, .acct-asset-table");
+  if (anchor) anchor.insertAdjacentHTML("beforebegin", html);
+  else panel.insertAdjacentHTML("afterbegin", html);
+}
+
 function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const matching = formatDeskMatchingLabel(edge?.matching);
   const pending = isDeskEdgePending(edge?.matching);
@@ -264,6 +283,46 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
         <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${pending ? "…" : dep ? "on" : "HOLD"}</span>
         <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${pending ? "…" : wd ? "on" : "HOLD"}</span>
       </div>${capsLine}</div>`;
+}
+
+/** Soft-update Account edge pills + soft-launch caps after /health refresh. */
+export function patchDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): void {
+  const row = document.querySelector(".acct-desk-hold");
+  if (row && edge) {
+    const matching = formatDeskMatchingLabel(edge.matching);
+    const pending = isDeskEdgePending(edge.matching);
+    const live = isDeskMatchingLive(edge.matching);
+    const vals = [
+      { on: live, text: `matching · ${matching}` },
+      { on: !!edge.depositEnabled, text: `deposit · ${pending ? "…" : edge.depositEnabled ? "on" : "HOLD"}` },
+      { on: !!edge.withdrawEnabled, text: `withdraw · ${pending ? "…" : edge.withdrawEnabled ? "on" : "HOLD"}` },
+    ];
+    row.querySelectorAll(".settings-hold-pill").forEach((el, i) => {
+      const v = vals[i];
+      if (!v) return;
+      el.setAttribute("data-on", v.on ? "1" : "0");
+      el.textContent = v.text;
+    });
+  }
+  const capsEl = document.querySelector(".acct-desk-caps");
+  if (!capsEl) return;
+  const caps: string[] = [];
+  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max open ${edge.maxOpenOrders}`);
+  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${edge.priceBandBps} bps`);
+  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min notional ${edge.minNotional}`);
+  if (caps.length > 0) {
+    capsEl.classList.add("mono");
+    capsEl.setAttribute("title", "Soft-launch caps from /health");
+    capsEl.textContent = caps.join(" · ");
+  } else if (isDeskMatchingLive(edge?.matching)) {
+    capsEl.classList.remove("mono");
+    capsEl.removeAttribute("title");
+    capsEl.textContent = "Soft-launch caps apply (see API health)";
+  } else if (isDeskEdgePending(edge?.matching)) {
+    capsEl.classList.remove("mono");
+    capsEl.removeAttribute("title");
+    capsEl.textContent = "Checking edge health…";
+  }
 }
 
 function allocationBars(w: DemoState["wallet"], market: MarketSnapshot, eq: number): string {
@@ -468,11 +527,10 @@ function renderWithdrawCard(
               ? `<p class="muted small lab-wd-limits mono" id="lab-wd-limits" hidden>${escapeHtml(
                   [
                     deskEdge?.minNotional && deskEdge.minNotional > 0 ? `min notional ${deskEdge.minNotional}` : "",
-                    deskEdge?.maxOpenOrders && deskEdge.maxOpenOrders > 0 ? `max open ${deskEdge.maxOpenOrders}` : "",
                     deskEdge?.priceBandBps && deskEdge.priceBandBps > 0 ? `±${deskEdge.priceBandBps} bps` : "",
                   ]
                     .filter(Boolean)
-                    .join(" · ") || "Limits from /health",
+                    .join(" · ") || "Withdraw limits from /health",
                 )}</p>`
               : ""
           }
@@ -507,6 +565,7 @@ function renderCashDock(
   const deskCustodyOn = deskOn && !!opts?.deskEdge?.depositEnabled;
   const deskWdOn = deskOn && !!opts?.deskEdge?.withdrawEnabled;
   // Prefer labOn / deskCustodyOn over labLive — useLabMatching can be sticky in tests on localhost.
+  const deskBookLive = deskOn && (usePublicDeskBook() || useDeskMatching());
   const intro = labOn
     ? labLive
       ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
@@ -518,9 +577,11 @@ function renderCashDock(
         ]
           .filter(Boolean)
           .join(" · ")}`
-      : deskOn
-        ? "Desk Connect · paper funds until Connect — live book when matching is GO"
-        : "Paper funds · live exchange deposit/withdraw follow server health · optional node Sync for HMC/SUP";
+      : deskOn && deskBookLive
+        ? "Desk live book — Connect to sync ledger · deposit/withdraw follow edge health"
+        : deskOn
+          ? "Desk Connect · Connect to sync ledger · matching opens trading when edge is GO"
+          : "Paper funds · live exchange deposit/withdraw follow server health · optional node Sync for HMC/SUP";
   const dockClass = [
     labOn ? "lab-custody-card" : "",
     deskOn && !labOn && !deskCustodyOn && !deskWdOn ? "desk-hold-card" : "",
@@ -929,11 +990,19 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <span class="vip-badge lg" title="${
               hasServerVipVolume()
                 ? "VIP from server GET /vip (30d USDT fills)"
-                : "Demo VIP from local paper trade history"
+                : deskOn
+                  ? "VIP schedule from desk · volume syncs after fills"
+                  : "Demo VIP from local paper trade history"
             }">
               <span class="vip-name">${escapeHtml(vip.name)}</span>
               <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
-              <span class="vip-demo muted small">${hasServerVipVolume() ? "live" : "demo"}</span>
+              <span class="vip-demo muted small">${
+                hasServerVipVolume()
+                  ? "live"
+                  : deskOn
+                    ? "sync…"
+                    : "demo"
+              }</span>
             </span>
             <div class="vip-progress">
               <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
@@ -971,7 +1040,11 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       <a class="acct-promo-card glass-inset" href="#convert">
         <span class="acct-promo-tag">Convert</span>
         <strong>Instant swap</strong>
-        <span class="muted small">Paper convert between assets</span>
+        <span class="muted small">${
+          isDeskConnectEnabled()
+            ? "Convert at desk mid · HMC/USDT · HMC/SUP"
+            : "Paper convert between assets"
+        }</span>
       </a>
       <a class="acct-promo-card glass-inset" href="#pool">
         <span class="acct-promo-tag">Pool</span>
@@ -1275,6 +1348,9 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
   const dayPnl = todayPnl(state, market);
   const denom = getEquityDenom();
 
+  patchScreeningHoldBanner();
+  patchDeskHoldPills(opts?.deskEdge);
+
   for (const r of assetRows) {
     const tr = document.querySelector(`tr.acct-asset-row[data-asset="${r.symbol}"]`) as HTMLElement | null;
     if (!tr) continue;
@@ -1292,6 +1368,8 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
           : "down";
     const reservedStr = formatNum(r.reserved, decimals);
     const availStr = formatNum(Math.max(0, r.amount - r.reserved), decimals);
+    const holdAmt = getLedgerHolds().find((h) => h.asset === r.symbol && h.hold > 0)?.hold ?? 0;
+    const holdStr = formatNum(holdAmt, decimals);
 
     tr.querySelector('[data-col="free"]')!.textContent = maskBalance(amtStr, hidden);
     tr.querySelector('[data-col="usdt"]')!.textContent = maskBalance(valueStr, hidden);
@@ -1311,7 +1389,8 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     if (detail) {
       detail.querySelectorAll<HTMLElement>("[data-raw]").forEach((el) => {
         const slot = el.dataset.rawSlot;
-        const raw = slot === "reserved" ? reservedStr : slot === "avail" ? availStr : el.dataset.raw;
+        const raw =
+          slot === "reserved" ? reservedStr : slot === "avail" ? availStr : slot === "hold" ? holdStr : el.dataset.raw;
         if (raw != null) {
           el.dataset.raw = raw;
           el.textContent = maskBalance(raw, hidden);
