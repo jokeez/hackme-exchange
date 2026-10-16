@@ -1,6 +1,6 @@
 import { getLedgerHolds } from "./adapters/exchangeApi";
 import { freeBalance, reservedBalances } from "./balance";
-import { formatNum, formatPct, formatPrice } from "./market";
+import { formatNum, formatPct, formatPrice, formatUiAbs } from "./market";
 import { assetBadgeLg } from "./icons";
 import { escapeHtml } from "./sanitize";
 import { walletEquityFromMarket } from "./store";
@@ -160,13 +160,7 @@ export function formatPnlAbsInDenom(
 ): { amount: string; unit: string } {
   const sign = absUsdt >= 0 ? "+" : "-";
   const abs = Math.abs(absUsdt);
-  const fmtTiny = (n: number, digits = 2): string => {
-    if (n >= 1) return formatNum(n, digits);
-    if (n >= 0.01) return formatNum(n, 4);
-    if (n >= 0.0001) return formatNum(n, 6);
-    if (n < 1e-12) return "0.00";
-    return n.toExponential(2);
-  };
+  const fmtTiny = (n: number): string => formatUiAbs(n);
   switch (denom) {
     case "BTC": {
       const btc = market.btcUsd > 0 ? abs / market.btcUsd : 0;
@@ -285,13 +279,7 @@ export function formatFloatingPnlDisplay(absUsdt: number, pct: number): string {
   // No real mark-vs-cost move — show flat instead of "+0.00 (0.00%)" / "00%".
   if (a < 1e-9 && p < 5e-3) return "flat";
   const sign = absUsdt >= 0 ? "+" : "-";
-  let absStr: string;
-  if (a >= 1) absStr = formatNum(a, 2);
-  else if (a >= 0.01) absStr = formatNum(a, 4);
-  else if (a >= 0.0001) absStr = formatNum(a, 6);
-  else if (a < 1e-12) absStr = "0.00";
-  else absStr = a.toExponential(2);
-  return `${sign}${absStr} (${formatPct(pct)})`;
+  return `${sign}${formatUiAbs(a)} (${formatPct(pct)})`;
 }
 
 export function equitySparklineSvg(snapshots: EquitySnapshot[], w = 200, h = 72): string {
@@ -383,9 +371,157 @@ function ledgerKindLabel(kind: LedgerEntry["kind"], asset: string): string {
   }
 }
 
+/** Absolute qty for an asset — never scientific notation. */
+export function formatAssetQty(n: number, asset?: string): string {
+  if (!Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  const sym = String(asset || "").toUpperCase();
+  if (a === 0 || a < 1e-12) return sym === "BTC" ? "0.00000000" : "0.00";
+  if (sym === "BTC") {
+    if (a >= 1) return formatNum(a, 4);
+    return trimFrac(a.toFixed(8));
+  }
+  if (sym === "USDT") {
+    if (a >= 1) return formatNum(a, 2);
+    if (a >= 0.01) return formatNum(a, 4);
+    return formatUiAbs(a);
+  }
+  return formatUiAbs(a);
+}
+
+/** Signed qty + asset label for ledger / recent-tx rows. */
+export function formatSignedAssetQty(n: number, asset: string): string {
+  if (!Number.isFinite(n)) return "—";
+  const sym = String(asset || "").toUpperCase() || "?";
+  if (Math.abs(n) < 1e-12) return `0.00 ${sym}`;
+  const sign = n > 0 ? "+" : "-";
+  return `${sign}${formatAssetQty(n, sym)} ${sym}`;
+}
+
+function trimFrac(s: string): string {
+  if (!s.includes(".")) return s;
+  return s.replace(/\.?0+$/, "") || "0";
+}
+
+/** Middle-ellipsis destination / id — keeps head + tail readable. */
+export function truncateMid(s: string, head = 10, tail = 6): string {
+  const t = String(s || "").trim();
+  if (!t) return "—";
+  if (t.length <= head + tail + 1) return t;
+  return `${t.slice(0, head)}…${t.slice(-tail)}`;
+}
+
+export type TxStatusTone = "completed" | "pending" | "failed" | "review";
+
+/** Normalize withdraw / custody status → CEX badge label + CSS tone. */
+export function custodyStatusMeta(
+  status: string,
+  opts?: { asset?: string; ageMin?: number | null; failReason?: string },
+): { label: string; tone: TxStatusTone; cssClass: string } {
+  const st = String(status || "").toLowerCase().trim();
+  const age =
+    opts?.ageMin != null && Number.isFinite(opts.ageMin) ? ` · ${Math.max(0, Math.round(opts.ageMin))}m` : "";
+  const assetU = String(opts?.asset || "").toUpperCase();
+  if (st === "completed" || st === "complete" || st === "confirmed" || st === "credited") {
+    return { label: `Complete${age}`, tone: "completed", cssClass: "completed" };
+  }
+  if (st === "failed" || st === "rejected" || st === "cancelled" || st === "canceled") {
+    const reason = opts?.failReason ? ` · ${String(opts.failReason).slice(0, 36)}` : "";
+    return { label: `Failed${reason}`, tone: "failed", cssClass: "failed" };
+  }
+  if (st === "kyt_pending" || st === "submitted" || st === "review") {
+    return { label: `KYT review${age}`, tone: "review", cssClass: "pending" };
+  }
+  if (st === "pending" || st === "queued" || st === "processing") {
+    const hint =
+      assetU === "USDT" ? " · KYT / ops broadcast" : assetU ? " · waiting on-chain" : "";
+    return { label: `Pending${age}${hint}`, tone: "pending", cssClass: "pending" };
+  }
+  const pretty = st ? st.replace(/_/g, " ") : "unknown";
+  return { label: pretty + age, tone: "pending", cssClass: "pending" };
+}
+
+export function formatTxStatusLabel(status: RecentTx["status"]): string {
+  if (status === "pending") return "Pending";
+  if (status === "failed") return "Failed";
+  return "Complete";
+}
+
+/** Ledger / recent-tx timestamp — date + local HH:MM (CEX-style). */
 export function formatTxTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" });
+  if (!Number.isFinite(d.getTime())) return "—";
+  const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${date} ${time}`;
+}
+
+/** Compact relative + absolute for withdraw history rows. */
+export function formatCustodyWhen(isoOrTs?: string | number): { absolute: string; ageMin: number | null } {
+  const ms =
+    typeof isoOrTs === "number"
+      ? isoOrTs
+      : isoOrTs
+        ? Date.parse(isoOrTs)
+        : NaN;
+  if (!Number.isFinite(ms)) return { absolute: "—", ageMin: null };
+  const ageMin = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  return { absolute: formatTxTime(ms), ageMin };
+}
+
+/** One ledger list row HTML (escaped). */
+export function renderLedgerListItem(r: LedgerEntry): string {
+  const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
+  const amt = formatSignedAssetQty(r.amount, r.asset);
+  const tone = r.amount >= 0 ? "up" : "down";
+  const kind = escapeHtml(ledgerKindLabel(r.kind, r.asset));
+  const note = r.note ? ` <span class="dim">${escapeHtml(r.note)}</span>` : "";
+  const when = `<span class="dim acct-ledger-when">${escapeHtml(formatTxTime(r.ts))}</span>`;
+  return `<li data-ledger-kind="${bucket}"><span class="acct-ledger-kind ${tone}">${kind}</span> <strong class="mono ${tone}">${escapeHtml(amt)}</strong>${note} ${when}</li>`;
+}
+
+/** Withdraw history row HTML (escaped) — amount, fee, destination, status, time. */
+export function renderWithdrawHistoryItem(w: {
+  id: string;
+  asset: string;
+  amount: number;
+  fee?: number;
+  status: string;
+  destination: string;
+  created_at?: string;
+  fail_reason?: string;
+  tx_id?: string;
+}): string {
+  const when = formatCustodyWhen(w.created_at);
+  const meta = custodyStatusMeta(w.status, {
+    asset: w.asset,
+    ageMin: when.ageMin,
+    failReason: w.fail_reason,
+  });
+  const amtDisp = formatAssetQty(w.amount, w.asset);
+  const feePart =
+    w.fee != null && Number.isFinite(w.fee) && w.fee > 0
+      ? `<span class="dim">fee ${escapeHtml(formatAssetQty(w.fee, w.asset))} ${escapeHtml(w.asset)}</span>`
+      : "";
+  const dest = escapeHtml(truncateMid(w.destination, 12, 8));
+  const idShort = escapeHtml(truncateMid(w.id, 8, 4));
+  const txPart = w.tx_id
+    ? `<span class="dim" title="${escapeHtml(w.tx_id)}">tx ${escapeHtml(truncateMid(w.tx_id, 8, 6))}</span>`
+    : "";
+  return `<li class="lab-wd-row">
+    <div class="lab-wd-row-main">
+      <span class="dim lab-wd-id">${idShort}</span>
+      <strong class="mono">${escapeHtml(w.asset)} ${escapeHtml(amtDisp)}</strong>
+      <span class="dim">→</span>
+      <span class="mono lab-wd-dest" title="${escapeHtml(w.destination)}">${dest}</span>
+      <span class="acct-tx-status ${meta.cssClass}">${escapeHtml(meta.label)}</span>
+    </div>
+    <div class="lab-wd-row-meta dim">
+      <span>${escapeHtml(when.absolute)}</span>
+      ${feePart}
+      ${txPart}
+    </div>
+  </li>`;
 }
 
 export function renderAssetTableRows(

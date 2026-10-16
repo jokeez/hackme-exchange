@@ -10,6 +10,8 @@ import {
   formatPrice,
   formatPriceCompact,
   formatRewardPerM,
+  formatUiAbs,
+  formatUiSigned,
   formatVol,
   formatVolBase,
 } from "./format";
@@ -64,6 +66,15 @@ describe("formatPrice", () => {
     const s = chartPriceFormatter(6.4123e-9);
     expect(s).not.toMatch(/e/i);
     expect(s).not.toBe("—");
+  });
+
+  it("formatUiAbs / formatUiSigned never use scientific notation", () => {
+    expect(formatUiAbs(1.36e-6)).toBe("0.00000136");
+    expect(formatUiAbs(1.36e-6)).not.toMatch(/e/i);
+    expect(formatUiSigned(-1.36e-6)).toBe("-0.00000136");
+    expect(formatUiSigned(-1.36e-6)).not.toMatch(/e/i);
+    expect(formatUiSigned(0)).toBe("+0.00");
+    expect(formatUiAbs(12.345)).toBe("12.35");
   });
 
   it("chartLocaleTag returns a valid Intl locale", () => {

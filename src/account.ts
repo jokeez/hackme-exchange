@@ -24,6 +24,8 @@ import {
   formatFloatingPnlDisplay,
   formatPnlAbsInDenom,
   formatTodayPnlHtml,
+  formatSignedAssetQty,
+  formatTxStatusLabel,
   formatTxTime,
   getEquityDenom,
   isBalanceHidden,
@@ -31,6 +33,7 @@ import {
   recentTransactions,
   renderAssetTableRows,
   renderDenomRing,
+  renderLedgerListItem,
   setBalanceHidden,
   setEquityDenom,
   syncDenomRingDom,
@@ -735,12 +738,7 @@ function renderActivityBlock(
 ): string {
   const rows = ledger.slice(0, 24);
   const listItems = rows.length
-    ? rows
-        .map((r) => {
-          const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
-          return `<li data-ledger-kind="${bucket}"><span class="${r.amount >= 0 ? "up" : "down"}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.asset)} <strong>${formatNum(r.amount, 4)}</strong> <span class="dim">${escapeHtml(r.note || "")}</span></li>`;
-        })
-        .join("")
+    ? rows.map((r) => renderLedgerListItem(r)).join("")
     : `<li class="ledger-empty-row" data-ledger-kind="other" hidden><span class="muted">No history yet</span></li>`;
   return `
     <section class="acct-activity-block" id="acct-activity">
@@ -833,8 +831,8 @@ function renderRecentTxTable(state: DemoState, hidden: boolean): string {
     <tbody>
       ${txs
         .map((tx) => {
-          const sign = tx.amount >= 0 ? "+" : "";
-          const amt = `${sign}${formatNum(tx.amount, 4)} ${escapeHtml(tx.asset)}`;
+          const amt = formatSignedAssetQty(tx.amount, tx.asset);
+          const statusLabel = formatTxStatusLabel(tx.status);
           return `<tr>
             <td class="acct-tx-label">
               <span class="acct-tx-ico ${tx.direction}" aria-hidden="true">${tx.direction === "in" ? "↓" : "↑"}</span>
@@ -842,7 +840,7 @@ function renderRecentTxTable(state: DemoState, hidden: boolean): string {
             </td>
             <td class="mono ${tx.amount >= 0 ? "up" : "down"}" data-raw-amt="${escapeHtml(amt)}">${maskBalance(amt, hidden)}</td>
             <td class="muted small">${formatTxTime(tx.ts)}</td>
-            <td><span class="acct-tx-status ${tx.status}">Completed</span></td>
+            <td><span class="acct-tx-status ${tx.status}">${escapeHtml(statusLabel)}</span></td>
           </tr>`;
         })
         .join("")}

@@ -3505,8 +3505,13 @@ html.mobile-layout .market-search {
   font-weight: 700;
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
+  white-space: nowrap;
 }
 .acct-tx-status.completed { background: rgba(0, 192, 115, 0.15); color: #7dffb0; }
+.acct-tx-status.pending { background: rgba(230, 168, 46, 0.18); color: #ffd48a; }
+.acct-tx-status.failed { background: rgba(219, 68, 85, 0.18); color: #ff9aaa; }
+.acct-ledger-kind { font-weight: 600; text-transform: none; }
+.acct-ledger-when { margin-left: 0.35rem; font-size: 0.68rem; }
 .acct-panel {
   margin-bottom: 0.65rem;
   border: 1px solid rgba(87, 118, 168, 0.18);
@@ -4020,16 +4025,36 @@ html.mobile-layout .market-search {
   padding: 0;
   display: grid;
   gap: 0.35rem;
-  max-height: 9rem;
+  max-height: 12rem;
   overflow: auto;
 }
 .lab-wd-list li {
-  padding: 0.4rem 0.5rem;
+  padding: 0.45rem 0.55rem;
   border-radius: 0.4rem;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(87, 118, 168, 0.18);
   line-height: 1.35;
 }
+.lab-wd-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+}
+.lab-wd-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+}
+.lab-wd-dest {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lab-wd-id { flex-shrink: 0; }
 .lab-ops {
   border-radius: 0.55rem;
   border: 1px dashed rgba(87, 118, 168, 0.35);

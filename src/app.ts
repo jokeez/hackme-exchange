@@ -266,11 +266,13 @@ import {
   formatVol,
   formatVolBase,
   formatBookQty,
+  formatUiAbs,
   localFallbackMarket,
   midForPair,
   pctTone,
   tickerFromMarket,
 } from "./market";
+import { renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
 import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { LANES, PAIRS, pairById } from "./pairs";
 import {
@@ -4706,7 +4708,7 @@ async function labMintHmcUi(displayAmt = 100): Promise<void> {
       return;
     }
     const after =
-      res.balance_after != null ? ` · bal=${minorToDisplay(res.balance_after)}` : "";
+      res.balance_after != null ? ` · bal=${formatUiAbs(minorToDisplay(res.balance_after))}` : "";
     if (msg) msg.textContent = `+${displayAmt} HMC minted${after}`;
     toast(`Lab mint +${displayAmt} HMC`, "ok");
     const sync = await syncLabBalancesAndBook(state, market);
@@ -4742,7 +4744,7 @@ async function labBridgeCreditUi(asset: "USDT" | "BTC", displayAmt: number): Pro
       toast(res.message, "warn");
       return;
     }
-    if (msg) msg.textContent = `Paper ${asset} credited · bal=${minorToDisplay(res.balance_after)} · ${res.deposit_address}`;
+    if (msg) msg.textContent = `Paper ${asset} credited · bal=${formatUiAbs(minorToDisplay(res.balance_after))} · ${res.deposit_address}`;
     toast(`Paper bridge +${displayAmt} ${asset}`, "ok");
     const sync = await syncLabBalancesAndBook(state, market);
     if (sync.ok) {
@@ -4759,10 +4761,12 @@ function renderLabWithdrawList(
     id: string;
     asset: string;
     amount: number;
+    fee?: number;
     status: string;
     destination: string;
     created_at?: string;
     fail_reason?: string;
+    tx_id?: string;
   }[],
 ): void {
   const ul = document.getElementById("lab-wd-list");
@@ -4772,24 +4776,19 @@ function renderLabWithdrawList(
     return;
   }
   ul.innerHTML = rows
-    .map((w) => {
-      const st = String(w.status || "").toLowerCase();
-      const age = w.created_at ? Date.parse(w.created_at) : NaN;
-      const ageMin = Number.isFinite(age) ? Math.max(0, Math.round((Date.now() - age) / 60_000)) : null;
-      const assetU = String(w.asset || "").toUpperCase();
-      const statusLabel =
-        st === "pending"
-          ? assetU === "USDT"
-            ? `pending${ageMin != null ? ` · ${ageMin}m` : ""} · KYT / ops broadcast (no auto hot-send)`
-            : `pending${ageMin != null ? ` · ${ageMin}m` : ""} · waiting ops on-chain`
-          : st === "kyt_pending" || st === "submitted"
-            ? `KYT review${ageMin != null ? ` · ${ageMin}m` : ""}`
-            : st === "failed"
-              ? `failed${w.fail_reason ? ` · ${escapeHtml(String(w.fail_reason).slice(0, 40))}` : ""}`
-              : escapeHtml(w.status);
-      const tone = st === "pending" ? "warn" : st === "completed" ? "up" : st === "failed" ? "down" : "dim";
-      return `<li><span class="dim">${escapeHtml(w.id.slice(0, 8))}…</span> ${escapeHtml(w.asset)} ${minorToDisplay(w.amount)} → ${escapeHtml(w.destination.slice(0, 18))}… <strong class="${tone}">${statusLabel}</strong></li>`;
-    })
+    .map((w) =>
+      renderWithdrawHistoryItem({
+        id: w.id,
+        asset: w.asset,
+        amount: minorToDisplay(w.amount),
+        fee: w.fee != null ? minorToDisplay(w.fee) : undefined,
+        status: w.status,
+        destination: w.destination,
+        created_at: w.created_at,
+        fail_reason: w.fail_reason,
+        tx_id: w.tx_id,
+      }),
+    )
     .join("");
 }
 
@@ -4882,12 +4881,23 @@ async function labWithdrawRequestUi(): Promise<void> {
     }
     const totpEl = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
     if (totpEl) totpEl.value = "";
-    if (msg) msg.textContent = `Requested ${res.withdraw.id.slice(0, 8)}… · pending — funds reserved until ops sends on-chain (not automatic)${
-      res.fee_quote && res.fee_quote.fee > 0
-        ? ` · fee ${minorToDisplay(res.fee_quote.fee)} ${res.withdraw.asset}`
-        : ""
-    }`;
-    toast("Withdraw queued · pending until ops completes on-chain", "info");
+    {
+      const assetU = String(res.withdraw.asset || "").toUpperCase();
+      const autoHint =
+        assetU === "USDT"
+          ? "funds reserved · KYT / ops broadcast (no auto hot-send)"
+          : "funds reserved · ops native hot drain when hot funded";
+      if (msg)
+        msg.textContent = `Requested ${truncateMid(res.withdraw.id, 8, 4)} · pending — ${autoHint}${
+          res.fee_quote && res.fee_quote.fee > 0
+            ? ` · fee ${formatUiAbs(minorToDisplay(res.fee_quote.fee))} ${res.withdraw.asset}`
+            : ""
+        }`;
+      toast(
+        assetU === "USDT" ? "Withdraw queued · pending KYT / ops" : "Withdraw queued · pending native drain",
+        "info",
+      );
+    }
     await labWithdrawRefreshUi();
     const sync = await syncLabBalancesAndBook(state, market);
     if (sync.ok) {
@@ -4932,13 +4942,13 @@ async function labWithdrawQuoteUi(): Promise<void> {
   const q = res.quote;
   if (!q) return;
   const minW = q.min_withdraw && q.min_withdraw > 0 ? q.min_withdraw : 0;
-  const minLine =
-    minW > 0 ? ` · min ${minorToDisplay(minW)} ${asset}` : "";
+  const fmtM = (n: number) => formatUiAbs(minorToDisplay(n));
+  const minLine = minW > 0 ? ` · min ${fmtM(minW)} ${asset}` : "";
   quoteEl2.textContent = q.paused
     ? `Paused — ${q.note || "unavailable"}`
     : q.note === "below minimum withdraw for asset"
-      ? `Below min withdraw${minLine} · fee would be ${minorToDisplay(q.fee)} ${q.asset} on top`
-      : `Fee ${minorToDisplay(q.fee)} ${q.asset} on top · dest gets ${minorToDisplay(q.receive)} · wallet debit ${minorToDisplay(q.debit_total)}${minLine}`;
+      ? `Below min withdraw${minLine} · fee would be ${fmtM(q.fee)} ${q.asset} on top`
+      : `Fee ${fmtM(q.fee)} ${q.asset} on top · dest gets ${fmtM(q.receive)} · wallet debit ${fmtM(q.debit_total)}${minLine}`;
 }
 
 async function labFillsRefreshUi(): Promise<void> {
@@ -4973,10 +4983,13 @@ async function labFillsRefreshUi(): Promise<void> {
                 : "?";
             const side = escapeHtml(mySide);
             const pair = escapeHtml(f.pair || "");
-            const px = minorToDisplay(Number(f.price || 0));
-            const qty = minorToDisplay(Number(f.qty || 0));
-            const id = escapeHtml(String(f.id || "").slice(0, 10));
-            return `<li><span class="dim">${id}…</span> ${pair} ${side} ${qty} @ ${px}</li>`;
+            const px = formatPrice(minorToDisplay(Number(f.price || 0)));
+            const qty = formatUiAbs(minorToDisplay(Number(f.qty || 0)));
+            const id = escapeHtml(truncateMid(String(f.id || ""), 8, 4));
+            const when = f.created_at
+              ? ` <span class="dim">${escapeHtml(String(f.created_at).replace("T", " ").slice(0, 16))}</span>`
+              : "";
+            return `<li><span class="dim">${id}</span> ${pair} ${side} <strong class="mono">${qty}</strong> @ <span class="mono">${px}</span>${when}</li>`;
           })
           .join("")
       : `<li class="dim">No fills yet — Sync after trading</li>`;

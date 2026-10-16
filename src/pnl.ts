@@ -1,4 +1,5 @@
 import type { DemoState, LedgerEntry, MarketSnapshot, Trade } from "./types";
+import { formatUiSigned } from "./format";
 import { walletEquityFromMarket } from "./store";
 
 export type PnlWindow = { label: string; pct: number; abs: number };
@@ -198,13 +199,7 @@ export function volumeRatioFromPrints(
 }
 
 function formatCalPnl(pnl: number): string {
-  const a = Math.abs(pnl);
-  const sign = pnl >= 0 ? "+" : "-";
-  if (a >= 1) return `${sign}${a.toFixed(2)}`;
-  if (a >= 0.01) return `${sign}${a.toFixed(4)}`;
-  if (a >= 0.0001) return `${sign}${a.toFixed(6)}`;
-  if (a < 1e-12) return "+0.00";
-  return `${sign}${a.toExponential(1)}`;
+  return formatUiSigned(pnl);
 }
 
 export function renderPnlCalendarHtml(days: DayPnl[]): string {

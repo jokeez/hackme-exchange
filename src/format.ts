@@ -70,6 +70,29 @@ export function formatNum(n: number, d = 2): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: d });
 }
 
+/**
+ * Absolute equity / PnL amounts for desk UI — never scientific notation
+ * (avoids "-1.36e-6 USDT · vs start" style labels).
+ */
+export function formatUiAbs(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  if (a === 0 || a < 1e-12) return "0.00";
+  if (a >= 1) return formatNum(a, 2);
+  if (a >= 0.01) return formatNum(a, 4);
+  if (a >= 0.0001) return formatNum(a, 6);
+  if (a >= 1e-8) return trimZeros(a.toFixed(10));
+  return trimZeros(a.toFixed(12));
+}
+
+/** Signed PnL / delta for desk UI — never scientific notation. */
+export function formatUiSigned(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (Math.abs(n) < 1e-12) return "+0.00";
+  const sign = n >= 0 ? "+" : "-";
+  return `${sign}${formatUiAbs(n)}`;
+}
+
 /** Book / depth qty — never round sub-1 amounts to 0 (was formatNum(_, 0)). */
 export function formatBookQty(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";

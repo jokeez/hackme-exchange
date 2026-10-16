@@ -20,4 +20,11 @@ describe("portfolioChart honesty", () => {
     expect(formatChartDeltaUsdt(0.00045)).toMatch(/USDT/);
     expect(formatChartDeltaUsdt(0)).toBe("flat USDT");
   });
+
+  it("formatChartDeltaUsdt never uses scientific notation", () => {
+    const s = formatChartDeltaUsdt(-1.36e-6);
+    expect(s).not.toMatch(/e/i);
+    expect(s).toMatch(/-0\.00000136/);
+    expect(s).toMatch(/USDT/);
+  });
 });
