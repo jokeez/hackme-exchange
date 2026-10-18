@@ -9,6 +9,7 @@ import {
   ensureContiguousCandles,
   ensureTfSeriesCadence,
   constrainLiveHistoryToTape,
+  finalizeClosedTip,
   hydrateLiveCandlesFromPrints,
   liveCandleCacheFitsTip,
   loadLiveCandleCache,
@@ -178,6 +179,37 @@ describe("trimCandlesToGenesis", () => {
     const out = trimCandlesToGenesis(junk, "1D");
     expect(out).toHaveLength(1);
     expect(out[0].time).toBeGreaterThanOrEqual(CHART_GENESIS_UNIX);
+  });
+});
+
+describe("finalizeClosedTip", () => {
+  it("freezeLived keeps sticky Soft-MM tip close as watched", () => {
+    const tip = {
+      time: 1_700_000_060,
+      open: 0.05,
+      high: 0.0502,
+      low: 0.0498,
+      close: 0.05,
+      volume: 0,
+    };
+    const out = finalizeClosedTip("HMC_USDT", "1m", tip, 0.051, { freezeLived: true });
+    expect(out.close).toBe(0.05);
+    expect(out.open).toBe(0.05);
+    expect(out.high).toBe(0.0502);
+  });
+
+  it("still walks sticky flat Soft-MM tips (close≈open) so minutes are not peg combs", () => {
+    const tip = {
+      time: 1_700_000_060,
+      open: 0.05,
+      high: 0.0501,
+      low: 0.0499,
+      close: 0.05,
+      volume: 500,
+    };
+    const out = finalizeClosedTip("HMC_USDT", "1m", tip, 0.051);
+    expect(out.open).toBe(0.05);
+    expect(Math.abs(out.close - out.open)).toBeGreaterThan(0);
   });
 });
 

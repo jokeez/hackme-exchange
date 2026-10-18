@@ -9215,16 +9215,13 @@ async function refresh(): Promise<void> {
     if (live) {
       const prevTk = tickers[p.id];
       const mid = liveLastPrice(p.id);
+      const api = deskApiTickers.get(p.id);
       if (mid > 0) {
         const book = getLabBookCache(p.id);
         const bid = book?.bids[0]?.price ?? prevTk?.bid ?? mid * 0.999;
         const ask = book?.asks[0]?.price ?? prevTk?.ask ?? mid * 1.001;
-        const q = buildPairQuote({
-          pairId: p.id,
-          mid,
-          candlesByTf: state.candles[p.id],
-          fallbackTf: "15m",
-        });
+        // Live desk: durable /tickers is source of truth for 24h H/L/%/vol.
+        // Candle stats24h (sanitized / painted) was fighting the toolbar and morphing rows.
         const spreadBps =
           bid > 0 && ask > 0 && mid > 0 ? ((ask - bid) / mid) * 10_000 : prevTk?.spreadBps ?? 0;
         tickers[p.id] = {
@@ -9233,9 +9230,9 @@ async function refresh(): Promise<void> {
           bid,
           ask,
           spreadBps,
-          change24hPct: q.changePct,
-          high24h: q.high24h,
-          low24h: q.low24h,
+          change24hPct: api ? api.changePct : s.changePct,
+          high24h: api && api.high24h > 0 ? api.high24h : s.high,
+          low24h: api && api.low24h > 0 ? api.low24h : s.low,
           volume24hBase: deskVol24hBase(p.id),
           source: "live",
         };
@@ -9243,9 +9240,9 @@ async function refresh(): Promise<void> {
         // Keep last L2 ticker — never overwrite with paper sine mid.
         tickers[p.id] = {
           ...prevTk,
-          change24hPct: s.changePct,
-          high24h: s.high,
-          low24h: s.low,
+          change24hPct: api ? api.changePct : s.changePct,
+          high24h: api && api.high24h > 0 ? api.high24h : s.high,
+          low24h: api && api.low24h > 0 ? api.low24h : s.low,
           volume24hBase: deskVol24hBase(p.id),
         };
       }

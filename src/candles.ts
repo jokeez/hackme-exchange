@@ -768,7 +768,7 @@ export function upsertTick(
   mid: number,
   pairId: PairId,
   prevMid?: number,
-  opts?: { syntheticVolume?: boolean },
+  opts?: { syntheticVolume?: boolean; freezeClosedTip?: boolean },
 ): Candle[] {
   const t = bucket(Date.now(), tf);
   const sec = TF_SEC[tf];
@@ -786,6 +786,7 @@ export function upsertTick(
     safeMid = clampTickMid(safeMid, last.open, maxBody);
   }
   const addVol = opts?.syntheticVolume !== false;
+  const freezeClosed = opts?.freezeClosedTip === true || opts?.syntheticVolume === false;
   const tickVol = addVol ? 150 + stableUnit([pairId, tf, t, safeMid.toPrecision(12), "tick-vol"]) * 2200 : 0;
   const wickCap = maxWickFracForTf(tf);
 
@@ -837,7 +838,7 @@ export function upsertTick(
     // that bar to a walked close — otherwise every closed candle keeps the same
     // close (шильдики glued to the last-price line).
     if (last && last.time < t) {
-      copy[copy.length - 1] = finalizeClosedTip(pairId, tf, last, safeMid);
+      copy[copy.length - 1] = finalizeClosedTip(pairId, tf, last, safeMid, { freezeLived: freezeClosed });
     }
     if (last && last.time + sec < t) {
       // Idle UTC holes → flat hold (not synthetic walk). Walk fills painted spike forests.
@@ -1192,21 +1193,35 @@ function barLooksFlat(c: Candle, mid: number): boolean {
 }
 
 /**
- * Finalize a just-closed tip: freeze a walked close from the lived open.
- * Never leave Soft-MM Last as the eternal close (шильдики on the last-price line).
+ * Finalize a just-closed tip.
+ * Live desk (`freezeLived`): freeze OHLC exactly as watched — never rewrite past bars
+ * (synthetic walk was morphing history every minute on Soft-MM).
+ * Paper Soft-MM: walk a small body so quiet minutes aren't flat combs.
  */
 export function finalizeClosedTip(
   pairId: PairId,
   tf: Timeframe,
   tip: Candle,
   _tipMid: number,
+  opts?: { freezeLived?: boolean },
 ): Candle {
-  const sec = TF_SEC[tf];
   const open = tip.open > 0 && Number.isFinite(tip.open) ? tip.open : tip.close;
   if (!(open > 0)) return tip;
-  let close = open * Math.exp(barReturn(pairId, tf, tip.time + sec));
+  const livedClose = tip.close > 0 && Number.isFinite(tip.close) ? tip.close : open;
+  if (opts?.freezeLived) {
+    const high = Math.max(tip.high, open, livedClose);
+    const low = Math.min(tip.low, open, livedClose);
+    return {
+      time: tip.time,
+      open,
+      high,
+      low: low > 0 ? low : Math.min(open, livedClose),
+      close: livedClose,
+      volume: tip.volume > 0 ? tip.volume : 0,
+    };
+  }
+  let close = open * Math.exp(barReturn(pairId, tf, tip.time + TF_SEC[tf]));
   if (!(close > 0) || !Number.isFinite(close)) close = open;
-  // Guarantee a visible body so Soft-MM quiet minutes still close as real candles.
   const minBody = open * 0.00035;
   if (Math.abs(close - open) < minBody) {
     const sign = Math.sign(barReturn(pairId, tf, tip.time) || 1) || 1;
