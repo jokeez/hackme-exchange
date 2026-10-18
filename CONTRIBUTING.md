@@ -22,11 +22,16 @@ Copy `.env.example` → `.env` for local overrides. **Never commit `.env`.**
 | **This repo** | Open-source paper Spot SPA |
 | Matching API | Private sibling (optional loopback lab) |
 
+## Ideas vs PRs
+
+Same culture as the [main HackMe CONTRIBUTING](https://github.com/jokeez/hackme/blob/main/CONTRIBUTING.md): **issues for ideas**, **PRs only when complete and product-fit**. Not a task mill — ecosystem/systems ideas welcome; cosmetics alone are not the bar. Security: [SECURITY.md](SECURITY.md).
+
 ## Pull requests
 
 - Keep changes focused (UI, docs, or lab wiring).
 - Do not enable a public matching API or custody path in the SPA without an explicit product decision.
 - Do **not** commit `.env`, tarballs (`hackme-exchange-d0-*.tar.gz`), `dist/`, `dist-d0/`, `.cache/`, or `docs/.local/`.
+- Prefer an issue first for large ideas; open a PR when it is merge-ready.
 
 ## QA before merge
 
