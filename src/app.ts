@@ -4544,12 +4544,10 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   const addrInp = document.getElementById("lab-deposit-addr") as HTMLInputElement | null;
   const metaEl = document.getElementById("lab-deposit-meta");
   const chipsEl = document.getElementById("lab-deposit-chips");
-  const stepsEl = document.getElementById("lab-deposit-steps");
   const qrHost = document.getElementById("lab-deposit-qr-host");
   const qrImg = document.getElementById("lab-deposit-qr") as HTMLImageElement | null;
   if (reveal) reveal.hidden = false;
   if (addrInp) addrInp.value = dep;
-  if (stepsEl) stepsEl.hidden = false;
   // Mark active asset pill
   document.querySelectorAll(".cex-asset-pill").forEach((el) => {
     el.classList.toggle("active", (el as HTMLElement).dataset.asset === res.asset);
@@ -4605,15 +4603,9 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   if (msg) {
     const creditHint =
       res.kind === "evm_bep20"
-        ? res.chain_id === 56
-          ? `MAINNET BSC · min ${USDT_DEPOSIT_MIN} USDT · watcher → HOLD → KYT → release; send only USDT BEP-20 (not testnet/TRC/ERC)`
-          : "watcher → HOLD → KYT screen → release; send only USDT BEP-20 on this network"
-        : "credits usually within ~30s after chain confirm";
-    const usdtHoldHint =
-      res.kind === "evm_bep20"
-        ? ` · after ≥${USDT_CONFIRMATIONS} confs USDT stays in screening hold until ops approve KYT (manual — not instant)`
-        : "";
-    msg.innerHTML = `<strong>${escapeHtml(res.asset)} deposit ready</strong> · ${creditHint}${usdtHoldHint}${
+        ? `BEP-20 BSC · min ${USDT_DEPOSIT_MIN} · ≥${USDT_CONFIRMATIONS} confs then manual review before Available`
+        : "usually credits within ~30s";
+    msg.innerHTML = `<strong>${escapeHtml(res.asset)} address ready</strong> · ${creditHint}${
       res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
     }`;
   }

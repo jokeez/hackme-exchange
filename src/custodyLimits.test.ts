@@ -9,20 +9,22 @@ import {
 import { validateLabWithdrawAmount, validateLabWithdrawDestination } from "./labCustody";
 
 describe("custodyLimits soft-launch", () => {
-  it("exposes deposit min plate for USDT", () => {
+  it("exposes compact deposit network note for USDT", () => {
     const html = depositLimitsPlateHtml();
-    expect(html).toContain("Deposit limits");
-    expect(html).toContain(`${USDT_DEPOSIT_MIN} USDT`);
+    expect(html).toContain("cex-dep-note");
+    expect(html).toContain(`${USDT_DEPOSIT_MIN}`);
     expect(html).toMatch(/BEP-20/);
+    expect(html).toMatch(/manual review/i);
   });
 
-  it("switches withdraw plate by asset", () => {
+  it("switches withdraw note by asset", () => {
     expect(withdrawMinForAsset("USDT")).toBe(USDT_WITHDRAW_MIN);
     expect(withdrawMinForAsset("HMC")).toBe(0.01);
     const usdt = withdrawLimitsPlateHtml("USDT");
-    expect(usdt).toContain("15 USDT");
+    expect(usdt).toContain("15");
     expect(usdt).toContain("1.5 USDT");
     expect(usdt).toContain("lab-wd-limits-plate");
+    expect(usdt).toMatch(/BEP-20|BSC/);
   });
 });
 

@@ -130,15 +130,12 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("btn-desk-dep-hmc");
     expect(html).toContain("btn-desk-dep-sup");
     expect(html).toContain("btn-desk-dep-usdt");
-    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
-    expect(html).toMatch(/Deposit limits/);
-    expect(html).toMatch(/Withdraw limits/);
-    expect(html).toMatch(/min <strong class="mono">0\.1 USDT/);
-    expect(html).toMatch(/USDT:<\/strong> BEP-20/);
+    expect(html).toMatch(/Select an asset to show your deposit address/);
+    expect(html).toMatch(/0\.1/);
+    expect(html).toMatch(/Withdraw limits|lab-wd-limits-plate/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
-    expect(html).toContain("Login addr ≠ deposit");
-    expect(html).toContain("Deposit to the address below");
+    expect(html).toMatch(/Never send to your login address|Login addr ≠ deposit/i);
     expect(html).toContain("deposit on");
     expect(html).toContain("withdraw on");
     expect(html).toContain("Wallet &amp; security");
@@ -148,7 +145,7 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain(">Withdraw<");
     expect(html).not.toContain("Withdraw · HOLD");
     expect(html).not.toContain("Deposit · HOLD");
-    expect(html).toMatch(/not for deposits/i);
+    expect(html).toMatch(/not for deposits|Login ≠ deposit/i);
     expect(html).toContain('id="acct-security-2fa"');
     expect(html).toContain("btn-lab-2fa-setup");
     expect(html).toContain("Authenticator (TOTP) is required");
@@ -160,9 +157,13 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("acct-2fa-manage-grid");
     // Soft-launch: no BTC rail; 2FA gate until enrolled
     expect(html).not.toContain('<option value="BTC">');
-    expect(html).toContain("Enable 2FA first");
+    expect(html).toMatch(/Enable 2FA/);
     expect(html).toContain("btn-acct-jump-2fa");
     expect(html).toMatch(/id="btn-lab-wd-request"[^>]*disabled/);
+    // Decluttered: no ops-step walls / duplicate callout stacks
+    expect(html).not.toContain("cex-steps");
+    expect(html).not.toContain("cex-callout--info");
+    expect(html).not.toContain("node-watch");
   });
 
   it("pending edge health avoids false Deposit·HOLD flash", () => {

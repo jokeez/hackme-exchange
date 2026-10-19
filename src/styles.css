@@ -969,11 +969,13 @@ a:hover { text-decoration: underline; }
   .ex-actions { flex-shrink: 0; }
   .pill-live { display: none; }
   .btn-sm { min-height: 2.5rem; padding: 0.4rem 0.55rem; }
-  /* Free header width for Spot/Convert/Account — System is icon-only on phones. */
+  /* Free header width for Spot/Convert/Account — Settings is icon-only on phones. */
   #btn-system-status .sys-label { display: none; }
   #btn-system-status {
-    min-width: 2.75rem;
-    padding-inline: 0.55rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0.4rem;
+    border-radius: 10px;
     justify-content: center;
   }
   /* Early mobile hints — definitive overrides live after base .dual-order / .trade-side-toggle. */
@@ -2805,12 +2807,22 @@ html.mobile-layout .market-search {
 }
 .acct-desk-cash-cta {
   display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.45rem 0.55rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 179, 71, 0.22);
-  background: rgba(255, 179, 71, 0.04);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.75rem;
+  padding: 0.15rem 0 0.35rem;
+  border: none;
+  background: transparent;
+}
+.acct-desk-cash-cta > p {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.acct-desk-cash-cta .acct-cash-actions {
+  margin: 0;
+  flex: 0 0 auto;
 }
 .acct-positions-empty {
   margin: 0 0 0.65rem;
@@ -6609,16 +6621,39 @@ html.mobile-layout .act-edit-inp {
   flex-shrink: 0;
   background: rgba(0, 0, 0, 0.16);
 }
+.btn-sm.btn-settings-quick,
 .btn-settings-quick {
-  width: 2.15rem;
-  height: 2.15rem;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: auto;
+  height: auto;
+  min-height: 1.55rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.22);
   color: var(--muted);
   cursor: pointer;
+  line-height: 1;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+.btn-settings-quick .ico {
+  display: block;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+}
+.btn-settings-quick .sys-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: visible;
 }
 .btn-settings-quick:hover {
   color: var(--primary);
@@ -6905,9 +6940,12 @@ html[data-embed="hub"] #app {
 }
 html[data-embed="hub"] .announce { display: none !important; }
 html[data-embed="hub"] .btn-settings-quick {
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 8px;
+  min-height: 1.45rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+}
+html[data-embed="hub"] .btn-settings-quick .sys-label {
+  font-size: 0.68rem;
 }
 html[data-embed="hub"] .sys-drop .sys-item {
   font-size: 0.78rem;
@@ -7859,9 +7897,17 @@ html {
   font-weight: 600;
 }
 .cex-asset-hint { margin: 0; }
+.cex-dep-note {
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+  color: rgba(180, 198, 220, 0.9);
+}
 .cex-dep-panel {
   padding: 0.75rem !important;
   border-radius: 14px !important;
+  border: 1px solid rgba(87, 118, 168, 0.28);
+  background: rgba(0, 0, 0, 0.22);
+  margin-top: 0.55rem;
 }
 .cex-dep-panel-top {
   display: grid;
@@ -8061,5 +8107,10 @@ html.mobile-layout .mobile-chart-trade-bar .mctb {
   letter-spacing: 0.02em;
 }
 html.mobile-layout .acct-desk-cash-cta {
-  padding: 0.55rem 0.6rem;
+  padding: 0.2rem 0 0.4rem;
+  flex-direction: column;
+  align-items: stretch;
+}
+html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
+  width: 100%;
 }

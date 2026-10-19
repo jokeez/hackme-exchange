@@ -25,43 +25,26 @@ export function withdrawMinForAsset(asset: string): number {
 
 export function withdrawFeeHint(asset: string): string {
   const a = asset.trim().toUpperCase();
-  if (a === "USDT") return `${USDT_WITHDRAW_FEE} USDT flat (on top)`;
-  return "Quoted per request";
+  if (a === "USDT") return `${USDT_WITHDRAW_FEE} USDT`;
+  return "quoted per request";
 }
 
 export function withdrawDestHint(asset: string): string {
   const a = asset.trim().toUpperCase();
   if (a === "USDT") {
-    return `BEP-20 on ${USDT_NETWORK_LABEL} (chain ${USDT_CHAIN_ID}) · paste a 0x… address · not TRC-20 / ERC-20`;
+    return `${USDT_STANDARD} BSC ${USDT_CHAIN_ID} · 0x… only (not TRC/ERC)`;
   }
-  if (a === "BTC") return "Ops destination stub until BTC rail is live";
-  return "External HMC- wallet (16 hex) · not your Connect / deposit address";
+  if (a === "BTC") return "BTC rail not live yet";
+  return "external HMC- wallet · not login/deposit addr";
 }
 
-/** Compact limits plate HTML for desk deposit (USDT-focused; HMC/SUP noted). */
+/** One-line network/min note for desk deposit (Binance-simple; no ops jargon wall). */
 export function depositLimitsPlateHtml(): string {
-  return `<div class="cex-limits" role="note" aria-label="Deposit limits">
-    <div class="cex-limits-head">Deposit limits</div>
-    <div class="cex-limits-grid">
-      <div class="cex-limit">
-        <span class="cex-limit-k">USDT min</span>
-        <span class="cex-limit-v mono">${USDT_DEPOSIT_MIN} USDT</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">Network</span>
-        <span class="cex-limit-v">${USDT_STANDARD} · ${USDT_NETWORK_LABEL}</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">Credit path</span>
-        <span class="cex-limit-v">≥${USDT_CONFIRMATIONS} conf → hold → manual KYT → available</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">HMC / SUP</span>
-        <span class="cex-limit-v">No fixed min · node-watch (ops sync)</span>
-      </div>
-    </div>
-    <p class="cex-limits-note">USDT is not instant credit — after ≥${USDT_CONFIRMATIONS} BSC confs it is held until ops approve KYT (manual). Amounts below ${USDT_DEPOSIT_MIN} USDT stay on the deposit address until a qualifying transfer.</p>
-  </div>`;
+  return `<p class="cex-dep-note muted small" role="note" aria-label="Deposit network">
+    <strong>USDT</strong> ${USDT_STANDARD} · BSC ${USDT_CHAIN_ID} · min <strong class="mono">${USDT_DEPOSIT_MIN}</strong>
+    · after ≥${USDT_CONFIRMATIONS} confs, manual review before Available
+    · <strong>HMC / SUP</strong> HackMe chain · usually ~30s
+  </p>`;
 }
 
 export function withdrawLimitsPlateHtml(asset = "HMC"): string {
@@ -69,37 +52,9 @@ export function withdrawLimitsPlateHtml(asset = "HMC"): string {
   const min = withdrawMinForAsset(a);
   const fee = withdrawFeeHint(a);
   const dest = withdrawDestHint(a);
-  const usdtExtra =
-    a === "USDT"
-      ? `<div class="cex-limit">
-        <span class="cex-limit-k">Network</span>
-        <span class="cex-limit-v">${USDT_STANDARD} · chain ${USDT_CHAIN_ID}</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">Auto-send</span>
-        <span class="cex-limit-v">Off · ops broadcast after KYT</span>
-      </div>`
-      : `<div class="cex-limit">
-        <span class="cex-limit-k">2FA</span>
-        <span class="cex-limit-v">TOTP required</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">Status</span>
-        <span class="cex-limit-v">Pending until ops completes</span>
-      </div>`;
-  return `<div class="cex-limits" id="lab-wd-limits-plate" data-asset="${a}" role="note" aria-label="Withdraw limits">
-    <div class="cex-limits-head">Withdraw limits · ${a}</div>
-    <div class="cex-limits-grid">
-      <div class="cex-limit">
-        <span class="cex-limit-k">Min amount</span>
-        <span class="cex-limit-v mono">${min} ${a}</span>
-      </div>
-      <div class="cex-limit">
-        <span class="cex-limit-k">Fee</span>
-        <span class="cex-limit-v">${fee}</span>
-      </div>
-      ${usdtExtra}
-    </div>
-    <p class="cex-limits-note">${dest}. Funds reserved until ops completes (no auto hot-send).</p>
-  </div>`;
+  return `<p class="cex-dep-note muted small" id="lab-wd-limits-plate" data-asset="${a}" role="note" aria-label="Withdraw limits">
+    <strong>${a}</strong> · min <strong class="mono">${min}</strong> · fee ${fee}
+    · ${dest}
+    · reserved until broadcast
+  </p>`;
 }

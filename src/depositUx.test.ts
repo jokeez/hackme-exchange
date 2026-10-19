@@ -32,22 +32,19 @@ describe("deposit UX contracts", () => {
       feeWallet: null,
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
-    expect(html).toMatch(/Do not send to Connect|Login addr ≠ deposit/);
+    expect(html).toMatch(/Never send to your login address|Login addr ≠ deposit|Do not send to Connect/i);
     expect(html).toContain("btn-desk-dep-hmc");
     expect(html).toContain("btn-desk-dep-sup");
     expect(html).toContain("btn-desk-dep-usdt");
-    expect(html).toMatch(/Show USDT deposit \(BEP-20\)/);
-    expect(html).toMatch(/Deposit limits/);
-    expect(html).toMatch(/USDT min/);
-    expect(html).toMatch(/0\.1 USDT/);
-    expect(html).toMatch(/manual.*KYT|manual<\/em> KYT/i);
-    expect(html).toMatch(/screening hold/i);
+    expect(html).toMatch(/Select an asset to show your deposit address/);
+    expect(html).toMatch(/0\.1/);
+    expect(html).toMatch(/manual review|screening hold|KYT/i);
     expect(html).toMatch(/HMC \/ SUP/i);
     expect(html).toContain("HMC-09dc5f553bfff940");
     expect(html).toMatch(/Login only/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     // Copy-addr path must stay labeled as login-only when custody is live
-    expect(html).toMatch(/Copy login ≠ deposit|not for deposits/i);
+    expect(html).toMatch(/Login ≠ deposit|not for deposits|Copy login/i);
   });
 
   it("shows screening hold banner when ledger hold is cached", async () => {
