@@ -550,9 +550,34 @@ describe("hydrateLiveCandlesFromPrints", () => {
     const tipDay = day[day.length - 1]!;
     expect(tipDay.high).toBeGreaterThanOrEqual(dayHi * 0.999);
     expect(tipDay.low).toBeLessThanOrEqual(dayLo * 1.001);
+    expect(tipDay.low).toBeGreaterThanOrEqual(dayLo * 0.999);
     expect(tipDay.close).toBeCloseTo(tip, 4);
     // Higher-TF constrain must not crush volume-backed day bar to tip×1.22 (~0.061).
     expect(tipDay.high).toBeGreaterThan(tip * 1.5);
+  });
+
+  it("preserves ticker 24h high/low on 1D after live tip mid ticks", () => {
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 90 * 60;
+    const prints = [
+      { ts: (t0 + 80 * 60) * 1000, price: 0.077, amountBase: 2 },
+      { ts: (t0 + 85 * 60) * 1000, price: 0.0765, amountBase: 2 },
+      { ts: (t0 + 88 * 60) * 1000, price: 0.076734, amountBase: 3 },
+    ];
+    const tip = 0.076734;
+    const dayHi = 0.081204;
+    const dayLo = 0.068395;
+    const dayRange = { high: dayHi, low: dayLo, open: 0.077645 };
+    const hydrated = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, now, null, dayRange);
+    const afterTick = applyMidToPairCandles(hydrated, "HMC_USDT", tip * 0.995, tip, {
+      syntheticVolume: false,
+      dayRange,
+    });
+    const tipDay = afterTick["1D"]![afterTick["1D"]!.length - 1]!;
+    expect(tipDay.high).toBeGreaterThanOrEqual(dayHi * 0.999);
+    expect(tipDay.low).toBeGreaterThanOrEqual(dayLo * 0.999);
+    expect(tipDay.low).toBeLessThanOrEqual(dayLo * 1.001);
   });
 
   it("clamps synthetic pad highs that never traded on the tape", () => {

@@ -801,8 +801,12 @@ export function upsertTick(
     const wickPad = midBody * wickCap;
     let high = Math.max(bodyHigh, Number.isFinite(bar.high) ? bar.high : bodyHigh);
     let low = Math.min(bodyLow, Number.isFinite(bar.low) ? bar.low : bodyLow);
-    high = Math.min(high, bodyHigh + wickPad);
-    low = Math.max(low, Math.max(midBody * 1e-6, bodyLow - wickPad));
+    // Live desk (freezeClosed): durable /tickers dayRange + real print wicks must survive
+    // Soft-MM tip ticks — wickPad would crush 24h pump highs back to body±pad.
+    if (!freezeClosed) {
+      high = Math.min(high, bodyHigh + wickPad);
+      low = Math.max(low, Math.max(midBody * 1e-6, bodyLow - wickPad));
+    }
     high = Math.max(high, bodyHigh);
     low = Math.min(low, bodyLow);
     return { ...bar, open, high, low, close, volume: bar.volume };
@@ -968,7 +972,7 @@ export function applyMidToPairCandles(
   pairId: PairId,
   mid: number,
   prevMid?: number,
-  opts?: { syntheticVolume?: boolean },
+  opts?: { syntheticVolume?: boolean; dayRange?: LiveDayRange },
 ): Partial<Record<Timeframe, Candle[]>> {
   let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
   // Always bridge to wall-clock tip — stale contiguous caches otherwise freeze at last closed bar.
@@ -1043,7 +1047,28 @@ export function applyMidToPairCandles(
     all[tf] = series;
   }
   pinAllTfTipsToBase(all, nextBase);
+  // Tip ticks re-aggregate 1m→1D and would drop durable 24h extremes painted only on
+  // higher TFs — re-apply /tickers dayRange so legend H/L stay aligned with the toolbar.
+  const dayHiLo = liveDayHiLo(opts?.dayRange);
+  if (dayHiLo) {
+    const nowMs = Date.now();
+    for (const tf of Object.keys(all) as Timeframe[]) {
+      const series = all[tf];
+      if (!series?.length) continue;
+      all[tf] = paintLiveDayRangeExtremes(series, dayHiLo, nowMs);
+    }
+    const baseAfter = all[CANDLE_BASE_TF] ?? nextBase;
+    pinAllTfTipsToBase(all, baseAfter);
+  }
   return all;
+}
+
+function liveDayHiLo(dayRange?: LiveDayRange): { high?: number; low?: number } | undefined {
+  if (!dayRange) return undefined;
+  const high = dayRange.high && dayRange.high > 0 ? dayRange.high : undefined;
+  const low = dayRange.low && dayRange.low > 0 ? dayRange.low : undefined;
+  if (!(high || low)) return undefined;
+  return { high, low };
 }
 
 function finiteMid(n: number | undefined): n is number {
@@ -1712,10 +1737,14 @@ export function constrainLiveHistoryToTape(
   if (dayRange?.high && dayRange.high > 0) tapeHi = Math.max(tapeHi, dayRange.high);
   if (dayRange?.low && dayRange.low > 0) tapeLo = Math.min(tapeLo, dayRange.low);
   // Synthetic pad stays near tip; print/volume energy may use the full day envelope.
+  // When durable /tickers dayRange is set, never invent Soft-MM lows below that floor
+  // (tip×0.88 was painting 1D L under rolling 24h Low and confusing the toolbar).
+  const hasDay = !!(dayRange?.high && dayRange.high > 0) || !!(dayRange?.low && dayRange.low > 0);
   const synthHi = Math.max(tip * (1 + band), tip * 1.12);
-  const synthLo = Math.min(tip * (1 - band), tip * 0.88);
-  const printHiCap = Math.max(tapeHi * 1.02, tip * 1.6);
-  const printLoCap = Math.min(tapeLo * 0.98, tip * 0.5);
+  let synthLo = Math.min(tip * (1 - band), tip * 0.88);
+  if (dayRange?.low && dayRange.low > 0) synthLo = Math.max(synthLo, dayRange.low);
+  const printHiCap = hasDay ? Math.max(tapeHi * 1.001, tapeHi) : Math.max(tapeHi * 1.02, tip * 1.6);
+  const printLoCap = hasDay ? tapeLo : Math.min(tapeLo * 0.98, tip * 0.5);
   return candles.map((c) => {
     const tapeBacked = printBuckets.has(c.time) || (c.volume || 0) > 0;
     if (tapeBacked) {
@@ -1756,6 +1785,15 @@ export function paintLiveDayRangeExtremes(
   if (!(dayHi > 0) && !(dayLo > 0)) return candles;
   const cutoff = Math.floor((nowMs - 24 * 3600_000) / 1000);
   const out = candles.map((c) => ({ ...c }));
+  // Raise synthetic Soft-MM lows that undercut the durable 24h floor before picking indices.
+  if (dayLo > 0) {
+    for (const c of out) {
+      if (c.time < cutoff) continue;
+      if (!(c.low < dayLo)) continue;
+      const bodyLo = Math.min(c.open, c.close);
+      c.low = bodyLo >= dayLo ? dayLo : bodyLo;
+    }
+  }
   let hiIdx = -1;
   let loIdx = -1;
   let hiPx = -Infinity;
@@ -1780,9 +1818,32 @@ export function paintLiveDayRangeExtremes(
   }
   if (dayLo > 0 && loIdx >= 0) {
     const b = out[loIdx]!;
-    b.low = Math.min(b.low, b.open, b.close, dayLo);
-    if (b.low <= 0) b.low = Math.min(b.open, b.close, dayLo);
+    // Ensure the durable floor is visible on at least one in-window bar.
+    if (Math.min(b.open, b.close) >= dayLo) {
+      b.low = dayLo;
+    } else {
+      b.low = Math.min(b.low, b.open, b.close);
+    }
   }
+  return out;
+}
+
+/** Re-apply durable /tickers 24h hi/lo onto an existing multi-TF series (after tip ticks). */
+export function applyLiveDayRangeToPairCandles(
+  candlesByTf: Partial<Record<Timeframe, Candle[]>>,
+  dayRange: LiveDayRange | undefined,
+  nowMs = Date.now(),
+): Partial<Record<Timeframe, Candle[]>> {
+  const dayHiLo = liveDayHiLo(dayRange);
+  if (!dayHiLo) return candlesByTf;
+  const out: Partial<Record<Timeframe, Candle[]>> = { ...candlesByTf };
+  for (const tf of Object.keys(out) as Timeframe[]) {
+    const series = out[tf];
+    if (!series?.length) continue;
+    out[tf] = paintLiveDayRangeExtremes(series, dayHiLo, nowMs);
+  }
+  const base = out[CANDLE_BASE_TF];
+  if (base?.length) pinAllTfTipsToBase(out, base);
   return out;
 }
 

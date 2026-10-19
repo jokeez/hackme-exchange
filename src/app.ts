@@ -13,6 +13,7 @@ import { captureEphemeralUi, restoreEphemeralUi } from "./uiPreserve";
 import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
 import {
+  applyLiveDayRangeToPairCandles,
   applyMidToPairCandles,
   applyPaperClockToPairCandles,
   CANDLE_BASE_TF,
@@ -891,6 +892,15 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
     deskVolReady.add(pid);
   }
   deskApiTickersReady = true;
+  // Toolbar H/L come from /tickers; tip ticks re-aggregate candles and would drop those
+  // extremes — re-paint so 1D legend stays aligned with the durable 24h range.
+  if (useLiveBook()) {
+    for (const p of PAIRS) {
+      const series = state.candles[p.id];
+      if (!series) continue;
+      state.candles[p.id] = applyLiveDayRangeToPairCandles(series, liveDayRangeForPair(p.id));
+    }
+  }
   if (state.mainView === "spot") {
     patchTickerBar();
     patchMarketRowsInPlace();
@@ -8864,8 +8874,10 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
     if (!(tipPx > 0)) return;
     // Lock Last to this print so microTick cannot snap tip back to stale Soft-MM mid.
     setLastPublicMid(pairId, tipPx);
+    const dayRange = liveDayRangeForPair(pairId);
     let next = applyMidToPairCandles(state.candles[pairId]!, pairId, tipPx, prev, {
       syntheticVolume: false,
+      dayRange,
     });
     if (fillPx > 0 && Number.isFinite(fillPx)) {
       const volAdd = amountBase > 0 ? amountBase : 0;
@@ -8879,6 +8891,7 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
         tip.volume = (tip.volume || 0) + volAdd;
         series[series.length - 1] = tip;
       }
+      next = applyLiveDayRangeToPairCandles(next, dayRange);
     }
     state.candles[pairId] = next;
     prevMids[pairId] = tipPx;
@@ -8930,6 +8943,7 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
     if (!(mid > 0)) return;
     state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev, {
       syntheticVolume: false,
+      dayRange: liveDayRangeForPair(pairId),
     });
     prevMids[pairId] = mid;
     persistLiveCandleCache(pairId);
