@@ -3385,6 +3385,19 @@ html.mobile-layout .market-search {
 .acct-asset-table td { vertical-align: middle; }
 .acct-asset-table th:nth-child(n+2),
 .acct-asset-table td:nth-child(n+2) { text-align: right; }
+/* Table rows ignore bare [hidden] in some engines — force filter hide. */
+.acct-asset-table tr.acct-asset-row[hidden],
+.acct-asset-table tr.acct-asset-detail[hidden],
+.acct-asset-table tr.acct-asset-row.is-filtered-out,
+.acct-asset-table tr.acct-asset-detail.is-filtered-out {
+  display: none !important;
+}
+.acct-asset-filter-empty {
+  margin: 0.55rem 0.75rem 0.35rem;
+}
+.acct-asset-filter-empty[hidden] {
+  display: none !important;
+}
 .acct-asset-cell {
   display: flex;
   align-items: center;

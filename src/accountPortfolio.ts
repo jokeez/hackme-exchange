@@ -118,6 +118,31 @@ export type AssetPortfolioRow = {
   floatingPnlPct: number;
 };
 
+/** Symbol/name only — never match prices, PnL, or other row digits (avoids `hm`→USDT false hits via loose text). */
+export function assetRowMatchesFilter(
+  row: Pick<AssetPortfolioRow, "symbol" | "name" | "usdtValue">,
+  query: string,
+  hideSmallUsd: boolean,
+): boolean {
+  const q = query.trim().toLowerCase();
+  const sym = row.symbol.toLowerCase();
+  const name = row.name.toLowerCase();
+  const matchQ = !q || sym.includes(q) || name.includes(q);
+  // Hide dust and zero rows when "Hide < 1 USD" is on.
+  const matchSize = !hideSmallUsd || row.usdtValue >= 1 - 1e-9;
+  return matchQ && matchSize;
+}
+
+/** Spot pair for the Assets "Trade →" link (quote assets open a major USDT market). */
+export function spotPairForAsset(symbol: string): string {
+  const sym = symbol.toUpperCase();
+  if (sym === "BTC") return "BTC_USDT";
+  if (sym === "SUP") return "SUP_USDT";
+  if (sym === "HMC") return "HMC_USDT";
+  // USDT and unknowns: HMC/USDT is the desk's primary quote market.
+  return "HMC_USDT";
+}
+
 export function isBalanceHidden(): boolean {
   try {
     return localStorage.getItem(BALANCE_HIDE_KEY) === "1";
@@ -547,7 +572,8 @@ export function renderAssetTableRows(
       const allocPct = eq > 0 ? (r.usdtValue / eq) * 100 : 0;
       const screenHold = getLedgerHolds().find((h) => h.asset === r.symbol && h.hold > 0)?.hold ?? 0;
       const holdStr = formatNum(screenHold, decimals);
-      return `<tr class="acct-asset-row" data-asset="${r.symbol}" data-usdt-value="${r.usdtValue.toFixed(4)}">
+      const pair = spotPairForAsset(r.symbol);
+      return `<tr class="acct-asset-row" data-asset="${r.symbol}" data-asset-name="${escapeHtml(r.name)}" data-usdt-value="${r.usdtValue.toFixed(4)}">
         <td class="acct-asset-cell">
           <button type="button" class="acct-asset-expand" data-asset-expand="${r.symbol}" aria-expanded="false" aria-label="Details ${r.symbol}">›</button>
           ${assetBadgeLg(r.symbol)}
@@ -575,7 +601,7 @@ export function renderAssetTableRows(
                 ? `<span>Screening hold <strong class="mono" data-raw="${escapeHtml(holdStr)}" data-raw-slot="hold">${maskBalance(holdStr, hidden)}</strong></span>`
                 : ""
             }
-            <a class="acct-asset-trade" href="#spot/${r.symbol === "BTC" ? "BTC_USDT" : r.symbol === "SUP" ? "SUP_USDT" : "HMC_USDT"}/15m" data-goto-spot="${r.symbol}">Trade →</a>
+            <a class="acct-asset-trade" href="#spot/${pair}/15m" data-goto-spot="${escapeHtml(r.symbol)}">Trade →</a>
           </div>
         </td>
       </tr>`;

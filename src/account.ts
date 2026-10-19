@@ -19,6 +19,7 @@ import { dailyPnlCalendar, pnlWindows, renderPnlCalendarHtml } from "./pnl";
 import { ASSET_REGISTRY, PLANNED_ASSETS } from "./adapters/assets";
 import { Ico, assetBadgeLg } from "./icons";
 import {
+  assetRowMatchesFilter,
   buildAssetPortfolioRows,
   equityInDenom,
   formatFloatingPnlDisplay,
@@ -785,6 +786,13 @@ function renderRecentTxTable(state: DemoState, hidden: boolean): string {
   </table>`;
 }
 
+/** Account Assets empty state — Deposit CTA (not "View Account" while already here). */
+function renderAccountSpotEmpty(): string {
+  return renderSpotEmptyState("positions")
+    .replace(/href="#account"/g, 'href="#account/deposit"')
+    .replace(/>View Account</g, ">Deposit<");
+}
+
 export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts?: AccountPageOpts): string {
   const eq = walletEquityFromMarket(state.wallet, market);
   const pnl = pnlPct(state, market);
@@ -895,7 +903,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
 
       <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds"${acctTab !== "assets" ? " hidden" : ""}>
         ${renderScreeningHoldBanner()}
-        ${!hasSpotInventory ? `<div class="acct-positions-empty">${renderSpotEmptyState("positions")}</div>` : ""}
+        ${!hasSpotInventory ? `<div class="acct-positions-empty">${renderAccountSpotEmpty()}</div>` : ""}
         <table class="acct-asset-table data-table">
           <thead>
             <tr>
@@ -917,6 +925,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             </tr>
           </tbody>
         </table>
+        <p class="muted small acct-asset-filter-empty" id="acct-asset-filter-empty" hidden>No assets match this filter</p>
       </div>
 
       <div class="acct-tab-panel" data-acct-panel="account"${acctTab !== "account" ? " hidden" : ""}>
@@ -1063,19 +1072,33 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
 }
 
 function applyAssetFilters(): void {
-  const q = (document.getElementById("acct-asset-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
+  const q = (document.getElementById("acct-asset-search") as HTMLInputElement | null)?.value ?? "";
   const hideSmall = (document.getElementById("acct-hide-small") as HTMLInputElement | null)?.checked ?? false;
+  let visible = 0;
   document.querySelectorAll<HTMLElement>(".acct-asset-row").forEach((row) => {
     const sym = row.dataset.asset ?? "";
+    const name = row.dataset.assetName ?? "";
     const val = parseFloat(row.dataset.usdtValue ?? "0");
-    const text = row.textContent?.toLowerCase() ?? "";
-    const matchQ = !q || sym.toLowerCase().includes(q) || text.includes(q);
-    const matchSize = !hideSmall || val >= 1;
-    const hide = !(matchQ && matchSize);
-    row.hidden = hide;
+    const show = assetRowMatchesFilter(
+      { symbol: sym, name, usdtValue: Number.isFinite(val) ? val : 0 },
+      q,
+      hideSmall,
+    );
+    row.hidden = !show;
+    row.classList.toggle("is-filtered-out", !show);
     const detail = document.querySelector(`[data-asset-detail="${sym}"]`) as HTMLElement | null;
-    if (detail && hide) detail.hidden = true;
+    if (detail) {
+      if (!show) {
+        detail.hidden = true;
+        detail.classList.add("is-filtered-out");
+      } else {
+        detail.classList.remove("is-filtered-out");
+      }
+    }
+    if (show) visible += 1;
   });
+  const emptyHint = document.getElementById("acct-asset-filter-empty");
+  if (emptyHint) emptyHint.hidden = visible !== 0;
 }
 
 function applyBalanceVisibility(hidden: boolean): void {
@@ -1426,8 +1449,11 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
     } else if (!empty) {
       empty = document.createElement("div");
       empty.className = "acct-positions-empty";
-      empty.innerHTML = renderSpotEmptyState("positions");
+      empty.innerHTML = renderAccountSpotEmpty();
       fundsPanel.prepend(empty);
     }
   }
+
+  // Keep search / Hide < 1 USD in sync after soft balance patches.
+  applyAssetFilters();
 }
