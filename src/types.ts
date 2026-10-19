@@ -310,7 +310,7 @@ export type Wallet = {
   btc: number;
 };
 
-export type MainView = "spot" | "convert" | "pool" | "account";
+export type MainView = "spot" | "convert" | "account";
 
 export type ThemeId = "hub" | "wallet";
 

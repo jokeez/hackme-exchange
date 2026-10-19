@@ -30,17 +30,16 @@ describe("Account desk session (HOLD)", () => {
       deskEdge: { matching: "disabled", depositEnabled: false, withdrawEnabled: false },
     });
     expect(html).toContain('id="acct-desk"');
-    expect(html).toContain("DESK · HOLD");
-    expect(html).toContain("matching · HOLD");
-    expect(html).toContain("deposit · HOLD");
-    expect(html).toContain("withdraw · HOLD");
+    expect(html).toContain("Wallet &amp; security");
+    expect(html).toMatch(/HOLD/);
+    expect(html).toContain("deposit HOLD");
+    expect(html).toContain("withdraw HOLD");
     expect(html).toContain("Deposit · HOLD");
     expect(html).toContain("Withdraw · HOLD");
     expect(html).toContain("btn-desk-wallet-connect");
     expect(html).toContain("btn-desk-cash-connect");
     expect(html).toContain("btn-desk-jump-panel");
     expect(html).toContain("desk-hold-card");
-    expect(html).toContain("matching · HOLD");
     expect(html).toContain("btn-desk-copy-addr");
     expect(html).toContain("btn-desk-api-revoke");
     expect(html).toContain("btn-desk-new-key");
@@ -48,10 +47,9 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("btn-desk-import-seed");
     expect(html).toContain('id="acct-security-2fa"');
     expect(html).toContain("btn-lab-2fa-setup");
-    expect(html).toContain("Withdraw stays");
-    expect(html).toContain("HOLD");
     expect(html).not.toContain('id="acct-security-2fa-hold"');
     expect(html).not.toContain('id="acct-lab"');
+    expect(html).not.toContain('href="#pool"');
   });
 
   it("enables session controls when CSRF session is live", () => {
@@ -67,17 +65,16 @@ describe("Account desk session (HOLD)", () => {
     expect(html).not.toMatch(/id="btn-lab-2fa-setup"[^>]*disabled/);
   });
 
-  it("multi-wallet prefers desk ledger + hub (no paper/lab sandbox chrome)", () => {
+  it("desk account keeps Connect + deposit without multi-wallet chrome", () => {
     const html = renderAccountPage(baseState(), sampleMarket(), {
       feeWallet: null,
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: false },
     });
-    expect(html).toContain("Desk ledger · soft-launch Spot");
-    expect(html).toContain("Desk ledger");
-    expect(html).toContain('data-wallet-slice="desk"');
-    expect(html).toContain('href="#acct-desk"');
+    expect(html).toContain("Spot balances · soft-launch");
+    expect(html).toContain('id="acct-desk"');
     expect(html).toContain(">Connect<");
-    expect(html).toContain("Hub wallet");
+    expect(html).not.toContain('data-wallet-slice="desk"');
+    expect(html).not.toContain('href="#pool"');
     expect(html).not.toContain("Paper trading · node wallet · lab sandbox");
     expect(html).not.toContain("Paper wallet");
     expect(html).not.toContain("Lab ledger");
@@ -85,14 +82,14 @@ describe("Account desk session (HOLD)", () => {
     expect(html).not.toContain('href="#account">Open');
   });
 
-  it("desk session live marks desk ledger Active", () => {
+  it("desk session live shows Reconnect without multi-wallet chrome", () => {
     setLabSessionMeta("HMC-deskmw0123456789", "csrf-mw");
     const html = renderAccountPage(baseState(), sampleMarket(), {
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
-    expect(html).toContain('data-wallet-slice="desk"');
-    expect(html).toContain(">Active<");
-    expect(html).not.toContain('href="#acct-desk"');
+    expect(html).toContain("Reconnect");
+    expect(html).toContain("HMC-deskmw0123456789");
+    expect(html).not.toContain('data-wallet-slice="desk"');
   });
 
   it("renders soft-launch caps when health advertises them", () => {
@@ -112,16 +109,16 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("±1500 bps");
   });
 
-  it("desk promo uses live convert copy (not paper)", () => {
+  it("desk overview uses soft-launch VIP copy (not paper demo)", () => {
     setDeskMatchingStatus("ok");
     const html = renderAccountPage(baseState(), sampleMarket(), {
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
-    expect(html).toContain("Convert at desk mid");
-    expect(html).not.toContain("Paper convert between assets");
+    expect(html).toContain("Spot balances · soft-launch");
     expect(html).toContain("VIP schedule from desk");
     expect(html).toContain("sync…");
     expect(html).not.toMatch(/vip-demo[^>]*>\s*demo\s*</);
+    expect(html).not.toContain('href="#pool"');
   });
 
   it("renders desk custody GO deposit buttons when deposit enabled", () => {
@@ -141,17 +138,17 @@ describe("Account desk session (HOLD)", () => {
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
     expect(html).toContain("Login addr ≠ deposit");
-    expect(html).toContain("Desk custody live");
-    expect(html).toContain("deposit · on");
-    expect(html).toContain("withdraw · on");
-    expect(html).toContain("DESK · LIVE");
+    expect(html).toContain("Deposit to the address below");
+    expect(html).toContain("deposit on");
+    expect(html).toContain("withdraw on");
+    expect(html).toContain("Wallet &amp; security");
     expect(html).toContain("desk-custody-live");
     expect(html).not.toContain("desk-hold-card");
     expect(html).toContain('id="btn-acct-deposit"');
     expect(html).toContain(">Withdraw<");
     expect(html).not.toContain("Withdraw · HOLD");
     expect(html).not.toContain("Deposit · HOLD");
-    expect(html).toContain("NOT for deposits");
+    expect(html).toMatch(/not for deposits/i);
     expect(html).toContain('id="acct-security-2fa"');
     expect(html).toContain("btn-lab-2fa-setup");
     expect(html).toContain("Authenticator (TOTP) is required");
@@ -172,11 +169,10 @@ describe("Account desk session (HOLD)", () => {
     const html = renderAccountPage(baseState(), sampleMarket(), {
       deskEdge: { matching: "…", depositEnabled: false, withdrawEnabled: false },
     });
-    expect(html).toContain("Deposit…");
-    expect(html).toContain("Withdraw…");
-    expect(html).toContain("deposit · …");
-    expect(html).toContain("withdraw · …");
-    expect(html).toContain("Checking edge health");
+    expect(html).toContain('id="btn-acct-deposit"');
+    expect(html).toContain('id="btn-acct-withdraw"');
+    expect(html).toContain("deposit …");
+    expect(html).toContain("withdraw …");
     expect(html).not.toContain("Deposit · HOLD");
   });
 

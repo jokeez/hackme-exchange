@@ -532,7 +532,8 @@ export function renderAssetTableRows(
   return rows
     .map((r) => {
       const decimals = r.symbol === "BTC" ? 8 : r.symbol === "USDT" ? 2 : 4;
-      const amtStr = r.symbol === "BTC" ? formatPrice(r.amount) : formatNum(r.amount, decimals);
+      // Amounts use formatAssetQty — formatPrice treats 0 as "—" (price-only helper).
+      const amtStr = formatAssetQty(r.amount, r.symbol);
       const priceStr = r.symbol === "USDT" ? "1.00" : formatPrice(r.price);
       const valueStr = formatNum(r.usdtValue, 2);
       const costStr = formatNum(r.costBasisUsdt, 2);

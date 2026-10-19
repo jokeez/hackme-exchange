@@ -119,11 +119,9 @@ function modeBlurb(): string {
 
 /** Build mode label — never append misleading Vite mode "paper" when desk matching is live. */
 function modeSubtitle(): string {
-  const blurb = modeBlurb();
-  if (isDeskConnectEnabled() && (useDeskMatching() || usePublicDeskBook())) {
-    return `${blurb} · desk ledger`;
-  }
-  return `${blurb} · <span class="mono">${escapeHtml(INTEGRATION.mode)}</span>`;
+  if (isDeskConnectEnabled()) return "Spot balances · soft-launch";
+  if (isLabLoopbackApi()) return "Lab ledger";
+  return "Paper Spot";
 }
 
 /** Shared TOTP UI (desk + lab) — same ids so wireLabApiButtons stays single-path. */
@@ -273,18 +271,13 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   if (edge?.minNotional && edge.minNotional > 0) caps.push(`min notional ${edge.minNotional}`);
   const capsLine =
     caps.length > 0
-      ? `<p class="muted small mono acct-desk-caps" title="Soft-launch caps from /health">${escapeHtml(caps.join(" · "))}</p>`
-      : live
-        ? `<p class="muted small acct-desk-caps">Soft-launch caps apply (see API health)</p>`
-        : pending
-          ? `<p class="muted small acct-desk-caps">Checking edge health…</p>`
-          : "";
+      ? `<p class="muted small mono acct-desk-caps" title="Soft-launch caps">${escapeHtml(caps.join(" · "))}</p>`
+      : "";
   return `<div class="settings-edge-card acct-desk-edge" aria-live="polite">
-        <div class="settings-edge-top"><strong>Edge status</strong></div>
         <div class="settings-hold-row acct-desk-hold">
-        <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">matching · ${escapeHtml(matching)}</span>
-        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit · ${pending ? "…" : dep ? "on" : "HOLD"}</span>
-        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw · ${pending ? "…" : wd ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">${escapeHtml(matching)}</span>
+        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit ${pending ? "…" : dep ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw ${pending ? "…" : wd ? "on" : "HOLD"}</span>
       </div>${capsLine}</div>`;
 }
 
@@ -317,14 +310,8 @@ export function patchDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): void {
     capsEl.classList.add("mono");
     capsEl.setAttribute("title", "Soft-launch caps from /health");
     capsEl.textContent = caps.join(" · ");
-  } else if (isDeskMatchingLive(edge?.matching)) {
-    capsEl.classList.remove("mono");
-    capsEl.removeAttribute("title");
-    capsEl.textContent = "Soft-launch caps apply (see API health)";
-  } else if (isDeskEdgePending(edge?.matching)) {
-    capsEl.classList.remove("mono");
-    capsEl.removeAttribute("title");
-    capsEl.textContent = "Checking edge health…";
+  } else {
+    capsEl.textContent = "";
   }
 }
 
@@ -571,20 +558,15 @@ function renderCashDock(
   const deskBookLive = deskOn && (usePublicDeskBook() || useDeskMatching());
   const intro = labOn
     ? labLive
-      ? "Lab ledger active — mint paper USDT/BTC or request withdraw"
-      : "Connect fixture once, then deposit / withdraw here"
+      ? "Lab ledger — deposit or withdraw below"
+      : "Connect fixture, then deposit / withdraw"
     : deskCustodyOn || deskWdOn
-      ? `Desk custody live — ${[
-          deskCustodyOn ? "deposit address below" : null,
-          deskWdOn ? "withdraw with TOTP" : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}`
+      ? "Deposit to the address below · withdraw needs 2FA"
       : deskOn && deskBookLive
-        ? "Desk live book — Connect to sync ledger · deposit/withdraw follow edge health"
+        ? "Connect to sync balances, then deposit"
         : deskOn
-          ? "Desk Connect · Connect to sync ledger · matching opens trading when edge is GO"
-          : "Paper funds · live exchange deposit/withdraw follow server health · optional node Sync for HMC/SUP";
+          ? "Connect to sync balances"
+          : "Paper funds on this device";
   const dockClass = [
     labOn ? "lab-custody-card" : "",
     deskOn && !labOn && !deskCustodyOn && !deskWdOn ? "desk-hold-card" : "",
@@ -602,11 +584,10 @@ function renderCashDock(
       ${
         deskOn && !labOn
           ? `<div class="acct-desk-cash-cta">
-        ${renderDeskHoldPills(opts?.deskEdge)}
-        <p class="muted small">Session: <strong class="mono">${escapeHtml(session.label)}</strong></p>
+        <p class="muted small">Session <strong class="mono">${escapeHtml(session.label)}</strong></p>
         <div class="acct-cash-actions">
-          <button type="button" class="btn-sm btn-primary" id="btn-desk-cash-connect">${session.live ? "Reconnect desk" : "Connect desk wallet"}</button>
-          <button type="button" class="btn-sm" id="btn-desk-jump-panel">Desk session ↓</button>
+          <button type="button" class="btn-sm btn-primary" id="btn-desk-cash-connect">${session.live ? "Reconnect" : "Connect"}</button>
+          <button type="button" class="btn-sm" id="btn-desk-jump-panel">Wallet &amp; security</button>
         </div>
       </div>`
           : ""
@@ -917,8 +898,8 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             <button type="button" class="acct-qa-btn primary" id="btn-acct-withdraw" data-cash-tab="withdraw">Withdraw</button>`;
                 }
                 if (edgePending) {
-                  return `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Checking edge health…">Deposit…</button>
-            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Checking edge health…">Withdraw…</button>`;
+                  return `<button type="button" class="acct-qa-btn muted" id="btn-acct-deposit" data-cash-tab="deposit" title="Loading…">Deposit</button>
+            <button type="button" class="acct-qa-btn muted" id="btn-acct-withdraw" data-cash-tab="withdraw" title="Loading…">Withdraw</button>`;
                 }
                 if (deskOn && (!!opts?.deskEdge?.depositEnabled || !!opts?.deskEdge?.withdrawEnabled)) {
                   return `<button type="button" class="acct-qa-btn ${opts?.deskEdge?.depositEnabled ? "primary" : "muted"}" id="btn-acct-deposit" data-cash-tab="deposit"${opts?.deskEdge?.depositEnabled ? "" : ' title="Live deposit on HOLD"'}>${opts?.deskEdge?.depositEnabled ? "Deposit" : "Deposit · HOLD"}</button>
@@ -1028,88 +1009,61 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </div>
     </section>
 
-    <section class="acct-promo-row" aria-label="Quick links">
-      <a class="acct-promo-card glass-inset" href="#spot/HMC_USDT/15m">
-        <span class="acct-promo-tag">Spot</span>
-        <strong>HMC/USDT</strong>
-        <span class="mono" data-acct-promo-mid="hmc">${formatPrice(market.hmcUsdt)}</span>
-        <span class="muted small">Limit &amp; market orders</span>
-      </a>
-      <a class="acct-promo-card glass-inset" href="#convert">
-        <span class="acct-promo-tag">Convert</span>
-        <strong>Instant swap</strong>
-        <span class="muted small">${
-          isDeskConnectEnabled()
-            ? "Convert at desk mid · HMC/USDT · HMC/SUP"
-            : "Paper convert between assets"
-        }</span>
-      </a>
-      <a class="acct-promo-card glass-inset" href="#pool">
-        <span class="acct-promo-tag">Pool</span>
-        <strong>Mining</strong>
-        <span class="muted small">Useful-PoW · HMC accrual</span>
-      </a>
-    </section>
-
     <section class="acct-recent glass-inset" id="acct-recent-tx">
       <header class="acct-recent-head">
-        <h3>Recent transactions</h3>
-        <a class="acct-more-link" href="#acct-activity">View all →</a>
+        <h3>Recent</h3>
+        <a class="acct-more-link" href="#acct-activity">All activity →</a>
       </header>
       <div id="acct-recent-tx-body">${renderRecentTxTable(state, hidden)}</div>
     </section>
-
-    ${renderMultiWalletCard(buildMultiWalletSlices(state, opts), market, multiWalletTagline(multiWalletMode()))}
-
-    ${renderDustPanel(w, market, "usdt", state)}
-
-    ${renderFeesBlock(state, market, vip, vol)}
 
     ${
       deskOn
         ? (() => {
             const custodyOn = !!opts?.deskEdge?.depositEnabled;
             const wdOn = !!opts?.deskEdge?.withdrawEnabled;
-            const matchLive = isDeskMatchingLive(opts?.deskEdge?.matching);
-            const badge = custodyOn || matchLive ? "DESK · LIVE" : "DESK · HOLD";
-            const summary = custodyOn || matchLive ? "Desk session" : "Desk session (HOLD)";
-            return `<details class="acct-panel" id="acct-desk" open>
-      <summary>${summary}</summary>
+            return `<details class="acct-panel" id="acct-desk">
+      <summary>Wallet &amp; security</summary>
       <article class="glass-inset account-card lab-api-card acct-desk-card">
-        <div class="acct-lab-status">
-          <span class="lab-badge">${badge}</span>
-          <p class="muted small">Session: <strong class="mono" id="desk-session-addr">${escapeHtml(session.label)}</strong></p>
-        </div>
+        <p class="muted small">Session <strong class="mono" id="desk-session-addr">${escapeHtml(session.label)}</strong></p>
         ${renderDeskHoldPills(opts?.deskEdge)}
         <div class="lab-action-row lab-session-primary">
           <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-wallet-connect">${session.live ? "Reconnect" : "Connect"}</button>
-          <button type="button" class="btn-lab" id="btn-desk-api-sync">↻ Sync</button>
+          <button type="button" class="btn-lab" id="btn-desk-api-sync">Sync</button>
           <button type="button" class="btn-lab" id="btn-desk-copy-addr" ${session.address || session.live ? "" : "disabled"} title="${
-              custodyOn ? "Copy login address — NOT for deposits" : "Copy HMC address"
+              custodyOn ? "Login address — not for deposits" : "Copy HMC address"
             }">Copy login</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout" ${session.live ? "" : "disabled"}>Logout</button>
         </div>
         <details class="acct-desk-advanced">
-          <summary>Backup &amp; advanced</summary>
+          <summary>Backup &amp; recovery</summary>
           <div class="lab-action-row">
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-export-seed" title="Download secret seed backup JSON">Export seed…</button>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear sessionStorage seed and create a new address">New wallet…</button>
+            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear seed and create a new address">New wallet…</button>
           </div>
           <input type="file" id="desk-seed-import-file" accept="application/json,.json,.txt,text/plain" class="hidden" />
           ${
             custodyOn
-              ? `<p class="muted small acct-dep-warn"><strong>Copy login ≠ deposit.</strong> Use Deposit tab for the on-chain address.</p>`
+              ? `<p class="muted small acct-dep-warn"><strong>Copy login ≠ deposit.</strong> Use Deposit for the on-chain address.</p>`
               : ""
           }
         </details>
         <p id="desk-api-msg" class="muted small sync-msg" role="status"></p>
       </article>
       ${renderSecurity2faCard(session.live, { withdrawEnabled: wdOn, deskMode: true })}
+    </details>
+    <details class="acct-panel" id="acct-fees-wrap">
+      <summary>Fees &amp; VIP</summary>
+      ${renderFeesBlock(state, market, vip, vol)}
+    </details>
+    <details class="acct-panel" id="acct-dust-wrap">
+      <summary>Convert dust</summary>
+      ${renderDustPanel(w, market, "usdt", state)}
     </details>`;
           })()
-        : ""
+        : `${renderFeesBlock(state, market, vip, vol)}${renderDustPanel(w, market, "usdt", state)}`
     }
 
     ${
@@ -1149,8 +1103,6 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       session,
       deskOn ? "Desk fills" : "Lab fills",
     )}
-
-    ${renderRoadmapBlock()}
   </section>`;
 }
 

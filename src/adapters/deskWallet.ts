@@ -1,10 +1,12 @@
 /**
  * Browser-local HMC wallet for public desk Connect (soft-launch matching).
  *
- * Seed lives in sessionStorage only (survives reload within the tab session).
- * localStorage copies are cleared on read (H-11 — no durable dual-store XSS harvest).
- * Export JSON backup is the durable recovery path. Treat like a private key:
- * XSS on this origin can read it while the tab is open — keep escapeHtml / CSP tight.
+ * Seed is durable in localStorage (survives reload + tab close) with a
+ * sessionStorage + memory mirror. Logout / clear-wallet wipes all stores.
+ * Export JSON backup remains the cross-device recovery path.
+ *
+ * Soft-launch deposits require durable seed: wiping localStorage without
+ * migrate orphaned ledger balances under the prior HMC address.
  */
 
 import * as ed from "@noble/ed25519";
@@ -16,6 +18,8 @@ import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../c
 ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 
 const SEED_KEY = "hackme.desk.wallet.seed.v1";
+/** Non-secret last Connect address — warns before minting a new empty wallet. */
+const LAST_ADDR_KEY = "hackme.desk.wallet.lastAddress.v1";
 
 /** In-tab memory mirror so same-tick races after clear still work. */
 let memorySeed: string | null = null;
@@ -43,38 +47,81 @@ export function normalizeDeskSeedHex(raw: string): string | null {
   return h;
 }
 
-function scrubLegacyLocalStorage(): void {
+function readRawSeedFrom(store: Storage): string | null {
   try {
-    localStorage.removeItem(SEED_KEY);
+    return normalizeDeskSeedHex(store.getItem(SEED_KEY) ?? "");
+  } catch {
+    return null;
+  }
+}
+
+function rememberLastAddress(address: string): void {
+  const a = String(address || "").trim();
+  if (!a.startsWith("HMC-")) return;
+  try {
+    localStorage.setItem(LAST_ADDR_KEY, a);
   } catch {
     /* ignore */
+  }
+  try {
+    sessionStorage.setItem(LAST_ADDR_KEY, a);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Last known desk address (non-secret) for reconnect recovery UX. */
+export function lastKnownDeskAddress(): string | null {
+  try {
+    const a = (localStorage.getItem(LAST_ADDR_KEY) || sessionStorage.getItem(LAST_ADDR_KEY) || "").trim();
+    return a.startsWith("HMC-") ? a : null;
+  } catch {
+    return null;
   }
 }
 
 function readStoredDeskSeed(): string | null {
-  scrubLegacyLocalStorage();
   if (memorySeed) return memorySeed;
+  // Prefer session (active tab), then durable local — never delete without migrate.
+  const fromSession = typeof sessionStorage !== "undefined" ? readRawSeedFrom(sessionStorage) : null;
+  const fromLocal = typeof localStorage !== "undefined" ? readRawSeedFrom(localStorage) : null;
+  const seed = fromSession || fromLocal;
+  if (!seed) return null;
+  memorySeed = seed;
+  // Heal missing mirrors so F5 / new tab keep the same address.
   try {
-    const fromSession = normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "");
-    if (fromSession) {
-      memorySeed = fromSession;
-      return fromSession;
-    }
+    if (!fromSession) sessionStorage.setItem(SEED_KEY, seed);
   } catch {
     /* ignore */
   }
-  return null;
+  try {
+    if (!fromLocal) localStorage.setItem(SEED_KEY, seed);
+  } catch {
+    /* ignore */
+  }
+  return seed;
 }
 
-/** True when a desk seed is stored (session/memory). */
+/** True when a desk seed is stored (local/session/memory). */
 export function hasDeskSeed(): boolean {
   return !!readStoredDeskSeed();
 }
 
 /** Where the active seed lives — for security chrome / docs honesty. */
 export function deskSeedStorageKind(): "local" | "session" | "none" {
-  scrubLegacyLocalStorage();
-  if (memorySeed) return "session";
+  if (memorySeed) {
+    try {
+      if (normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "")) return "local";
+    } catch {
+      /* ignore */
+    }
+    return "session";
+  }
+  try {
+    if (normalizeDeskSeedHex(localStorage.getItem(SEED_KEY) ?? "")) return "local";
+  } catch {
+    /* ignore */
+  }
   try {
     if (normalizeDeskSeedHex(sessionStorage.getItem(SEED_KEY) ?? "")) return "session";
   } catch {
@@ -83,6 +130,10 @@ export function deskSeedStorageKind(): "local" | "session" | "none" {
   return "none";
 }
 
+/**
+ * Load existing seed, or create a new one.
+ * Prefer {@link reconnectDeskSeed} for the Reconnect button — never mint there.
+ */
 export function loadOrCreateDeskSeed(): string {
   const existing = readStoredDeskSeed();
   if (existing) return existing;
@@ -93,9 +144,21 @@ export function loadOrCreateDeskSeed(): string {
   return hex;
 }
 
+/**
+ * Reconnect path: return existing seed only. Never create a new HD address
+ * (that orphaned soft-launch ledger balances under the prior HMC-…).
+ */
+export function reconnectDeskSeed(): string | null {
+  return readStoredDeskSeed();
+}
+
 export function clearDeskSeed(): void {
   memorySeed = null;
-  scrubLegacyLocalStorage();
+  try {
+    localStorage.removeItem(SEED_KEY);
+  } catch {
+    /* ignore */
+  }
   try {
     sessionStorage.removeItem(SEED_KEY);
   } catch {
@@ -103,19 +166,24 @@ export function clearDeskSeed(): void {
   }
 }
 
-/** Persist desk seed to sessionStorage (+ memory). Export backup for durability. */
+/** Persist desk seed to localStorage + sessionStorage (+ memory). */
 export function persistDeskSeed(seedHex: string): string {
   const n = normalizeDeskSeedHex(seedHex);
   if (!n) throw new Error("seed must be 32-byte hex");
   // Prove it is a valid Ed25519 seed before writing.
-  ed.getPublicKey(hexToBytes(n));
+  const id = deskWalletIdentity(n);
   memorySeed = n;
-  scrubLegacyLocalStorage();
+  try {
+    localStorage.setItem(SEED_KEY, n);
+  } catch {
+    /* ignore quota — session/memory may still hold it */
+  }
   try {
     sessionStorage.setItem(SEED_KEY, n);
   } catch {
-    /* ignore quota — memory still holds it for this tab */
+    /* ignore */
   }
+  rememberLastAddress(id.address);
   return n;
 }
 
@@ -137,7 +205,7 @@ export function buildDeskSeedBackup(seedHex = loadOrCreateDeskSeed()): DeskSeedB
     seed_hex: id.seedHex,
     created_at: new Date().toISOString(),
     warning:
-      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Soft-launch seed is session-only until you export a backup; Clear wallet / Logout wipes it.",
+      "SECRET — anyone with this file can Connect as this HMC address. Never share or commit. Soft-launch seed is stored in this browser; Export backup before clearing site data or switching devices.",
   };
 }
 
@@ -184,9 +252,11 @@ export type DeskWalletIdentity = {
 export function deskWalletIdentity(seedHex = loadOrCreateDeskSeed()): DeskWalletIdentity {
   const seed = hexToBytes(seedHex);
   const pub = ed.getPublicKey(seed);
+  const address = addressFromPubKey(pub);
+  rememberLastAddress(address);
   return {
     label: "browser desk wallet",
-    address: addressFromPubKey(pub),
+    address,
     pubkeyHex: bytesToHex(pub),
     seedHex,
   };
@@ -194,9 +264,12 @@ export function deskWalletIdentity(seedHex = loadOrCreateDeskSeed()): DeskWallet
 
 /**
  * Challenge → sign with browser-local seed → verify (cookie on desk API / same-origin proxy).
+ * @param seedHex optional explicit seed; when omitted uses stored seed or creates one.
+ * @param opts.createIfMissing when false, refuse instead of minting a new address (Reconnect).
  */
 export async function deskWalletConnect(
   seedHex?: string,
+  opts?: { createIfMissing?: boolean },
 ): Promise<(VerifyResponse & { wallet: DeskWalletIdentity }) | ExchangeApiError> {
   if (!isExchangeApiWired()) {
     return {
@@ -214,7 +287,23 @@ export async function deskWalletConnect(
       message: "Desk Connect off — enable VITE_PUBLIC_DESK_CONNECT=1 (or lab loopback)",
     };
   }
-  const wallet = deskWalletIdentity(seedHex ?? loadOrCreateDeskSeed());
+  const createIfMissing = opts?.createIfMissing !== false;
+  let resolved = seedHex ? normalizeDeskSeedHex(seedHex) : reconnectDeskSeed();
+  if (!resolved) {
+    if (!createIfMissing) {
+      const prev = lastKnownDeskAddress();
+      return {
+        ok: false,
+        status: 0,
+        code: "seed_missing",
+        message: prev
+          ? `Desk seed missing for ${prev} — Import seed backup to restore balances (Reconnect will not create a new wallet)`
+          : "Desk seed missing — Import seed backup or Connect to create a new wallet",
+      };
+    }
+    resolved = loadOrCreateDeskSeed();
+  }
+  const wallet = deskWalletIdentity(resolved);
   const ch = await authChallenge(wallet.address);
   if ("ok" in ch && ch.ok === false) return ch;
   const challenge = ch as Exclude<typeof ch, ExchangeApiError>;
@@ -226,5 +315,6 @@ export async function deskWalletConnect(
     sig_ed25519: sig,
   });
   if ("ok" in verified && verified.ok === false) return verified;
+  rememberLastAddress(wallet.address);
   return { ...(verified as VerifyResponse), wallet };
 }

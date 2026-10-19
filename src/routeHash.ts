@@ -5,7 +5,7 @@ import { TIMEFRAMES } from "./types";
 
 const PAIR_IDS = new Set(PAIRS.map((p) => p.id));
 const TF_SET = new Set<string>(TIMEFRAMES);
-const VIEWS = new Set<MainView>(["spot", "convert", "pool", "account"]);
+const VIEWS = new Set<MainView>(["spot", "convert", "account"]);
 const WALLET_KEYS = new Set<keyof Wallet>(["hmc", "sup", "usdt", "btc"]);
 const ACCOUNT_SECTIONS = new Set(["deposit", "withdraw", "fees", "activity", "dust"]);
 
@@ -18,8 +18,6 @@ export type RouteHash = {
   /** Convert asset keys (#convert/hmc/usdt). */
   convertFrom?: keyof Wallet;
   convertTo?: keyof Wallet;
-  /** Pool worker lookup payout address (#pool/lookup/HMC-…). */
-  poolAddress?: string;
 };
 
 export type RouteHashWriteContext = {
@@ -29,7 +27,6 @@ export type RouteHashWriteContext = {
   convertFrom?: keyof Wallet;
   convertTo?: keyof Wallet;
   accountSection?: string;
-  poolAddress?: string;
 };
 
 function parseWalletKey(raw: string | undefined): keyof Wallet | undefined {
@@ -50,9 +47,12 @@ const VIEW_ALIASES: Record<string, MainView> = {
   trade: "spot",
   market: "spot",
   swap: "convert",
+  /** Retired SPA Pool tab — bookmarks land on Account. */
+  pool: "account",
+  mining: "account",
 };
 
-/** Parse `#spot/HMC_USDT/15m`, `#convert/hmc/usdt`, `#pool/lookup/HMC-…`, `#account/deposit`, `#wallet`. */
+/** Parse `#spot/HMC_USDT/15m`, `#convert/hmc/usdt`, `#account/deposit`, `#wallet`. */
 export function parseRouteHash(hash: string): RouteHash {
   const raw = (hash || "").replace(/^#/, "").trim();
   if (!raw) return {};
@@ -75,6 +75,8 @@ export function parseRouteHash(hash: string): RouteHash {
       out.section = parts[1];
     } else if (head === "login" || head === "hub" || head === "wallet" || head === "settings") {
       out.section = "deposit";
+    } else if (head === "pool" || head === "mining") {
+      out.section = "deposit";
     }
   }
 
@@ -88,13 +90,6 @@ export function parseRouteHash(hash: string): RouteHash {
 
   if (out.view === "account") {
     if (parts[i] && ACCOUNT_SECTIONS.has(parts[i]!)) out.section = parts[i];
-    return out;
-  }
-
-  if (out.view === "pool") {
-    if (parts[i] === "lookup" && parts[i + 1]) {
-      out.poolAddress = decodeURIComponent(parts[i + 1]!);
-    }
     return out;
   }
 
@@ -120,8 +115,9 @@ export function formatConvertPairHash(from: keyof Wallet, to: keyof Wallet): str
   return `#convert/${from}/${to}`;
 }
 
-export function formatPoolLookupHash(address: string): string {
-  return `#pool/lookup/${encodeURIComponent(address.trim())}`;
+/** @deprecated Pool tab removed — kept for callers; redirects to account. */
+export function formatPoolLookupHash(_address: string): string {
+  return "#account/deposit";
 }
 
 /** Build location hash for the current view, preserving view-specific deep-link segments. */
@@ -138,10 +134,6 @@ export function buildRouteHash(ctx: RouteHashWriteContext): string {
       return formatAccountSectionHash(ctx.accountSection);
     }
     return "#account";
-  }
-  if (ctx.view === "pool") {
-    if (ctx.poolAddress?.trim()) return formatPoolLookupHash(ctx.poolAddress);
-    return "#pool";
   }
   return `#${ctx.view}`;
 }

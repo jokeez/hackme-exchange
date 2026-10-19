@@ -45,6 +45,20 @@ describe("pnlPct / pnlWindows", () => {
     expect(s.equitySnapshots[0]!.equityUsdt).toBeCloseTo(0.05, 8);
   });
 
+  it("repairStaleEquityBaseline resets micro baseline (25₽ / ~0.28 USDT) → 0", async () => {
+    const { repairStaleEquityBaseline } = await import("./store");
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0, sup: 0, btc: 0 },
+      initialEquityUsdt: 0.28,
+      equitySnapshots: [{ ts: Date.now() - 86_400_000, equityUsdt: 0.28 }],
+    });
+    expect(pnlPct(s, market)).toBeLessThan(-99);
+    expect(repairStaleEquityBaseline(s, market)).toBe(true);
+    expect(pnlPct(s, market)).toBe(0);
+    expect(s.initialEquityUsdt).toBe(0);
+    expect(s.equitySnapshots).toHaveLength(0);
+  });
+
   it("repairStaleEquityBaseline resets dust→deposit surge (+thousands% PnL)", async () => {
     const { repairStaleEquityBaseline } = await import("./store");
     const s = baseState({

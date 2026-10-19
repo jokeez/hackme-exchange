@@ -25,11 +25,6 @@ export const TOUR_V2_STEPS: TourStep[] = [
     body: "Convert HMC/USDT and HMC/SUP at server mid + VIP taker after Connect. Spot uses the live book; Convert does not touch the order book.",
   },
   {
-    id: "pool",
-    title: "Mining pool",
-    body: "Open Pool for live hashrate telemetry from hackme.tech (does not drive spot mids).",
-  },
-  {
     id: "account",
     title: "Account & deposit",
     body: "Connect, then Deposit → show HMC/SUP/USDT address. USDT stays in screening hold until ops approve KYT. Never send to Copy/login addr.",

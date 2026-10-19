@@ -68,16 +68,25 @@ export function chartEquitySeries(
   if (daily.length >= 2) return scrub(daily);
   const raw = scrub(snapshotsLast30d(snapshots).sort((a, b) => a.ts - b.ts));
   if (raw.length >= 2) return raw;
-  const current = raw[raw.length - 1]?.equityUsdt ?? initialEquityUsdt;
-  const start = initialEquityUsdt > 0 ? initialEquityUsdt : current;
+  const tip = raw[raw.length - 1]?.equityUsdt;
+  // Explicit zero tip (empty reconnect) — never invent start→0 from stale baseline.
+  if (tip === 0) return [];
+  const current = tip != null ? tip : initialEquityUsdt;
   const now = Date.now();
-  if (!(current > 0) && !(start > 0)) return [];
+  if (!(current > 0)) return [];
+  const start = initialEquityUsdt > 0 ? initialEquityUsdt : current;
   // Honest flat (or real start→current) — two points only, no synthetic 30d noise.
   if (Math.abs(current - start) < 1e-9) {
-    const anchor = current || start;
     return [
-      { ts: now - MS_DAY, equityUsdt: anchor },
-      { ts: now, equityUsdt: anchor },
+      { ts: now - MS_DAY, equityUsdt: current },
+      { ts: now, equityUsdt: current },
+    ];
+  }
+  // Ignore stale baseline cliffs (paper→empty desk) — flat at current equity.
+  if (start > 0 && current / start < 0.05 && start - current > 0.04) {
+    return [
+      { ts: now - MS_DAY, equityUsdt: current },
+      { ts: now, equityUsdt: current },
     ];
   }
   return [

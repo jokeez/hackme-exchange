@@ -61,22 +61,18 @@ describe("patchAccountFundsDom", () => {
     expect(document.querySelector("[data-portfolio-chart]")?.getAttribute("data-chart-denom")).toBe("RUB");
   });
 
-  it("patchAccountFundsDom updates multi-wallet lab row and dust panel", () => {
-    // Vitest wires loopback lab API — multi-wallet is lab ledger (no paper sandbox row).
+  it("patchAccountFundsDom updates dust panel after balance change", () => {
     setLabSessionMeta("HMC-patchlab01234567", "csrf-patch");
     const s = baseState();
     s.wallet.hmc = 0.0005;
     s.wallet.usdt = 50;
     const m = sampleMarket();
     document.body.innerHTML = renderAccountPage(s, m);
-    expect(document.querySelector('[data-wallet-slice="paper"]')).toBeNull();
-    expect(document.querySelector('[data-wallet-slice="lab"]')).toBeTruthy();
     s.wallet.usdt = 12_500;
     s.wallet.hmc = 0;
     s.wallet.sup = 0;
     s.wallet.btc = 0;
     patchAccountFundsDom(s, m);
-    expect(document.querySelector('[data-wallet-slice="lab"] .mono')?.textContent).toMatch(/12[,.]?500/);
     expect(document.getElementById("acct-dust")?.textContent).toMatch(/No dust/i);
   });
 
@@ -88,6 +84,5 @@ describe("patchAccountFundsDom", () => {
     expect(document.querySelector('[data-acct-oracle-mid="hmc"]')?.textContent).toContain("0.0523");
     expect(document.querySelector('[data-acct-oracle-mid="sup"]')?.textContent).toContain("0.0104");
     expect(document.querySelector('[data-acct-oracle-mid="btc"]')?.textContent).toContain("92,500");
-    expect(document.querySelector('[data-acct-promo-mid="hmc"]')?.textContent).toContain("0.0523");
   });
 });

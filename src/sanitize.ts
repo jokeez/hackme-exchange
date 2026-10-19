@@ -228,7 +228,7 @@ export function sanitizeLedgerEntry(
 const CANDLE_SCHEMES = new Set<CandleScheme>(["classic", "blue", "neon", "mono"]);
 const CHART_MODES = new Set<ChartMode>(["candles", "bars", "line", "area", "heikin"]);
 const MULTI_LAYOUTS = new Set<MultiChartLayout>(["1", "2v", "2h", "4"]);
-const MAIN_VIEWS = new Set<MainView>(["spot", "convert", "pool", "account"]);
+const MAIN_VIEWS = new Set<MainView>(["spot", "convert", "account"]);
 const LEDGER_KINDS = new Set<LedgerKind>(["trade", "deposit", "withdrawal", "transfer", "fee", "convert"]);
 const LEDGER_ASSETS = new Set(["USDT", "HMC", "SUP", "BTC"]);
 const INDICATOR_IDS = Object.keys(DEFAULT_CHART_SETTINGS.indicators) as IndicatorId[];
@@ -249,7 +249,10 @@ export function migrateOracleAnchor(raw: unknown, fallback = 0.05): number {
 }
 
 export function sanitizeMainView(raw: unknown, fallback: MainView = "spot"): MainView {
-  return typeof raw === "string" && MAIN_VIEWS.has(raw as MainView) ? (raw as MainView) : fallback;
+  if (typeof raw !== "string") return fallback;
+  // Retired Pool tab — keep bookmarks / persisted state on Account.
+  if (raw === "pool" || raw === "mining") return "account";
+  return MAIN_VIEWS.has(raw as MainView) ? (raw as MainView) : fallback;
 }
 
 export function sanitizeChartMode(raw: unknown, fallback: ChartMode = "candles"): ChartMode {

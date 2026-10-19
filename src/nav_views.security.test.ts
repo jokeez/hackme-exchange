@@ -73,10 +73,10 @@ function livePool(over: Partial<PoolLive> = {}): PoolLive {
 }
 
 describe("main-nav route allowlist", () => {
-  it("only accepts spot|convert|account|pool", () => {
+  it("only accepts spot|convert|account (pool redirects to account)", () => {
     expect(sanitizeMainView("convert")).toBe("convert");
     expect(sanitizeMainView("account")).toBe("account");
-    expect(sanitizeMainView("pool")).toBe("pool");
+    expect(sanitizeMainView("pool")).toBe("account");
     expect(sanitizeMainView(`convert${XSS}`)).toBe("spot");
     expect(sanitizeMainView("javascript:alert(1)")).toBe("spot");
     expect(sanitizeMainView({} as unknown as string)).toBe("spot");
@@ -85,7 +85,7 @@ describe("main-nav route allowlist", () => {
   it("parseRouteHash ignores XSS / unknown segments", () => {
     expect(parseRouteHash("#convert")).toEqual({ view: "convert" });
     expect(parseRouteHash("#account")).toEqual({ view: "account" });
-    expect(parseRouteHash("#pool")).toEqual({ view: "pool" });
+    expect(parseRouteHash("#pool")).toEqual({ view: "account", section: "deposit" });
     expect(parseRouteHash(`#${XSS}`)).toEqual({});
     expect(parseRouteHash("#convert/hmc/usdt")).toEqual({
       view: "convert",
@@ -96,7 +96,6 @@ describe("main-nav route allowlist", () => {
     expect(parseRouteHash("#spot/NOPE/15m")).toEqual({ view: "spot" });
     expect(parseRouteHash("#spot/HMC_USDT/nope")).toEqual({ view: "spot", pair: "HMC_USDT" });
     expect(formatRouteHash("account", "HMC_USDT", "1m")).toBe("#account");
-    expect(formatRouteHash("pool", "SUP_USDT", "5m")).toBe("#pool");
     expect(formatRouteHash("convert", "HMC_BTC", "1H")).toBe("#convert");
   });
 });
@@ -358,9 +357,9 @@ describe("openInNewTab / nav link open redirect", () => {
 });
 
 describe("nav button contract (header)", () => {
-  it("documents expected data-view ids for Convert/Account/Pool", () => {
+  it("documents expected data-view ids for Spot/Convert/Account", () => {
     // Mirrors app.ts main-nav — keep in sync if labels change.
-    const expected = ["spot", "convert", "account", "pool"] as const;
+    const expected = ["spot", "convert", "account"] as const;
     document.body.innerHTML = `
       <nav class="ex-nav" id="main-nav">
         ${expected

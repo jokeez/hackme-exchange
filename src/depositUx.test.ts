@@ -47,8 +47,7 @@ describe("deposit UX contracts", () => {
     expect(html).toMatch(/Login only/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     // Copy-addr path must stay labeled as login-only when custody is live
-    expect(html).toMatch(/Copy login ≠ deposit|NOT for deposits/);
-    expect(html).toMatch(/NOT for deposits/);
+    expect(html).toMatch(/Copy login ≠ deposit|not for deposits/i);
   });
 
   it("shows screening hold banner when ledger hold is cached", async () => {

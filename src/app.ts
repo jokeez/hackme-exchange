@@ -129,7 +129,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -357,7 +357,6 @@ function normalizeActivityTab(raw: string | null | undefined): typeof activityTa
 function gotoMainView(view: MainView): void {
   state.mainView = view;
   if (view !== "account") accountRouteSection = undefined;
-  if (view !== "pool") poolRouteAddress = undefined;
   saveState(state);
   chartMounted = false;
   if (view === "account" && isLabApiEnabled()) void refreshTradingGuardsFromHealth();
@@ -566,7 +565,6 @@ function syncRouteHash(): void {
     convertFrom: state.mainView === "convert" ? convertFrom : undefined,
     convertTo: state.mainView === "convert" ? convertTo : undefined,
     accountSection: state.mainView === "account" ? accountRouteSection : undefined,
-    poolAddress: state.mainView === "pool" ? poolRouteAddress : undefined,
   });
 }
 
@@ -601,15 +599,6 @@ function applyHashToState(): void {
   } else if (h.view) {
     accountRouteSection = undefined;
   }
-  if (h.poolAddress) {
-    poolRouteAddress = h.poolAddress;
-    pendingPoolAddress = h.poolAddress;
-  } else if (h.view === "pool") {
-    poolRouteAddress = undefined;
-    pendingPoolAddress = undefined;
-  } else if (h.view) {
-    poolRouteAddress = undefined;
-  }
 }
 
 function applyPendingDeepLinks(): void {
@@ -636,15 +625,6 @@ function applyPendingDeepLinks(): void {
     window.setTimeout(() => {
       document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
-  }
-  if (state.mainView === "pool" && pendingPoolAddress) {
-    const addr = pendingPoolAddress;
-    pendingPoolAddress = undefined;
-    const inp = document.getElementById("pool-worker-addr") as HTMLInputElement | null;
-    if (inp) inp.value = addr;
-    window.setTimeout(() => {
-      document.getElementById("pool-worker-search")?.dispatchEvent(new Event("click"));
-    }, 120);
   }
 }
 
@@ -3594,13 +3574,11 @@ function render(): void {
       <button type="button" class="nav-btn ${view === "spot" ? "active" : ""}" data-view="spot">Spot</button>
       <button type="button" class="nav-btn ${view === "convert" ? "active" : ""}" data-view="convert">Convert</button>
       <button type="button" class="nav-btn ${view === "account" ? "active" : ""}" data-view="account"><span class="nav-label-full">Account</span><span class="nav-label-short" aria-hidden="true">Acct</span></button>
-      <button type="button" class="nav-btn ${view === "pool" ? "active" : ""}" data-view="pool">Pool</button>
     </nav>
     <div class="ex-actions">
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
-      <button type="button" class="btn-ico btn-settings-quick" id="btn-settings-quick" title="Settings" aria-label="Open settings">${Ico.settings()}</button>
       <div class="sys-menu-wrap">
-        <button type="button" class="btn-sm" id="btn-system-status" aria-haspopup="true" aria-expanded="false" aria-label="System menu">⚙ <span class="sys-label">System</span></button>
+        <button type="button" class="btn-sm btn-settings-quick" id="btn-system-status" aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings">${Ico.settings()} <span class="sys-label">Settings</span></button>
         <div class="sys-backdrop hidden" id="sys-backdrop" aria-hidden="true"></div>
         <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">${
@@ -3610,7 +3588,7 @@ function render(): void {
                 ? `Lab · ${modeChromeLabel()}`
                 : `Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}`
           }</p>
-          <button type="button" class="sys-item" id="btn-settings">${Ico.settings()} Settings</button>
+          <button type="button" class="sys-item" id="btn-settings">${Ico.settings()} Preferences</button>
           <button type="button" class="sys-item" id="btn-settings-wallet" data-settings-tab="wallet">${Ico.wallet()} Wallet &amp; security</button>
           ${
             embed
@@ -3618,7 +3596,6 @@ function render(): void {
           <a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Hub wallet</a>`
               : `<a class="sys-link" href="${escapeHtml(nodeWalletUrl())}" id="link-node-wallet" target="_blank" rel="noreferrer">Node wallet</a>
           <button type="button" class="sys-item" id="btn-sync-node-header" title="Local hackme-node on this device (127.0.0.1:8080) or Hub embed">↻ Sync HMC/SUP (local node)</button>
-          <a class="sys-link" href="https://hackme.tech/pool/coordinator/api/pool/stats" target="_blank" rel="noreferrer">Official pool</a>
           <a class="sys-link" href="https://hackme.tech/downloads.html#start" target="_blank" rel="noreferrer">Mine ${pairById(state.activePair).base}</a>`
           }
           <input type="file" id="import-demo-file" accept="application/json,.json" class="hidden" />
@@ -3627,11 +3604,19 @@ function render(): void {
       </div>
     </div>
   </header>
-  ${view === "spot" ? renderSpot() : view === "convert" ? renderConvert() : view === "account" ? renderAccountPage(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet, deskEdge: deskEdgeSnap, wallet: state.wallet, totpEnabled: labUser2faEnabled }) : renderPoolPage(poolLive, market, { poolAddress: pendingPoolAddress, oracleMeta })}
-  ${view === "pool" && !embed ? `<div class="mining-strip mono" id="mining-strip">
-    ${pairById(state.activePair).base}_${pairById(state.activePair).quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}
-  </div>` : ""}`;
-
+  ${
+    view === "spot"
+      ? renderSpot()
+      : view === "convert"
+        ? renderConvert()
+        : renderAccountPage(state, market, {
+            feeWallet: labFeeWallet,
+            nodeWallet: cachedNodeWallet,
+            deskEdge: deskEdgeSnap,
+            wallet: state.wallet,
+            totpEnabled: labUser2faEnabled,
+          })
+  }`;
   wireEvents();
   if (view === "spot") {
     ensurePublicTape();
@@ -3679,9 +3664,6 @@ function patchNonSpotChrome(): void {
   }
   if (state.mainView === "account" && market) {
     patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
-  }
-  if (state.mainView === "pool" && poolLive && market) {
-    patchPoolLiveDom(poolLive, market, oracleMeta);
   }
   if (state.mainView === "convert") {
     refreshConvertPreview();
@@ -4196,10 +4178,28 @@ async function deskWalletConnectUi(): Promise<void> {
       return;
     }
   }
-  const res = await deskWalletConnect();
+  // Reconnect / known prior address: never mint a new HD wallet (orphans ledger).
+  const prevAddr = lastKnownDeskAddress();
+  const createIfMissing = !hasDeskSeed() && !prevAddr && !labSessionLabel().live;
+  if (!hasDeskSeed() && prevAddr) {
+    const goImport = window.confirm(
+      `Desk seed missing for ${prevAddr}.\n\n` +
+        `Reconnect will NOT create a new empty wallet (that hid prior balances).\n` +
+        `OK = Import seed backup now · Cancel = stay disconnected.`,
+    );
+    if (msg) msg.textContent = goImport ? "Import seed to restore…" : "Reconnect blocked — seed missing";
+    if (goImport) deskImportSeedUi();
+    else toast(`Import seed backup to restore ${prevAddr.slice(0, 14)}…`, "warn");
+    return;
+  }
+  const res = await deskWalletConnect(undefined, { createIfMissing });
   if (!res.ok) {
     if (msg) msg.textContent = res.message;
     toast(`Desk Connect: ${res.message}`, "warn");
+    if (res.code === "seed_missing") {
+      const goImport = window.confirm(`${res.message}\n\nImport seed backup now?`);
+      if (goImport) deskImportSeedUi();
+    }
     return;
   }
   if (msg) {
@@ -4264,13 +4264,33 @@ async function deskCopyAddressUi(): Promise<void> {
 }
 
 async function deskNewWalletUi(): Promise<void> {
+  const prev = lastKnownDeskAddress() || labSessionLabel().address;
+  if (
+    !window.confirm(
+      `Create a NEW desk wallet?\n\n` +
+        (prev ? `Current address ${prev} keeps its ledger balances on the server — you need the seed backup to reach them again.\n\n` : "") +
+        `Export seed first if this browser still has funds. Continue?`,
+    )
+  ) {
+    return;
+  }
   if (labSessionLabel().live) {
     await authLogout();
     clearLabBookCache();
   }
   clearDeskSeed();
   toast("Desk seed cleared — connecting new wallet…", "info");
-  await deskWalletConnectUi();
+  const res = await deskWalletConnect(undefined, { createIfMissing: true });
+  if (!res.ok) {
+    toast(`Desk Connect: ${res.message}`, "warn");
+    return;
+  }
+  toast(`New desk wallet · ${res.wallet.address.slice(0, 14)}…`, "ok");
+  const sync = await syncLabBalancesAndBook(state, market);
+  if (sync.ok) saveState(state);
+  if (market && repairStaleEquityBaseline(state, market)) saveState(state);
+  if (state.mainView === "account") render();
+  patchOpenSettingsWalletChrome();
 }
 
 function deskExportSeedUi(): void {
@@ -5370,7 +5390,9 @@ function wireLabApiButtons(): void {
   click("btn-desk-wallet-connect", () => void deskWalletConnectUi());
   click("btn-desk-cash-connect", () => void deskWalletConnectUi());
   click("btn-desk-jump-panel", () => {
-    document.getElementById("acct-desk")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const panel = document.getElementById("acct-desk") as HTMLDetailsElement | null;
+    if (panel) panel.open = true;
+    panel?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   click("btn-desk-api-sync", () => void syncLabLedgerUi());
   click("btn-desk-api-logout", () => void labApiLogoutUi());
@@ -5382,13 +5404,6 @@ function wireLabApiButtons(): void {
   click("btn-desk-export-seed", () => deskExportSeedUi());
   click("btn-desk-import-seed", () => deskImportSeedUi());
   click("btn-desk-new-key", () => {
-    if (
-      !window.confirm(
-        "Create a new browser desk wallet? This clears the durable browser seed (localStorage) and logs out. Export a backup first if you need this address again.",
-      )
-    ) {
-      return;
-    }
     void deskNewWalletUi();
   });
   const seedFile = document.getElementById("desk-seed-import-file") as HTMLInputElement | null;
@@ -8186,7 +8201,6 @@ function wireEvents(): void {
     showSystemDrop(false);
     showSettings();
   });
-  document.getElementById("btn-settings-quick")?.addEventListener("click", () => showSettings());
   document.getElementById("btn-settings-wallet")?.addEventListener("click", () => {
     showSystemDrop(false);
     showSettings({ tab: "wallet" });
@@ -8240,10 +8254,6 @@ function wireEvents(): void {
 
   if (state.mainView === "convert") {
     wireConvertDesk();
-  }
-  if (state.mainView === "pool") {
-    wirePoolPage();
-    if (poolLive && market) patchPoolLiveDom(poolLive, market, oracleMeta);
   }
 
   if (!hotkeysWired) {

@@ -15,15 +15,15 @@ describe("routeHash", () => {
 
   it("parses non-spot views", () => {
     expect(parseRouteHash("#convert")).toEqual({ view: "convert" });
-    expect(parseRouteHash("#pool")).toEqual({ view: "pool" });
+    expect(parseRouteHash("#pool")).toEqual({ view: "account", section: "deposit" });
     expect(parseRouteHash("#convert/hmc/usdt")).toEqual({ view: "convert", convertFrom: "hmc", convertTo: "usdt" });
     expect(parseRouteHash("#account/deposit")).toEqual({ view: "account", section: "deposit" });
-    expect(parseRouteHash("#pool/lookup/HMC-abc")).toEqual({ view: "pool", poolAddress: "HMC-abc" });
+    expect(parseRouteHash("#pool/lookup/HMC-abc")).toEqual({ view: "account", section: "deposit" });
   });
 
   it("does not treat account/pool tails as spot pair/tf", () => {
     expect(parseRouteHash("#account/HMC_USDT")).toEqual({ view: "account" });
-    expect(parseRouteHash("#pool/HMC_USDT")).toEqual({ view: "pool" });
+    expect(parseRouteHash("#pool/HMC_USDT")).toEqual({ view: "account", section: "deposit" });
   });
 
   it("formats and ignores junk", () => {
@@ -50,14 +50,6 @@ describe("routeHash", () => {
         accountSection: "deposit",
       }),
     ).toBe("#account/deposit");
-    expect(
-      buildRouteHash({
-        view: "pool",
-        pair: "HMC_USDT",
-        tf: "15m",
-        poolAddress: "HMC-abc",
-      }),
-    ).toBe("#pool/lookup/HMC-abc");
     expect(
       buildRouteHash({
         view: "convert",

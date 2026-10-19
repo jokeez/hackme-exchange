@@ -668,9 +668,10 @@ export function repairStaleEquityBaseline(state: DemoState, m: MarketSnapshot): 
     0,
   );
   /** Paper→empty/dust desk: equity collapsed vs baseline → PnL ≈ −100%.
-   * Threshold starts at $1 so ~7 USDT paper seeds still repair (was ref>=10). */
+   * Threshold starts at $0.05 so ~0.28 USDT (25₽) baselines still repair after
+   * empty Reconnect (was ref>=1 / delta>0.5, which left fake −100% charts). */
   const cliffDown =
-    (ref: number) => ref >= 1 && eq >= 0 && eq / ref < 0.05 && ref - eq > 0.5;
+    (ref: number) => ref >= 0.05 && eq >= 0 && eq / ref < 0.05 && ref - eq > 0.04;
   /** Dust→deposit/credit: equity exploded vs tiny baseline → PnL +thousands%. */
   const cliffUp =
     (ref: number) =>
