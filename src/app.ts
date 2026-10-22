@@ -4193,13 +4193,15 @@ async function deskWalletConnectUi(): Promise<void> {
   const createIfMissing = !hasDeskSeed() && !prevAddr && !labSessionLabel().live;
   if (!hasDeskSeed() && prevAddr) {
     const goImport = window.confirm(
-      `Desk seed missing for ${prevAddr}.\n\n` +
+      `IMPORT SEED REQUIRED\n\n` +
+        `Desk seed missing for ${prevAddr}.\n\n` +
         `Reconnect will NOT create a new empty wallet (that hid prior balances).\n` +
+        `Connect/login address ≠ deposit address.\n\n` +
         `OK = Import seed backup now · Cancel = stay disconnected.`,
     );
     if (msg) msg.textContent = goImport ? "Import seed to restore…" : "Reconnect blocked — seed missing";
     if (goImport) deskImportSeedUi();
-    else toast(`Import seed backup to restore ${prevAddr.slice(0, 14)}…`, "warn");
+    else toast(`Import seed backup to restore ${prevAddr.slice(0, 14)}… — Connect will not mint a new wallet`, "warn");
     return;
   }
   const res = await deskWalletConnect(undefined, { createIfMissing });
@@ -4228,6 +4230,14 @@ async function deskWalletConnectUi(): Promise<void> {
     if (sync.ok) {
       saveState(state);
       if (msg) msg.textContent = `${msg.textContent} · ${sync.note}`;
+      const deskEq =
+        state.wallet.usdt + state.wallet.hmc + state.wallet.sup + state.wallet.btc;
+      if (deskEq <= 0 && deskEdgeSnap.depositEnabled) {
+        toast(
+          "Avbl 0 after Connect — fund Deposit address (not Copy/login). Wrong seed? Import seed backup.",
+          "warn",
+        );
+      }
     } else {
       if (msg) msg.textContent = `${msg.textContent} · ledger sync: ${sync.message}`;
       if (isHubEmbed() && isSessionRequiredError(sync)) {
@@ -5405,6 +5415,7 @@ function wireLabApiButtons(): void {
   click("btn-desk-copy-addr", () => void deskCopyAddressUi());
   click("btn-desk-export-seed", () => deskExportSeedUi());
   click("btn-desk-import-seed", () => deskImportSeedUi());
+  click("btn-desk-import-seed-banner", () => deskImportSeedUi());
   click("btn-desk-new-key", () => {
     void deskNewWalletUi();
   });

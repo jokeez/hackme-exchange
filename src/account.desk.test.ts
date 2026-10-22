@@ -14,6 +14,7 @@ vi.mock("./config/integration", async (importOriginal) => {
 });
 
 import { clearLabSessionMeta, setLabSessionMeta } from "./adapters/exchangeApi";
+import { clearDeskSeed, persistDeskSeed, deskWalletIdentity } from "./adapters/deskWallet";
 import { setDeskMatchingStatus } from "./adapters/labMatching";
 import { renderAccountPage } from "./account";
 import { baseState, sampleMarket } from "./testFixtures";
@@ -22,6 +23,8 @@ describe("Account desk session (HOLD)", () => {
   beforeEach(() => {
     clearLabSessionMeta();
     sessionStorage.clear();
+    localStorage.clear();
+    clearDeskSeed();
   });
 
   it("renders desk panel with HOLD pills, session actions, and enrollable 2FA", () => {
@@ -187,5 +190,40 @@ describe("Account desk session (HOLD)", () => {
     expect(html).not.toContain("Enable 2FA first");
     expect(html).not.toContain("btn-acct-jump-2fa");
     expect(html).not.toMatch(/id="btn-lab-wd-request"[^>]*disabled/);
+  });
+
+  it("shows loud Import seed banner when prior address known but seed missing", () => {
+    const seed = "33".repeat(32);
+    persistDeskSeed(seed);
+    const addr = deskWalletIdentity(seed).address;
+    clearDeskSeed();
+    expect(addr.startsWith("HMC-")).toBe(true);
+    const s = baseState();
+    s.wallet = { usdt: 0, hmc: 0, sup: 0, btc: 0 };
+    const html = renderAccountPage(s, sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
+    });
+    expect(html).toContain("acct-import-seed-banner");
+    expect(html).toContain('data-import-seed-reason="seed_missing"');
+    expect(html).toContain("btn-desk-import-seed-banner");
+    expect(html).toContain("Import seed backup");
+    expect(html).toMatch(/Connect\/login address ≠ deposit|Connect\/login address/i);
+    // Primary Import seed promoted outside Backup details (durable seed restore).
+    expect(html).toContain('id="btn-desk-import-seed"');
+    expect(html).toContain(addr.slice(0, 14));
+  });
+
+  it("empty Avbl with seed present nudges Deposit vs Connect + Import", () => {
+    const seed = "44".repeat(32);
+    persistDeskSeed(seed);
+    const s = baseState();
+    s.wallet = { usdt: 0, hmc: 0, sup: 0, btc: 0 };
+    const html = renderAccountPage(s, sampleMarket(), {
+      deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: false },
+    });
+    expect(html).toContain('data-import-seed-reason="empty_after_connect"');
+    expect(html).toContain("Connect ≠ deposit");
+    expect(html).toContain("#account/deposit");
+    expect(html).toContain("btn-desk-import-seed-banner");
   });
 });

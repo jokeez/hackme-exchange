@@ -1,5 +1,6 @@
 import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
 import { getLedgerHolds, labSessionLabel } from "./adapters/exchangeApi";
+import { hasDeskSeed, lastKnownDeskAddress } from "./adapters/deskWallet";
 import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
@@ -237,8 +238,38 @@ function renderScreeningHoldBanner(): string {
     .map((h) => `<strong class="mono">${escapeHtml(formatNum(h.hold, 4))} ${escapeHtml(h.asset)}</strong>`)
     .join(" · ");
   return `<div class="cex-callout cex-callout--warn acct-screening-hold" role="status" aria-live="polite">
-    <strong>Screening hold</strong> — ${bits} is not tradable yet. USDT deposits stay held until ops approve KYT (manual soft-launch; not automatic).
+    <strong>Screening hold</strong> — ${bits} is not tradable yet. USDT deposits stay held until KYT clears (Didit/ops — not automatic hot-send).
   </div>`;
+}
+
+/**
+ * Louder Import seed CTA when durable seed is gone but a prior Connect address is known
+ * (or Avbl is empty after reconnect risk). Connect ≠ deposit — never mint a new wallet here.
+ */
+function renderImportSeedBanner(hasSpotInventory: boolean): string {
+  if (!isDeskConnectEnabled() || isLabLoopbackApi()) return "";
+  const prev = lastKnownDeskAddress();
+  const seedOk = hasDeskSeed();
+  if (seedOk && (hasSpotInventory || !prev)) return "";
+  if (!seedOk && prev) {
+    const short = escapeHtml(prev.slice(0, 14) + "…");
+    return `<div class="cex-callout cex-callout--warn acct-import-seed-banner" role="alert" data-import-seed-reason="seed_missing">
+      <strong>Import seed to restore ${short}</strong>
+      <p class="muted small" style="margin:0.35rem 0 0.55rem">Browser seed is missing. Reconnect will <em>not</em> create a new empty wallet (that hid prior balances). Connect/login address ≠ deposit address.</p>
+      <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-import-seed-banner">Import seed backup…</button>
+    </div>`;
+  }
+  if (seedOk && !hasSpotInventory && prev) {
+    return `<div class="cex-callout acct-import-seed-banner" role="status" data-import-seed-reason="empty_after_connect">
+      <strong>Avbl is 0 — Connect ≠ deposit</strong>
+      <p class="muted small" style="margin:0.35rem 0">Fund the <em>Deposit</em> address (Account → Deposit), not Copy/login. If this was another device, Import seed backup first.</p>
+      <div class="lab-action-row" style="gap:0.4rem;flex-wrap:wrap">
+        <a class="btn-lab btn-lab-primary" href="#account/deposit">Show deposit address</a>
+        <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed-banner">Import seed…</button>
+      </div>
+    </div>`;
+  }
+  return "";
 }
 
 /** Soft-update screening banner after deposit poll / balance patch (no full remount). */
@@ -902,6 +933,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </header>
 
       <div class="acct-tab-panel" data-acct-panel="assets" id="account-funds"${acctTab !== "assets" ? " hidden" : ""}>
+        ${renderImportSeedBanner(hasSpotInventory)}
         ${renderScreeningHoldBanner()}
         ${!hasSpotInventory ? `<div class="acct-positions-empty">${renderAccountSpotEmpty()}</div>` : ""}
         <table class="acct-asset-table data-table">
@@ -1000,11 +1032,23 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
             }">Copy login</button>
           <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-logout" ${session.live ? "" : "disabled"}>Logout</button>
         </div>
-        <details class="acct-desk-advanced">
+        ${
+          !hasDeskSeed() && lastKnownDeskAddress()
+            ? `<div class="lab-action-row" style="margin:0.5rem 0">
+          <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed backup…</button>
+          <span class="muted small">Required to restore ${escapeHtml((lastKnownDeskAddress() || "").slice(0, 14))}…</span>
+        </div>`
+            : ""
+        }
+        <details class="acct-desk-advanced"${!hasDeskSeed() && lastKnownDeskAddress() ? " open" : ""}>
           <summary>Backup &amp; recovery</summary>
           <div class="lab-action-row">
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-export-seed" title="Download secret seed backup JSON">Export seed…</button>
-            <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>
+            ${
+              hasDeskSeed() || !lastKnownDeskAddress()
+                ? `<button type="button" class="btn-lab btn-lab-muted" id="btn-desk-import-seed" title="Import seed from phone/PC backup">Import seed…</button>`
+                : ""
+            }
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-api-revoke" ${session.live ? "" : "disabled"} title="Invalidate all sessions for this address">Revoke all</button>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-desk-new-key" title="Clear seed and create a new address">New wallet…</button>
           </div>
