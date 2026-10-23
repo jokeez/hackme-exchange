@@ -9,6 +9,7 @@ import {
   ensureContiguousCandles,
   ensureTfSeriesCadence,
   constrainLiveHistoryToTape,
+  LIVE_HISTORY_TIP_BAND_SEC,
   finalizeClosedTip,
   hydrateLiveCandlesFromPrints,
   liveCandleCacheFitsTip,
@@ -582,19 +583,84 @@ describe("hydrateLiveCandlesFromPrints", () => {
 
   it("clamps synthetic pad highs that never traded on the tape", () => {
     const tip = 0.055;
+    const nowMs = Date.UTC(2026, 9, 23, 12, 0, 0);
+    const tTip = Math.floor(nowMs / 1000 / 60) * 60;
     const fake: Candle[] = [
-      { time: 1_700_000_000, open: 0.05, high: 0.092, low: 0.049, close: 0.051, volume: 0 },
-      { time: 1_700_000_060, open: 0.051, high: 0.053, low: 0.05, close: 0.052, volume: 0 },
-      { time: 1_700_000_120, open: 0.052, high: 0.056, low: 0.051, close: tip, volume: 2 },
+      { time: tTip - 120, open: 0.05, high: 0.092, low: 0.049, close: 0.051, volume: 0 },
+      { time: tTip - 60, open: 0.051, high: 0.053, low: 0.05, close: 0.052, volume: 0 },
+      { time: tTip, open: 0.052, high: 0.056, low: 0.051, close: tip, volume: 2 },
     ];
     const prints = [
-      { ts: 1_700_000_120_000, price: 0.054, amountBase: 1 },
-      { ts: 1_700_000_120_500, price: tip, amountBase: 1 },
+      { ts: tTip * 1000, price: 0.054, amountBase: 1 },
+      { ts: tTip * 1000 + 500, price: tip, amountBase: 1 },
     ];
-    const out = constrainLiveHistoryToTape(fake, prints, tip, 0.22);
+    const out = constrainLiveHistoryToTape(fake, prints, tip, 0.22, undefined, { nowMs });
     expect(out[0]!.high).toBeLessThan(0.07);
     expect(out[0]!.high).toBeLessThanOrEqual(tip * 1.22 + 1e-9);
     expect(out[2]!.close).toBeCloseTo(tip, 5);
+  });
+
+  it("does not remap month-ago / yesterday synthetic OHLC when tip drifts", () => {
+    const nowMs = Date.UTC(2026, 9, 23, 18, 0, 0);
+    const nowSec = Math.floor(nowMs / 1000);
+    const monthAgo = nowSec - 30 * 86400;
+    const yesterday = nowSec - 86400;
+    const old: Candle[] = [
+      { time: monthAgo, open: 0.048, high: 0.049, low: 0.047, close: 0.0482, volume: 0 },
+      { time: yesterday, open: 0.0495, high: 0.0505, low: 0.049, close: 0.05, volume: 0 },
+      { time: nowSec - 60, open: 0.074, high: 0.075, low: 0.073, close: 0.0745, volume: 0 },
+    ];
+    const tipLow = 0.05;
+    const tipHigh = 0.0745;
+    const a = constrainLiveHistoryToTape(old, [], tipLow, 0.22, undefined, { nowMs });
+    const b = constrainLiveHistoryToTape(old, [], tipHigh, 0.22, undefined, { nowMs });
+    // Month-ago + yesterday are outside LIVE_HISTORY_TIP_BAND_SEC → identical across tip drift.
+    expect(LIVE_HISTORY_TIP_BAND_SEC).toBe(18 * 3600);
+    expect(a[0]).toEqual(old[0]);
+    expect(b[0]).toEqual(old[0]);
+    expect(a[1]).toEqual(old[1]);
+    expect(b[1]).toEqual(old[1]);
+    // Recent synthetic still gets tip-band (high tip must not leave a 0.05-era skyscraper).
+    expect(b[2]!.high).toBeLessThanOrEqual(tipHigh * 1.22 + 1e-9);
+    expect(b[2]!.low).toBeGreaterThanOrEqual(tipHigh * 0.78 - 1e-9);
+  });
+
+  it("hydrate preserves closed OHLC across tip drift for bars older than tip-band", () => {
+    const nowMs = Date.UTC(2026, 9, 23, 18, 0, 0);
+    const sec = 60;
+    const tNow = Math.floor(nowMs / 1000 / sec) * sec;
+    // Continuous ~36h cache so yesterday survives MAX_CANDLES / contiguous fill.
+    const cache: Candle[] = [];
+    const span = 36 * 60;
+    for (let i = 0; i < span; i++) {
+      const t = tNow - (span - i) * sec;
+      const px = 0.05 + (i / span) * 0.024;
+      cache.push({ time: t, open: px, high: px * 1.001, low: px * 0.999, close: px, volume: 0 });
+    }
+    const yday = tNow - 24 * 3600;
+    const prints = [
+      { ts: (tNow - 120) * 1000, price: 0.074, amountBase: 2 },
+      { ts: (tNow - 60) * 1000, price: 0.0742, amountBase: 1 },
+      { ts: tNow * 1000, price: 0.0745, amountBase: 3 },
+    ];
+    const first = hydrateLiveCandlesFromPrints("HMC_USDT", prints, 0.074, nowMs, cache);
+    const again = hydrateLiveCandlesFromPrints(
+      "HMC_USDT",
+      prints,
+      0.0745,
+      nowMs,
+      first[CANDLE_BASE_TF],
+    );
+    const a = first[CANDLE_BASE_TF]!.find((c) => c.time === yday);
+    const b = again[CANDLE_BASE_TF]!.find((c) => c.time === yday);
+    expect(a).toBeTruthy();
+    expect(b).toBeTruthy();
+    expect(b!.open).toBeCloseTo(a!.open, 8);
+    expect(b!.high).toBeCloseTo(a!.high, 8);
+    expect(b!.low).toBeCloseTo(a!.low, 8);
+    expect(b!.close).toBeCloseTo(a!.close, 8);
+    // Tip band must not have dragged yesterday up into the live tip envelope.
+    expect(b!.close).toBeLessThan(0.065);
   });
 
   it("keeps tape-envelope session cache when Soft-MM tip pumps away from median", () => {

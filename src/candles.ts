@@ -1680,10 +1680,14 @@ export function liveCandleCacheFitsTip(
   return drift <= 0.22;
 }
 
+/** Tip-band remapping horizon — yesterday+ must not morph on tip drift / F5. */
+export const LIVE_HISTORY_TIP_BAND_SEC = 18 * 3600;
+
 export function pruneLiveCacheForHydration(
   cached: Candle[] | null | undefined,
   tip: number,
   prints: CandlePrint[],
+  nowMs = Date.now(),
 ): Candle[] | null {
   if (!cached?.length) return cached ?? null;
   if (liveCandleCacheFitsTip(cached, tip, prints)) return cached;
@@ -1696,11 +1700,17 @@ export function pruneLiveCacheForHydration(
   const firstTs = Math.min(...prints.map((p) => p.ts));
   const firstBucket = Math.floor(firstTs / 1000 / sec) * sec;
   const { lo, hi } = printPriceEnvelope(prints, tip);
+  const nowSec = Math.floor(nowMs / 1000);
+  const historyCutoff = nowSec - LIVE_HISTORY_TIP_BAND_SEC;
   const trimmed = cached.filter((c) => {
+    // Always keep closed history older than the tip-band window (yesterday / month-ago).
+    // Do NOT keep arbitrary pre-tape recent bars — divergent device caches fork print opens
+    // via ensureContiguousCandles bridging into the first print bucket.
+    if (c.time < historyCutoff) return true;
     if (c.time < firstBucket) return false;
     const px = c.close > 0 ? c.close : c.open;
     if (!(px > 0)) return false;
-    // Keep bars on the path Soft-MM already printed (not only tip±14%).
+    // Keep recent bars on the path Soft-MM already printed (not only tip±14%).
     return px >= lo && px <= hi;
   });
   if (trimmed.length >= 4) return trimmed;
@@ -1714,6 +1724,9 @@ export function pruneLiveCacheForHydration(
  *
  * Higher TFs (1H/1D) never share 1m print bucket ids — they must still use the tape/day
  * envelope whenever volume > 0, otherwise Soft-MM tip dumps clip today's 0.096 high to tip×1.22.
+ *
+ * Tip±band remapping applies only to *recent* synthetic bars (default 18h). Applying it to
+ * the full series remapped yesterday / month-ago OHLC into the live tip on every hydrate.
  */
 export function constrainLiveHistoryToTape(
   candles: Candle[],
@@ -1721,6 +1734,7 @@ export function constrainLiveHistoryToTape(
   tip: number,
   bandFrac = 0.22,
   dayRange?: { high?: number; low?: number },
+  opts?: { nowMs?: number; recentSec?: number },
 ): Candle[] {
   if (!candles.length || !(tip > 0)) return candles;
   const band = Math.min(0.45, Math.max(0.1, bandFrac));
@@ -1745,6 +1759,9 @@ export function constrainLiveHistoryToTape(
   if (dayRange?.low && dayRange.low > 0) synthLo = Math.max(synthLo, dayRange.low);
   const printHiCap = hasDay ? Math.max(tapeHi * 1.001, tapeHi) : Math.max(tapeHi * 1.02, tip * 1.6);
   const printLoCap = hasDay ? tapeLo : Math.min(tapeLo * 0.98, tip * 0.5);
+  const nowSec = Math.floor((opts?.nowMs ?? Date.now()) / 1000);
+  const recentSec = opts?.recentSec ?? LIVE_HISTORY_TIP_BAND_SEC;
+  const recentCutoff = nowSec - Math.max(3600, recentSec);
   return candles.map((c) => {
     const tapeBacked = printBuckets.has(c.time) || (c.volume || 0) > 0;
     if (tapeBacked) {
@@ -1761,6 +1778,11 @@ export function constrainLiveHistoryToTape(
         close,
         volume: c.volume > 0 ? c.volume : 0,
       };
+    }
+    // Freeze closed history outside the recent window — tip drift must not rewrite
+    // yesterday / month-ago synthetic OHLC into tip±band on F5.
+    if (c.time < recentCutoff) {
+      return c;
     }
     const open = Math.min(synthHi, Math.max(synthLo, c.open));
     const close = Math.min(synthHi, Math.max(synthLo, c.close));
@@ -1939,7 +1961,7 @@ export function hydrateLiveCandlesFromPrints(
     tipMid > 0 && Number.isFinite(tipMid)
       ? tipMid
       : sortedPrints[sortedPrints.length - 1]?.price ?? 0;
-  cached1m = pruneLiveCacheForHydration(cached1m, tipEarly, sortedPrints);
+  cached1m = pruneLiveCacheForHydration(cached1m, tipEarly, sortedPrints, nowMs);
   const byBucket = new Map<number, Candle>();
   const printBuckets = new Set<number>();
 
@@ -1967,10 +1989,12 @@ export function hydrateLiveCandlesFromPrints(
     }
   }
 
-  // 2) Session cache fills gaps only — never forks print opens.
-  // Dense tape (≥12 print buckets) is already cross-device truth; merging divergent
-  // session caches here was the source of length/shape forks after F5.
-  if (cached1m?.length && printBuckets.size < 12) {
+  const historyCutoff = Math.floor(nowMs / 1000) - LIVE_HISTORY_TIP_BAND_SEC;
+
+  // 2) Session cache fills gaps — never forks print opens.
+  // Dense tape (≥12 print buckets) is SoT for *overlapping* recent buckets only.
+  // Always reattach older closed history (yesterday / month-ago) or F5 morphs the left pad.
+  if (cached1m?.length) {
     const env = printPriceEnvelope(sortedPrints, tipEarly);
     const lo = tipEarly > 0 ? Math.min(env.lo, tipEarly * 0.55) : env.lo;
     const hi = tipEarly > 0 ? Math.max(env.hi, tipEarly * 1.45) : env.hi;
@@ -1979,7 +2003,11 @@ export function hydrateLiveCandlesFromPrints(
       if (c.time < CHART_GENESIS_UNIX) continue;
       if (printBuckets.has(c.time)) continue;
       if (byBucket.has(c.time)) continue;
-      if (lo > 0 && hi > 0 && (c.close < lo || c.close > hi)) continue;
+      // Only yesterday+ is safe to reattach across tip drift / F5. Recent pre-tape
+      // cache still uses the sparse-tape gap-fill path (avoids cross-device forks).
+      const olderHistory = c.time < historyCutoff;
+      if (!olderHistory && printBuckets.size >= 12) continue;
+      if (!olderHistory && lo > 0 && hi > 0 && (c.close < lo || c.close > hi)) continue;
       byBucket.set(c.time, { ...c });
     }
   }
@@ -2052,7 +2080,7 @@ export function hydrateLiveCandlesFromPrints(
       : undefined;
   // Kill synthetic skyscrapers before contiguous fill expands them.
   if (tip > 0) {
-    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo);
+    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo, { nowMs });
   }
   base = sanitizeDerivedCandlesForChart(base.slice(-MAX_CANDLES), pairId);
   // Always run contiguous+open-bridge — time-contiguous print islands still gap open vs prior close.
@@ -2065,7 +2093,7 @@ export function hydrateLiveCandlesFromPrints(
   }
   // Contiguous fill can reintroduce paper extremes — clamp again.
   if (tip > 0) {
-    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo);
+    base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo, { nowMs });
   }
   // Tip-run only — never rewrite mid-history print/seed into fake chop.
   if (tip > 0) {
@@ -2087,6 +2115,7 @@ export function hydrateLiveCandlesFromPrints(
         tip,
         tf === "1H" || tf === "2H" || tf === "4H" || tf === "1D" || tf === "1W" ? 0.35 : 0.22,
         dayHiLo,
+        { nowMs },
       );
       if (dayHiLo) next = paintLiveDayRangeExtremes(next, dayHiLo, nowMs);
       all[tf] = next;
