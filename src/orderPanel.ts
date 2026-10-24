@@ -220,6 +220,13 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
   </div>`;
 }
 
+/** Parse order-form numbers; reject NaN/Infinity (e.g. `1e309`) as 0. */
+export function parseOrderFormNumber(raw: string | null | undefined): number {
+  const n = Number(String(raw ?? "0").replace(/,/g, "").trim());
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
 export function readOrderForm(side: "buy" | "sell"): {
   amt: number;
   price: number;
@@ -231,7 +238,8 @@ export function readOrderForm(side: "buy" | "sell"): {
   stopLoss: number;
   tpslEnabled: boolean;
 } {
-  const g = (id: string) => Number(String((document.getElementById(id) as HTMLInputElement | null)?.value ?? 0).replace(/,/g, ""));
+  const g = (id: string) =>
+    parseOrderFormNumber((document.getElementById(id) as HTMLInputElement | null)?.value);
   const tpsl = document.getElementById(`${side}-tpsl`) as HTMLInputElement | null;
   return {
     amt: g(`${side}-amt`),

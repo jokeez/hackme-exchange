@@ -143,6 +143,7 @@ import {
   setLastPublicMid,
   mergeServerFills,
   placeLabOrder,
+  type LabPlaceResult,
   refreshLabBook,
   refreshLabBooks,
   runLabCounterpartyCross,
@@ -4064,6 +4065,24 @@ function refreshAfterLabTrade(): void {
   patchAccountDomIfPresent();
 }
 
+/** Toast + chart tip after a successful lab place (VWAP tip; warn on thin-book cancel/partial). */
+function applyLabPlaceSuccess(
+  lab: Extract<LabPlaceResult, { ok: true }>,
+  side: "buy" | "sell" | null,
+  fallbackPx: number,
+  opts?: { restingHint?: boolean },
+): void {
+  const liqTone = lab.liquidityWarn || lab.partialLiquidity ? "warn" : "ok";
+  if (side) setOrderMsg(side, lab.note, lab.liquidityWarn || lab.partialLiquidity ? "err" : "ok");
+  toast(lab.note, liqTone);
+  if (lab.fillCount > 0) {
+    const tipPx = lab.fillVwap || lab.order.price || fallbackPx;
+    upsertAllCandles(tipPx, lab.filledBase || 0);
+  } else if (opts?.restingHint) {
+    toast("Resting on book — Account → Counterparty bot to fill", "info");
+  }
+}
+
 /**
  * After mint/sync/bridge/withdraw — update Account numbers without remounting
  * (Asset roadmap / withdraw form stay put). Connect/logout still full-render.
@@ -5751,12 +5770,7 @@ function quickPlaceFromChart(
           toast(lab.reason, "warn");
           return;
         }
-        toast(lab.note, "ok");
-        if (lab.fillCount > 0) {
-          upsertAllCandles(lab.order.price || labBookMid(pairId) || price);
-        } else {
-          toast("Resting on book — use Counterparty bot (Account) to fill", "info");
-        }
+        applyLabPlaceSuccess(lab, null, labBookMid(pairId) || price, { restingHint: true });
         refreshAfterLabTrade();
         return;
       }
@@ -7111,9 +7125,7 @@ function submitOrder(side: "buy" | "sell"): void {
           toast(lab.reason, "warn");
           return;
         }
-        setOrderMsg(side, lab.note, "ok");
-        toast(lab.note, "ok");
-        if (lab.fillCount > 0) upsertAllCandles(lab.order.price || labBookMid(state.activePair) || t.mid);
+        applyLabPlaceSuccess(lab, side, labBookMid(state.activePair) || t.mid);
         refreshAfterLabTrade();
       });
       return;
@@ -7181,10 +7193,7 @@ function submitOrder(side: "buy" | "sell"): void {
           toast(lab.reason, "warn");
           return;
         }
-        setOrderMsg(side, lab.note, "ok");
-        toast(lab.note, "ok");
-        if (lab.fillCount > 0) upsertAllCandles(form.price);
-        else toast("Resting on book — Account → Counterparty bot to fill", "info");
+        applyLabPlaceSuccess(lab, side, form.price, { restingHint: true });
         refreshAfterLabTrade();
       });
       return;

@@ -4,6 +4,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { pairById } from "./pairs";
 import {
+  parseOrderFormNumber,
   readOrderForm,
   renderDualOrderPanel,
   setFormPrice,
@@ -136,6 +137,13 @@ describe("orderPanel HTML & controls", () => {
     expect(html).not.toContain("0.00041177652319212107");
   });
 
+  it("parseOrderFormNumber accepts sci-notation and rejects Infinity", () => {
+    expect(parseOrderFormNumber("1e2")).toBe(100);
+    expect(parseOrderFormNumber("1e309")).toBe(0);
+    expect(parseOrderFormNumber("-3")).toBe(0);
+    expect(parseOrderFormNumber("abc")).toBe(0);
+  });
+
   it("readOrderForm / setFormPrice / preview / msg work in DOM", () => {
     mountPanel();
     setFormPrice("buy", 0.000411776, "HMC_USDT");
@@ -145,6 +153,11 @@ describe("orderPanel HTML & controls", () => {
     const form = readOrderForm("buy");
     expect(form.amt).toBe(2500);
     expect(form.price).toBeCloseTo(0.00041178, 8);
+
+    (document.getElementById("buy-amt") as HTMLInputElement).value = "1e3";
+    expect(readOrderForm("buy").amt).toBe(1000);
+    (document.getElementById("buy-amt") as HTMLInputElement).value = "1e309";
+    expect(readOrderForm("buy").amt).toBe(0);
 
     setOrderPreview("buy", "Est. 1.03 USDT");
     expect(document.getElementById("buy-preview")!.textContent).toBe("Est. 1.03 USDT");

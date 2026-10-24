@@ -215,14 +215,29 @@ export function labMarketSlipHint(
   if (!(mid > 0) || !(slipFrac >= 0)) return 0;
   const slip = Math.max(slipFrac, 0.01);
   const band = Math.min(Math.max(bandFrac, 0.02), 0.149);
+  const last = lastPublicMid(pairId);
   if (side === "buy") {
     const anchor = ask > 0 ? ask : mid;
-    const ceil = anchor * (1 + slip);
-    return Math.min(ceil, mid * (1 + band));
+    let ceil = anchor * (1 + slip);
+    ceil = Math.min(ceil, mid * (1 + band));
+    // API band is seed∩last — BBO mid alone can overshoot the seed rim when Soft-MM
+    // discovery walked last above softLaunchMids (false price_band on market buy).
+    if (last > 0) ceil = Math.min(ceil, last * (1 + band));
+    if (ask > 0) {
+      ceil = Math.min(ceil, ask * 1.02);
+      if (ceil < ask) ceil = ask;
+    }
+    return ceil;
   }
   const anchor = bid > 0 ? bid : mid;
-  const floor = anchor * (1 - slip);
-  return Math.max(floor, mid * (1 - band));
+  let floor = anchor * (1 - slip);
+  floor = Math.max(floor, mid * (1 - band));
+  if (last > 0) floor = Math.max(floor, last * (1 - band));
+  if (bid > 0) {
+    floor = Math.max(floor, bid * 0.98);
+    if (floor > bid) floor = bid;
+  }
+  return floor;
 }
 
 function apiLevelsToBook(levels: ApiBookLevel[]): BookLevel[] {
@@ -428,8 +443,73 @@ export function mergeServerFills(
 }
 
 export type LabPlaceResult =
-  | { ok: true; order: Order; fillCount: number; note: string }
+  | {
+      ok: true;
+      order: Order;
+      fillCount: number;
+      /** Sum of fill base sizes (display units). */
+      filledBase: number;
+      /** VWAP of fills when any; else 0. */
+      fillVwap: number;
+      note: string;
+      /** Market cancelled with 0 fills — thin book / slip, not a success. */
+      liquidityWarn?: boolean;
+      /** Market/IOC cancelled after partial fill — book exhausted. */
+      partialLiquidity?: boolean;
+    }
   | { ok: false; reason: string };
+
+/** VWAP + filled base from API fills (display units). */
+export function fillStatsFromApi(fills: ApiFill[]): { filledBase: number; vwap: number } {
+  let base = 0;
+  let notional = 0;
+  for (const f of fills) {
+    const q = minorToDisplay(f.qty);
+    const px = apiPriceToDisplay(f.price);
+    if (!(q > 0) || !(px > 0)) continue;
+    base += q;
+    notional += q * px;
+  }
+  return { filledBase: base, vwap: base > 0 ? notional / base : 0 };
+}
+
+/** Human note for lab place — distinguishes thin-book cancel from full fill. */
+export function labPlaceNote(
+  type: string,
+  fillCount: number,
+  filledBase: number,
+  amountBase: number,
+  status: string | undefined,
+): { note: string; liquidityWarn?: boolean; partialLiquidity?: boolean } {
+  if (
+    type === "stop_limit" ||
+    type === "stop_market" ||
+    type === "trailing_stop" ||
+    type === "oco"
+  ) {
+    return { note: `Lab ${type} armed · synced` };
+  }
+  const st = (status || "").toLowerCase();
+  const cancelled = st === "cancelled" || st === "canceled";
+  if (type === "market" && fillCount === 0 && cancelled) {
+    return {
+      note: "Insufficient liquidity — market cancelled (no fill within slip / book)",
+      liquidityWarn: true,
+    };
+  }
+  if (fillCount > 0 && type === "market" && cancelled && filledBase + 1e-12 < amountBase) {
+    return {
+      note: `Partial fill · ${fillCount} print(s) · book exhausted (filled ${filledBase.toPrecision(6)} of ${amountBase})`,
+      partialLiquidity: true,
+    };
+  }
+  if (fillCount > 0) {
+    return { note: `Lab ${type} · ${fillCount} fill(s) · synced balances` };
+  }
+  return {
+    note: `Lab ${type} ${status ?? "accepted"} · open on server book`,
+  };
+}
 
 export async function placeLabOrder(
   state: DemoState,
@@ -510,18 +590,18 @@ export async function placeLabOrder(
   const account = getLabSessionMeta().address;
   const fillCount = mergeServerFills(state, res.fills, account, marketSnap ?? null);
   await syncLabBalancesAndBook(state, marketSnap ?? null);
-  const cancelledEmpty = type === "market" && fillCount === 0 && demoOrder?.status === "cancelled";
-  const note =
-    type === "stop_limit" || type === "stop_market" || type === "trailing_stop" || type === "oco"
-      ? `Lab ${type} armed · synced`
-      : fillCount > 0
-        ? `Lab ${type} · ${fillCount} fill(s) · synced balances`
-        : cancelledEmpty
-          ? `Lab market cancelled · no fill within slip / book`
-          : `Lab ${type} ${demoOrder?.status ?? "accepted"} · open on server book`;
-  return {
-    ok: true,
-    order: demoOrder ?? {
+  const { filledBase, vwap } = fillStatsFromApi(res.fills);
+  const { note, liquidityWarn, partialLiquidity } = labPlaceNote(
+    type,
+    fillCount,
+    filledBase > 0 ? filledBase : demoOrder?.filledBase ?? 0,
+    amountBase,
+    demoOrder?.status ?? res.order.status,
+  );
+  // Prefer fill VWAP on the demo order so chart tip uses trade price, not slip ceiling.
+  const orderOut: Order =
+    demoOrder ??
+    ({
       id: res.order.id,
       pairId,
       side,
@@ -543,9 +623,18 @@ export async function placeLabOrder(
       filledBase: 0,
       status: "open",
       createdAt: Date.now(),
-    },
+    } as Order);
+  if (vwap > 0) orderOut.price = vwap;
+  if (filledBase > 0) orderOut.filledBase = Math.max(orderOut.filledBase || 0, filledBase);
+  return {
+    ok: true,
+    order: orderOut,
     fillCount,
+    filledBase: orderOut.filledBase || filledBase,
+    fillVwap: vwap,
     note,
+    liquidityWarn,
+    partialLiquidity,
   };
 }
 
