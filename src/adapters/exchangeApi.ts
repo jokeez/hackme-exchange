@@ -1535,6 +1535,61 @@ export async function fetchPublicTrades(
   }
 }
 
+/** Public OHLC candle (GET /candles or /klines) — integer minors. */
+export type ApiCandle = {
+  open_time: string;
+  close_time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  quote_volume?: number;
+  n_trades?: number;
+};
+
+/** GET /candles?pair=&interval= — durable OHLC (fleet/tools; chart still uses /trades hydrate). */
+export async function fetchPublicCandles(
+  pair: string,
+  opts?: {
+    interval?: string;
+    limit?: number;
+    timeoutMs?: number;
+    baseOverride?: string;
+    path?: "candles" | "klines";
+  },
+): Promise<{ ok: true; candles: ApiCandle[]; interval: string } | ExchangeApiError> {
+  const q = new URLSearchParams();
+  q.set("pair", pair);
+  q.set("interval", opts?.interval ?? "1m");
+  q.set("limit", String(Math.max(1, Math.min(1500, opts?.limit ?? 500))));
+  const path = opts?.path ?? "candles";
+  const url = apiUrl(`/${path}?${q}`, opts?.baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store", mode: "cors", credentials: "include", headers: { Accept: "application/json" } },
+      opts?.timeoutMs ?? 8_000,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "list candles failed");
+    const data = body as { candles?: ApiCandle[]; interval?: string };
+    return {
+      ok: true,
+      candles: data.candles ?? [],
+      interval: data.interval ?? opts?.interval ?? "1m",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      code: "unreachable",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 /** Public 24h ticker row from durable fills (GET /ticker · /tickers). */
 export type ApiMarketTicker = {
   pair: string;
