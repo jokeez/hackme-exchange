@@ -7,7 +7,7 @@ import { INTEGRATION } from "../config/integration";
 import { clearServerVipVolume } from "../fees";
 import { fetchWithTimeout } from "../fetchTimeout";
 import { isAllowedExchangeApiOrigin, isLoopbackOrigin } from "../sanitize";
-import type { OrderSide, PairId, Wallet } from "../types";
+import type { Candle, OrderSide, PairId, Wallet } from "../types";
 
 export const MINOR_UNIT_SCALE = 1e8;
 
@@ -1548,7 +1548,10 @@ export type ApiCandle = {
   n_trades?: number;
 };
 
-/** GET /candles?pair=&interval= — durable OHLC (fleet/tools; chart still uses /trades hydrate). */
+/**
+ * GET /candles?pair=&interval= — durable OHLC from fills.
+ * Live chart hydrates closed bars from this endpoint (SoT); tip still paints from last/VWAP.
+ */
 export async function fetchPublicCandles(
   pair: string,
   opts?: {
@@ -1588,6 +1591,31 @@ export async function fetchPublicCandles(
       message: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+/** Convert durable API OHLC minors → demo display candles (1m bucket unix sec). */
+export function apiCandlesToDemoBars(rows: ApiCandle[]): Candle[] {
+  const out: Candle[] = [];
+  for (const row of rows) {
+    const ms = Date.parse(String(row.open_time || ""));
+    if (!(ms > 0)) continue;
+    const time = Math.floor(ms / 1000);
+    const open = apiPriceToDisplay(Number(row.open));
+    const high = apiPriceToDisplay(Number(row.high));
+    const low = apiPriceToDisplay(Number(row.low));
+    const close = apiPriceToDisplay(Number(row.close));
+    if (![open, high, low, close].every((n) => Number.isFinite(n) && n > 0)) continue;
+    const volume = minorToDisplay(Number(row.volume ?? 0));
+    out.push({
+      time,
+      open,
+      high: Math.max(high, open, close),
+      low: Math.min(low, open, close),
+      close,
+      volume: Number.isFinite(volume) && volume > 0 ? volume : 0,
+    });
+  }
+  return out.sort((a, b) => a.time - b.time);
 }
 
 /** Public 24h ticker row from durable fills (GET /ticker · /tickers). */

@@ -972,7 +972,7 @@ export function applyMidToPairCandles(
   pairId: PairId,
   mid: number,
   prevMid?: number,
-  opts?: { syntheticVolume?: boolean; dayRange?: LiveDayRange },
+  opts?: { syntheticVolume?: boolean; dayRange?: LiveDayRange; freezeClosedTip?: boolean },
 ): Partial<Record<Timeframe, Candle[]>> {
   let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
   // Always bridge to wall-clock tip — stale contiguous caches otherwise freeze at last closed bar.
@@ -982,30 +982,25 @@ export function applyMidToPairCandles(
       fillToNow: true,
     });
   }
-  const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid, opts);
-  // Tip-run heal for Soft-MM шильдики — avoid full-history rewrite (spike forests).
+  const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid, {
+    syntheticVolume: opts?.syntheticVolume,
+    freezeClosedTip: opts?.syntheticVolume === false || opts?.freezeClosedTip === true,
+  });
+  // Tip-run heal for Soft-MM шильдики — never rewrite mid-history closed OHLC.
   const healedRaw = healFlatPaperBars(pairId, CANDLE_BASE_TF, nextRaw, mid, Date.now(), {
     scope: "tipRun",
   });
-  const nextBase = sanitizeCandlesForChart(healedRaw, pairId, CANDLE_BASE_TF);
-  // Keep only clear print spikes from pre-heal raw. Always re-clip — unclipped
-  // Soft-MM deep-take highs painted the long needle combs on 1m/15m.
-  const rawByT = new Map(nextRaw.map((c) => [c.time, c]));
+  // CRITICAL: sanitize ONLY the forming tip. sanitizeCandleExtremes median-clips the
+  // whole series toward tip after a pump and wiped 0.05-era closed highs/lows.
   const bodyCap = maxBodyFracForTf(CANDLE_BASE_TF);
   const wickCap = maxWickFracForTf(CANDLE_BASE_TF);
-  for (let i = 0; i < nextBase.length; i++) {
-    const bar = { ...nextBase[i]! };
-    const raw = rawByT.get(bar.time);
-    if (!raw) continue;
-    const midPx = Math.max(raw.close, bar.close, 1e-12);
-    const rawSpan = (raw.high - raw.low) / midPx;
-    const healedSpan = (bar.high - bar.low) / midPx;
-    if (rawSpan > 0.018 && rawSpan > healedSpan * 1.5) {
-      bar.high = Math.max(bar.high, raw.high, bar.open, bar.close);
-      bar.low = Math.min(bar.low, raw.low, bar.open, bar.close);
-      nextBase[i] = constrainBarToOpen(bar, bodyCap, wickCap);
-    }
-  }
+  const nextBase =
+    healedRaw.length <= 1
+      ? sanitizeCandlesForChart(healedRaw, pairId, CANDLE_BASE_TF)
+      : [
+          ...healedRaw.slice(0, -1).map((c) => ({ ...c })),
+          ...sanitizeCandlesForChart([healedRaw[healedRaw.length - 1]!], pairId, CANDLE_BASE_TF),
+        ];
   // Sanitize/heal must never yank tip.close off Soft-MM / tape Last.
   const tipIdx = nextBase.length - 1;
   if (tipIdx >= 0 && mid > 0 && Number.isFinite(mid)) {
@@ -1411,7 +1406,7 @@ export function relativeClosePath(candles: Candle[]): number[] {
 export function ensureContiguousCandles(
   candles: Candle[],
   tf: Timeframe,
-  opts?: { pairId?: PairId; fillToNow?: boolean; nowMs?: number },
+  opts?: { pairId?: PairId; fillToNow?: boolean; nowMs?: number; freezeExisting?: boolean },
 ): Candle[] {
   if (!candles.length) return candles;
   const sec = TF_SEC[tf];
@@ -1469,13 +1464,15 @@ export function ensureContiguousCandles(
     }
   }
 
+  const freezeExisting = opts?.freezeExisting !== false;
   for (let t = start; t <= end; t += sec) {
     if (t < g) continue;
     const hit = byBucket.get(t);
     if (hit) {
-      // Bridge open to prior close so paper-pad → print junctions don't leave 5–15% islands.
+      // Closed / existing bars are immutable — never rewrite open to bridge a tip pump.
+      // Paper-only callers can pass freezeExisting:false to keep soft open-bridging.
       let bar = hit;
-      if (out.length && px > 0) {
+      if (!freezeExisting && out.length && px > 0) {
         const jump = Math.abs(hit.open - px) / px;
         if (jump > 0.002) {
           bar = {
@@ -1717,42 +1714,27 @@ export function pruneLiveCacheForHydration(
 ): Candle[] | null {
   if (!cached?.length) return cached ?? null;
   if (liveCandleCacheFitsTip(cached, tip, prints)) return cached;
-  if (!prints.length) {
-    // No tape yet — keep recent tip-aligned bars instead of nuking the whole session.
-    const trimmed = cached.filter((c) => tip > 0 && Math.abs(c.close - tip) / tip <= 0.22);
-    return trimmed.length >= 6 ? trimmed : null;
-  }
-  const sec = TF_SEC[CANDLE_BASE_TF];
-  const firstTs = Math.min(...prints.map((p) => p.ts));
-  const firstBucket = Math.floor(firstTs / 1000 / sec) * sec;
-  const { lo, hi } = printPriceEnvelope(prints, tip);
+  // Tip pump/dump (0.06→0.08): KEEP the watched path. Stripping to tip±tape was the
+  // wipe that replaced yesterday's 0.05-era OHLC with tip-scaled seed on F5.
+  // Only drop a true orphan island (cache on a totally different band than tip+tape).
+  const med = medianClose(cached);
+  const pMed = prints.length >= 2 ? medianPrintPrice(prints) : 0;
+  const orphan =
+    med > 0 &&
+    tip > 0 &&
+    Math.abs(med - tip) / tip > 0.55 &&
+    (pMed <= 0 || Math.abs(med - pMed) / pMed > 0.55);
+  if (!orphan) return cached;
   const nowSec = Math.floor(nowMs / 1000);
   const historyCutoff = nowSec - LIVE_HISTORY_TIP_BAND_SEC;
-  const trimmed = cached.filter((c) => {
-    // Always keep closed history older than the tip-band window (yesterday / month-ago).
-    // Do NOT keep arbitrary pre-tape recent bars — divergent device caches fork print opens
-    // via ensureContiguousCandles bridging into the first print bucket.
-    if (c.time < historyCutoff) return true;
-    if (c.time < firstBucket) return false;
-    const px = c.close > 0 ? c.close : c.open;
-    if (!(px > 0)) return false;
-    // Keep recent bars on the path Soft-MM already printed (not only tip±14%).
-    return px >= lo && px <= hi;
-  });
-  if (trimmed.length >= 4) return trimmed;
-  return null;
+  const older = cached.filter((c) => c.time < historyCutoff);
+  return older.length >= 4 ? older : null;
 }
 
 /**
- * Paper-walk pad / stale cache must not invent skyscraper highs away from tape.
- * Real print buckets + any bar with traded volume keep full OHLC; optional dayHi/dayLo
- * widen the envelope so a short pump inside the 24h range is not crushed toward tip.
- *
- * Higher TFs (1H/1D) never share 1m print bucket ids — they must still use the tape/day
- * envelope whenever volume > 0, otherwise Soft-MM tip dumps clip today's 0.096 high to tip×1.22.
- *
- * Tip±band remapping applies only to *recent* synthetic bars (default 18h). Applying it to
- * the full series remapped yesterday / month-ago OHLC into the live tip on every hydrate.
+ * Live desk rule: closed candles are immutable forever.
+ * Only the forming tip bucket may be nudged toward tip / tape (orphan synthetic needles).
+ * Never remap yesterday / month-ago / any closed OHLC when tip pumps 0.06→0.08.
  */
 export function constrainLiveHistoryToTape(
   candles: Candle[],
@@ -1762,117 +1744,85 @@ export function constrainLiveHistoryToTape(
   dayRange?: { high?: number; low?: number },
   opts?: { nowMs?: number; recentSec?: number },
 ): Candle[] {
+  void prints;
+  void dayRange;
+  void opts;
   if (!candles.length || !(tip > 0)) return candles;
+  const tipT = candles[candles.length - 1]!.time;
   const band = Math.min(0.45, Math.max(0.1, bandFrac));
-  let tapeHi = tip;
-  let tapeLo = tip;
-  const printBuckets = new Set<number>();
-  const sec = TF_SEC[CANDLE_BASE_TF];
-  for (const p of prints) {
-    if (!(p.price > 0)) continue;
-    tapeHi = Math.max(tapeHi, p.price);
-    tapeLo = Math.min(tapeLo, p.price);
-    printBuckets.add(Math.floor(p.ts / 1000 / sec) * sec);
-  }
-  if (dayRange?.high && dayRange.high > 0) tapeHi = Math.max(tapeHi, dayRange.high);
-  if (dayRange?.low && dayRange.low > 0) tapeLo = Math.min(tapeLo, dayRange.low);
-  // Synthetic pad stays near tip; print/volume energy may use the full day envelope.
-  // When durable /tickers dayRange is set, never invent Soft-MM lows below that floor
-  // (tip×0.88 was painting 1D L under rolling 24h Low and confusing the toolbar).
-  const hasDay = !!(dayRange?.high && dayRange.high > 0) || !!(dayRange?.low && dayRange.low > 0);
   const synthHi = Math.max(tip * (1 + band), tip * 1.12);
-  let synthLo = Math.min(tip * (1 - band), tip * 0.88);
-  if (dayRange?.low && dayRange.low > 0) synthLo = Math.max(synthLo, dayRange.low);
-  const printHiCap = hasDay ? Math.max(tapeHi * 1.001, tapeHi) : Math.max(tapeHi * 1.02, tip * 1.6);
-  const printLoCap = hasDay ? tapeLo : Math.min(tapeLo * 0.98, tip * 0.5);
-  const nowSec = Math.floor((opts?.nowMs ?? Date.now()) / 1000);
-  const recentSec = opts?.recentSec ?? LIVE_HISTORY_TIP_BAND_SEC;
-  const recentCutoff = nowSec - Math.max(3600, recentSec);
+  const synthLo = Math.min(tip * (1 - band), tip * 0.88);
   return candles.map((c) => {
-    const tapeBacked = printBuckets.has(c.time) || (c.volume || 0) > 0;
-    if (tapeBacked) {
-      // Keep traded OHLC — only clip absurd orphan needles outside day/tape envelope.
-      const high = Math.min(c.high, printHiCap);
-      const low = Math.max(c.low, Math.max(printLoCap, tip * 1e-6));
-      const open = Math.min(high, Math.max(low, c.open));
-      const close = Math.min(high, Math.max(low, c.close));
+    // Closed bars (any TF older than the live tip bucket) — never remap.
+    if (c.time < tipT) return c;
+    // Tip only: print-backed tip keeps tape OHLC (Soft-MM mid must not crush print close).
+    if ((c.volume || 0) > 0) {
       return {
         ...c,
-        open,
-        high: Math.max(high, open, close),
-        low: Math.min(low, open, close),
-        close,
-        volume: c.volume > 0 ? c.volume : 0,
+        high: Math.max(c.high, c.open, c.close, tip),
+        low: Math.min(c.low, c.open, c.close, tip),
       };
     }
-    // Freeze closed history outside the recent window — tip drift must not rewrite
-    // yesterday / month-ago synthetic OHLC into tip±band on F5.
-    if (c.time < recentCutoff) {
-      return c;
-    }
     const open = Math.min(synthHi, Math.max(synthLo, c.open));
-    const close = Math.min(synthHi, Math.max(synthLo, c.close));
-    const high = Math.min(synthHi, Math.max(open, close, c.high));
-    const low = Math.max(synthLo, Math.min(open, close, c.low));
+    const close = tip > 0 ? tip : Math.min(synthHi, Math.max(synthLo, c.close));
+    const high = Math.max(open, close, Math.min(synthHi, Math.max(c.high, tip)));
+    const low = Math.min(open, close, Math.max(synthLo, Math.min(c.low, tip)));
     return { ...c, open, high, low, close };
   });
 }
 
 /**
- * Durable /tickers 24h high/low can outlive the client tape window (max 2000 prints).
- * Paint those extremes onto the strongest last-24h bar so 1m→1D aggregation still shows them.
+ * Merge durable server `/candles` (closed SoT) with a local tip series by time.
+ * Server OHLC wins for every closed bucket; local tip bucket keeps live last/VWAP.
+ * Never scale/replace older bars when tip moves.
+ */
+export function mergeDurableApiCandlesIntoBase(
+  localOrTip: Candle[],
+  durable: Candle[],
+  tipBucket?: number,
+): Candle[] {
+  const byT = new Map<number, Candle>();
+  for (const c of durable) {
+    if (!(c.time > 0) || !(c.close > 0)) continue;
+    byT.set(c.time, { ...c });
+  }
+  const tipT =
+    tipBucket && tipBucket > 0
+      ? tipBucket
+      : localOrTip.length
+        ? localOrTip[localOrTip.length - 1]!.time
+        : 0;
+  for (const c of localOrTip) {
+    if (!(c.time > 0) || !(c.close > 0)) continue;
+    // Closed buckets: durable wins; local only fills holes.
+    if (tipT > 0 && c.time < tipT) {
+      if (!byT.has(c.time)) byT.set(c.time, { ...c });
+      continue;
+    }
+    // Tip (or unknown tip): local live paint wins.
+    byT.set(c.time, { ...c });
+  }
+  return [...byT.values()].sort((a, b) => a.time - b.time).slice(-MAX_CANDLES);
+}
+
+/**
+ * Durable /tickers 24h high/low — extend ONLY the forming tip wick so closed OHLC stay immutable.
+ * Past bars that already printed the day high/low (via /candles or tape) keep their own extremes.
  */
 export function paintLiveDayRangeExtremes(
   candles: Candle[],
   dayRange: { high?: number; low?: number } | undefined,
-  nowMs = Date.now(),
+  _nowMs = Date.now(),
 ): Candle[] {
+  void _nowMs;
   if (!candles.length || !dayRange) return candles;
   const dayHi = dayRange.high && dayRange.high > 0 ? dayRange.high : 0;
   const dayLo = dayRange.low && dayRange.low > 0 ? dayRange.low : 0;
   if (!(dayHi > 0) && !(dayLo > 0)) return candles;
-  const cutoff = Math.floor((nowMs - 24 * 3600_000) / 1000);
   const out = candles.map((c) => ({ ...c }));
-  // Raise synthetic Soft-MM lows that undercut the durable 24h floor before picking indices.
-  if (dayLo > 0) {
-    for (const c of out) {
-      if (c.time < cutoff) continue;
-      if (!(c.low < dayLo)) continue;
-      const bodyLo = Math.min(c.open, c.close);
-      c.low = bodyLo >= dayLo ? dayLo : bodyLo;
-    }
-  }
-  let hiIdx = -1;
-  let loIdx = -1;
-  let hiPx = -Infinity;
-  let loPx = Infinity;
-  for (let i = 0; i < out.length; i++) {
-    const c = out[i]!;
-    if (c.time < cutoff) continue;
-    if (c.high > hiPx) {
-      hiPx = c.high;
-      hiIdx = i;
-    }
-    if (c.low < loPx) {
-      loPx = c.low;
-      loIdx = i;
-    }
-  }
-  if (hiIdx < 0) hiIdx = out.length - 1;
-  if (loIdx < 0) loIdx = out.length - 1;
-  if (dayHi > 0 && hiIdx >= 0) {
-    const b = out[hiIdx]!;
-    b.high = Math.max(b.high, b.open, b.close, dayHi);
-  }
-  if (dayLo > 0 && loIdx >= 0) {
-    const b = out[loIdx]!;
-    // Ensure the durable floor is visible on at least one in-window bar.
-    if (Math.min(b.open, b.close) >= dayLo) {
-      b.low = dayLo;
-    } else {
-      b.low = Math.min(b.low, b.open, b.close);
-    }
-  }
+  const tip = out[out.length - 1]!;
+  if (dayHi > 0) tip.high = Math.max(tip.high, tip.open, tip.close, dayHi);
+  if (dayLo > 0) tip.low = Math.min(tip.low, tip.open, tip.close, dayLo);
   return out;
 }
 
@@ -1922,7 +1872,8 @@ export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
   if (typeof sessionStorage === "undefined" || !base1m.length) return;
   try {
     const boot = currentBootAssetTag();
-    const slim = base1m.slice(-360).map((c) => ({
+    // Keep ~24h of 1m (not 6h) so tip pumps cannot orphan yesterday on F5 before /candles returns.
+    const slim = base1m.slice(-1500).map((c) => ({
       t: c.time,
       o: c.open,
       h: c.high,
@@ -1987,8 +1938,9 @@ export function loadLiveCandleCache(
     if (tipMid > 0) {
       const last = out[out.length - 1]!.close;
       if (last > 0 && Math.abs(last - tipMid) / tipMid > LIVE_CANDLE_TIP_DESYNC_FRAC) {
-        clearLiveCandleCache(pairId);
-        return null;
+        // Tip desync after a pump/dump: KEEP closed history. Clearing the whole
+        // session cache was reseeding tip-scaled fake bars over real Soft-MM path.
+        return out.length > 1 ? out.slice(0, -1) : out;
       }
     }
     return out;
@@ -1998,11 +1950,16 @@ export function loadLiveCandleCache(
 }
 
 /**
- * Build 1m OHLC from public prints, merge session cache, pad short history with
- * paper walk, then derive all TFs. Used on live desk after F5 so spikes survive.
+ * Build 1m OHLC from durable `/candles` + public prints + session cache, then derive TFs.
  *
- * Cross-device rule: print buckets are rebuilt from tape only (first=open, last=close).
- * Session cache may fill *empty* buckets only — never override print open/H/L.
+ * Precedence (by time bucket):
+ * 1) Durable server OHLC for closed bars (SoT — never tip-scaled)
+ * 2) Print tape rebuild for overlapping buckets
+ * 3) Session cache fills empty buckets only (append/merge — never replace durable)
+ * 4) Live tip close tracks tipMid
+ *
+ * Cross-device: print buckets rebuild from tape (first=open, last=close).
+ * Session cache never overrides print or durable open/H/L.
  */
 export function hydrateLiveCandlesFromPrints(
   pairId: PairId,
@@ -2011,6 +1968,7 @@ export function hydrateLiveCandlesFromPrints(
   nowMs = Date.now(),
   cached1m?: Candle[] | null,
   dayRange?: LiveDayRange,
+  durable1m?: Candle[] | null,
 ): Record<Timeframe, Candle[]> {
   const sec = TF_SEC[CANDLE_BASE_TF];
   const sortedPrints = [...prints]
@@ -2023,13 +1981,29 @@ export function hydrateLiveCandlesFromPrints(
   cached1m = pruneLiveCacheForHydration(cached1m, tipEarly, sortedPrints, nowMs);
   const byBucket = new Map<number, Candle>();
   const printBuckets = new Set<number>();
+  const durableBuckets = new Set<number>();
+  const tipBucketNow = bucket(nowMs, CANDLE_BASE_TF);
 
-  // 1) Tape is source of truth — rebuild each print bucket from scratch.
+  // 0) Durable server `/candles` — closed-bar source of truth (append/merge by time).
+  if (durable1m?.length) {
+    for (const c of durable1m) {
+      if (!(c.time > 0) || !(c.close > 0)) continue;
+      if (c.time < CHART_GENESIS_UNIX) continue;
+      // Never let durable overwrite the live forming tip — client paints tip from last.
+      if (c.time >= tipBucketNow) continue;
+      byBucket.set(c.time, { ...c });
+      durableBuckets.add(c.time);
+    }
+  }
+
+  // 1) Tape rebuilds print buckets (may refine durable when same minute traded).
   for (const p of sortedPrints) {
     const t = Math.floor(p.ts / 1000 / sec) * sec;
     if (t < CHART_GENESIS_UNIX) continue;
     const vol = p.amountBase && p.amountBase > 0 ? p.amountBase : 0;
     printBuckets.add(t);
+    // Closed durable bars stay immutable — prints only fill holes / tip.
+    if (durableBuckets.has(t) && t < tipBucketNow) continue;
     const prev = byBucket.get(t);
     if (!prev) {
       byBucket.set(t, {
@@ -2048,25 +2022,18 @@ export function hydrateLiveCandlesFromPrints(
     }
   }
 
-  const historyCutoff = Math.floor(nowMs / 1000) - LIVE_HISTORY_TIP_BAND_SEC;
-
-  // 2) Session cache fills gaps — never forks print opens.
-  // Dense tape (≥12 print buckets) is SoT for *overlapping* recent buckets only.
-  // Always reattach older closed history (yesterday / month-ago) or F5 morphs the left pad.
+  // 2) Session cache fills gaps — never forks durable or print opens.
+  // Always reattach closed history (including recent) into empty buckets so a tip
+  // pump cannot drop the watched path when dense prints only cover the tip window.
   if (cached1m?.length) {
-    const env = printPriceEnvelope(sortedPrints, tipEarly);
-    const lo = tipEarly > 0 ? Math.min(env.lo, tipEarly * 0.55) : env.lo;
-    const hi = tipEarly > 0 ? Math.max(env.hi, tipEarly * 1.45) : env.hi;
     for (const c of cached1m) {
       if (!(c.time > 0) || !(c.close > 0)) continue;
       if (c.time < CHART_GENESIS_UNIX) continue;
       if (printBuckets.has(c.time)) continue;
+      if (durableBuckets.has(c.time)) continue;
       if (byBucket.has(c.time)) continue;
-      // Only yesterday+ is safe to reattach across tip drift / F5. Recent pre-tape
-      // cache still uses the sparse-tape gap-fill path (avoids cross-device forks).
-      const olderHistory = c.time < historyCutoff;
-      if (!olderHistory && printBuckets.size >= 12) continue;
-      if (!olderHistory && lo > 0 && hi > 0 && (c.close < lo || c.close > hi)) continue;
+      // Reject absurd orphans (e.g. 0.012 vs tip 0.08) — not normal pump paths (0.05→0.08).
+      if (tipEarly > 0 && (c.close < tipEarly * 0.25 || c.close > tipEarly * 4)) continue;
       byBucket.set(c.time, { ...c });
     }
   }
@@ -2074,9 +2041,8 @@ export function hydrateLiveCandlesFromPrints(
   let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
   const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
 
-  // Pad ONLY when tape is nearly empty — never invent a paper walk over real Soft-MM history.
-  // Dense prints (≥6 buckets or ≥20 fills) already define the day; seedCandles would overwrite
-  // what the user just watched after a tip-drift cache prune.
+  // Pad ONLY when tape+durable+cache are nearly empty — never invent a paper walk
+  // over real Soft-MM / server history after a tip-drift cache prune.
   const want = Math.min(barCountForTf(CANDLE_BASE_TF, nowMs), 400);
   const printAnchor =
     sortedPrints.length > 0
@@ -2088,7 +2054,8 @@ export function hydrateLiveCandlesFromPrints(
     base.length < 12 &&
     printBucketsN < 6 &&
     sortedPrints.length < 20 &&
-    !(cached1m && cached1m.length >= 12);
+    !(cached1m && cached1m.length >= 12) &&
+    !(durable1m && durable1m.length >= 12);
   if (allowSeedPad) {
     const open24 = dayRange?.open && dayRange.open > 0 ? dayRange.open : 0;
     const anchor =

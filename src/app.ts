@@ -104,12 +104,14 @@ import {
   auth2faStatus,
   authLogout,
   authRevokeAll,
+  apiCandlesToDemoBars,
   apiPairToId,
   apiPriceToDisplay,
   displayToMinor,
   exchangeHealth,
   fetchCustodyFees,
   fetchDepositAddress,
+  fetchPublicCandles,
   fetchPublicTrades,
   fetchPublicTickers,
   formatExchangeReject,
@@ -720,7 +722,7 @@ function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
   return out;
 }
 
-/** Restore live OHLC from session cache + public tape / GET /trades (survives F5). */
+/** Restore live OHLC from durable /candles + session cache + /trades (survives F5 + tip pumps). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
   let cached =
     loadLiveCandleCache(pairId, undefined, tipMid) ??
@@ -728,8 +730,19 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
       ? state.candles[pairId]![CANDLE_BASE_TF]!
       : null);
   let apiPrints: CandlePrint[] = [];
+  let durableBars: Candle[] = [];
   await hydrateDeskApiTickers();
-  const res = await fetchPublicTrades(pairIdToApi(pairId), 2000, 15_000, undefined, { window: "24h" });
+  const apiPair = pairIdToApi(pairId);
+  // Closed-bar SoT: durable server OHLC. Tip still comes from last trade / Soft-MM.
+  const candleRes = await fetchPublicCandles(apiPair, {
+    interval: "1m",
+    limit: 1500,
+    timeoutMs: 12_000,
+  });
+  if (candleRes.ok && candleRes.candles.length) {
+    durableBars = apiCandlesToDemoBars(candleRes.candles);
+  }
+  const res = await fetchPublicTrades(apiPair, 2000, 15_000, undefined, { window: "24h" });
   if (res.ok) {
     apiPrints = candlePrintsFromApiTrades(res.trades, pairId);
     // Same /trades payload feeds 24h Vol — don't wait for WS/poll push.
@@ -759,13 +772,13 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
         ? tipMid
         : lastPublicMid(pairId) ||
           labBookMid(pairId) ||
+          durableBars[durableBars.length - 1]?.close ||
           cached?.[cached.length - 1]?.close ||
           0;
   // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
-  if (!prints.length && !(cached?.length) && !(tip > 0)) return false;
+  if (!prints.length && !(cached?.length) && !(durableBars.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
-  // Never wipe session cache here — pruneLiveCacheForHydration inside hydrate keeps the
-  // tape envelope. Clearing on tip drift was reseeding fake bars over real Soft-MM history.
+  // Merge by time: durable closed bars win; tip paints live. Never tip-scale history.
   state.candles[pairId] = hydrateLiveCandlesFromPrints(
     pairId,
     prints,
@@ -773,6 +786,7 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     Date.now(),
     cached,
     liveDayRangeForPair(pairId),
+    durableBars,
   );
   prevMids[pairId] = tip;
   persistLiveCandleCache(pairId, true);

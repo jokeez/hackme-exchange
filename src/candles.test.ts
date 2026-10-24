@@ -530,16 +530,19 @@ describe("hydrateLiveCandlesFromPrints", () => {
     ];
     saveLiveCandleCache("HMC_USDT", bars);
     expect(loadLiveCandleCache("HMC_USDT")?.length).toBe(2);
-    // Tip far from cached last → purge (do not morph forever).
-    expect(loadLiveCandleCache("HMC_USDT", undefined, 0.12)).toBeNull();
+    // Tip far from cached last → drop stale tip only; keep closed history (never wipe past).
+    const kept = loadLiveCandleCache("HMC_USDT", undefined, 0.12);
+    expect(kept).toBeTruthy();
+    expect(kept!).toHaveLength(1);
+    expect(kept![0]!.time).toBe(t0);
+    expect(kept![0]!.close).toBeCloseTo(0.05, 8);
 
     // Simulate a prior deploy's payload under the current boot key.
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: {
-        querySelectorAll: () => [{ getAttribute: () => "/assets/boot-NewBootHash-abc.js" }],
-      },
+    vi.stubGlobal("document", {
+      querySelectorAll: () => [{ getAttribute: () => "/assets/boot-NewBootHash-abc.js" }],
     });
+    // Wrong boot in payload must not restore (and must not fall back to untagged tip-era cache).
+    mem.clear();
     mem.set(
       "hackme-ex-live-1m:v20:NewBootHash:HMC_USDT",
       JSON.stringify({
@@ -628,23 +631,25 @@ describe("hydrateLiveCandlesFromPrints", () => {
     expect(tipDay.low).toBeLessThanOrEqual(dayLo * 1.001);
   });
 
-  it("clamps synthetic pad highs that never traded on the tape", () => {
+  it("never remaps closed synthetic pad highs — only tip may move", () => {
     const tip = 0.055;
     const nowMs = Date.UTC(2026, 9, 23, 12, 0, 0);
     const tTip = Math.floor(nowMs / 1000 / 60) * 60;
     const fake: Candle[] = [
       { time: tTip - 120, open: 0.05, high: 0.092, low: 0.049, close: 0.051, volume: 0 },
       { time: tTip - 60, open: 0.051, high: 0.053, low: 0.05, close: 0.052, volume: 0 },
-      { time: tTip, open: 0.052, high: 0.056, low: 0.051, close: tip, volume: 2 },
+      { time: tTip, open: 0.052, high: 0.056, low: 0.051, close: tip, volume: 0 },
     ];
     const prints = [
       { ts: tTip * 1000, price: 0.054, amountBase: 1 },
       { ts: tTip * 1000 + 500, price: tip, amountBase: 1 },
     ];
     const out = constrainLiveHistoryToTape(fake, prints, tip, 0.22, undefined, { nowMs });
-    expect(out[0]!.high).toBeLessThan(0.07);
-    expect(out[0]!.high).toBeLessThanOrEqual(tip * 1.22 + 1e-9);
+    // Closed bars immutable (orphan needles come from durable /candles SoT, not remaps).
+    expect(out[0]!.high).toBeCloseTo(0.092, 8);
+    expect(out[1]).toEqual(fake[1]);
     expect(out[2]!.close).toBeCloseTo(tip, 5);
+    expect(out[2]!.high).toBeLessThanOrEqual(tip * 1.22 + 1e-9);
   });
 
   it("does not remap month-ago / yesterday synthetic OHLC when tip drifts", () => {
@@ -667,9 +672,8 @@ describe("hydrateLiveCandlesFromPrints", () => {
     expect(b[0]).toEqual(old[0]);
     expect(a[1]).toEqual(old[1]);
     expect(b[1]).toEqual(old[1]);
-    // Recent synthetic still gets tip-band (high tip must not leave a 0.05-era skyscraper).
-    expect(b[2]!.high).toBeLessThanOrEqual(tipHigh * 1.22 + 1e-9);
-    expect(b[2]!.low).toBeGreaterThanOrEqual(tipHigh * 0.78 - 1e-9);
+    // Last series bar is the tip bucket here — may track tip; closed bars above stay frozen.
+    expect(b[2]!.close).toBeCloseTo(tipHigh, 5);
   });
 
   it("hydrate preserves closed OHLC across tip drift for bars older than tip-band", () => {
