@@ -723,7 +723,7 @@ function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
 /** Restore live OHLC from session cache + public tape / GET /trades (survives F5). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
   let cached =
-    loadLiveCandleCache(pairId) ??
+    loadLiveCandleCache(pairId, undefined, tipMid) ??
     (state.candles[pairId]?.[CANDLE_BASE_TF]?.length
       ? state.candles[pairId]![CANDLE_BASE_TF]!
       : null);
@@ -782,7 +782,7 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
 
 /** Sync path: session cache only (before GET /trades returns). */
 function restoreLiveCandlesFromCache(pairId: PairId, tipMid: number): boolean {
-  const cached = loadLiveCandleCache(pairId);
+  const cached = loadLiveCandleCache(pairId, undefined, tipMid);
   if (!cached?.length) return false;
   const tip = tipMid > 0 ? tipMid : cached[cached.length - 1]?.close ?? 0;
   if (!(tip > 0)) return false;

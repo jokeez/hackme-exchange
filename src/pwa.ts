@@ -1,4 +1,4 @@
-/** PWA install prompt + service worker registration. */
+/** PWA install prompt + service worker registration (force-activate on deploy). */
 
 let deferredInstall: BeforeInstallPromptEvent | null = null;
 
@@ -8,6 +8,77 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 const PWA_BANNER_DISMISS_KEY = "hackme.pwa.banner.dismiss";
+
+/**
+ * Production build (cf_chunk_assets) replaces this exact path with `/sw-v5-<hash>.js`.
+ * Dev uses plain `/sw.js` from public/.
+ */
+const BUILT_SW_URL = "/sw-v5-PLACEHOLDER.js";
+const EXPECTED_SW_URL = import.meta.env.DEV ? "/sw.js" : BUILT_SW_URL;
+const EXPECTED_CACHE = "hackme-ex-v5";
+
+function askWaitingToActivate(worker: ServiceWorker | null | undefined): void {
+  if (!worker) return;
+  try {
+    worker.postMessage({ type: "SKIP_WAITING" });
+  } catch {
+    /* ignore */
+  }
+}
+
+function scriptUrlMatchesExpected(scriptURL: string): boolean {
+  try {
+    const path = new URL(scriptURL, location.origin).pathname;
+    return path === EXPECTED_SW_URL;
+  } catch {
+    return false;
+  }
+}
+
+/** Drop every SW registration that is not the content-hashed worker, every boot. */
+async function unregisterStaleServiceWorkers(): Promise<boolean> {
+  const regs = await navigator.serviceWorker.getRegistrations();
+  let removed = false;
+  await Promise.all(
+    regs.map(async (reg) => {
+      const urls = [reg.active, reg.waiting, reg.installing]
+        .filter(Boolean)
+        .map((w) => (w as ServiceWorker).scriptURL);
+      const ok = urls.length > 0 && urls.every((u) => scriptUrlMatchesExpected(u));
+      if (!ok) {
+        removed = true;
+        try {
+          await reg.unregister();
+        } catch {
+          /* ignore */
+        }
+      }
+    }),
+  );
+  return removed;
+}
+
+async function purgeNonExpectedCaches(): Promise<void> {
+  if (typeof caches === "undefined") return;
+  try {
+    const keys = await caches.keys();
+    const controller = navigator.serviceWorker.controller;
+    const controllerOk = !!(controller && scriptUrlMatchesExpected(controller.scriptURL));
+    await Promise.all(
+      keys
+        .filter((k) => {
+          if (!k.startsWith("hackme-ex-")) return false;
+          // Until the expected controller owns the page, wipe everything — including a
+          // half-installed cache left by a racing old /sw.js registration.
+          if (!controllerOk) return true;
+          return k !== EXPECTED_CACHE;
+        })
+        .map((k) => caches.delete(k)),
+    );
+  } catch {
+    /* ignore */
+  }
+}
 
 export function initPwa(): void {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
@@ -25,9 +96,39 @@ export function initPwa(): void {
     document.getElementById("pwa-install-banner")?.remove();
   });
 
-  void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => {
-    console.warn("[pwa] service worker registration failed", err);
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
   });
+
+  void (async () => {
+    try {
+      const removed = await unregisterStaleServiceWorkers();
+      await purgeNonExpectedCaches();
+
+      const reg = await navigator.serviceWorker.register(EXPECTED_SW_URL, {
+        scope: "/",
+        updateViaCache: "none",
+      });
+      askWaitingToActivate(reg.waiting);
+      reg.addEventListener("updatefound", () => {
+        const installing = reg.installing;
+        if (!installing) return;
+        installing.addEventListener("statechange", () => {
+          if (installing.state === "installed") askWaitingToActivate(installing);
+        });
+      });
+      void reg.update();
+
+      if (removed && !navigator.serviceWorker.controller) {
+        askWaitingToActivate(reg.installing || reg.waiting || reg.active);
+      }
+    } catch (err) {
+      console.warn("[pwa] service worker registration failed", err);
+    }
+  })();
 }
 
 function bannerDismissed(): boolean {

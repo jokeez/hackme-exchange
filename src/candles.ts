@@ -1616,8 +1616,34 @@ export type CandlePrint = {
   amountBase?: number;
 };
 
-/** v19: tipRun heal no longer rewrites mid-history; cache prune keeps tape envelope. */
-const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v19:";
+/** v20: key by boot asset + shorter max-age; drop cache when tip Last desyncs hard. */
+const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v20:";
+
+/** Default session OHLC TTL — long enough for F5, short enough to shed stale morph. */
+export const LIVE_CANDLE_CACHE_MAX_AGE_MS = 90 * 60_000;
+
+/** Tip vs cached last close beyond this → discard (do not paint month-old morph). */
+export const LIVE_CANDLE_TIP_DESYNC_FRAC = 0.28;
+
+/** Boot chunk tag from the running page (hashed `boot-*.js`); empty in non-DOM tests. */
+export function currentBootAssetTag(): string {
+  if (typeof document === "undefined") return "";
+  try {
+    const nodes = document.querySelectorAll("script[src]");
+    for (let i = 0; i < nodes.length; i++) {
+      const src = nodes[i]?.getAttribute("src") || "";
+      const m = src.match(/boot-([A-Za-z0-9_-]+)/);
+      if (m?.[1]) return m[1];
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function liveCandleCacheKey(pairId: PairId, boot = currentBootAssetTag()): string {
+  return boot ? `${LIVE_CANDLE_CACHE_PREFIX}${boot}:${pairId}` : `${LIVE_CANDLE_CACHE_PREFIX}${pairId}`;
+}
 
 /** Durable 24h ticker envelope — widens print OHLC when tape window is shorter than 24h. */
 export type LiveDayRange = { high?: number; low?: number; open?: number };
@@ -1872,13 +1898,20 @@ export function applyLiveDayRangeToPairCandles(
 export function clearLiveCandleCache(pairId: PairId): void {
   if (typeof sessionStorage === "undefined") return;
   try {
+    sessionStorage.removeItem(liveCandleCacheKey(pairId));
     sessionStorage.removeItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v18:" + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v17:" + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v16:" + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v15:" + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v14:" + pairId);
-    sessionStorage.removeItem("hackme-ex-live-1m:v13:" + pairId);
+    // Legacy prefixes (pre-boot-keyed + older morph versions).
+    for (const ver of ["v19", "v18", "v17", "v16", "v15", "v14", "v13"]) {
+      sessionStorage.removeItem(`hackme-ex-live-1m:${ver}:${pairId}`);
+    }
+    // Drop any boot-tagged keys for this pair (other deploys in same tab session).
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (!k || !k.startsWith(LIVE_CANDLE_CACHE_PREFIX)) continue;
+      if (k.endsWith(`:${pairId}`) || k === LIVE_CANDLE_CACHE_PREFIX + pairId) {
+        sessionStorage.removeItem(k);
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -1888,6 +1921,7 @@ export function clearLiveCandleCache(pairId: PairId): void {
 export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
   if (typeof sessionStorage === "undefined" || !base1m.length) return;
   try {
+    const boot = currentBootAssetTag();
     const slim = base1m.slice(-360).map((c) => ({
       t: c.time,
       o: c.open,
@@ -1896,23 +1930,40 @@ export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
       c: c.close,
       v: c.volume,
     }));
-    sessionStorage.setItem(LIVE_CANDLE_CACHE_PREFIX + pairId, JSON.stringify({ at: Date.now(), bars: slim }));
+    sessionStorage.setItem(
+      liveCandleCacheKey(pairId, boot),
+      JSON.stringify({ at: Date.now(), boot, bars: slim }),
+    );
   } catch {
     /* quota */
   }
 }
 
-export function loadLiveCandleCache(pairId: PairId, maxAgeMs = 6 * 60 * 60_000): Candle[] | null {
+/**
+ * Load session 1m OHLC. Invalid when expired, boot hash changed, or tip Last desyncs hard.
+ * @param tipMid optional live last/mid — when set, purge cache that sits on another price scale.
+ */
+export function loadLiveCandleCache(
+  pairId: PairId,
+  maxAgeMs = LIVE_CANDLE_CACHE_MAX_AGE_MS,
+  tipMid = 0,
+): Candle[] | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
+    const boot = currentBootAssetTag();
+    const raw =
+      sessionStorage.getItem(liveCandleCacheKey(pairId, boot)) ??
+      // Same-tab upgrade path: untagged v20 key before boot was known.
+      (!boot ? null : sessionStorage.getItem(LIVE_CANDLE_CACHE_PREFIX + pairId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as {
       at?: number;
+      boot?: string;
       bars?: { t: number; o: number; h: number; l: number; c: number; v: number }[];
     };
     if (!parsed?.bars?.length || !Array.isArray(parsed.bars)) return null;
     if (parsed.at && Date.now() - parsed.at > maxAgeMs) return null;
+    if (boot && parsed.boot && parsed.boot !== boot) return null;
     const out: Candle[] = [];
     for (const b of parsed.bars) {
       const t = Number(b?.t);
@@ -1932,7 +1983,15 @@ export function loadLiveCandleCache(pairId: PairId, maxAgeMs = 6 * 60 * 60_000):
         volume: Number.isFinite(v) && v >= 0 ? v : 0,
       });
     }
-    return out.length ? out : null;
+    if (!out.length) return null;
+    if (tipMid > 0) {
+      const last = out[out.length - 1]!.close;
+      if (last > 0 && Math.abs(last - tipMid) / tipMid > LIVE_CANDLE_TIP_DESYNC_FRAC) {
+        clearLiveCandleCache(pairId);
+        return null;
+      }
+    }
+    return out;
   } catch {
     return null;
   }

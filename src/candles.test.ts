@@ -495,10 +495,57 @@ describe("hydrateLiveCandlesFromPrints", () => {
     // Poisoned / non-finite OHLC must not hydrate (same key prefix as save/load).
     clearLiveCandleCache("HMC_USDT");
     sessionStorage.setItem(
-      "hackme-ex-live-1m:v19:HMC_USDT",
+      "hackme-ex-live-1m:v20:HMC_USDT",
       JSON.stringify({
         at: Date.now(),
         bars: [{ t: t0, o: "x", h: 1, l: 0, c: 1, v: 0 }, { t: t0 + 60, o: 1, h: 0.5, l: 2, c: 1, v: 0 }],
+      }),
+    );
+    expect(loadLiveCandleCache("HMC_USDT")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops session cache when tip Last desyncs hard or boot tag changes", () => {
+    const mem = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        mem.set(k, v);
+      },
+      removeItem: (k: string) => {
+        mem.delete(k);
+      },
+      key: (i: number) => [...mem.keys()][i] ?? null,
+      get length() {
+        return mem.size;
+      },
+    });
+
+    const now = Date.now();
+    const sec = 60;
+    const t0 = Math.floor(now / 1000 / sec) * sec - 60;
+    const bars = [
+      { time: t0, open: 0.05, high: 0.051, low: 0.049, close: 0.05, volume: 1 },
+      { time: t0 + 60, open: 0.05, high: 0.052, low: 0.049, close: 0.051, volume: 2 },
+    ];
+    saveLiveCandleCache("HMC_USDT", bars);
+    expect(loadLiveCandleCache("HMC_USDT")?.length).toBe(2);
+    // Tip far from cached last → purge (do not morph forever).
+    expect(loadLiveCandleCache("HMC_USDT", undefined, 0.12)).toBeNull();
+
+    // Simulate a prior deploy's payload under the current boot key.
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        querySelectorAll: () => [{ getAttribute: () => "/assets/boot-NewBootHash-abc.js" }],
+      },
+    });
+    mem.set(
+      "hackme-ex-live-1m:v20:NewBootHash:HMC_USDT",
+      JSON.stringify({
+        at: Date.now(),
+        boot: "oldBootHash",
+        bars: bars.map((c) => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close, v: c.volume })),
       }),
     );
     expect(loadLiveCandleCache("HMC_USDT")).toBeNull();

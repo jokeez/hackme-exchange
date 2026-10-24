@@ -3,14 +3,15 @@
  * Cloudflare ↔ this origin stalls mid-body above ~16–19 KiB.
  * Split built JS/CSS into ≤14 KiB parts; boot loader fetches all parts in parallel.
  */
-import { readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DIST = join(ROOT, "dist");
 const ASSETS = join(DIST, "assets");
+const SW_PLACEHOLDER = "/sw-v5-PLACEHOLDER.js";
 /** Verified safe through CF orange-cloud on exchange.hackme.tech (Aug 2026). */
 const MAX = 14 * 1024;
 
@@ -61,6 +62,29 @@ function buildLoader(partUrls) {
   return loader;
 }
 
+function publishHashedServiceWorker() {
+  const swSrc = join(DIST, "sw.js");
+  const killSrc = join(ROOT, "public", "sw-legacy-kill.js");
+  if (!existsSync(swSrc)) {
+    console.error("cf_chunk_assets: missing dist/sw.js");
+    process.exit(1);
+  }
+  const body = readFileSync(swSrc, "utf8");
+  if (!body.includes('hackme-ex-v5')) {
+    console.error("cf_chunk_assets: dist/sw.js must use CACHE hackme-ex-v5");
+    process.exit(1);
+  }
+  const hash = createHash("sha256").update(body).digest("hex").slice(0, 10);
+  const hashedName = `sw-v5-${hash}.js`;
+  const hashedPath = `/${hashedName}`;
+  writeFileSync(join(DIST, hashedName), body);
+  // Bare /sw.js becomes a self-unregistering kill-switch (CF may still HIT old v3 until TTL).
+  if (existsSync(killSrc)) {
+    writeFileSync(join(DIST, "sw.js"), readFileSync(killSrc, "utf8"));
+  }
+  return hashedPath;
+}
+
 function main() {
   const files = readdirSync(ASSETS);
   const jsName = files.find((f) => /^index-.*\.js$/.test(f));
@@ -70,7 +94,18 @@ function main() {
     process.exit(1);
   }
 
-  const js = readFileSync(join(ASSETS, jsName), "utf8");
+  const swUrl = publishHashedServiceWorker();
+
+  let js = readFileSync(join(ASSETS, jsName), "utf8");
+  if (!js.includes(SW_PLACEHOLDER)) {
+    console.error(`cf_chunk_assets: bundle missing ${SW_PLACEHOLDER} — pwa.ts token drift?`);
+    process.exit(1);
+  }
+  js = js.split(SW_PLACEHOLDER).join(swUrl);
+  if (js.includes(SW_PLACEHOLDER) || js.includes("/sw.js?v=4")) {
+    console.error("cf_chunk_assets: failed to rewrite SW URL in bundle");
+    process.exit(1);
+  }
   const css = readFileSync(join(ASSETS, cssName), "utf8");
   const tag = jsName.replace(/^index-/, "").replace(/\.js$/, "");
 
@@ -109,6 +144,14 @@ function main() {
   if (!/script-src 'self' blob:/.test(html)) {
     html = html.replace(/script-src 'self'/g, "script-src 'self' blob:");
   }
+  // Deploy stamp — makes HTML body unique per build (pairs with no-store Cache-Control).
+  const stamp = new Date().toISOString();
+  if (!html.includes('name="hackme-deploy"')) {
+    html = html.replace(
+      /<head>/i,
+      `<head>\n    <meta name="hackme-deploy" content="${stamp}" />\n    <meta name="hackme-sw" content="${swUrl}" />`,
+    );
+  }
   writeFileSync(join(DIST, "index.html"), html);
 
   unlinkSync(join(ASSETS, jsName));
@@ -123,7 +166,7 @@ function main() {
     process.exit(1);
   }
   console.log(
-    `cf_chunk_assets: js=${jsParts.length} parts css=${cssParts.length} parts loader=${byteLen(readFileSync(join(ASSETS, loaderName), "utf8"))}B tag=${tag}`,
+    `cf_chunk_assets: js=${jsParts.length} parts css=${cssParts.length} parts loader=${byteLen(readFileSync(join(ASSETS, loaderName), "utf8"))}B tag=${tag} sw=${swUrl}`,
   );
 }
 
