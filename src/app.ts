@@ -163,7 +163,13 @@ import {
   type TradingGuards,
 } from "./tradingGuards";
 import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
-import { assertOrderFunds, freeBalance, fundsImmediateFill, maxOrderBaseAmount } from "./balance";
+import {
+  assertOrderFunds,
+  feeOptsForAvailableHmc,
+  freeBalance,
+  fundsImmediateFill,
+  maxOrderBaseAmount,
+} from "./balance";
 import { pctOfBalancePercent, snapToMinor } from "./money";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
@@ -1230,9 +1236,18 @@ function labOrderOpts(extra?: {
   postOnly?: boolean;
   timeInForce?: TimeInForce;
 } {
+  // Match % sizing: do not request HMC fee-pay when free HMC is 0 (quote-fee path).
+  const feeOpts = market
+    ? feeOptsForAvailableHmc(state, market, tradingGuards.hmcFeePayServer)
+    : { honorPayFeesInHmc: false as const };
+  const honorHmc =
+    tradingGuards.hmcFeePayServer &&
+    state.feeConfig.payFeesInHmc &&
+    feeOpts?.honorPayFeesInHmc !== false &&
+    (!market || freeBalance(state, "hmc", market) > 0);
   return {
     market,
-    payFeeInHmc: tradingGuards.hmcFeePayServer && state.feeConfig.payFeesInHmc ? true : undefined,
+    payFeeInHmc: honorHmc ? true : undefined,
     ...extra,
   };
 }
@@ -6661,12 +6676,12 @@ function previewFeeLabel(fee: { feeQuote: number; feeHmc: number; paidInHmc: boo
   return `est. fee ≈ ${formatPrice(fee.feeQuote)} ${quote}`;
 }
 
-/** Live matching: only show HMC −discount when health advertises hmc_fee_pay. */
+/** Live matching: only show HMC −discount when health advertises hmc_fee_pay + free HMC. */
 function liveFeeOpts(): CalcFeeOpts | undefined {
-  if (!useServerMatching()) return undefined;
-  return {
-    honorPayFeesInHmc: tradingGuards.hmcFeePayServer && state.feeConfig.payFeesInHmc,
-  };
+  if (!useServerMatching()) {
+    return feeOptsForAvailableHmc(state, market ?? undefined);
+  }
+  return feeOptsForAvailableHmc(state, market ?? undefined, tradingGuards.hmcFeePayServer);
 }
 
 function updatePreviewForSide(side: "buy" | "sell"): void {
@@ -6931,9 +6946,13 @@ function submitOrder(side: "buy" | "sell"): void {
         if (maxAmt <= 0 && form.amt > 0) {
           const minN = tradingGuards.minNotionalQuote;
           const pair = pairById(state.activePair);
+          const need = side === "buy" ? pair.quote : pair.base;
+          const needKey = need.toLowerCase() as keyof typeof state.wallet;
+          const free = freeBalance(state, needKey, market!);
+          const quoteFree = side === "buy" ? free : free * (refPx > 0 ? refPx : safePx);
           const msg =
-            minN > 0
-              ? `Need ≥ min notional ${minN} ${pair.quote} after fees`
+            minN > 0 && quoteFree + 1e-12 < minN
+              ? `Available ${formatUiAbs(quoteFree)} ${pair.quote} < min notional ${minN} ${pair.quote}`
               : "Balance too small after fees/reserves";
           setOrderMsg(side, msg, "err");
           toast(msg, "warn");
@@ -7596,26 +7615,28 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
       fundsImmediateFill(uiType, side, price, mid),
     );
     let hint: string;
+    // True below-min only when quote-equivalent avail cannot fund min (never when Avbl ≫ min).
     if (minN > 0 && quoteFree + 1e-12 < minN) {
       hint = `Available ${formatUiAbs(quoteFree)} ${pair.quote} < min notional ${minN} ${pair.quote}`;
-      setOrderMsg(side, hint, "err");
-    } else if (minN > 0 && free > 0) {
-      hint = `Need more than min notional ${minN} ${pair.quote} after fees (Avbl ${formatNum(free, 4)} ${need})`;
       setOrderMsg(side, hint, "err");
     } else if (!probe.ok && /HMC for fee/i.test(probe.reason)) {
       hint =
         hmcFree > 0
           ? `Leave HMC for fees (Avbl ${formatNum(hmcFree, 4)} HMC) — or turn off Pay fees in HMC`
           : `Need HMC for fees (Avbl 0 HMC) — deposit HMC or turn off Pay fees in HMC`;
+      setOrderMsg(side, hint, "err");
     } else if (usePublicDeskBook() && !useDeskMatching() && free <= 0) {
       hint = `Avbl 0 ${need} — Connect desk wallet + deposit first`;
     } else if (free > 0) {
+      // Fee haircut / reserves — not a false "min notional after fees" when quoteFree ≥ min.
       hint =
         state.feeConfig.payFeesInHmc && need === "HMC"
           ? `Leave a little HMC for fees (Avbl ${formatNum(free, 4)} ${need})`
           : `Balance too small after fees/reserves (Avbl ${formatNum(free, 4)} ${need})`;
+      setOrderMsg(side, hint, "err");
     } else {
       hint = `Avbl 0 ${need} — deposit or free reserved balance first`;
+      setOrderMsg(side, hint, "err");
     }
     toastAvailHint(hint);
   } else if (sized > 0) {

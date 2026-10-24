@@ -215,22 +215,27 @@ describe("100% pct sizing (buy + sell)", () => {
     expect(assertOrderFunds(s, m, "HMC_USDT", "buy", naive, slip, "market", true).ok).toBe(false);
   });
 
-  it("buy with payFeesInHmc and 0 HMC blocks meaningful size (fee blocker, not quote Avbl 0)", () => {
+  it("buy with payFeesInHmc and 0 HMC sizes via quote-fee fallback (assert still blocks HMC path)", () => {
     const m = sampleMarket({ hmcUsdt: 0.05, supUsdt: 0.05 });
     const s = baseState({
       wallet: { usdt: 0, hmc: 0, sup: 0.199, btc: 0 },
       feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
     });
     const price = 0.2003;
-    const amt = maxBuyBaseAmount(s, m, "HMC_SUP", price, "market", 1, price);
-    // Server-parity ApplyHMCDiscountPct trunc can zero feeHmc on dust notionals, so MAX may
-    // return a sub-fee dust size (e.g. ~5e-5) — not a regression vs exact 0. Meaningful fills stay blocked.
-    expect(amt).toBeLessThan(0.001);
-    if (amt > 0) {
-      const dustFee = calcFee(s, m, "HMC_SUP", price * amt, "taker");
-      expect(dustFee.paidInHmc).toBe(true);
-      expect(dustFee.feeHmc).toBe(0);
-    }
+    const minN = 0.01;
+    // % sizing must not collapse to 0 — quote fees cover when HMC Avbl is 0.
+    const amt = maxBuyBaseAmount(s, m, "HMC_SUP", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBeGreaterThan(0.01);
+    expect(notionalMeetsMin(price, amt, minN)).toBe(true);
+    expect(
+      assertOrderFunds(s, m, "HMC_SUP", "buy", amt, price, "market", true, undefined, undefined, {
+        honorPayFeesInHmc: false,
+      }).ok,
+    ).toBe(true);
+    // Strict HMC fee path still rejects (toggle on, no free HMC).
     const probe = assertOrderFunds(s, m, "HMC_SUP", "buy", 0.5, price, "market");
     expect(probe.ok).toBe(false);
     if (!probe.ok) expect(probe.reason).toMatch(/HMC for fee/i);
@@ -348,7 +353,7 @@ describe("100% pct sizing (buy + sell)", () => {
     expect(notionalMeetsMin(price, amt, minN)).toBe(true);
   });
 
-  it("sell 100% with payFeesInHmc at min leaves fee room or returns 0", () => {
+  it("sell 100% with payFeesInHmc at min falls back to quote fees (full base)", () => {
     const m = sampleMarket({ hmcUsdt: 0.05 });
     const minN = 0.01;
     const price = 0.05;
@@ -360,8 +365,16 @@ describe("100% pct sizing (buy + sell)", () => {
       minNotionalQuote: minN,
       notionalPrice: price,
     });
-    // Fee haircut on 0.2 HMC drops notional under min → 0 (clear path, not dust size).
-    expect(amt).toBe(0);
+    // HMC fee-pay would haircut under min; quote-fee fallback keeps full 0.2 at exact min.
+    expect(amt).toBe(0.2);
+    expect(notionalMeetsMin(price, amt, minN)).toBe(true);
+    expect(
+      assertOrderFunds(s, m, "HMC_USDT", "sell", amt, price, "market", true, undefined, undefined, {
+        honorPayFeesInHmc: false,
+      }).ok,
+    ).toBe(true);
+    // Strict HMC path still needs leftover — full 0.2 fails.
+    expect(assertOrderFunds(s, m, "HMC_USDT", "sell", 0.2, price, "market").ok).toBe(false);
     const sFat = baseState({
       wallet: { usdt: 0, hmc: 0.25, sup: 0, btc: 0 },
       feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },

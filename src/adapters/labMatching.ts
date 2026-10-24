@@ -4,6 +4,7 @@
  */
 
 import type { BookLevel, DemoState, MarketSnapshot, Order, OrderSide, PairId, Trade } from "../types";
+import { assertOrderFunds, fundsImmediateFill } from "../balance";
 import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
 import { hasDeskSeed } from "./deskWallet";
 import {
@@ -31,6 +32,7 @@ import {
 } from "./exchangeApi";
 import { activeVipTier, clearServerVipVolume, hasServerVipVolume, setServerVipVolumeUsdt } from "../fees";
 import { recordTradeLedger } from "../ledger";
+import { midForPair } from "../market";
 import { cancelOrder } from "../store";
 import { isDeskMatchingLive } from "../settingsModal";
 
@@ -456,9 +458,27 @@ export async function placeLabOrder(
     };
   }
   const { market: marketSnap, payFeeInHmc, postOnly, timeInForce, ...placeOpts } = opts ?? {};
+  // Match % sizing quote-fee fallback: if toggle requests HMC pay but free HMC cannot
+  // cover this size, omit pay_fee_in_hmc so the server takes quote fees instead.
+  let honorHmcPay = !!payFeeInHmc;
+  if (honorHmcPay && marketSnap && amountBase > 0) {
+    const mid = midForPair(marketSnap, pairId);
+    const px =
+      priceDisplay && priceDisplay > 0
+        ? priceDisplay
+        : stopDisplay && stopDisplay > 0
+          ? stopDisplay
+          : mid;
+    if (px > 0) {
+      const kind = type === "oco" ? "limit" : type;
+      const immediate = fundsImmediateFill(kind, side, px, mid);
+      const check = assertOrderFunds(state, marketSnap, pairId, side, amountBase, px, kind, immediate);
+      if (!check.ok && /HMC for fee/i.test(check.reason)) honorHmcPay = false;
+    }
+  }
   const body = buildPlaceOrderBody(pairId, side, type, amountBase, priceDisplay, stopDisplay, {
     ...placeOpts,
-    payFeeInHmc: !!payFeeInHmc,
+    payFeeInHmc: honorHmcPay,
     postOnly,
     timeInForce,
   });

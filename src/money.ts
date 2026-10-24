@@ -72,14 +72,15 @@ export function minBaseForNotional(minNotional: number, price: number): number {
 
 /**
  * Quote notional in minor units: round(price×qty) via integer multiply.
- * `priceMinor * qtyMinor / SCALE` with nearest rounding on the product path.
+ * Uses BigInt so large HMC notionals do not lose precision past MAX_SAFE_INTEGER.
  */
 export function notionalMinor(price: number, amountBase: number): number {
   if (!(price > 0) || !(amountBase > 0)) return 0;
   const pm = toMinor(price);
   const am = toMinor(amountBase);
   if (pm <= 0 || am <= 0) return 0;
-  return Math.floor((pm * am + MONEY_SCALE / 2) / MONEY_SCALE);
+  const scale = BigInt(MONEY_SCALE);
+  return Number((BigInt(pm) * BigInt(am) + scale / 2n) / scale);
 }
 
 /** True when price×qty meets min notional in minor units (no float edge rejects). */

@@ -1,4 +1,4 @@
-import { calcFee, liquidityRole } from "./fees";
+import { calcFee, liquidityRole, type CalcFeeOpts } from "./fees";
 import { midForPair } from "./market";
 import {
   floorToMinor,
@@ -26,6 +26,8 @@ export type MaxOrderSizeOpts = {
    * Funds still check against `price` (may include market slip ceiling).
    */
   notionalPrice?: number;
+  /** Forwarded to assertOrderFunds / calcFee (e.g. force quote fees when HMC Avbl is 0). */
+  feeOpts?: CalcFeeOpts;
 };
 
 function balKey(asset: string): keyof Wallet {
@@ -138,11 +140,56 @@ export function freeBalance(
 }
 
 /**
+ * When "Pay fees in HMC" is on but free HMC is 0, size/submit must use quote fees —
+ * otherwise maxBuy collapses to fee-truncation dust and the min-notional gate returns 0
+ * (false "Need more than min notional after fees" with Avbl ≫ min).
+ */
+export function feeOptsForAvailableHmc(
+  state: DemoState,
+  m: MarketSnapshot | undefined,
+  honorServerHmcPay?: boolean,
+): CalcFeeOpts | undefined {
+  if (!state.feeConfig.payFeesInHmc) return { honorPayFeesInHmc: false };
+  if (honorServerHmcPay === false) return { honorPayFeesInHmc: false };
+  if (!m || freeBalance(state, "hmc", m) <= 0) return { honorPayFeesInHmc: false };
+  return undefined;
+}
+
+function applyMinNotionalGate(
+  state: DemoState,
+  m: MarketSnapshot,
+  pairId: PairId,
+  side: OrderSide,
+  amt: number,
+  price: number,
+  kind: Order["kind"],
+  immediate: boolean,
+  opts: MaxOrderSizeOpts | undefined,
+  feeOpts: CalcFeeOpts | undefined,
+): number {
+  const minN = opts?.minNotionalQuote ?? 0;
+  if (!(minN > 0) || amt <= 0) return amt;
+  const refPx = opts?.notionalPrice && opts.notionalPrice > 0 ? opts.notionalPrice : price;
+  if (notionalMeetsMin(refPx, amt, minN)) return amt;
+  const minBase = minBaseForNotional(minN, refPx);
+  if (
+    minBase > 0 &&
+    assertOrderFunds(state, m, pairId, side, minBase, price, kind, immediate, undefined, undefined, feeOpts)
+      .ok &&
+    notionalMeetsMin(refPx, minBase, minN)
+  ) {
+    return floorQty(minBase);
+  }
+  return 0;
+}
+
+/**
  * Largest whole-base buy that still passes assertOrderFunds at `pct` of free quote.
  * Accounts for maker/taker fees (quote or HMC) so 100% / MAX never overshoots.
  * Pass `mid` so marketable limits size against taker fees (matches immediate fill).
  * When `opts.minNotionalQuote` is set: return 0 if fee-safe size cannot meet min
  * (caller should show a clear below-min / after-fees message — not float dust).
+ * If HMC fee-pay would zero a clearly fundable quote balance, retries with quote fees.
  */
 export function maxBuyBaseAmount(
   state: DemoState,
@@ -163,29 +210,36 @@ export function maxBuyBaseAmount(
   const budget = pctOfBalance(freeBalance(state, quoteK, m), p);
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "buy", price, mid);
-  const hi = floorQty(budget / price);
-  // Binary search on minor-scaled integers so small wallets still size.
-  let loU = 0;
-  let hiU = Math.floor(hi * QTY_SCALE + 1e-12);
-  while (loU < hiU) {
-    const midU = Math.ceil((loU + hiU + 1) / 2);
-    const midAmt = midU / QTY_SCALE;
-    if (assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate).ok) loU = midU;
-    else hiU = midU - 1;
-  }
-  let amt = floorQty(loU / QTY_SCALE);
-  const minN = opts?.minNotionalQuote ?? 0;
-  if (!(minN > 0) || amt <= 0) return amt;
-  const refPx = opts?.notionalPrice && opts.notionalPrice > 0 ? opts.notionalPrice : price;
-  if (notionalMeetsMin(refPx, amt, minN)) return amt;
-  // Fee-safe max sits under min — try ceil-to-min only if funds still cover it.
-  const minBase = minBaseForNotional(minN, refPx);
-  if (
-    minBase > 0 &&
-    assertOrderFunds(state, m, pairId, "buy", minBase, price, kind, immediate).ok &&
-    notionalMeetsMin(refPx, minBase, minN)
-  ) {
-    return floorQty(minBase);
+
+  const sizeOnce = (feeOpts: CalcFeeOpts | undefined): number => {
+    const hi = floorQty(budget / price);
+    let loU = 0;
+    let hiU = Math.floor(hi * QTY_SCALE + 1e-12);
+    while (loU < hiU) {
+      const midU = Math.ceil((loU + hiU + 1) / 2);
+      const midAmt = midU / QTY_SCALE;
+      if (
+        assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate, undefined, undefined, feeOpts)
+          .ok
+      ) {
+        loU = midU;
+      } else hiU = midU - 1;
+    }
+    const amt = floorQty(loU / QTY_SCALE);
+    return applyMinNotionalGate(state, m, pairId, "buy", amt, price, kind, immediate, opts, feeOpts);
+  };
+
+  const primaryOpts = opts?.feeOpts ?? feeOptsForAvailableHmc(state, m);
+  const primary = sizeOnce(primaryOpts);
+  if (primary > 0) return primary;
+
+  // Explicit feeOpts from caller — no second guess.
+  if (opts?.feeOpts) return 0;
+
+  // Toggle on + dust HMC (or sizing without feeOptsForAvailableHmc): retry quote fees.
+  if (state.feeConfig.payFeesInHmc && primaryOpts?.honorPayFeesInHmc !== false) {
+    const fallback = sizeOnce({ honorPayFeesInHmc: false });
+    if (fallback > 0) return fallback;
   }
   return 0;
 }
@@ -193,6 +247,7 @@ export function maxBuyBaseAmount(
 /**
  * Largest whole-base sell at `pct` of free base — fee-aware when paying fees in HMC
  * (selling HMC must leave leftover for the fee).
+ * Retries with quote fees when HMC fee-pay would zero a fundable base balance under min notional.
  */
 export function maxSellBaseAmount(
   state: DemoState,
@@ -213,26 +268,31 @@ export function maxSellBaseAmount(
   const budget = pctOfBalance(freeBalance(state, baseK, m), p);
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "sell", price, mid);
-  let loU = 0;
-  let hiU = Math.floor(floorQty(budget) * QTY_SCALE + 1e-12);
-  while (loU < hiU) {
-    const midU = Math.ceil((loU + hiU + 1) / 2);
-    const midAmt = midU / QTY_SCALE;
-    if (assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate).ok) loU = midU;
-    else hiU = midU - 1;
-  }
-  let amt = floorQty(loU / QTY_SCALE);
-  const minN = opts?.minNotionalQuote ?? 0;
-  if (!(minN > 0) || amt <= 0) return amt;
-  const refPx = opts?.notionalPrice && opts.notionalPrice > 0 ? opts.notionalPrice : price;
-  if (notionalMeetsMin(refPx, amt, minN)) return amt;
-  const minBase = minBaseForNotional(minN, refPx);
-  if (
-    minBase > 0 &&
-    assertOrderFunds(state, m, pairId, "sell", minBase, price, kind, immediate).ok &&
-    notionalMeetsMin(refPx, minBase, minN)
-  ) {
-    return floorQty(minBase);
+
+  const sizeOnce = (feeOpts: CalcFeeOpts | undefined): number => {
+    let loU = 0;
+    let hiU = Math.floor(floorQty(budget) * QTY_SCALE + 1e-12);
+    while (loU < hiU) {
+      const midU = Math.ceil((loU + hiU + 1) / 2);
+      const midAmt = midU / QTY_SCALE;
+      if (
+        assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate, undefined, undefined, feeOpts)
+          .ok
+      ) {
+        loU = midU;
+      } else hiU = midU - 1;
+    }
+    const amt = floorQty(loU / QTY_SCALE);
+    return applyMinNotionalGate(state, m, pairId, "sell", amt, price, kind, immediate, opts, feeOpts);
+  };
+
+  const primaryOpts = opts?.feeOpts ?? feeOptsForAvailableHmc(state, m);
+  const primary = sizeOnce(primaryOpts);
+  if (primary > 0) return primary;
+  if (opts?.feeOpts) return 0;
+  if (state.feeConfig.payFeesInHmc && primaryOpts?.honorPayFeesInHmc !== false) {
+    const fallback = sizeOnce({ honorPayFeesInHmc: false });
+    if (fallback > 0) return fallback;
   }
   return 0;
 }
@@ -266,6 +326,7 @@ export function assertOrderFunds(
   excludeOrderId?: string,
   /** Placement-only: stop trigger for stop_market / trailing sizing. */
   stopPrice?: number,
+  feeOpts?: CalcFeeOpts,
 ): { ok: true } | { ok: false; reason: string } {
   if (!Number.isFinite(amountBase) || amountBase <= 0) {
     return { ok: false, reason: "Amount must be > 0" };
@@ -281,16 +342,14 @@ export function assertOrderFunds(
     if (free < amountBase) {
       return { ok: false, reason: `Insufficient ${pair.base} (reserved in open orders)` };
     }
-    if (state.feeConfig.payFeesInHmc) {
-      const quoteGross = price * amountBase;
-      const fee = calcFee(state, m, pairId, quoteGross, role);
-      if (fee.paidInHmc) {
-        // Selling HMC reduces free HMC — fee must fit in leftover (or other free HMC).
-        const hmcFree = freeBalance(state, "hmc", m, excludeOrderId);
-        const leftover = baseK === "hmc" ? hmcFree - amountBase : hmcFree;
-        if (leftover < fee.feeHmc) {
-          return { ok: false, reason: "Insufficient HMC for fee (reserved in open orders)" };
-        }
+    const quoteGross = price * amountBase;
+    const fee = calcFee(state, m, pairId, quoteGross, role, feeOpts);
+    if (fee.paidInHmc) {
+      // Selling HMC reduces free HMC — fee must fit in leftover (or other free HMC).
+      const hmcFree = freeBalance(state, "hmc", m, excludeOrderId);
+      const leftover = baseK === "hmc" ? hmcFree - amountBase : hmcFree;
+      if (leftover < fee.feeHmc) {
+        return { ok: false, reason: "Insufficient HMC for fee (reserved in open orders)" };
       }
     }
     return { ok: true };
@@ -306,7 +365,7 @@ export function assertOrderFunds(
     px = Math.max(price, stopPrice ?? 0) * MARKETABLE_BUY_RESERVE_PAD;
   }
   const quoteGross = px * amountBase;
-  const fee = calcFee(state, m, pairId, quoteGross, role);
+  const fee = calcFee(state, m, pairId, quoteGross, role, feeOpts);
   const quoteNeed = quoteGross + (fee.paidInHmc ? 0 : fee.feeQuote);
   const free = freeBalance(state, quoteK, m, excludeOrderId);
   if (free < quoteNeed) {
