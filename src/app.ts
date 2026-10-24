@@ -171,6 +171,12 @@ import {
   maxOrderBaseAmount,
 } from "./balance";
 import { pctOfBalancePercent, snapToMinor } from "./money";
+import {
+  limitFormNeedsResync,
+  pinTipCloseToLast,
+  pricesAligned,
+  resolveDeskLast,
+} from "./priceSoT";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
 import { markPerf, measurePerf, throttle } from "./perf";
@@ -1435,8 +1441,8 @@ function activeTicker(): Ticker {
 
 /**
  * Last tradeable print for ticker/chart tip (CEX "Last").
- * Prefer public prints over Soft-MM mid — Soft-MM re-pegs BBO and stays sticky for
- * minutes (top-up skip_existing), which paints a horizontal ruler if used as tip.
+ * Soft-MM BBO wins when public tape desyncs — avoids header Last at book while
+ * chart tip sticks to a stale synthetic print (screenshot: 0.072659 vs 0.064175).
  */
 function liveLastPrice(pairId: PairId): number {
   const tape = lastPublicMid(pairId);
@@ -1445,23 +1451,54 @@ function liveLastPrice(pairId: PairId): number {
   const tipTf = pairId === state.activePair ? state.activeTf : CANDLE_BASE_TF;
   const tip = state.candles[pairId]?.[tipTf]?.slice(-1)[0]?.close ?? 0;
   const ageMs = tapeTs > 0 ? Date.now() - tapeTs : Number.POSITIVE_INFINITY;
-  // Short freshness — Soft-MM peg must not own Last for minutes after tape dies.
-  const tapeFresh = tape > 0 && ageMs < 45_000;
+  const api = deskApiTickers.get(pairId)?.last ?? 0;
+  const prev = prevMids[pairId] ?? 0;
+  return resolveDeskLast({
+    tape,
+    tapeAgeMs: ageMs,
+    labMid: lab,
+    apiLast: api,
+    tipClose: tip,
+    prevMid: prev,
+  });
+}
 
-  if (tapeFresh) return tape;
-  // Stale print: blend toward Soft-MM so Last drifts instead of snapping to a peg.
-  if (tape > 0 && lab > 0) {
-    const w = Math.min(1, Math.max(0, (ageMs - 45_000) / (3 * 60_000)));
-    return tape * (1 - w) + lab * w;
+/** Limit price inputs dirtied by the user (chart drag / typing) — skip auto-resync. */
+const limitPriceDirty: Record<"buy" | "sell", boolean> = { buy: false, sell: false };
+
+function markLimitPriceDirty(side: "buy" | "sell", dirty = true): void {
+  limitPriceDirty[side] = dirty;
+}
+
+function clearLimitPriceDirty(): void {
+  limitPriceDirty.buy = false;
+  limitPriceDirty.sell = false;
+}
+
+/**
+ * Keep undirtied limit/stop prices on desk Last (not paper ~0.05 seed) so header,
+ * book top, form, and markets agree. Re-applies pct slider when price moves.
+ */
+function syncLimitFormToDeskLast(pairId: PairId = state.activePair): void {
+  if (uiType !== "limit" && uiType !== "stop_limit" && uiType !== "oco") return;
+  if (pairId !== state.activePair) return;
+  const deskLast = spotMidForPair(pairId);
+  if (!(deskLast > 0)) return;
+  let changed = false;
+  for (const side of ["buy", "sell"] as const) {
+    if (limitPriceDirty[side]) continue;
+    const inp = document.getElementById(`${side}-price`) as HTMLInputElement | null;
+    if (!inp) continue;
+    const cur = Number(inp.value);
+    if (!limitFormNeedsResync(cur, deskLast, false, 0.02)) continue;
+    const resting = deskLast * (side === "buy" ? 0.9985 : 1.0015);
+    inp.value = tickInputValue(resting, pairId);
+    changed = true;
   }
-  if (tape > 0) return tape;
-  if (lab > 0) return lab;
-  if (tip > 0) return tip;
-  const tk = tickers[pairId];
-  if (tk?.mid && tk.mid > 0) return tk.mid;
-  const prev = prevMids[pairId];
-  if (prev != null && prev > 0) return prev;
-  return 0;
+  if (changed) {
+    resyncPctSizedAmounts();
+    updatePreview();
+  }
 }
 
 /** Live desk mid for book/spread math (true BBO when two-sided). */
@@ -1689,7 +1726,8 @@ function refreshOrderZone(): void {
     deskEdgeLive: usePublicDeskBook(),
     deskSession: useDeskMatching(),
   });
-  applyRestingLimitPrices(spotTradeMid(), state.activePair);
+  clearLimitPriceDirty();
+  applyRestingLimitPrices(spotTradeMid() || activePairQuote().mid, state.activePair);
   wireOrderPanelEvents();
   toggleOrderFields();
   syncPctMarks("buy");
@@ -1708,7 +1746,8 @@ function wireOrderPanelEvents(): void {
       saveOrderDesk(uiType, uiTif, uiPostOnly);
       toggleOrderFields();
       if ((next === "limit" || next === "stop_limit") && prev !== next) {
-        applyRestingLimitPrices(spotTradeMid(), state.activePair);
+        clearLimitPriceDirty();
+        applyRestingLimitPrices(spotTradeMid() || activePairQuote().mid, state.activePair);
       }
       updatePreview();
     });
@@ -1722,7 +1761,8 @@ function wireOrderPanelEvents(): void {
     saveOrderDesk(uiType, uiTif, uiPostOnly);
     toggleOrderFields();
     if ((v === "limit" || v === "stop_limit") && prev !== v) {
-      applyRestingLimitPrices(spotTradeMid(), state.activePair);
+      clearLimitPriceDirty();
+      applyRestingLimitPrices(spotTradeMid() || activePairQuote().mid, state.activePair);
     }
     updatePreview();
   });
@@ -1737,6 +1777,7 @@ function wireOrderPanelEvents(): void {
       updatePreviewForSide(side);
     });
     document.getElementById(`${side}-price`)?.addEventListener("input", () => {
+      markLimitPriceDirty(side, true);
       const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
       const pct = Number(slider?.value ?? 0);
       if (pct > 0) setAmountPct(side, pct / 100);
@@ -1881,6 +1922,21 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
 
   patchActivePairChrome();
 
+  // Immediately re-seed limit prices from best known Last (api/tape/book) — do not
+  // leave prior pair's USDT mid in HMC_BTC inputs until L2 arrives (99% desync).
+  clearLimitPriceDirty();
+  {
+    const seed =
+      spotMidForPair(pairId) ||
+      deskApiTickers.get(pairId)?.last ||
+      lastPublicMid(pairId) ||
+      0;
+    if (seed > 0 && (uiType === "limit" || uiType === "stop_limit" || uiType === "oco")) {
+      applyRestingLimitPrices(seed, pairId);
+      updatePreview();
+    }
+  }
+
   if (useLiveBook()) {
     restoreDeskVolCache(pairId);
     void hydrateDeskVolFromApi(pairId);
@@ -1893,10 +1949,14 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
       throttledBookTapePatch();
       patchMobileTradeTape();
       // Re-seed limit prices from the live L2 mid once the book for this pair arrives.
-      if (r.ok && state.activePair === pairId && (uiType === "limit" || uiType === "stop_limit")) {
-        applyRestingLimitPrices(spotTradeMid(), pairId);
-        updatePreview();
-        resyncPctSizedAmounts();
+      if (r.ok && state.activePair === pairId && (uiType === "limit" || uiType === "stop_limit" || uiType === "oco")) {
+        const live = spotTradeMid() || labBookMid(pairId);
+        if (live > 0 && !limitPriceDirty.buy && !limitPriceDirty.sell) {
+          clearLimitPriceDirty();
+          applyRestingLimitPrices(live, pairId);
+          updatePreview();
+          resyncPctSizedAmounts();
+        }
       }
     });
   }
@@ -5590,10 +5650,14 @@ function fillOrderPanelAtPrice(
 ): void {
   uiType = kind;
   setFormPrice(side, price, pairId);
+  markLimitPriceDirty(side, true);
   const stopInp = document.getElementById(`${side}-stop`) as HTMLInputElement | null;
   if (kind === "stop_limit" && stopInp) stopInp.value = tickInputValue(price, pairId);
   syncOrderTypeTabs(kind);
   toggleOrderFields();
+  const slider = document.getElementById(`${side}-pct`) as HTMLInputElement | null;
+  const pct = Number(slider?.value ?? 0);
+  if (pct > 0) setAmountPct(side, pct / 100);
   updatePreviewForSide(side);
   if (isMobileLayout()) setMobileTradeSide(side);
   if (opts?.scroll !== false) {
@@ -5613,15 +5677,29 @@ function quickPlaceFromChart(
   let amt = amountOverride ?? Number(amtInp?.value ?? 0);
   if (amt <= 0) {
     if (!market || !(price > 0)) {
-      toast("Insufficient balance — set amount", "warn");
+      toast("Set amount before placing from chart", "warn");
       fillOrderPanelAtPrice(side, kind, price, pairId);
       return;
     }
-    const mid = midForPair(market, pairId);
-    amt = maxOrderBaseAmount(state, market, pairId, side, price, kind, 0.25, mid);
+    const mid = spotMidForPair(pairId) || midForPair(market, pairId);
+    amt = maxOrderBaseAmount(state, market, pairId, side, price, kind, 0.25, mid, {
+      minNotionalQuote: tradingGuards.minNotionalQuote,
+      notionalPrice: price,
+      feeOpts: feeOptsForAvailableHmc(state, market, tradingGuards.hmcFeePayServer),
+    });
   }
   if (amt <= 0) {
-    toast("Insufficient balance — set amount", "warn");
+    const need = side === "buy" ? pair.quote : pair.base;
+    const free = market ? freeBalance(state, need.toLowerCase() as keyof typeof state.wallet, market) : 0;
+    const minN = tradingGuards.minNotionalQuote;
+    const quoteFree = side === "buy" ? free : free * price;
+    const msg =
+      free <= 0
+        ? `Avbl 0 ${need} — deposit first`
+        : minN > 0 && quoteFree + 1e-12 < minN
+          ? `Available ${formatUiAbs(quoteFree)} ${pair.quote} < min notional ${minN} ${pair.quote}`
+          : `Cannot size order from Avbl ${formatNum(free, 4)} ${need}`;
+    toast(msg, "warn");
     fillOrderPanelAtPrice(side, kind, price, pairId);
     return;
   }
@@ -7589,9 +7667,11 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
     side === "buy"
       ? Math.min(price, mid || price, activeTicker().ask || price)
       : Math.max(price, mid || price, activeTicker().bid || price);
+  const feeOpts = feeOptsForAvailableHmc(state, market, tradingGuards.hmcFeePayServer);
   const sized = maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid, {
     minNotionalQuote: minN,
     notionalPrice: notionalPx > 0 ? notionalPx : price,
+    feeOpts,
   });
   amtInp.value = sized > 0 ? formatInputQty(sized) : "0";
   if (pct > 0 && sized <= 0) {
@@ -7613,6 +7693,9 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
       price,
       uiType,
       fundsImmediateFill(uiType, side, price, mid),
+      undefined,
+      undefined,
+      feeOpts,
     );
     let hint: string;
     // True below-min only when quote-equivalent avail cannot fund min (never when Avbl ≫ min).
@@ -7627,8 +7710,9 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
       setOrderMsg(side, hint, "err");
     } else if (usePublicDeskBook() && !useDeskMatching() && free <= 0) {
       hint = `Avbl 0 ${need} — Connect desk wallet + deposit first`;
+      setOrderMsg(side, hint, "err");
     } else if (free > 0) {
-      // Fee haircut / reserves — not a false "min notional after fees" when quoteFree ≥ min.
+      // Fee haircut / reserves — never "min notional after fees" when Avbl ≫ min.
       hint =
         state.feeConfig.payFeesInHmc && need === "HMC"
           ? `Leave a little HMC for fees (Avbl ${formatNum(free, 4)} ${need})`
@@ -7640,6 +7724,7 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
     }
     toastAvailHint(hint);
   } else if (sized > 0) {
+    // Clear stale min-notional / after-fees banners when % sizing produced a fundable size.
     setOrderMsg(side, "", "");
   }
 }
@@ -9027,6 +9112,12 @@ function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean)
       syntheticVolume: false,
       dayRange: liveDayRangeForPair(pairId),
     });
+    // Hard pin every TF tip close to desk Last — aggregation / day-range paint must
+    // never leave 1D tip at ~day-low while toolbar Last tracks Soft-MM.
+    const byTf = state.candles[pairId]!;
+    for (const tf of Object.keys(byTf) as Timeframe[]) {
+      pinTipCloseToLast(byTf[tf], mid);
+    }
     prevMids[pairId] = mid;
     persistLiveCandleCache(pairId);
     return;
@@ -9154,10 +9245,24 @@ function microTickPrices(): void {
     }
   }
   const quote = activePairQuote();
+  // Chart tip close must share toolbar Last — heal + repaint when they diverge.
+  const tipClose = candles[candles.length - 1]?.close ?? 0;
+  if (quote.mid > 0 && tipClose > 0 && !pricesAligned(quote.mid, tipClose, 0.01)) {
+    tipCandlesForPair(state.activePair, quote.mid, labLive);
+    const healed = state.candles[state.activePair]?.[state.activeTf] ?? [];
+    const tip = healed[healed.length - 1];
+    const healOpts = chartOpts();
+    if (tip) {
+      if (!updateLastCandle(tip, healOpts)) {
+        setCandleData(healed, healOpts, { preserveLogicalRange: scrubbing, scrollToLive: !scrubbing });
+      }
+    }
+  }
   updateLivePriceHud(quote.mid, quote.tone !== "down", candleCountdown(state.activeTf));
   evaluateAllPriceAlerts();
   if (scrubbing) return;
   patchTickerBar(quote);
+  if (labLive && liveTickN % 2 === 0) syncLimitFormToDeskLast(state.activePair);
   if (liveTickN % 3 === 0) {
     const tape = document.getElementById("tape");
     if (tape) tape.innerHTML = renderTape();

@@ -4,7 +4,7 @@
  */
 
 import type { BookLevel, DemoState, MarketSnapshot, Order, OrderSide, PairId, Trade } from "../types";
-import { assertOrderFunds, fundsImmediateFill } from "../balance";
+import { assertOrderFunds, feeOptsForAvailableHmc, fundsImmediateFill } from "../balance";
 import { isDeskConnectEnabled, isExchangeApiWired, isLabLoopbackApi } from "../config/integration";
 import { hasDeskSeed } from "./deskWallet";
 import {
@@ -472,8 +472,25 @@ export async function placeLabOrder(
     if (px > 0) {
       const kind = type === "oco" ? "limit" : type;
       const immediate = fundsImmediateFill(kind, side, px, mid);
-      const check = assertOrderFunds(state, marketSnap, pairId, side, amountBase, px, kind, immediate);
-      if (!check.ok && /HMC for fee/i.test(check.reason)) honorHmcPay = false;
+      // Probe with HMC fees honored — if free HMC cannot cover, fall back to quote fees.
+      const check = assertOrderFunds(
+        state,
+        marketSnap,
+        pairId,
+        side,
+        amountBase,
+        px,
+        kind,
+        immediate,
+        undefined,
+        undefined,
+        undefined,
+      );
+      const noHmc =
+        !check.ok && /HMC for fee/i.test(check.reason)
+          ? true
+          : feeOptsForAvailableHmc(state, marketSnap)?.honorPayFeesInHmc === false;
+      if (noHmc) honorHmcPay = false;
     }
   }
   const body = buildPlaceOrderBody(pairId, side, type, amountBase, priceDisplay, stopDisplay, {
