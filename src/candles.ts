@@ -1070,32 +1070,21 @@ function finiteMid(n: number | undefined): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
 
-/** Idle UTC hole — hold prior close. Tiny wick so LWC paints a visible tick (not blank strip). */
+/**
+ * Idle UTC hole — true flat hold O=H=L=C=prev.close.
+ * Must not drift (old +8bps/bar compounded into tip-band walks across long gaps).
+ * Display paint (`displayCapCandles`) fattenes quiet dojis for LWC visibility.
+ */
 function flatGapBar(t: number, px: number): Candle {
   const p = px > 0 && Number.isFinite(px) ? px : 1e-12;
-  // ~8 bps body floor — 1.2 bps dojis painted Soft-MM «dotted ruler» lines on 1m.
-  const body = p * 0.0008;
-  const wick = p * 0.00035;
-  const close = p + body;
   return {
     time: t,
     open: p,
-    high: close + wick,
-    low: Math.max(p - wick, p * 1e-6),
-    close,
+    high: p,
+    low: p,
+    close: p,
     volume: 0,
   };
-}
-
-/**
- * Idle gap with a gentle constrained walk — real candle bodies, no spike forest.
- * Prefer this over flatGapBar when pairId is known (contiguous heal / paint).
- */
-function idleHoldBar(pairId: PairId, tf: Timeframe, t: number, prevClose: number): Candle {
-  const open = prevClose > 0 && Number.isFinite(prevClose) ? prevClose : 1e-12;
-  const walked = walkClosedFromPrev(pairId, tf, t, open);
-  // Tight caps: breathe like liquid spot, never mile-long Soft-MM needles.
-  return constrainBarToOpen(walked, 0.0025, 0.0018);
 }
 
 /**
@@ -1464,13 +1453,37 @@ export function ensureContiguousCandles(
     }
   }
 
+  // freezeExisting (default): never rewrite durable/print open/H/L/C (cross-device SoT).
+  // Flying islands = missing UTC buckets. Fill empties with flat bridges; optionally soft-bridge
+  // opens only when freezeExisting:false (paper). Vertical print gaps stay honest auction jumps.
   const freezeExisting = opts?.freezeExisting !== false;
+  /** Times of flat bridges invented in THIS pass — never treat cache vol=0 as synthetic. */
+  const syntheticTimes = new Set<number>();
   for (let t = start; t <= end; t += sec) {
     if (t < g) continue;
     const hit = byBucket.get(t);
     if (hit) {
-      // Closed / existing bars are immutable — never rewrite open to bridge a tip pump.
-      // Paper-only callers can pass freezeExisting:false to keep soft open-bridging.
+      // Ramp trailing synthetics into this bar's open so the path meets without
+      // rewriting durable/print/cache OHLC (keeps multi-device /candles SoT aligned).
+      if (out.length && hit.open > 0) {
+        let i = out.length - 1;
+        while (i >= 0 && syntheticTimes.has(out[i]!.time)) i--;
+        const fillFrom = i + 1;
+        if (fillFrom < out.length) {
+          const fromPx =
+            fillFrom > 0 && out[fillFrom - 1]!.close > 0 ? out[fillFrom - 1]!.close : px;
+          const target = hit.open;
+          const n = out.length - fillFrom;
+          for (let j = 0; j < n; j++) {
+            const frac = (j + 1) / n;
+            const p = fromPx + (target - fromPx) * frac;
+            const bt = out[fillFrom + j]!.time;
+            out[fillFrom + j] = flatGapBar(bt, p > 0 ? p : target);
+            syntheticTimes.add(bt);
+          }
+          px = target;
+        }
+      }
       let bar = hit;
       if (!freezeExisting && out.length && px > 0) {
         const jump = Math.abs(hit.open - px) / px;
@@ -1486,13 +1499,11 @@ export function ensureContiguousCandles(
       out.push(bar);
       px = bar.close;
     } else {
-      // Idle UTC hole: constrained walk (pair known) or fattened hold — never 1bps doji rulers.
+      // Empty UTC bucket: flat O=H=L=C=prev.close (time continuity; no tip-band remap).
       const open = px > 0 ? px : tipPxFallback(byBucket, times, px);
-      const fill =
-        pairId != null
-          ? idleHoldBar(pairId, tf, t, open > 0 ? open : 1e-12)
-          : flatGapBar(t, open > 0 ? open : 1e-12);
+      const fill = flatGapBar(t, open > 0 ? open : 1e-12);
       out.push(fill);
+      syntheticTimes.add(t);
       px = fill.close;
     }
   }
@@ -2109,7 +2120,7 @@ export function hydrateLiveCandlesFromPrints(
     base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo, { nowMs });
   }
   base = sanitizeDerivedCandlesForChart(base.slice(-MAX_CANDLES), pairId);
-  // Always run contiguous+open-bridge — time-contiguous print islands still gap open vs prior close.
+  // Time-contiguous flat bridges to now; durable/print OHLC stay immutable (opens included).
   if (base.length >= 2) {
     base = ensureContiguousCandles(base, CANDLE_BASE_TF, {
       pairId,

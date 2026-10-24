@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+/**
+ * Playwright: assert 1m series is time-contiguous to wall-clock tip and tip≈header Last.
+ *   node scripts/candle_continuity_pw.mjs
+ *   EX_LIVE_BASE=https://exchange.hackme.tech node scripts/candle_continuity_pw.mjs
+ */
+import { chromium } from "playwright";
+import { createServer } from "vite";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const BASE = (process.env.EX_LIVE_BASE || "").replace(/\/$/, "");
+const fail = [];
+
+async function localUnitProof() {
+  const server = await createServer({
+    root: resolve(__dirname, ".."),
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  try {
+    const mod = await server.ssrLoadModule("/src/candles.ts");
+    const { ensureContiguousCandles, candlesAreContiguous, hydrateLiveCandlesFromPrints, CANDLE_BASE_TF } =
+      mod;
+    const nowMs = Date.UTC(2026, 9, 24, 15, 0, 0);
+    const sec = 60;
+    const tip = Math.floor(nowMs / 1000 / sec) * sec;
+    const sparse = [
+      { time: tip - 200 * sec, open: 0.072, high: 0.073, low: 0.071, close: 0.072, volume: 2 },
+      { time: tip - 140 * sec, open: 0.078, high: 0.079, low: 0.077, close: 0.078, volume: 2 },
+      { time: tip - 90 * sec, open: 0.065, high: 0.066, low: 0.064, close: 0.065, volume: 2 },
+      { time: tip - 40 * sec, open: 0.068, high: 0.069, low: 0.067, close: 0.068, volume: 2 },
+    ];
+    const healed = ensureContiguousCandles(sparse, "1m", {
+      pairId: "HMC_USDT",
+      fillToNow: true,
+      nowMs,
+    });
+    if (!candlesAreContiguous(healed, "1m")) fail.push("unit: ensureContiguous not contiguous");
+    if (healed.at(-1).time !== tip) fail.push("unit: tip not filled to now");
+    const all = hydrateLiveCandlesFromPrints(
+      "HMC_USDT",
+      [{ ts: tip * 1000, price: 0.069, amountBase: 1 }],
+      0.069,
+      nowMs,
+      null,
+      undefined,
+      sparse,
+    );
+    const base = all[CANDLE_BASE_TF];
+    if (!candlesAreContiguous(base, "1m")) fail.push("unit: hydrate not contiguous");
+    if (base.at(-1).time !== tip) fail.push("unit: hydrate tip missing");
+    if (Math.abs(base.at(-1).close - 0.069) / 0.069 > 0.008) fail.push("unit: tip≠Last");
+    console.log(`[continuity] unit ok n=${base.length}`);
+  } finally {
+    await server.close();
+  }
+}
+
+async function liveProbe() {
+  if (!BASE) {
+    console.log("[continuity] skip live (set EX_LIVE_BASE)");
+    return;
+  }
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForSelector("#chart-host canvas, #chart-host", { timeout: 25_000 });
+    await page.waitForTimeout(2500);
+    await page.locator('[data-tf="1m"], .tfq[data-tf="1m"]').first().click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    const probe = await page.evaluate(() => {
+      const host = document.getElementById("chart-host");
+      const lastEl =
+        document.querySelector("[data-testid='ticker-last'], .ticker-last, .last-price, #ticker-last") ||
+        document.querySelector(".market-last, .pair-last");
+      const lastTxt = (lastEl?.textContent || "").replace(/[^\d.]/g, "");
+      const headerLast = Number(lastTxt) || 0;
+      // Prefer debug hook if present
+      const dbg = window.__hackmeChartDebug;
+      if (dbg?.candles?.length) {
+        const c = dbg.candles;
+        let gaps = 0;
+        for (let i = 1; i < c.length; i++) if (c[i].time - c[i - 1].time !== 60) gaps++;
+        return {
+          n: c.length,
+          gaps,
+          tipTime: c.at(-1)?.time,
+          tipClose: c.at(-1)?.close,
+          headerLast,
+          hasCanvas: !!host?.querySelector("canvas"),
+        };
+      }
+      return {
+        n: 0,
+        gaps: -1,
+        tipTime: 0,
+        tipClose: 0,
+        headerLast,
+        hasCanvas: !!host?.querySelector("canvas"),
+        hostW: host?.clientWidth || 0,
+        hostH: host?.clientHeight || 0,
+      };
+    });
+    console.log("[continuity] live", probe);
+    if (!probe.hasCanvas) fail.push("live: no canvas");
+    if (probe.gaps > 0) fail.push(`live: ${probe.gaps} time gaps`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+await localUnitProof();
+await liveProbe();
+if (fail.length) {
+  console.error("[continuity] FAIL", fail);
+  process.exit(1);
+}
+console.log("[continuity] PASS");
