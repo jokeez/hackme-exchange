@@ -9091,7 +9091,14 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
 
   if (useServerMatching() || useLiveBook()) {
     // Live desk: Last = print. Soft-MM bid/ask IS the traded price — do not crush to L2 mid.
-    const tipPx = fillPx > 0 && Number.isFinite(fillPx) ? fillPx : tapeMid || bookMid || prev || 0;
+    // Reject impossible fills (minors leak / sci) so one bad VWAP cannot paint a skyscraper tip.
+    const refPx = tapeMid || bookMid || prev || 0;
+    const fillOk =
+      fillPx > 0 &&
+      Number.isFinite(fillPx) &&
+      fillPx < 50 &&
+      (!(refPx > 0) || (fillPx <= refPx * 4.5 && fillPx >= refPx / 4.5));
+    const tipPx = fillOk ? fillPx : tapeMid || bookMid || prev || 0;
     if (!(tipPx > 0)) return;
     // Lock Last to this print so microTick cannot snap tip back to stale Soft-MM mid.
     setLastPublicMid(pairId, tipPx);
@@ -9100,15 +9107,15 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
       syntheticVolume: false,
       dayRange,
     });
-    if (fillPx > 0 && Number.isFinite(fillPx)) {
+    if (fillOk) {
       const volAdd = amountBase > 0 ? amountBase : 0;
       for (const tf of Object.keys(next) as Timeframe[]) {
         const series = next[tf];
         if (!series?.length) continue;
         const tip = { ...series[series.length - 1]! };
-        tip.close = fillPx;
-        tip.high = Math.max(tip.high, tip.open, tip.close, fillPx);
-        tip.low = Math.min(tip.low, tip.open, tip.close, fillPx);
+        tip.close = tipPx;
+        tip.high = Math.max(tip.high, tip.open, tip.close, tipPx);
+        tip.low = Math.min(tip.low, tip.open, tip.close, tipPx);
         tip.volume = (tip.volume || 0) + volAdd;
         series[series.length - 1] = tip;
       }

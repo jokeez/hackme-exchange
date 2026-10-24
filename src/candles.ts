@@ -1042,12 +1042,13 @@ export function applyMidToPairCandles(
     all[tf] = series;
   }
   pinAllTfTipsToBase(all, nextBase);
-  // Tip ticks re-aggregate 1m→1D and would drop durable 24h extremes painted only on
-  // higher TFs — re-apply /tickers dayRange so legend H/L stay aligned with the toolbar.
+  // Tip ticks re-aggregate 1m→1D and would drop durable 24h extremes — re-apply
+  // /tickers dayRange onto 1D/1W only (never 1m tip wick skyscraper).
   const dayHiLo = liveDayHiLo(opts?.dayRange);
   if (dayHiLo) {
     const nowMs = Date.now();
     for (const tf of Object.keys(all) as Timeframe[]) {
+      if (!tfPaintsDayRangeLegend(tf)) continue;
       const series = all[tf];
       if (!series?.length) continue;
       all[tf] = paintLiveDayRangeExtremes(series, dayHiLo, nowMs);
@@ -1672,6 +1673,18 @@ function medianPrintPrice(prints: CandlePrint[]): number {
   return xs.length % 2 ? xs[m]! : (xs[m - 1]! + xs[m]!) / 2;
 }
 
+/**
+ * Reject impossible tape prints (minors left unscaled, sci glitches, fee dust as px).
+ * Soft-launch HMC day pumps (~2×) pass; 1.0 vs 0.07 or 8e6 minors fail.
+ */
+export function isPlausibleTapePrice(price: number, ref: number, maxMult = 4.5): boolean {
+  if (!(price > 0) || !Number.isFinite(price)) return false;
+  if (price >= 50) return false; // display HMC/SUP never this high
+  if (!(ref > 0) || !Number.isFinite(ref)) return true;
+  const ratio = price / ref;
+  return ratio <= maxMult && ratio >= 1 / maxMult;
+}
+
 function printPriceEnvelope(prints: CandlePrint[], tip: number): { lo: number; hi: number } {
   let lo = tip > 0 ? tip : Infinity;
   let hi = tip > 0 ? tip : 0;
@@ -1817,8 +1830,18 @@ export function mergeDurableApiCandlesIntoBase(
 }
 
 /**
+ * TFs that carry durable /tickers 24h H/L on the forming tip for legend parity.
+ * Never stamp day extremes onto 1m/short tips — that painted a skyscraper wick and
+ * crushed Y-scale (screenshot thin green spike).
+ */
+export function tfPaintsDayRangeLegend(tf: Timeframe | string): boolean {
+  return tf === "1D" || tf === "1W";
+}
+
+/**
  * Durable /tickers 24h high/low — extend ONLY the forming tip wick so closed OHLC stay immutable.
  * Past bars that already printed the day high/low (via /candles or tape) keep their own extremes.
+ * Callers must restrict to {@link tfPaintsDayRangeLegend} TFs (1D/1W).
  */
 export function paintLiveDayRangeExtremes(
   candles: Candle[],
@@ -1832,12 +1855,18 @@ export function paintLiveDayRangeExtremes(
   if (!(dayHi > 0) && !(dayLo > 0)) return candles;
   const out = candles.map((c) => ({ ...c }));
   const tip = out[out.length - 1]!;
-  if (dayHi > 0) tip.high = Math.max(tip.high, tip.open, tip.close, dayHi);
-  if (dayLo > 0) tip.low = Math.min(tip.low, tip.open, tip.close, dayLo);
+  const tipPx = tip.close > 0 ? tip.close : tip.open;
+  // Reject minors-leak / absurd ticker rows (e.g. high_24h left in integer minors).
+  const hiOk =
+    dayHi > 0 && tipPx > 0 && dayHi <= tipPx * 4.5 && dayHi >= tipPx / 4.5 && dayHi < 50;
+  const loOk =
+    dayLo > 0 && tipPx > 0 && dayLo >= tipPx / 4.5 && dayLo <= tipPx * 4.5 && dayLo < 50;
+  if (hiOk) tip.high = Math.max(tip.high, tip.open, tip.close, dayHi);
+  if (loOk) tip.low = Math.min(tip.low, tip.open, tip.close, dayLo);
   return out;
 }
 
-/** Re-apply durable /tickers 24h hi/lo onto an existing multi-TF series (after tip ticks). */
+/** Re-apply durable /tickers 24h hi/lo onto daily+ tips only (after tip ticks). */
 export function applyLiveDayRangeToPairCandles(
   candlesByTf: Partial<Record<Timeframe, Candle[]>>,
   dayRange: LiveDayRange | undefined,
@@ -1847,6 +1876,7 @@ export function applyLiveDayRangeToPairCandles(
   if (!dayHiLo) return candlesByTf;
   const out: Partial<Record<Timeframe, Candle[]>> = { ...candlesByTf };
   for (const tf of Object.keys(out) as Timeframe[]) {
+    if (!tfPaintsDayRangeLegend(tf)) continue;
     const series = out[tf];
     if (!series?.length) continue;
     out[tf] = paintLiveDayRangeExtremes(series, dayHiLo, nowMs);
@@ -2008,7 +2038,14 @@ export function hydrateLiveCandlesFromPrints(
   }
 
   // 1) Tape rebuilds print buckets (may refine durable when same minute traded).
+  const tapeRef =
+    tipEarly > 0
+      ? tipEarly
+      : durable1m?.length
+        ? medianClose(durable1m)
+        : medianPrintPrice(sortedPrints);
   for (const p of sortedPrints) {
+    if (!isPlausibleTapePrice(p.price, tapeRef)) continue;
     const t = Math.floor(p.ts / 1000 / sec) * sec;
     if (t < CHART_GENESIS_UNIX) continue;
     const vol = p.amountBase && p.amountBase > 0 ? p.amountBase : 0;
@@ -2136,10 +2173,7 @@ export function hydrateLiveCandlesFromPrints(
   if (tip > 0) {
     base = healFlatPaperBars(pairId, CANDLE_BASE_TF, base, tip, nowMs, { scope: "tipRun" });
   }
-  // Ticker 24h hi/lo can outlive the 2000-print window — paint onto strongest last-24h bar.
-  if (dayHiLo) {
-    base = paintLiveDayRangeExtremes(base, dayHiLo, nowMs);
-  }
+  // Never stamp 24h ticker H/L onto 1m tip (skyscraper wick). Daily+ only after derive.
   const all = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, base);
   if (tip > 0) {
@@ -2154,7 +2188,9 @@ export function hydrateLiveCandlesFromPrints(
         dayHiLo,
         { nowMs },
       );
-      if (dayHiLo) next = paintLiveDayRangeExtremes(next, dayHiLo, nowMs);
+      if (dayHiLo && tfPaintsDayRangeLegend(tf)) {
+        next = paintLiveDayRangeExtremes(next, dayHiLo, nowMs);
+      }
       all[tf] = next;
     }
   }

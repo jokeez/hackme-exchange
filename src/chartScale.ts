@@ -442,17 +442,43 @@ function paintNoise(time: number, salt: number): number {
 }
 
 /**
+ * Display-only: price looks like an oracle / minors-leak spike vs series mid.
+ * Real Soft-MM day pumps (~1.2–2×) pass; minors (1e6+) or `1.0` vs `0.07` fail.
+ */
+export function isDisplayOutlierPx(px: number, seriesMid: number, maxMult = 2.75): boolean {
+  if (!(px > 0) || !Number.isFinite(px)) return true;
+  if (!(seriesMid > 0) || !Number.isFinite(seriesMid)) return false;
+  const ratio = px / seriesMid;
+  if (ratio > maxMult || ratio < 1 / maxMult) return true;
+  // Absolute wrong-unit guard (quote minors painted as display).
+  if (px >= 20 && seriesMid < 2) return true;
+  return false;
+}
+
+/** Clamp one OHLC extreme into [mid/mult, mid*mult] for LWC paint (state untouched). */
+function clampDisplayExtreme(px: number, seriesMid: number, maxMult = 2.75): number {
+  if (!(seriesMid > 0) || !Number.isFinite(seriesMid)) return px;
+  if (!(px > 0) || !Number.isFinite(px)) return seriesMid;
+  const lo = seriesMid / maxMult;
+  const hi = seriesMid * maxMult;
+  return Math.min(hi, Math.max(lo, px));
+}
+
+/**
  * CEX desk paint — truthful history, readable quiet tape:
- * - Closed bars keep real aggregated OHLC (prints / seed / aggregate). No affine-pin,
+ * - Closed bars keep real aggregated closes (prints / seed / aggregate). No affine-pin,
  *   no drift-pull toward Last — that faked multi-day ramps after a recent pump.
- * - Clip Soft-MM mile wicks + cap only oracle-class single-bar glitches.
+ * - Soft-bridge opens to prior close (display only) so durable auction gaps don't "fly".
+ * - Clip Soft-MM mile wicks + reject oracle-class single-bar glitches vs series median.
  * - Sticky peg dojis: display-only micro body+wick (bar-local, does not rewrite trend).
- * - Tip: close = Last; open/high/low from tape; real pump bodies stay large.
+ * - Tip: close = Last; open bridges from prior close; real multi-bar pumps stay large.
  */
 function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
   const maxWick = maxWickFracForTf(tf);
   const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.2);
   const minBody = Math.min(Math.max(paintMaxBodyFracForTf(tf) * 0.35, 0.001), 0.003);
+  // Multiplier vs series median — day pumps OK; minors/sci spikes rejected.
+  const outlierMult = tf === "1D" || tf === "1W" ? 4.5 : tf === "4H" || tf === "2H" ? 3.5 : 2.75;
   const tipIdx = candles.length - 1;
   const tipClose = finitePos(candles[tipIdx]!.close)
     ? candles[tipIdx]!.close
@@ -461,6 +487,9 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
       : 0;
   if (!(tipClose > 0)) return candles;
 
+  const closes = candles.map((c) => c.close).filter(finitePos).sort((a, b) => a - b);
+  const seriesMid = median(closes) || tipClose;
+
   const out: Candle[] = new Array(candles.length);
   for (let i = 0; i < candles.length; i++) {
     const raw = candles[i]!;
@@ -468,6 +497,35 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     let close = i === tipIdx ? tipClose : finitePos(raw.close) ? raw.close : open;
     let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
     let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
+
+    // Display contiguity: durable/print opens may jump off prior close (freezeExisting SoT).
+    // Bridge open only — never rewrite close (honest auction print).
+    if (i > 0) {
+      const prevClose = out[i - 1]!.close;
+      if (finitePos(prevClose) && Math.abs(open - prevClose) / prevClose > 0.0004) {
+        open = prevClose;
+        high = Math.max(high, open, close);
+        low = Math.min(low, open, close);
+      }
+    }
+
+    // Reject impossible highs/lows (minors leak, sci glitch) — never rewrite honest closes.
+    // Only squash O/C when they are wrong-unit orphans (minors / ≥20× series mid).
+    const absurdMult = Math.max(outlierMult * 3, 12);
+    if (i !== tipIdx && isDisplayOutlierPx(close, seriesMid, absurdMult)) {
+      close = clampDisplayExtreme(close, seriesMid, outlierMult);
+    }
+    if (i !== tipIdx && isDisplayOutlierPx(open, seriesMid, absurdMult)) {
+      open = clampDisplayExtreme(open, seriesMid, outlierMult);
+    }
+    if (isDisplayOutlierPx(high, seriesMid, outlierMult)) {
+      high = clampDisplayExtreme(high, seriesMid, outlierMult);
+    }
+    if (isDisplayOutlierPx(low, seriesMid, outlierMult)) {
+      low = clampDisplayExtreme(low, seriesMid, outlierMult);
+    }
+    high = Math.max(high, open, close);
+    low = Math.min(low, open, close);
 
     const midRef = Math.max(Math.abs(open), Math.abs(close), 1e-12);
     const bodyLo = Math.min(open, close);
@@ -490,10 +548,24 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     }
 
     if (i === tipIdx) {
-      open = finitePos(raw.open) ? raw.open : tipIdx > 0 && finitePos(out[tipIdx - 1]!.close) ? out[tipIdx - 1]!.close : tipClose;
+      // Tip open continues prior painted close (CEX contiguity); close = Last.
+      open =
+        tipIdx > 0 && finitePos(out[tipIdx - 1]!.close)
+          ? out[tipIdx - 1]!.close
+          : finitePos(raw.open)
+            ? raw.open
+            : tipClose;
       close = tipClose;
-      high = Math.max(high, open, tipClose, finitePos(raw.high) ? raw.high : tipClose);
-      low = Math.min(low, open, tipClose, finitePos(raw.low) ? raw.low : tipClose);
+      high = Math.max(open, tipClose, finitePos(raw.high) ? raw.high : tipClose);
+      low = Math.min(open, tipClose, finitePos(raw.low) ? raw.low : tipClose);
+      if (isDisplayOutlierPx(high, seriesMid, outlierMult)) {
+        high = clampDisplayExtreme(high, Math.max(seriesMid, tipClose), outlierMult);
+      }
+      if (isDisplayOutlierPx(low, seriesMid, outlierMult)) {
+        low = clampDisplayExtreme(low, Math.max(seriesMid, tipClose), outlierMult);
+      }
+      high = Math.max(high, open, tipClose);
+      low = Math.min(low, open, tipClose);
       let painted = clipBarWicks({ ...raw, open, high, low, close: tipClose }, tipWick);
       painted = {
         ...painted,
@@ -509,6 +581,8 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
       continue;
     }
 
+    // Do not rewrite durable/print closes for large bodies — only wick outliers were clamped.
+    // Open may already be soft-bridged to prior close (display contiguity).
     const painted = clipBarWicks(
       {
         ...raw,

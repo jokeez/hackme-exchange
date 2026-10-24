@@ -119,6 +119,8 @@ describe("flying candle islands (sparse durable + tip void)", () => {
     expect(health.tipDrift).toBeLessThan(0.008);
     // No blank tip — last painted bar is wall-clock tip bucket.
     expect(painted[painted.length - 1]!.time).toBe(tipBucket);
+    // Display soft-bridges opens — no island-class open≠prev.close after paint.
+    expect(countOpenJumps(painted, 0.05)).toBe(0);
   });
 
   it("tip pump does not remap closed durable print closes after contiguous heal", () => {
