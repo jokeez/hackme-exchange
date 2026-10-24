@@ -25,6 +25,7 @@ import {
   routeForAssets,
   type ConvertPreview,
 } from "./convert";
+import { pctOfBalancePercent } from "./money";
 import { placeOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
 
@@ -309,5 +310,24 @@ describe("convert", () => {
     expect(isConvertPreviewError(bad)).toBe(true);
     const ok = previewConvert(baseState(), market, "HMC_USDT", 10);
     expect(isConvertPreviewError(ok)).toBe(false);
+  });
+
+  it("convert % chips use minor math for all primary / BTC routes (mirrors spot 100%)", () => {
+    const cases: { avail: number; pct: number; expect: number }[] = [
+      { avail: 0.01, pct: 100, expect: 0.01 },
+      { avail: 0.01, pct: 75, expect: 0.0075 },
+      { avail: 0.01, pct: 50, expect: 0.005 },
+      { avail: 0.01, pct: 25, expect: 0.0025 },
+      { avail: 0.009999, pct: 100, expect: 0.009999 }, // 999_900 minors
+      { avail: 1.23456789, pct: 100, expect: 1.23456789 },
+      { avail: 0.00000074, pct: 50, expect: 0.00000037 },
+      { avail: 0.01 - Number.EPSILON * 8, pct: 100, expect: 0.01 },
+    ];
+    for (const c of cases) {
+      expect(pctOfBalancePercent(c.avail, c.pct)).toBe(c.expect);
+    }
+    // Never emit classic float dust string under min-notional balance.
+    expect(String(pctOfBalancePercent(0.01, 100))).toBe("0.01");
+    expect(String(pctOfBalancePercent(0.01, 100))).not.toMatch(/0\.00999/);
   });
 });

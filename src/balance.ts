@@ -1,15 +1,32 @@
 import { calcFee, liquidityRole } from "./fees";
 import { midForPair } from "./market";
+import {
+  floorToMinor,
+  minBaseForNotional,
+  MONEY_SCALE,
+  notionalMeetsMin,
+  pctOfBalance,
+} from "./money";
 import { PAIRS } from "./pairs";
 import type { DemoState, MarketSnapshot, Order, OrderSide, PairId, Wallet } from "./types";
 
 /** Display qty precision (1e8 minors). Whole-unit floor broke small HMC sells when fees pay in HMC. */
-const QTY_SCALE = 1e8;
+const QTY_SCALE = MONEY_SCALE;
 
 function floorQty(n: number): number {
-  if (!(n > 0) || !Number.isFinite(n)) return 0;
-  return Math.floor(n * QTY_SCALE + 1e-12) / QTY_SCALE;
+  return floorToMinor(n);
 }
+
+/** Optional sizing constraints for % / MAX chips. */
+export type MaxOrderSizeOpts = {
+  /** Min quote notional (display units). When set, size is 0 if funds cannot meet it. */
+  minNotionalQuote?: number;
+  /**
+   * Price for the min-notional check (usually mid/ask without slip pad).
+   * Funds still check against `price` (may include market slip ceiling).
+   */
+  notionalPrice?: number;
+};
 
 function balKey(asset: string): keyof Wallet {
   return asset.toLowerCase() as keyof Wallet;
@@ -124,6 +141,8 @@ export function freeBalance(
  * Largest whole-base buy that still passes assertOrderFunds at `pct` of free quote.
  * Accounts for maker/taker fees (quote or HMC) so 100% / MAX never overshoots.
  * Pass `mid` so marketable limits size against taker fees (matches immediate fill).
+ * When `opts.minNotionalQuote` is set: return 0 if fee-safe size cannot meet min
+ * (caller should show a clear below-min / after-fees message — not float dust).
  */
 export function maxBuyBaseAmount(
   state: DemoState,
@@ -133,6 +152,7 @@ export function maxBuyBaseAmount(
   kind: Order["kind"],
   pct = 1,
   mid?: number,
+  opts?: MaxOrderSizeOpts,
 ): number {
   if (!(price > 0) || !Number.isFinite(price)) return 0;
   const pair = PAIRS.find((p) => p.id === pairId);
@@ -140,11 +160,10 @@ export function maxBuyBaseAmount(
   const p = Math.min(1, Math.max(0, pct));
   if (p <= 0) return 0;
   const quoteK = balKey(pair.quote);
-  const budget = freeBalance(state, quoteK, m) * p;
+  const budget = pctOfBalance(freeBalance(state, quoteK, m), p);
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "buy", price, mid);
-  let lo = 0;
-  let hi = floorQty(budget / price);
+  const hi = floorQty(budget / price);
   // Binary search on minor-scaled integers so small wallets still size.
   let loU = 0;
   let hiU = Math.floor(hi * QTY_SCALE + 1e-12);
@@ -154,8 +173,21 @@ export function maxBuyBaseAmount(
     if (assertOrderFunds(state, m, pairId, "buy", midAmt, price, kind, immediate).ok) loU = midU;
     else hiU = midU - 1;
   }
-  lo = loU / QTY_SCALE;
-  return floorQty(lo);
+  let amt = floorQty(loU / QTY_SCALE);
+  const minN = opts?.minNotionalQuote ?? 0;
+  if (!(minN > 0) || amt <= 0) return amt;
+  const refPx = opts?.notionalPrice && opts.notionalPrice > 0 ? opts.notionalPrice : price;
+  if (notionalMeetsMin(refPx, amt, minN)) return amt;
+  // Fee-safe max sits under min — try ceil-to-min only if funds still cover it.
+  const minBase = minBaseForNotional(minN, refPx);
+  if (
+    minBase > 0 &&
+    assertOrderFunds(state, m, pairId, "buy", minBase, price, kind, immediate).ok &&
+    notionalMeetsMin(refPx, minBase, minN)
+  ) {
+    return floorQty(minBase);
+  }
+  return 0;
 }
 
 /**
@@ -170,6 +202,7 @@ export function maxSellBaseAmount(
   kind: Order["kind"],
   pct = 1,
   mid?: number,
+  opts?: MaxOrderSizeOpts,
 ): number {
   if (!(price > 0) || !Number.isFinite(price)) return 0;
   const pair = PAIRS.find((p) => p.id === pairId);
@@ -177,7 +210,7 @@ export function maxSellBaseAmount(
   const p = Math.min(1, Math.max(0, pct));
   if (p <= 0) return 0;
   const baseK = balKey(pair.base);
-  const budget = freeBalance(state, baseK, m) * p;
+  const budget = pctOfBalance(freeBalance(state, baseK, m), p);
   if (budget <= 0) return 0;
   const immediate = fundsImmediateFill(kind, "sell", price, mid);
   let loU = 0;
@@ -188,7 +221,20 @@ export function maxSellBaseAmount(
     if (assertOrderFunds(state, m, pairId, "sell", midAmt, price, kind, immediate).ok) loU = midU;
     else hiU = midU - 1;
   }
-  return floorQty(loU / QTY_SCALE);
+  let amt = floorQty(loU / QTY_SCALE);
+  const minN = opts?.minNotionalQuote ?? 0;
+  if (!(minN > 0) || amt <= 0) return amt;
+  const refPx = opts?.notionalPrice && opts.notionalPrice > 0 ? opts.notionalPrice : price;
+  if (notionalMeetsMin(refPx, amt, minN)) return amt;
+  const minBase = minBaseForNotional(minN, refPx);
+  if (
+    minBase > 0 &&
+    assertOrderFunds(state, m, pairId, "sell", minBase, price, kind, immediate).ok &&
+    notionalMeetsMin(refPx, minBase, minN)
+  ) {
+    return floorQty(minBase);
+  }
+  return 0;
 }
 
 /** Unified 100%/pct sizing for the dual order panel. */
@@ -201,10 +247,11 @@ export function maxOrderBaseAmount(
   kind: Order["kind"],
   pct = 1,
   mid?: number,
+  opts?: MaxOrderSizeOpts,
 ): number {
   return side === "buy"
-    ? maxBuyBaseAmount(state, m, pairId, price, kind, pct, mid)
-    : maxSellBaseAmount(state, m, pairId, price, kind, pct, mid);
+    ? maxBuyBaseAmount(state, m, pairId, price, kind, pct, mid, opts)
+    : maxSellBaseAmount(state, m, pairId, price, kind, pct, mid, opts);
 }
 
 export function assertOrderFunds(

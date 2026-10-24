@@ -9,6 +9,7 @@ import {
   reservedBalances,
 } from "./balance";
 import { calcFee } from "./fees";
+import { notionalMeetsMin } from "./money";
 import { placeOco, placeOrder } from "./orders";
 import { baseState, sampleMarket } from "./testFixtures";
 
@@ -250,6 +251,128 @@ describe("100% pct sizing (buy + sell)", () => {
       expect(assertOrderFunds(s, m, "HMC_USDT", "buy", buy, price, "limit").ok).toBe(true);
       expect(assertOrderFunds(s, m, "HMC_USDT", "sell", sell, price, "limit").ok).toBe(true);
     }
+  });
+
+  it("buy 100% at exactly min notional with fees returns 0 (clear below-min path)", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const s = baseState({
+      wallet: { usdt: minN, hmc: 0, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const price = 0.05;
+    // Fee-safe 100% of exactly-min leaves dust under min — must not return a float-dust size.
+    const amt = maxBuyBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBe(0);
+  });
+
+  it("buy 100% just below min notional returns 0", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const s = baseState({
+      wallet: { usdt: 0.009999, hmc: 0, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const amt = maxBuyBaseAmount(s, m, "HMC_USDT", 0.05, "market", 1, 0.05, {
+      minNotionalQuote: minN,
+      notionalPrice: 0.05,
+    });
+    expect(amt).toBe(0);
+  });
+
+  it("buy 100% just above min notional with fees sizes ≥ min", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const s = baseState({
+      wallet: { usdt: 0.0105, hmc: 0, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const price = 0.05;
+    const amt = maxBuyBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBeGreaterThan(0);
+    expect(notionalMeetsMin(price, amt, minN)).toBe(true);
+    expect(assertOrderFunds(s, m, "HMC_USDT", "buy", amt, price, "market").ok).toBe(true);
+  });
+
+  it("buy 100% at exactly min with payFeesInHmc meets min when HMC covers fee", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const s = baseState({
+      wallet: { usdt: minN, hmc: 1_000, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    const price = 0.05;
+    const amt = maxBuyBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBeGreaterThan(0);
+    expect(notionalMeetsMin(price, amt, minN)).toBe(true);
+    expect(assertOrderFunds(s, m, "HMC_USDT", "buy", amt, price, "market").ok).toBe(true);
+  });
+
+  it("sell 100% just below min notional returns 0", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const price = 0.05;
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0.19, sup: 0, btc: 0 }, // 0.19 * 0.05 = 0.0095 < 0.01
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const amt = maxSellBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBe(0);
+  });
+
+  it("sell 100% at exactly min notional sizes full free base", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const price = 0.05;
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0.2, sup: 0, btc: 0 }, // 0.2 * 0.05 = 0.01
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: false, hmcDiscountPct: 25 },
+    });
+    const amt = maxSellBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(amt).toBe(0.2);
+    expect(notionalMeetsMin(price, amt, minN)).toBe(true);
+  });
+
+  it("sell 100% with payFeesInHmc at min leaves fee room or returns 0", () => {
+    const m = sampleMarket({ hmcUsdt: 0.05 });
+    const minN = 0.01;
+    const price = 0.05;
+    const s = baseState({
+      wallet: { usdt: 0, hmc: 0.2, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    const amt = maxSellBaseAmount(s, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    // Fee haircut on 0.2 HMC drops notional under min → 0 (clear path, not dust size).
+    expect(amt).toBe(0);
+    const sFat = baseState({
+      wallet: { usdt: 0, hmc: 0.25, sup: 0, btc: 0 },
+      feeConfig: { makerBps: 8, takerBps: 10, payFeesInHmc: true, hmcDiscountPct: 25 },
+    });
+    const fat = maxSellBaseAmount(sFat, m, "HMC_USDT", price, "market", 1, price, {
+      minNotionalQuote: minN,
+      notionalPrice: price,
+    });
+    expect(fat).toBeGreaterThan(0);
+    expect(notionalMeetsMin(price, fat, minN)).toBe(true);
+    expect(assertOrderFunds(sFat, m, "HMC_USDT", "sell", fat, price, "market").ok).toBe(true);
   });
 });
 

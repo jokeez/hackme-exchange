@@ -164,6 +164,7 @@ import {
 } from "./tradingGuards";
 import { INTEGRATION, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked, isPaperMode, modeChromeLabel, modeStatusPill } from "./config/integration";
 import { assertOrderFunds, freeBalance, fundsImmediateFill, maxOrderBaseAmount } from "./balance";
+import { pctOfBalancePercent, snapToMinor } from "./money";
 import { nodeWalletUrl } from "./adapters/walletLinks";
 import { fetchNodeWallet, mergeNodeIntoDemoWallet, probeNodeOnline } from "./adapters/nodeWallet";
 import { markPerf, measurePerf, throttle } from "./perf";
@@ -2787,21 +2788,21 @@ function maxConvertibleFrom(): number {
   const avail = freeBalance(state, convertFrom, market ?? undefined);
   if (!(avail > 0) || !market) return 0;
   const route = routeForAssets(convertFrom, convertTo);
-  if (!route) return avail;
+  if (!route) return snapToMinor(avail);
   const def = convertRouteDef(route);
-  if (!def) return avail;
+  if (!def) return snapToMinor(avail);
   if (state.feeConfig.payFeesInHmc) {
-    if (convertFrom !== "hmc") return avail;
-    // Leave ~0.2% headroom for HMC fee on rough quote notional.
-    const headroom = avail * 0.002;
-    return Math.max(0, avail - Math.max(headroom, 1e-6));
+    if (convertFrom !== "hmc") return snapToMinor(avail);
+    // Leave ~0.2% headroom for HMC fee on rough quote notional (minor-snapped).
+    const headroom = Math.max(avail * 0.002, 1e-6);
+    return snapToMinor(Math.max(0, avail - headroom));
   }
   // Invert spends quote then pays fee from leftover quote — Max must leave fee room.
   if (def.invert) {
     const vip = activeVipTier(state, market);
-    return Math.max(0, (avail / (1 + vip.takerBps / 10_000)) * 0.999);
+    return snapToMinor(Math.max(0, (avail / (1 + vip.takerBps / 10_000)) * 0.999));
   }
-  return avail;
+  return snapToMinor(avail);
 }
 
 async function runConvertDesk(): Promise<void> {
@@ -3122,7 +3123,8 @@ function wireConvertDesk(): void {
     btn.addEventListener("click", () => {
       const pct = Number((btn as HTMLElement).dataset.cvPct ?? 0);
       const avail = maxConvertibleFrom();
-      convertAmtStr = String((avail * pct) / 100);
+      // Integer minor % — avoids 100% → 0.009999… float dust under min notional.
+      convertAmtStr = formatInputQty(pctOfBalancePercent(avail, pct));
       amtInp.value = convertAmtStr;
       markConvertPct(pct);
       persistConvertDesk();
@@ -6726,17 +6728,27 @@ function updatePreview(): void {
 /** Disable Buy/Sell when Avbl is 0 — avoid POST /orders 400 (M-24). */
 function syncExecButtonsEnabled(): void {
   const av = availBalance();
+  const minN = tradingGuards.minNotionalQuote;
+  const mid = market ? midForPair(market, state.activePair) : activeTicker().mid;
+  const pair = pairById(state.activePair);
   for (const side of ["buy", "sell"] as const) {
     const btn = document.getElementById(`btn-${side}`) as HTMLButtonElement | null;
     if (!btn) continue;
     const need = side === "buy" ? av.quote : av.base;
-    const dead = !(need > 0);
-    btn.disabled = dead;
+    let dead = !(need > 0);
+    let title = "";
     if (dead) {
-      btn.title = side === "buy" ? "Avbl 0 quote — deposit first" : "Avbl 0 base — deposit or free reserves";
-    } else {
-      btn.removeAttribute("title");
+      title = side === "buy" ? "Avbl 0 quote — deposit first" : "Avbl 0 base — deposit or free reserves";
+    } else if (minN > 0) {
+      const quoteAvail = side === "buy" ? need : need * (mid > 0 ? mid : 0);
+      if (quoteAvail + 1e-12 < minN) {
+        dead = true;
+        title = `Available ${formatUiAbs(quoteAvail)} ${pair.quote} < min notional ${minN} ${pair.quote}`;
+      }
     }
+    btn.disabled = dead;
+    if (dead) btn.title = title;
+    else btn.removeAttribute("title");
   }
 }
 
@@ -6902,14 +6914,32 @@ function submitOrder(side: "buy" | "sell"): void {
           side === "buy"
             ? Math.max(slip || book?.asks[0]?.price || t.ask || 0, book?.asks[0]?.price || t.ask || 0) * 1.002
             : Math.min(slip || book?.bids[0]?.price || t.bid || mid, book?.bids[0]?.price || t.bid || mid) * 0.998;
-        const maxAmt = maxOrderBaseAmount(state, market!, state.activePair, side, safePx, "market", 1, mid);
+        const refPx =
+          side === "buy"
+            ? Math.min(safePx, mid || safePx, book?.asks[0]?.price || t.ask || safePx)
+            : Math.max(safePx, mid || safePx, book?.bids[0]?.price || t.bid || safePx);
+        const maxAmt = maxOrderBaseAmount(state, market!, state.activePair, side, safePx, "market", 1, mid, {
+          minNotionalQuote: tradingGuards.minNotionalQuote,
+          notionalPrice: refPx > 0 ? refPx : safePx,
+        });
         let amt = form.amt;
         if (maxAmt > 0 && amt > maxAmt) {
           amt = maxAmt;
           const inp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
-          if (inp) inp.value = String(amt);
+          if (inp) inp.value = formatInputQty(amt);
         }
-        if (!paperGuardsOrWarn(side, "market", amt, slip || mid)) return;
+        if (maxAmt <= 0 && form.amt > 0) {
+          const minN = tradingGuards.minNotionalQuote;
+          const pair = pairById(state.activePair);
+          const msg =
+            minN > 0
+              ? `Need ≥ min notional ${minN} ${pair.quote} after fees`
+              : "Balance too small after fees/reserves";
+          setOrderMsg(side, msg, "err");
+          toast(msg, "warn");
+          return;
+        }
+        if (!paperGuardsOrWarn(side, "market", amt, slip || mid || refPx)) return;
         let lab = await placeLabOrder(
           state,
           state.activePair,
@@ -6960,7 +6990,9 @@ function submitOrder(side: "buy" | "sell"): void {
       });
       return;
     }
-    if (!paperGuardsOrWarn(side, "market", form.amt, 0)) return;
+    // Pass mid/ask so min-notional matches % sizing ref (not slip-padded funds price).
+    const paperMid = market ? midForPair(market, state.activePair) : activeTicker().mid;
+    if (!paperGuardsOrWarn(side, "market", form.amt, paperMid || activeTicker().mid)) return;
     const t = activeTicker();
     const m = matchMarket(t, side, form.amt);
     const funds = assertOrderFunds(
@@ -7531,14 +7563,24 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
     amtInp.value = "0";
     return;
   }
-  const sized = maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid);
+  const pair = pairById(state.activePair);
+  const minN = tradingGuards.minNotionalQuote;
+  // Ref price for min-notional (unpadded mid/ask) so slip ceilings cannot shrink under min.
+  const notionalPx =
+    side === "buy"
+      ? Math.min(price, mid || price, activeTicker().ask || price)
+      : Math.max(price, mid || price, activeTicker().bid || price);
+  const sized = maxOrderBaseAmount(state, market, state.activePair, side, price, uiType, pct, mid, {
+    minNotionalQuote: minN,
+    notionalPrice: notionalPx > 0 ? notionalPx : price,
+  });
   amtInp.value = sized > 0 ? formatInputQty(sized) : "0";
   if (pct > 0 && sized <= 0) {
-    const pair = pairById(state.activePair);
     const need = side === "buy" ? pair.quote : pair.base;
     const needKey = need.toLowerCase() as keyof typeof state.wallet;
     const free = freeBalance(state, needKey, market);
     const hmcFree = freeBalance(state, "hmc", market);
+    const quoteFree = side === "buy" ? free : free * (notionalPx > 0 ? notionalPx : price);
     const probeAmt =
       side === "buy"
         ? Math.max((free / Math.max(price, 1e-12)) * 0.5, 1e-8)
@@ -7554,7 +7596,13 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
       fundsImmediateFill(uiType, side, price, mid),
     );
     let hint: string;
-    if (!probe.ok && /HMC for fee/i.test(probe.reason)) {
+    if (minN > 0 && quoteFree + 1e-12 < minN) {
+      hint = `Available ${formatUiAbs(quoteFree)} ${pair.quote} < min notional ${minN} ${pair.quote}`;
+      setOrderMsg(side, hint, "err");
+    } else if (minN > 0 && free > 0) {
+      hint = `Need more than min notional ${minN} ${pair.quote} after fees (Avbl ${formatNum(free, 4)} ${need})`;
+      setOrderMsg(side, hint, "err");
+    } else if (!probe.ok && /HMC for fee/i.test(probe.reason)) {
       hint =
         hmcFree > 0
           ? `Leave HMC for fees (Avbl ${formatNum(hmcFree, 4)} HMC) — or turn off Pay fees in HMC`
@@ -7570,6 +7618,8 @@ function setAmountPct(side: "buy" | "sell", pct: number): void {
       hint = `Avbl 0 ${need} — deposit or free reserved balance first`;
     }
     toastAvailHint(hint);
+  } else if (sized > 0) {
+    setOrderMsg(side, "", "");
   }
 }
 

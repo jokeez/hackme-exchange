@@ -7,6 +7,7 @@
 
 import { MINOR_UNIT_SCALE, type HealthResponse } from "./adapters/exchangeApi";
 import { formatUiAbs } from "./format";
+import { fromMinor, notionalMinor, toMinor } from "./money";
 export { formatExchangeReject as formatOrderReject } from "./adapters/exchangeApi";
 
 /** Guard reject strings — never scientific notation. */
@@ -236,11 +237,13 @@ export function validatePaperTradingGuards(
   }
 
   if (g.minNotionalQuote > 0) {
-    const notional = px * amt;
-    if (notional < g.minNotionalQuote) {
+    // Integer minor compare — avoids "got 0.00999999999999" float-dust rejects at the boundary.
+    const gotMinor = notionalMinor(px, amt);
+    const minMinor = toMinor(g.minNotionalQuote);
+    if (gotMinor < minMinor) {
       return {
         ok: false,
-        reason: `Min notional ${g.minNotionalQuote} ${quote} (got ${formatGuardNum(notional)})`,
+        reason: `Min notional ${g.minNotionalQuote} ${quote} (got ${formatGuardNum(fromMinor(gotMinor))})`,
       };
     }
   }

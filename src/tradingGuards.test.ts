@@ -96,6 +96,48 @@ describe("tradingGuards", () => {
     if (!far.ok) expect(far.reason).toMatch(/band/i);
   });
 
+  it("min notional compare uses minor units (no float-dust reject at exact min)", () => {
+    const mid = 0.05;
+    const atMin = validatePaperTradingGuards({
+      side: "buy",
+      kind: "market",
+      amountBase: 0.2,
+      price: 0,
+      mid,
+      guards: { minNotionalQuote: 0.01 },
+    });
+    expect(atMin.ok).toBe(true);
+
+    // Classic IEEE dust under 0.01 that still rounds to min minor must pass.
+    const dustEdge = validatePaperTradingGuards({
+      side: "buy",
+      kind: "market",
+      amountBase: 0.2,
+      price: 0.05 - Number.EPSILON,
+      mid: 0.05 - Number.EPSILON,
+      guards: { minNotionalQuote: 0.01 },
+    });
+    // price×qty may still land on 0.01 minor after rounding — either ok or a clean under-min msg.
+    if (!dustEdge.ok) {
+      expect(dustEdge.reason).toMatch(/Min notional 0\.01/);
+      expect(dustEdge.reason).not.toMatch(/0\.00999999999999/);
+    }
+
+    const under = validatePaperTradingGuards({
+      side: "buy",
+      kind: "market",
+      amountBase: 0.1998,
+      price: mid,
+      mid,
+      guards: { minNotionalQuote: 0.01 },
+    });
+    expect(under.ok).toBe(false);
+    if (!under.ok) {
+      expect(under.reason).toMatch(/Min notional 0\.01 USDT \(got /);
+      expect(under.reason).not.toMatch(/9{5,}/);
+    }
+  });
+
   it("formatExchangeReject prefers API error string + code", () => {
     expect(
       formatExchangeReject({
