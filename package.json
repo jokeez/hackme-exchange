@@ -36,7 +36,7 @@
     "playwright": "^1.55.0",
     "typescript": "^5.8.3",
     "vite": "^6.4.5",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@noble/ed25519": "^2.3.0",
