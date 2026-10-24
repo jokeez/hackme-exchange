@@ -1974,6 +1974,8 @@ function switchActivePair(pairId: PairId, opts?: { mobileTrade?: boolean }): voi
 
   bookFlashSnap = snapshotBookLevels(document.getElementById("book"));
   refreshActivityPanel();
+  // WS is subscribed per-pair — reconnect so book/tape pushes track the new active pair.
+  marketStream?.notifyActivePairChanged();
   // Do NOT await full oracle refresh() here — it blocks Markets clicks for seconds.
   // Book for the new pair is fetched above; ticker/oracle keep polling on their timers.
 }
@@ -2473,25 +2475,38 @@ function renderActivityBody(): string {
   return `<div class="act-list">${rows
     .map((o) => {
       const p = pairById(o.pairId);
+      // Lab/server orders have no amend API — local edits would desync the book.
+      const canAmend = o.source !== "lab";
+      const filled = o.filledBase ?? 0;
+      const remaining = Math.max(0, o.amountBase - filled);
+      const amtLabel =
+        filled > 0
+          ? `${formatNum(remaining, 2)}/${formatNum(o.amountBase, 2)}`
+          : formatNum(o.amountBase, 2);
       const priceCell =
         o.kind === "limit"
-          ? `<button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="price" title="Edit price">${formatPrice(o.price)}</button>`
+          ? canAmend
+            ? `<button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="price" title="Edit price">${formatPrice(o.price)}</button>`
+            : `<span class="mono" title="Cancel &amp; replace — server amend not supported">${formatPrice(o.price)}</span>`
           : `<span>${formatPrice(o.price)}</span>`;
       const stopCell = o.stopPrice
-        ? o.kind === "stop_limit"
+        ? o.kind === "stop_limit" && canAmend
           ? `<button type="button" class="link mono act-edit dim" data-amend-id="${escapeHtml(o.id)}" data-amend-field="stop" title="Edit stop">stop ${formatPrice(o.stopPrice)}</button>`
           : `<span class="dim">stop ${formatPrice(o.stopPrice)}</span>`
         : "";
+      const amountCell = canAmend
+        ? `<button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="amount" title="Edit amount">×${amtLabel}</button>`
+        : `<span class="mono" title="${filled > 0 ? "Partial fill · remaining/total" : "Cancel &amp; replace — server amend not supported"}">×${amtLabel}</span>`;
       return `<div class="act-row">
       <div class="act-line">
         <span class="${o.side === "buy" ? "up" : "down"}">${escapeHtml(o.side).toUpperCase()}</span>
-        <span>${escapeHtml(orderTypeLabel(o.kind, o))}${o.postOnly ? " PO" : ""}</span>
+        <span>${escapeHtml(orderTypeLabel(o.kind, o))}${o.postOnly ? " PO" : ""}${filled > 0 ? " · partial" : ""}</span>
         <span class="dim">${p.label}</span>
       </div>
       <div class="act-line mono">
         ${priceCell}
         ${stopCell}
-        <button type="button" class="link mono act-edit" data-amend-id="${escapeHtml(o.id)}" data-amend-field="amount" title="Edit amount">×${formatNum(o.amountBase, 2)}</button>
+        ${amountCell}
       </div>
       <div class="act-actions">
         <span class="dim mono">${o.timeInForce ?? "GTC"}</span>
@@ -3719,6 +3734,9 @@ function render(): void {
     wireAccountFunding(state, market, () => {
       saveState(state);
       softPatchFeePayChrome();
+      // Account ↔ Spot fee toggle must resize % amounts when Spot form is mounted.
+      resyncPctSizedAmounts();
+      updatePreview();
     });
     wireLabApiButtons();
     wireFundsFunding();
@@ -5932,6 +5950,12 @@ function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: str
     toast("Order not open", "warn");
     return;
   }
+  // No PATCH /orders — local amend of lab rows would desync ledger vs SPA.
+  if (o.source === "lab") {
+    toast("Server order — Cancel & replace (amend not supported)", "warn");
+    refreshActivityPanel();
+    return;
+  }
   if (field === "price" && o.kind !== "limit") {
     toast("Only limit price can be edited inline", "warn");
     return;
@@ -5973,23 +5997,21 @@ function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: str
         toast(check.reason, "warn");
         return;
       }
-      if (o.source !== "lab") {
-        const funds = assertOrderFunds(
-          state,
-          market,
-          o.pairId,
-          o.side,
-          o.amountBase,
-          n,
-          o.kind,
-          check.immediate,
-          o.id,
-          o.stopPrice,
-        );
-        if (!funds.ok) {
-          toast(funds.reason, "warn");
-          return;
-        }
+      const funds = assertOrderFunds(
+        state,
+        market,
+        o.pairId,
+        o.side,
+        o.amountBase,
+        n,
+        o.kind,
+        check.immediate,
+        o.id,
+        o.stopPrice,
+      );
+      if (!funds.ok) {
+        toast(funds.reason, "warn");
+        return;
       }
     }
     if (!updateOrderPrice(state, id, n)) {
@@ -5998,7 +6020,7 @@ function amendOpenOrder(id: string, field: "price" | "amount" | "stop", raw: str
     }
     toast(`Order price → ${formatPrice(n)}`, "ok");
   } else {
-    if (market && o.source !== "lab") {
+    if (market) {
       const funds = assertOrderFunds(state, market, o.pairId, o.side, n, o.price, o.kind, false, o.id, o.stopPrice);
       if (!funds.ok) {
         toast(funds.reason, "warn");
@@ -6211,8 +6233,17 @@ function mountChartPanel(): void {
       updateOhlcDisplays(c);
     },
     onOrderPriceDrag: (id, price) => {
-      updateOrderPrice(state, id, price);
-      refreshOrderLines(state.orders.filter((o) => o.pairId === state.activePair));
+      const o = state.orders.find((x) => x.id === id);
+      if (o?.source === "lab") {
+        toast("Server order — Cancel & replace (amend not supported)", "warn");
+        refreshOpenOrderChartLines();
+        return;
+      }
+      if (!updateOrderPrice(state, id, price)) {
+        refreshOpenOrderChartLines();
+        return;
+      }
+      refreshOrderLines(state.orders.filter((ord) => ord.pairId === state.activePair));
       toast(`Order price → ${formatPrice(price)}`, "info");
     },
     onContextMenu: (price, x, y) => openPaneContextMenu(state.activePair, "chart-host", price, x, y),

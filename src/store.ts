@@ -578,6 +578,8 @@ export function cancelAllOpenOrders(state: DemoState): number {
 export function updateOrderPrice(state: DemoState, id: string, price: number): boolean {
   const o = state.orders.find((x) => x.id === id);
   if (!o || (o.status !== "open" && o.status !== "triggered")) return false;
+  // Lab/server orders: no amend API — refuse local mutation to avoid ledger desync.
+  if (o.source === "lab") return false;
   if (!(price > 0)) return false;
   o.price = price;
   saveState(state);
@@ -587,6 +589,7 @@ export function updateOrderPrice(state: DemoState, id: string, price: number): b
 export function updateOrderAmount(state: DemoState, id: string, amountBase: number): boolean {
   const o = state.orders.find((x) => x.id === id);
   if (!o || (o.status !== "open" && o.status !== "triggered")) return false;
+  if (o.source === "lab") return false;
   if (!(amountBase > 0)) return false;
   o.amountBase = amountBase;
   // Keep OCO legs symmetric — TP/SL must share size.

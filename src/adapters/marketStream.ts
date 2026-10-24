@@ -123,6 +123,27 @@ export class MarketStream {
     this.handlers.onEvent?.({ type: "tape" });
   }
 
+  /**
+   * Active pair changed — WS is subscribed per `?pair=`; reconnect so pushes track the new pair.
+   * Poll mode already reads getActivePair() each tick; still force an immediate book/tape pull.
+   */
+  notifyActivePairChanged(): void {
+    if (!this.running || !this.liveBookOn()) return;
+    const pairId = this.opts.getActivePair();
+    void refreshLabBook(pairId).then(() => {
+      this.handlers.onEvent?.({ type: "book", pairId, changed: true });
+    });
+    void this.syncPublicTrades(pairId);
+    if (this.transport === "ws" || this.ws) {
+      this.closeWs();
+      // Reset backoff so pair switches reconnect promptly (not after a storm wait).
+      this.wsBackoff = 1000;
+      void this.tryWebSocket().then((ok) => {
+        if (!ok && this.running && this.transport !== "ws") this.startPoll();
+      });
+    }
+  }
+
   private setTransport(t: StreamTransport): void {
     if (this.transport === t) return;
     this.transport = t;
@@ -224,15 +245,18 @@ export class MarketStream {
     try {
       const msg = JSON.parse(raw) as WsMsg;
       if (msg.type === "ping") return;
+      const active = this.opts.getActivePair();
+      const activeApi = pairIdToApi(active);
+      // Drop stale pushes from a prior pair while reconnect is in flight.
+      if (msg.type === "book" && msg.pair && msg.pair !== activeApi) return;
       if (msg.type === "book") {
-        const pairId = this.opts.getActivePair();
-        void refreshLabBook(pairId).then((r) => {
-          this.handlers.onEvent?.({ type: "book", pairId, changed: r.changed });
+        void refreshLabBook(active).then((r) => {
+          this.handlers.onEvent?.({ type: "book", pairId: active, changed: r.changed });
         });
         return;
       }
       if (msg.type === "tape" || msg.type === "trades" || msg.type === "fill") {
-        void this.syncPublicTrades(this.opts.getActivePair());
+        void this.syncPublicTrades(active);
         if (this.sessionOn()) {
           void this.syncFillsLight().then((changed) => {
             this.handlers.onEvent?.({ type: "tape" });

@@ -9,6 +9,7 @@ import {
   placeLimitOrder,
   saveState,
   toggleFavorite,
+  updateOrderAmount,
   updateOrderPrice,
   walletEquityFromMarket,
   walletEquityUsdt,
@@ -138,6 +139,16 @@ describe("store order mutations", () => {
     s.orders[0].status = "filled";
     expect(updateOrderPrice(s, o.id, 0.0005)).toBe(false);
     expect(s.orders[0].price).toBe(0.00041);
+  });
+
+  it("refuses local amend of lab/server orders (no PATCH API)", () => {
+    const s = baseState();
+    const o = placeLimitOrder(s, "HMC_USDT", "buy", 0.0004, 1);
+    s.orders[0].source = "lab";
+    expect(updateOrderPrice(s, o.id, 0.0005)).toBe(false);
+    expect(s.orders[0].price).toBe(0.0004);
+    expect(updateOrderAmount(s, o.id, 99)).toBe(false);
+    expect(s.orders[0].amountBase).toBe(1);
   });
 
   it("toggleFavorite adds and removes", () => {

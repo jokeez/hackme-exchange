@@ -42,6 +42,10 @@ describe("tier1 UI contracts", () => {
     expect(app).toContain("wireOrderAmendButtons");
     expect(app).toContain('data-amend-field="stop"');
     expect(app).toContain("applyBookFlashes");
+    // Lab/server rows must not be locally amendable (no PATCH /orders).
+    expect(app).toContain('o.source === "lab"');
+    expect(app).toContain("Cancel & replace");
+    expect(app).toContain("notifyActivePairChanged");
   });
 
   it("unified settings modal has chart overlay toggles", () => {

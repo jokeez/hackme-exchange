@@ -33,4 +33,18 @@ describe("marketStream", () => {
     stream.stop();
     expect(stream.getTransport()).toBe("idle");
   });
+
+  it("notifyActivePairChanged is a no-op when not on live book", async () => {
+    const stream = createMarketStream(
+      { onEvent: () => {} },
+      {
+        getActivePair: () => "HMC_BTC",
+        isSpotView: () => true,
+        useLiveBook: () => false,
+      },
+    );
+    stream.start();
+    expect(() => stream.notifyActivePairChanged()).not.toThrow();
+    stream.stop();
+  });
 });
