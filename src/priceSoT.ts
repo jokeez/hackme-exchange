@@ -1,7 +1,7 @@
 /**
  * Single source of truth helpers for desk “Last” across header / chart tip /
  * order form / markets. Soft-MM tape can diverge from live BBO — prefer book
- * when the print is stale or far from mid.
+ * when the print is stale, outside the spread, or far from mid.
  */
 
 /** Relative |a−b|/ref — 0 when either side is non-positive. */
@@ -16,6 +16,22 @@ export function pricesAligned(a: number, b: number, tolFrac = 0.005): boolean {
   return priceDriftFrac(a, b) <= tolFrac;
 }
 
+/**
+ * Soft-MM / thin-book: print outside [bid, ask] (tiny pad) must not pin Last
+ * above the offer / below the bid while the ladder shows a different mid.
+ */
+export function tapeOutsideBbo(
+  tape: number,
+  bestBid: number,
+  bestAsk: number,
+  padFrac = 0.001,
+): boolean {
+  if (!(tape > 0) || !Number.isFinite(tape)) return false;
+  if (!(bestBid > 0) || !(bestAsk > 0) || bestAsk < bestBid) return false;
+  const pad = Math.max(padFrac, 0);
+  return tape > bestAsk * (1 + pad) || tape < bestBid * (1 - pad);
+}
+
 export type DeskLastInputs = {
   /** Last public print (tape). */
   tape?: number;
@@ -23,6 +39,10 @@ export type DeskLastInputs = {
   tapeAgeMs?: number;
   /** Soft-MM / L2 mid (two-sided BBO). */
   labMid?: number;
+  /** Best bid (display). When set with ask, outside-BBO snaps to Soft-MM. */
+  bestBid?: number;
+  /** Best ask (display). */
+  bestAsk?: number;
   /** Durable /tickers last. */
   apiLast?: number;
   /** Forming candle tip close (last resort only). */
@@ -31,10 +51,14 @@ export type DeskLastInputs = {
   prevMid?: number;
 };
 
+/** Tape↔Soft-MM desync that forces Soft-MM Last (was 5% — HMC/BTC soft-launch ~2%). */
+const TAPE_LAB_DESYNC_FRAC = 0.02;
+
 /**
  * Desk Last for toolbar, chart tip, markets, and undirtied limit defaults.
- * Prefer fresh tape; when tape↔BBO desyncs, Soft-MM mid wins so tip/header
- * cannot stick to a stale synthetic print while the book has moved.
+ * Prefer fresh tape; when tape↔BBO desyncs or print sits outside the spread,
+ * Soft-MM mid wins so tip/header/form cannot stick to a stale synthetic print
+ * while the book has moved.
  */
 export function resolveDeskLast(input: DeskLastInputs): number {
   const tape = input.tape && input.tape > 0 && Number.isFinite(input.tape) ? input.tape : 0;
@@ -42,20 +66,25 @@ export function resolveDeskLast(input: DeskLastInputs): number {
   const api = input.apiLast && input.apiLast > 0 && Number.isFinite(input.apiLast) ? input.apiLast : 0;
   const tip = input.tipClose && input.tipClose > 0 && Number.isFinite(input.tipClose) ? input.tipClose : 0;
   const prev = input.prevMid && input.prevMid > 0 && Number.isFinite(input.prevMid) ? input.prevMid : 0;
+  const bid = input.bestBid && input.bestBid > 0 && Number.isFinite(input.bestBid) ? input.bestBid : 0;
+  const ask = input.bestAsk && input.bestAsk > 0 && Number.isFinite(input.bestAsk) ? input.bestAsk : 0;
   const ageMs =
     input.tapeAgeMs != null && Number.isFinite(input.tapeAgeMs) ? Math.max(0, input.tapeAgeMs) : Number.POSITIVE_INFINITY;
+
+  const outside = tape > 0 && lab > 0 && tapeOutsideBbo(tape, bid, ask);
+  if (outside) return lab;
 
   const tapeFresh = tape > 0 && ageMs < 45_000;
   if (tapeFresh && lab > 0) {
     // Fresh print far from live BBO → Soft-MM mid is the tradeable Last.
-    if (priceDriftFrac(tape, lab) > 0.05) return lab;
+    if (priceDriftFrac(tape, lab) > TAPE_LAB_DESYNC_FRAC) return lab;
     return tape;
   }
   if (tapeFresh) return tape;
 
   if (tape > 0 && lab > 0) {
     // Stale print already far from Soft-MM — don't drag Last for minutes.
-    if (priceDriftFrac(tape, lab) > 0.05) return lab;
+    if (priceDriftFrac(tape, lab) > TAPE_LAB_DESYNC_FRAC) return lab;
     // Near-aligned stale tape: blend gently toward Soft-MM.
     const w = Math.min(1, Math.max(0, (ageMs - 45_000) / (3 * 60_000)));
     return tape * (1 - w) + lab * w;

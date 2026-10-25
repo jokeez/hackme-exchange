@@ -17,6 +17,8 @@
     "smoke:live": "node scripts/live_smoke.mjs",
     "smoke:chart-soak": "node scripts/chart_soak_live.mjs",
     "smoke:candle-immutability": "node scripts/candle_history_immutability_pw.mjs",
+    "smoke:desk-last-sync": "node scripts/desk_last_sync_pw.mjs",
+    "smoke:candle-continuity": "node scripts/candle_continuity_pw.mjs",
     "soak:candle-tip-jump": "npx vite-node scripts/candle_tip_jump_soak.mjs",
     "smoke:candle-paint": "npx vite-node scripts/live_candle_paint_probe.ts",
     "smoke:desk": "npx tsx scripts/desk-connect-smoke.ts",

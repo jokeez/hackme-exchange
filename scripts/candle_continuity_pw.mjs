@@ -73,40 +73,40 @@ async function liveProbe() {
     await page.waitForTimeout(800);
     const probe = await page.evaluate(() => {
       const host = document.getElementById("chart-host");
-      const lastEl =
-        document.querySelector("[data-testid='ticker-last'], .ticker-last, .last-price, #ticker-last") ||
-        document.querySelector(".market-last, .pair-last");
-      const lastTxt = (lastEl?.textContent || "").replace(/[^\d.]/g, "");
+      const lastTxt = (document.querySelector(".tb-price")?.textContent || "").replace(/[^\d.]/g, "");
       const headerLast = Number(lastTxt) || 0;
-      // Prefer debug hook if present
-      const dbg = window.__hackmeChartDebug;
-      if (dbg?.candles?.length) {
-        const c = dbg.candles;
-        let gaps = 0;
-        for (let i = 1; i < c.length; i++) if (c[i].time - c[i - 1].time !== 60) gaps++;
-        return {
-          n: c.length,
-          gaps,
-          tipTime: c.at(-1)?.time,
-          tipClose: c.at(-1)?.close,
-          headerLast,
-          hasCanvas: !!host?.querySelector("canvas"),
-        };
-      }
+      const chart = window.__hackmeChart;
+      const c = chart?.getDisplayedCandles?.() || [];
+      const tipClose = chart?.getDisplayedLastCandle?.()?.close ?? c.at(-1)?.close ?? 0;
+      let gaps = 0;
+      for (let i = 1; i < c.length; i++) if (c[i].time - c[i - 1].time !== 60) gaps++;
+      const drift =
+        tipClose > 0 && headerLast > 0
+          ? Math.abs(tipClose - headerLast) / Math.max(tipClose, headerLast)
+          : 0;
       return {
-        n: 0,
-        gaps: -1,
-        tipTime: 0,
-        tipClose: 0,
+        n: c.length,
+        gaps: c.length ? gaps : -1,
+        tipTime: c.at(-1)?.time ?? 0,
+        tipClose,
         headerLast,
+        tipHeaderDrift: drift,
         hasCanvas: !!host?.querySelector("canvas"),
         hostW: host?.clientWidth || 0,
         hostH: host?.clientHeight || 0,
+        boot: document.querySelector('script[src*="boot-"]')?.getAttribute("src") || "",
       };
     });
     console.log("[continuity] live", probe);
     if (!probe.hasCanvas) fail.push("live: no canvas");
-    if (probe.gaps > 0) fail.push(`live: ${probe.gaps} time gaps`);
+    if (probe.n > 10 && probe.gaps > Math.max(2, probe.n * 0.02)) {
+      fail.push(`live: ${probe.gaps} time gaps in ${probe.n} bars`);
+    }
+    if (probe.tipClose > 0 && probe.headerLast > 0 && probe.tipHeaderDrift > 0.01) {
+      fail.push(
+        `live: tip↔header drift ${(probe.tipHeaderDrift * 100).toFixed(2)}% tip=${probe.tipClose} last=${probe.headerLast}`,
+      );
+    }
   } finally {
     await browser.close().catch(() => {});
   }

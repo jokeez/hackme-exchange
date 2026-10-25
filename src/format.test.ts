@@ -82,6 +82,14 @@ describe("formatPrice", () => {
     expect(formatUiSigned(-1.36e-6)).not.toMatch(/e/i);
     expect(formatUiSigned(0)).toBe("+0.00");
     expect(formatUiAbs(12.345)).toBe("12.35");
+    // Soft-launch BTC-pair dust + portfolio micro PnL leftovers.
+    for (const n of [8.3483e-9, 9.9466e-10, 2.00676e-3, 1e-11, -4.2e-8]) {
+      expect(formatUiAbs(n)).not.toMatch(/e/i);
+      expect(formatUiSigned(n)).not.toMatch(/e/i);
+      expect(formatPrice(Math.abs(n))).not.toMatch(/e/i);
+      expect(formatPriceCompact(Math.abs(n))).not.toMatch(/e/i);
+      expect(formatInputQty(n)).not.toMatch(/e/i);
+    }
   });
 
   it("chartLocaleTag returns a valid Intl locale", () => {

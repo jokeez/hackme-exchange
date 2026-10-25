@@ -2184,6 +2184,13 @@ html.mobile-layout .market-search {
   overscroll-behavior: contain;
   contain: layout style;
 }
+.ob-empty {
+  padding: 0.55rem 0.4rem;
+  text-align: center;
+  opacity: 0.72;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
 .book-ladder {
   flex: 1 1 0;
   min-height: 0;

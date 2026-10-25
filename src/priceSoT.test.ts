@@ -5,13 +5,14 @@ import {
   priceDriftFrac,
   pricesAligned,
   resolveDeskLast,
+  tapeOutsideBbo,
 } from "./priceSoT";
 import { maxBuyBaseAmount, maxOrderBaseAmount } from "./balance";
 import { notionalMeetsMin } from "./money";
 import { baseState, sampleMarket } from "./testFixtures";
 
 describe("resolveDeskLast", () => {
-  it("prefers Soft-MM mid when fresh tape desyncs >5%", () => {
+  it("prefers Soft-MM mid when fresh tape desyncs >2%", () => {
     const last = resolveDeskLast({
       tape: 0.064175,
       tapeAgeMs: 1_000,
@@ -29,13 +30,37 @@ describe("resolveDeskLast", () => {
     expect(last).toBeCloseTo(0.0725, 8);
   });
 
-  it("snaps to Soft-MM when stale tape drifts >5%", () => {
+  it("snaps to Soft-MM when stale tape drifts >2%", () => {
     const mid = resolveDeskLast({
       tape: 0.064175,
       tapeAgeMs: 120_000,
       labMid: 0.072659,
     });
     expect(mid).toBeCloseTo(0.072659, 8);
+  });
+
+  it("snaps to Soft-MM when fresh tape sits above the offer (HMC/BTC live)", () => {
+    // Live 2026-10-25: last=0.0009119 > ask=0.000898 while mid≈0.000894
+    const last = resolveDeskLast({
+      tape: 0.0009119,
+      tapeAgeMs: 5_000,
+      labMid: 0.00089365,
+      bestBid: 0.00088918,
+      bestAsk: 0.00089812,
+    });
+    expect(last).toBeCloseTo(0.00089365, 10);
+    expect(priceDriftFrac(last, 0.00089365)).toBeLessThan(1e-12);
+  });
+
+  it("keeps fresh tape inside the BBO even when mid drifts ~1%", () => {
+    const last = resolveDeskLast({
+      tape: 0.00089812,
+      tapeAgeMs: 2_000,
+      labMid: 0.00089365,
+      bestBid: 0.00088918,
+      bestAsk: 0.00089812,
+    });
+    expect(last).toBeCloseTo(0.00089812, 10);
   });
 
   it("falls back api → tip → prev", () => {
@@ -46,11 +71,25 @@ describe("resolveDeskLast", () => {
   });
 });
 
+describe("tapeOutsideBbo", () => {
+  it("detects print above ask / below bid", () => {
+    expect(tapeOutsideBbo(0.0009119, 0.00088918, 0.00089812)).toBe(true);
+    expect(tapeOutsideBbo(0.00088, 0.00088918, 0.00089812)).toBe(true);
+    expect(tapeOutsideBbo(0.000893, 0.00088918, 0.00089812)).toBe(false);
+  });
+});
+
 describe("limitFormNeedsResync", () => {
   it("resyncs undirtied form stuck on paper ~0.05 while desk Last is live", () => {
     expect(limitFormNeedsResync(0.04996821, 0.072659, false)).toBe(true);
     expect(limitFormNeedsResync(0.0725, 0.072659, false)).toBe(false);
     expect(limitFormNeedsResync(0.04996821, 0.072659, true)).toBe(false);
+  });
+
+  it("resyncs undirtied HMC/BTC form when Last snapped to Soft-MM mid", () => {
+    const deskLast = 0.00089365;
+    expect(limitFormNeedsResync(0.0009119, deskLast, false, 0.02)).toBe(true);
+    expect(limitFormNeedsResync(deskLast * 0.9985, deskLast, false, 0.02)).toBe(false);
   });
 });
 
@@ -71,6 +110,11 @@ describe("pricesAligned", () => {
   it("detects header vs tip divergence from screenshot", () => {
     expect(pricesAligned(0.072659, 0.064175, 0.02)).toBe(false);
     expect(priceDriftFrac(0.072659, 0.064175)).toBeGreaterThan(0.1);
+  });
+
+  it("50 bps heal catches HMC/BTC last↔tip gap", () => {
+    expect(pricesAligned(0.0009119, 0.00089554, 0.005)).toBe(false);
+    expect(pricesAligned(0.00089365, 0.00089365, 0.005)).toBe(true);
   });
 });
 

@@ -761,20 +761,24 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     if (pairId === state.activePair) patchTickerBar();
   }
   const prints = [...apiPrints, ...candlePrintsFromLocalTape(pairId)];
-  // Prefer last trade over Soft-MM book mid — mid can lag Last by 1–3% and desync the tip bar.
+  // Seed tape from newest print, then resolve Last via Soft-MM SoT (outside-BBO /
+  // desync snaps to book mid so hydrate cannot leave tip above the offer).
   const lastPrint = prints.length
     ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.price ?? 0
     : 0;
+  const lastPrintTs = prints.length
+    ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.ts ?? Date.now()
+    : 0;
+  if (lastPrint > 0) setLastPublicMid(pairId, lastPrint, lastPrintTs || Date.now());
   const tip =
-    lastPrint > 0
-      ? lastPrint
-      : tipMid > 0
-        ? tipMid
-        : lastPublicMid(pairId) ||
-          labBookMid(pairId) ||
-          durableBars[durableBars.length - 1]?.close ||
-          cached?.[cached.length - 1]?.close ||
-          0;
+    liveLastPrice(pairId) ||
+    (lastPrint > 0 ? lastPrint : 0) ||
+    (tipMid > 0 ? tipMid : 0) ||
+    lastPublicMid(pairId) ||
+    labBookMid(pairId) ||
+    durableBars[durableBars.length - 1]?.close ||
+    cached?.[cached.length - 1]?.close ||
+    0;
   // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
   if (!prints.length && !(cached?.length) && !(durableBars.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
@@ -1342,7 +1346,7 @@ async function refreshTradingGuardsFromHealth(): Promise<void> {
     if (usePublicDeskBook()) {
       // Matching flipped to ok — start public L2 poll even without Connect.
       startMarketStreamLoop();
-      void refreshLabBooks(["HMC_USDT", "HMC_SUP", "SUP_USDT"] as PairId[]).then(() => {
+      void refreshLabBooks(PAIRS.map((p) => p.id)).then(() => {
         patchBookTapeDom();
       });
     }
@@ -1463,6 +1467,7 @@ function liveLastPrice(pairId: PairId): number {
   const tape = lastPublicMid(pairId);
   const tapeTs = lastPublicTs(pairId);
   const lab = labBookMid(pairId);
+  const book = getLabBookCache(pairId);
   const tipTf = pairId === state.activePair ? state.activeTf : CANDLE_BASE_TF;
   const tip = state.candles[pairId]?.[tipTf]?.slice(-1)[0]?.close ?? 0;
   const ageMs = tapeTs > 0 ? Date.now() - tapeTs : Number.POSITIVE_INFINITY;
@@ -1472,6 +1477,8 @@ function liveLastPrice(pairId: PairId): number {
     tape,
     tapeAgeMs: ageMs,
     labMid: lab,
+    bestBid: book?.bids[0]?.price ?? 0,
+    bestAsk: book?.asks[0]?.price ?? 0,
     apiLast: api,
     tipClose: tip,
     prevMid: prev,
@@ -2315,7 +2322,11 @@ function renderBook(): string {
     }
     <div class="ob-head"><span>${mobileBook ? "Price" : `Price (${pair.quote})`}</span><span>${mobileBook ? "Amt" : `Amount (${pair.base})`}</span><span class="ob-total">${mobileBook ? "Tot" : "Total"}</span></div>
     <div class="book-ladder">
-      <div class="ob-asks-pane" data-book-pane="asks">${visibleAsks.slice().reverse().map((l) => row(l, "ask")).join("")}</div>
+      <div class="ob-asks-pane" data-book-pane="asks">${
+        visibleAsks.length
+          ? visibleAsks.slice().reverse().map((l) => row(l, "ask")).join("")
+          : `<div class="ob-empty muted small">${labLive ? "No asks — Soft-MM refreshing" : "No asks"}</div>`
+      }</div>
       <div class="ob-mid" title="${midTitle}">
         <div class="ob-mid-price">${formatPrice(midPx)}</div>
         <div class="ob-mid-spread">${
@@ -2325,7 +2336,11 @@ function renderBook(): string {
         }</div>
         ${mobileBook ? "" : `<div class="ob-mid-src muted small">${midHint}</div>`}
       </div>
-      <div class="ob-bids-pane" data-book-pane="bids">${visibleBids.map((l) => row(l, "bid")).join("")}</div>
+      <div class="ob-bids-pane" data-book-pane="bids">${
+        visibleBids.length
+          ? visibleBids.map((l) => row(l, "bid")).join("")
+          : `<div class="ob-empty muted small">${labLive ? "No bids — Soft-MM refreshing" : "No bids"}</div>`
+      }</div>
     </div>`;
 }
 
@@ -9191,10 +9206,12 @@ function microTickPrices(): void {
   if (!market) return;
   const labLive = useLiveBook();
   // Hidden tab: still roll candle time with last known mid so new bars appear.
+  // Use the same Last SoT as the visible path — not raw Soft-MM mid alone —
+  // so tip/header cannot desync across tab blur/focus.
   if (document.hidden) {
     for (const p of PAIRS) {
       const mid = labLive
-        ? labBookMid(p.id) || lastPublicMid(p.id) || prevMids[p.id] || 0
+        ? liveLastPrice(p.id) || labBookMid(p.id) || lastPublicMid(p.id) || prevMids[p.id] || 0
         : midForPair(market, p.id);
       if (mid > 0) tipCandlesForPair(p.id, mid, labLive);
     }
@@ -9214,14 +9231,14 @@ function microTickPrices(): void {
     for (const p of PAIRS) {
       if (!tickers[p.id]) continue;
       if (labLive) {
-        const labMid = labBookMid(p.id);
-        if (labMid > 0) {
-          const book = getLabBookCache(p.id);
+        const book = getLabBookCache(p.id);
+        const last = liveLastPrice(p.id) || labBookMid(p.id);
+        if (last > 0) {
           tickers[p.id] = {
             ...tickers[p.id]!,
-            mid: labMid,
-            bid: book?.bids[0]?.price ?? labMid * 0.999,
-            ask: book?.asks[0]?.price ?? labMid * 1.001,
+            mid: last,
+            bid: book?.bids[0]?.price ?? last * 0.999,
+            ask: book?.asks[0]?.price ?? last * 1.001,
           };
         }
       } else {
@@ -9306,9 +9323,10 @@ function microTickPrices(): void {
     }
   }
   const quote = activePairQuote();
-  // Chart tip close must share toolbar Last — heal + repaint when they diverge.
+  // Chart tip close must share toolbar Last — heal + repaint when they diverge
+  // (50 bps: Soft-MM HMC/BTC last↔book gaps were ~2% and left tip stuck).
   const tipClose = candles[candles.length - 1]?.close ?? 0;
-  if (quote.mid > 0 && tipClose > 0 && !pricesAligned(quote.mid, tipClose, 0.01)) {
+  if (quote.mid > 0 && tipClose > 0 && !pricesAligned(quote.mid, tipClose, 0.005)) {
     tipCandlesForPair(state.activePair, quote.mid, labLive);
     const healed = state.candles[state.activePair]?.[state.activeTf] ?? [];
     const tip = healed[healed.length - 1];
