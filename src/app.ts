@@ -6391,6 +6391,7 @@ function setPaneTf(pane: number, tf: Timeframe): void {
     const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
     if (!switchChartTimeframe(candles, opts)) mountChartPanel();
     else refreshOhlcLegendIdle();
+    if (useLiveBook()) syncLimitFormToDeskLast(state.activePair);
     return;
   }
   const next = [...(state.multiPaneTfs ?? ["15m", "1H", "1D"])] as MultiPaneTfs;
@@ -8516,6 +8517,7 @@ function wireEvents(): void {
     const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
     if (!switchChartTimeframe(candles, opts)) mountChartPanel();
     else refreshOhlcLegendIdle();
+    if (useLiveBook()) syncLimitFormToDeskLast(state.activePair);
   };
 
   document.querySelectorAll(".tfq").forEach((btn) => {
@@ -9342,7 +9344,8 @@ function microTickPrices(): void {
   evaluateAllPriceAlerts();
   if (scrubbing) return;
   patchTickerBar(quote);
-  if (labLive && liveTickN % 2 === 0) syncLimitFormToDeskLast(state.activePair);
+  // Every tick — Soft-MM Last can move >75 bps between 2-tick samples (SUP/BTC).
+  if (labLive) syncLimitFormToDeskLast(state.activePair);
   if (liveTickN % 3 === 0) {
     const tape = document.getElementById("tape");
     if (tape) tape.innerHTML = renderTape();

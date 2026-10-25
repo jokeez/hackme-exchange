@@ -62,7 +62,7 @@ async function main() {
           .first()
           .click({ timeout: 2500 })
           .catch(() => {});
-        await page.waitForTimeout(550);
+        await page.waitForTimeout(900);
         const snap = await page.evaluate(
           ({ pairId, tfId }) => {
             const headerTxt = (document.querySelector(".tb-price")?.textContent || "").replace(/[^\d.]/g, "");
