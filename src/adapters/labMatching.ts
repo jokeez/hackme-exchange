@@ -32,6 +32,7 @@ import {
 } from "./exchangeApi";
 import { activeVipTier, clearServerVipVolume, hasServerVipVolume, setServerVipVolumeUsdt } from "../fees";
 import { recordTradeLedger } from "../ledger";
+import { formatBookQty, formatInputQty } from "../format";
 import { midForPair } from "../market";
 import { cancelOrder } from "../store";
 import { isDeskMatchingLive } from "../settingsModal";
@@ -499,7 +500,7 @@ export function labPlaceNote(
   }
   if (fillCount > 0 && type === "market" && cancelled && filledBase + 1e-12 < amountBase) {
     return {
-      note: `Partial fill · ${fillCount} print(s) · book exhausted (filled ${filledBase.toPrecision(6)} of ${amountBase})`,
+      note: `Partial fill · ${fillCount} print(s) · book exhausted (filled ${formatBookQty(filledBase)} of ${formatInputQty(amountBase)})`,
       partialLiquidity: true,
     };
   }

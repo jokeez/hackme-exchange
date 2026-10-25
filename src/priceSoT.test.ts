@@ -77,6 +77,21 @@ describe("tapeOutsideBbo", () => {
     expect(tapeOutsideBbo(0.00088, 0.00088918, 0.00089812)).toBe(true);
     expect(tapeOutsideBbo(0.000893, 0.00088918, 0.00089812)).toBe(false);
   });
+
+  it("desk Last after outside-BBO print matches Soft-MM (public_tape tip seed)", () => {
+    // Simulate: set tape to print above ask, then resolve — tip must use this Last.
+    const print = 0.0009119;
+    const lab = 0.00089365;
+    const last = resolveDeskLast({
+      tape: print,
+      tapeAgeMs: 0,
+      labMid: lab,
+      bestBid: 0.00088918,
+      bestAsk: 0.00089812,
+    });
+    expect(last).toBeCloseTo(lab, 10);
+    expect(pricesAligned(last, print, 0.01)).toBe(false);
+  });
 });
 
 describe("limitFormNeedsResync", () => {

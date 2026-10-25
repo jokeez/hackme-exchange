@@ -16,6 +16,13 @@ describe("labPlaceNote thin-book UX", () => {
     expect(r.note).toMatch(/49/);
   });
 
+  it("never uses scientific notation for micro BTC-base partial fills", () => {
+    const r = labPlaceNote("market", 2, 1.23e-7, 5e-7, "canceled");
+    expect(r.partialLiquidity).toBe(true);
+    expect(r.note).not.toMatch(/e[+-]?\d/i);
+    expect(r.note).toMatch(/0\.000000/);
+  });
+
   it("keeps full-fill note without liquidity warn", () => {
     const r = labPlaceNote("market", 1, 10, 10, "filled");
     expect(r.liquidityWarn).toBeFalsy();

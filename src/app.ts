@@ -2836,7 +2836,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
         hint.textContent =
           avail < amt
             ? `Need ${formatPrice(amt - avail)} more ${assetSymbol(convertFrom)}`
-            : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · desk mid (Soft-MM / last trade)`;
+            : `You receive ≈ ${formatPrice(netDisp)} ${assetSymbol(convertTo)} net (gross ${formatPrice(gotDisp)}) · inventory mid (not spot Last)`;
       }
       const maxOk = maxConvertibleFrom();
       paintConvertCta(go, amt, avail < amt || amt > maxOk + 1e-12);
@@ -6506,6 +6506,14 @@ function patchLive(): void {
   if (state.mainView !== "spot") return;
   markPerf("patchLive-start");
   const quote = activePairQuote();
+  // Heal tip↔Last immediately on tape/fill patches (don't wait for microTick).
+  if (useLiveBook() && quote.mid > 0) {
+    const series = state.candles[state.activePair]?.[state.activeTf];
+    const tipClose = series?.[series.length - 1]?.close ?? 0;
+    if (tipClose > 0 && !pricesAligned(quote.mid, tipClose, 0.005)) {
+      tipCandlesForPair(state.activePair, quote.mid, true);
+    }
+  }
   patchTickerBar(quote);
   patchMarketRowsInPlace();
   // Order book is NOT patched here — chart ticks must stay smooth (see startBookLoop).
@@ -6664,8 +6672,9 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
       setLastPublicMid(ev.pairId, newest.price, newest.ts || Date.now());
       // Rebuild OHLC from tape+cache so F5-restored spikes and multi-print moves stick.
       if (ev.pairId === state.activePair && useLiveBook()) {
-        // Tip MUST be the print — Soft-MM mid flattens the chart after re-peg.
-        const tip = newest.price;
+        // Tip close = desk Last (outside-BBO / >2% snaps to Soft-MM). Wick still
+        // expands toward the print via upsertAllCandles — never leave tip above ask.
+        const tip = liveLastPrice(ev.pairId) || newest.price;
         const baseLen = state.candles[ev.pairId]?.[CANDLE_BASE_TF]?.length ?? 0;
         // Full hydrate needs a dense tape. Sparse WS bursts + seed pad were wiping the chart
         // the user was watching — only rebuild when we already have a long series to merge
@@ -7138,7 +7147,7 @@ function submitOrder(side: "buy" | "sell"): void {
           if (retry > 0 && retry < amt) {
             amt = retry;
             const inp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
-            if (inp) inp.value = String(amt);
+            if (inp) inp.value = formatInputQty(amt);
             lab = await placeLabOrder(
               state,
               state.activePair,
@@ -7704,7 +7713,8 @@ function toggleOrderFields(): void {
 function setAmountPct(side: "buy" | "sell", pct: number): void {
   const amtInp = document.getElementById(`${side}-amt`) as HTMLInputElement | null;
   if (!amtInp || !market) return;
-  const mid = midForPair(market, state.activePair);
+  // Desk Last (Soft-MM / tape SoT) — not pool-oracle mid, which lags live BBO.
+  const mid = spotMidForPair(state.activePair) || midForPair(market, state.activePair);
   const t = activeTicker();
   let price = side === "buy" ? t.ask : t.bid;
   if (useLiveBook()) {
@@ -9108,18 +9118,18 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
   const prev = prevMids[pairId];
 
   if (useServerMatching() || useLiveBook()) {
-    // Live desk: Last = print. Soft-MM bid/ask IS the traded price — do not crush to L2 mid.
-    // Reject impossible fills (minors leak / sci) so one bad VWAP cannot paint a skyscraper tip.
+    // Live desk: seed tape from the print, then tip close = desk Last (Soft-MM wins
+    // outside BBO / >2%). Wick expands toward the fill; never pin close above ask.
     const refPx = tapeMid || bookMid || prev || 0;
     const fillOk =
       fillPx > 0 &&
       Number.isFinite(fillPx) &&
       fillPx < 50 &&
       (!(refPx > 0) || (fillPx <= refPx * 4.5 && fillPx >= refPx / 4.5));
-    const tipPx = fillOk ? fillPx : tapeMid || bookMid || prev || 0;
+    if (fillOk) setLastPublicMid(pairId, fillPx);
+    const tipPx = liveLastPrice(pairId) || (fillOk ? fillPx : 0) || tapeMid || bookMid || prev || 0;
     if (!(tipPx > 0)) return;
-    // Lock Last to this print so microTick cannot snap tip back to stale Soft-MM mid.
-    setLastPublicMid(pairId, tipPx);
+    const wickPx = fillOk ? fillPx : tipPx;
     const dayRange = liveDayRangeForPair(pairId);
     let next = applyMidToPairCandles(state.candles[pairId]!, pairId, tipPx, prev, {
       syntheticVolume: false,
@@ -9132,8 +9142,8 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
         if (!series?.length) continue;
         const tip = { ...series[series.length - 1]! };
         tip.close = tipPx;
-        tip.high = Math.max(tip.high, tip.open, tip.close, tipPx);
-        tip.low = Math.min(tip.low, tip.open, tip.close, tipPx);
+        tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
+        tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
         tip.volume = (tip.volume || 0) + volAdd;
         series[series.length - 1] = tip;
       }
