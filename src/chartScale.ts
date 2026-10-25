@@ -531,6 +531,31 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     const bodyLo = Math.min(open, close);
     const dumpNeedle =
       bodyLo > 0 && (bodyLo - low) / bodyLo > Math.max(maxWick * 2.5, 0.008);
+    // Empty-bucket holds (vol=0, O=H=L=C) stay pristine so LWC can hide them as whitespace.
+    // Never fatten / invent volume — that painted diagonal cross stairs after gap ramps.
+    const flatGapBridge =
+      i !== tipIdx &&
+      raw.volume === 0 &&
+      raw.open === raw.close &&
+      raw.high === raw.close &&
+      raw.low === raw.close;
+    if (flatGapBridge) {
+      const prev = i > 0 ? out[i - 1]!.close : 0;
+      const hold = finitePos(raw.close)
+        ? raw.close
+        : finitePos(prev)
+          ? prev
+          : tipClose;
+      out[i] = {
+        time: raw.time,
+        open: hold,
+        high: hold,
+        low: hold,
+        close: hold,
+        volume: 0,
+      };
+      continue;
+    }
     const flatTape =
       i !== tipIdx &&
       Math.abs(close - open) / midRef < minBody * 0.55 &&

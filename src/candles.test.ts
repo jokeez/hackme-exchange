@@ -362,13 +362,46 @@ describe("1D contiguity / gap abuse", () => {
     expect(healed).toHaveLength(9); // 23..31 inclusive
     expect(healed[0].time).toBe(t0);
     expect(healed[healed.length - 1].time).toBe(t0 + 8 * day);
-    // Gap days: constrained idle walk (visible body, no spike forests).
+    // Gap days: flat hold at prior close (no idle-walk / ramp into next print).
     expect(healed[1].time).toBe(t0 + day); // 24th
     expect(healed[1].open).toBe(1);
-    expect(Math.abs(healed[1].close - 1) / 1).toBeLessThan(0.01);
-    expect(healed[1].high).toBeGreaterThanOrEqual(Math.max(healed[1].open, healed[1].close));
-    expect(healed[1].low).toBeLessThanOrEqual(Math.min(healed[1].open, healed[1].close));
-    expect((healed[1].high - healed[1].low) / 1).toBeLessThan(0.02);
+    expect(healed[1].close).toBe(1);
+    expect(healed[1].high).toBe(1);
+    expect(healed[1].low).toBe(1);
+    expect(healed[1].volume).toBe(0);
+  });
+
+  it("sparse prints: synthetic stretch has zero close-to-close delta (no diagonal ramp)", () => {
+    const sec = 900; // 15m — screenshot TF
+    const t0 = Math.floor(Date.parse("2026-10-25T12:00:00.000Z") / 1000 / sec) * sec;
+    const sparse: Candle[] = [
+      { time: t0, open: 0.08, high: 0.081, low: 0.079, close: 0.08, volume: 12 },
+      { time: t0 + 20 * sec, open: 0.06, high: 0.061, low: 0.059, close: 0.06, volume: 8 },
+      { time: t0 + 40 * sec, open: 0.07, high: 0.072, low: 0.069, close: 0.071, volume: 15 },
+    ];
+    const healed = ensureContiguousCandles(sparse, "15m", { pairId: "HMC_USDT" });
+    expect(candlesAreContiguous(healed, "15m")).toBe(true);
+    expect(healed).toHaveLength(41);
+
+    // Between print0 and print1: every synthetic close == 0.08 (no stair toward 0.06).
+    for (let i = 1; i < 20; i++) {
+      expect(healed[i]!.volume).toBe(0);
+      expect(healed[i]!.close).toBe(0.08);
+      expect(healed[i]!.open).toBe(0.08);
+      expect(healed[i]!.high).toBe(0.08);
+      expect(healed[i]!.low).toBe(0.08);
+    }
+    // Between print1 and print2: hold at 0.06 (no ramp toward 0.07).
+    for (let i = 21; i < 40; i++) {
+      expect(healed[i]!.volume).toBe(0);
+      expect(healed[i]!.close).toBe(0.06);
+      expect(healed[i]!.open).toBe(0.06);
+    }
+    // Durable prints immutable.
+    expect(healed[20]!.close).toBe(0.06);
+    expect(healed[20]!.open).toBe(0.06);
+    expect(healed[40]!.close).toBe(0.071);
+    expect(healed[40]!.open).toBe(0.07);
   });
 
   it("upsertTick fills multi-day idle gap on 1D", () => {

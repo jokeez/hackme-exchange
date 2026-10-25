@@ -39,7 +39,7 @@ import {
   isMeaningfulMeasure,
   resolvePaintDrawings,
 } from "./chartDraw";
-import { ensureContiguousCandles, MAX_CANDLES } from "./candles";
+import { ensureContiguousCandles, MAX_CANDLES, toLwcLinePoints, toLwcOhlcPoints } from "./candles";
 import {
   clampPaintPriceSpan,
   displayCapCandles,
@@ -3079,21 +3079,24 @@ export function setCandleData(
     return;
   }
 
-  const candleData = currentCandles.map((c) => ({
-    time: c.time as UTCTimestamp,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-  }));
-  const barData = currentCandles.map((c) => ({
-    time: c.time as UTCTimestamp,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-  }));
-  const lineData = currentCandles.map((c) => ({ time: c.time as UTCTimestamp, value: c.close }));
+  // Flat vol=0 bridges → LWC whitespace (no diagonal dojis); tip always painted.
+  const candleData = toLwcOhlcPoints(currentCandles).map((d) =>
+    "open" in d
+      ? {
+          time: d.time as UTCTimestamp,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+        }
+      : { time: d.time as UTCTimestamp },
+  );
+  const barData = candleData;
+  const lineData = toLwcLinePoints(currentCandles).map((d) =>
+    "value" in d
+      ? { time: d.time as UTCTimestamp, value: d.value }
+      : { time: d.time as UTCTimestamp },
+  );
   const volData = currentCandles.map((c) => ({
     time: c.time as UTCTimestamp,
     value: c.volume,

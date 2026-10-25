@@ -15,7 +15,7 @@ import { displayCapCandles, logicalRangeToIndices, robustPriceRange } from "./ch
 import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isChartPointerBusy, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, noteChartPointerBusy, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
-import { ensureContiguousCandles } from "./candles";
+import { ensureContiguousCandles, toLwcOhlcPoints } from "./candles";
 import type { Drawing } from "./types";
 import { escapeHtml } from "./sanitize";
 import { orderTypeLabel } from "./orders";
@@ -199,15 +199,18 @@ function slotKey(el: HTMLElement): string {
 }
 
 function candlePoints(candles: Candle[]) {
-  return [...candles]
-    .sort((a, b) => a.time - b.time)
-    .map((c) => ({
-      time: c.time as UTCTimestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+  const sorted = [...candles].sort((a, b) => a.time - b.time);
+  return toLwcOhlcPoints(sorted).map((d) =>
+    "open" in d
+      ? {
+          time: d.time as UTCTimestamp,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+        }
+      : { time: d.time as UTCTimestamp },
+  );
 }
 
 function rememberRange(slot: Slot): void {

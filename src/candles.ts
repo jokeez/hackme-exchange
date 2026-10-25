@@ -1073,8 +1073,8 @@ function finiteMid(n: number | undefined): n is number {
 
 /**
  * Idle UTC hole — true flat hold O=H=L=C=prev.close.
- * Must not drift (old +8bps/bar compounded into tip-band walks across long gaps).
- * Display paint (`displayCapCandles`) fattenes quiet dojis for LWC visibility.
+ * Must not drift / ramp toward the next print (that painted diagonal doji stairs).
+ * Display paint may hide these as LWC whitespace while keeping time continuity.
  */
 function flatGapBar(t: number, px: number): Candle {
   const p = px > 0 && Number.isFinite(px) ? px : 1e-12;
@@ -1086,6 +1086,42 @@ function flatGapBar(t: number, px: number): Candle {
     close: p,
     volume: 0,
   };
+}
+
+/** Empty-bucket hold from flatGapBar / ensureContiguousCandles — never a durable print. */
+export function isFlatGapBridge(c: Candle): boolean {
+  if (!c || c.volume !== 0) return false;
+  const p = c.close;
+  if (!(p > 0) || !Number.isFinite(p)) return false;
+  return c.open === p && c.high === p && c.low === p;
+}
+
+/**
+ * LWC OHLC points — hide flat gap bridges as whitespace (time continuity kept for tip).
+ * Tip bar always paints so Last stays visible.
+ */
+export function toLwcOhlcPoints(
+  candles: Candle[],
+): Array<
+  | { time: number; open: number; high: number; low: number; close: number }
+  | { time: number }
+> {
+  const tip = candles.length - 1;
+  return candles.map((c, i) => {
+    if (i !== tip && isFlatGapBridge(c)) return { time: c.time };
+    return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
+  });
+}
+
+/** LWC line/area points — same whitespace hide for flat bridges. */
+export function toLwcLinePoints(
+  candles: Candle[],
+): Array<{ time: number; value: number } | { time: number }> {
+  const tip = candles.length - 1;
+  return candles.map((c, i) => {
+    if (i !== tip && isFlatGapBridge(c)) return { time: c.time };
+    return { time: c.time, value: c.close };
+  });
 }
 
 /**
@@ -1455,36 +1491,14 @@ export function ensureContiguousCandles(
   }
 
   // freezeExisting (default): never rewrite durable/print open/H/L/C (cross-device SoT).
-  // Flying islands = missing UTC buckets. Fill empties with flat bridges; optionally soft-bridge
-  // opens only when freezeExisting:false (paper). Vertical print gaps stay honest auction jumps.
+  // Flying islands = missing UTC buckets. Fill empties with flat O=H=L=C=prev.close only —
+  // never interpolate / idle-walk / ramp into the next print open (diagonal doji stairs).
+  // Vertical print gaps stay honest auction jumps; displayCap may soft-bridge opens for paint.
   const freezeExisting = opts?.freezeExisting !== false;
-  /** Times of flat bridges invented in THIS pass — never treat cache vol=0 as synthetic. */
-  const syntheticTimes = new Set<number>();
   for (let t = start; t <= end; t += sec) {
     if (t < g) continue;
     const hit = byBucket.get(t);
     if (hit) {
-      // Ramp trailing synthetics into this bar's open so the path meets without
-      // rewriting durable/print/cache OHLC (keeps multi-device /candles SoT aligned).
-      if (out.length && hit.open > 0) {
-        let i = out.length - 1;
-        while (i >= 0 && syntheticTimes.has(out[i]!.time)) i--;
-        const fillFrom = i + 1;
-        if (fillFrom < out.length) {
-          const fromPx =
-            fillFrom > 0 && out[fillFrom - 1]!.close > 0 ? out[fillFrom - 1]!.close : px;
-          const target = hit.open;
-          const n = out.length - fillFrom;
-          for (let j = 0; j < n; j++) {
-            const frac = (j + 1) / n;
-            const p = fromPx + (target - fromPx) * frac;
-            const bt = out[fillFrom + j]!.time;
-            out[fillFrom + j] = flatGapBar(bt, p > 0 ? p : target);
-            syntheticTimes.add(bt);
-          }
-          px = target;
-        }
-      }
       let bar = hit;
       if (!freezeExisting && out.length && px > 0) {
         const jump = Math.abs(hit.open - px) / px;
@@ -1504,7 +1518,6 @@ export function ensureContiguousCandles(
       const open = px > 0 ? px : tipPxFallback(byBucket, times, px);
       const fill = flatGapBar(t, open > 0 ? open : 1e-12);
       out.push(fill);
-      syntheticTimes.add(t);
       px = fill.close;
     }
   }

@@ -39,6 +39,20 @@ async function localUnitProof() {
     });
     if (!candlesAreContiguous(healed, "1m")) fail.push("unit: ensureContiguous not contiguous");
     if (healed.at(-1).time !== tip) fail.push("unit: tip not filled to now");
+    // No diagonal ramp: synthetic (vol=0) bars must hold prior close flat.
+    for (let i = 1; i < healed.length; i++) {
+      const cur = healed[i];
+      const prev = healed[i - 1];
+      if (cur.volume !== 0) continue;
+      if (Math.abs(cur.close - prev.close) > 1e-15) {
+        fail.push(`unit: synthetic ramp Δclose at t=${cur.time} ${prev.close}→${cur.close}`);
+        break;
+      }
+      if (cur.open !== cur.close || cur.high !== cur.close || cur.low !== cur.close) {
+        fail.push(`unit: synthetic not flat OHL=C at t=${cur.time}`);
+        break;
+      }
+    }
     const all = hydrateLiveCandlesFromPrints(
       "HMC_USDT",
       [{ ts: tip * 1000, price: 0.069, amountBase: 1 }],

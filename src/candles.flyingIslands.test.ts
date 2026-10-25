@@ -1,7 +1,7 @@
 /**
  * Flying candles regression: sparse durable /candles islands must become
- * time-contiguous with flat bridges, tip at wall-clock now, no open jumps.
- * Closed print OHLC (H/L/C) stay immutable — only open may bridge to prior close.
+ * time-contiguous with flat bridges (no diagonal ramp), tip at wall-clock now.
+ * Closed print OHLC stay immutable; displayCap may soft-bridge opens for paint.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +9,8 @@ import {
   candlesAreContiguous,
   ensureContiguousCandles,
   hydrateLiveCandlesFromPrints,
+  isFlatGapBridge,
+  toLwcOhlcPoints,
 } from "./candles";
 import { displayCapCandles, paintedCandleHealth } from "./chartScale";
 import type { Candle } from "./types";
@@ -57,7 +59,7 @@ function gapFillBars(series: Candle[], durableTimes: Set<number>): Candle[] {
 }
 
 describe("flying candle islands (sparse durable + tip void)", () => {
-  it("ensureContiguousCandles fills time gaps with flat bridges and bridges opens", () => {
+  it("ensureContiguousCandles fills time gaps with flat bridges (no ramp into next print)", () => {
     const sparse = sparseFlyingDurable();
     const durableT = new Set(sparse.map((c) => c.time));
     const healed = ensureContiguousCandles(sparse, "1m", {
@@ -68,8 +70,6 @@ describe("flying candle islands (sparse durable + tip void)", () => {
 
     expect(candlesAreContiguous(healed, "1m")).toBe(true);
     expect(healed[healed.length - 1]!.time).toBe(tipBucket);
-    // Trailing flat fills retarget into the next durable open — no 5%+ open cliffs.
-    expect(countOpenJumps(healed, 0.05)).toBe(0);
 
     const fills = gapFillBars(healed, durableT);
     expect(fills.length).toBeGreaterThan(10);
@@ -81,6 +81,15 @@ describe("flying candle islands (sparse durable + tip void)", () => {
       expect(f.volume).toBe(0);
     }
 
+    // Synthetic stretch: zero close-to-close delta (no diagonal ramp toward next print).
+    for (let i = 1; i < healed.length; i++) {
+      const prev = healed[i - 1]!;
+      const cur = healed[i]!;
+      if (cur.volume !== 0) continue;
+      expect(cur.close).toBeCloseTo(prev.close, 12);
+      expect(cur.open).toBeCloseTo(prev.close, 12);
+    }
+
     // Durable/print OHLC fully immutable (opens included — cross-device SoT).
     for (const raw of sparse) {
       const hit = healed.find((c) => c.time === raw.time)!;
@@ -89,6 +98,8 @@ describe("flying candle islands (sparse durable + tip void)", () => {
       expect(hit.high).toBeCloseTo(raw.high, 12);
       expect(hit.low).toBeCloseTo(raw.low, 12);
     }
+    // Auction open jumps at durable edges are honest — never interpolated away.
+    expect(countOpenJumps(healed, 0.05)).toBeGreaterThan(0);
   });
 
   it("hydrateLiveCandlesFromPrints densifies flying islands and tips at now", () => {
@@ -121,6 +132,33 @@ describe("flying candle islands (sparse durable + tip void)", () => {
     expect(painted[painted.length - 1]!.time).toBe(tipBucket);
     // Display soft-bridges opens — no island-class open≠prev.close after paint.
     expect(countOpenJumps(painted, 0.05)).toBe(0);
+  });
+
+  it("toLwcOhlcPoints hides flat bridges as whitespace but keeps tip", () => {
+    const sparse = sparseFlyingDurable();
+    const healed = ensureContiguousCandles(sparse, "1m", {
+      pairId: "HMC_USDT",
+      fillToNow: true,
+      nowMs,
+    });
+    const painted = displayCapCandles(healed, "1m");
+    const pts = toLwcOhlcPoints(painted);
+    expect(pts).toHaveLength(painted.length);
+    expect("open" in pts[pts.length - 1]!).toBe(true);
+    let whitespace = 0;
+    let ohlc = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]!;
+      if ("open" in p) {
+        ohlc++;
+        if (i < pts.length - 1) expect(isFlatGapBridge(painted[i]!)).toBe(false);
+      } else {
+        whitespace++;
+        expect(isFlatGapBridge(painted[i]!)).toBe(true);
+      }
+    }
+    expect(whitespace).toBeGreaterThan(10);
+    expect(ohlc).toBeGreaterThan(sparse.length);
   });
 
   it("tip pump does not remap closed durable print closes after contiguous heal", () => {
