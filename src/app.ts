@@ -1512,8 +1512,9 @@ function syncLimitFormToDeskLast(pairId: PairId = state.activePair): void {
     const inp = document.getElementById(`${side}-price`) as HTMLInputElement | null;
     if (!inp) continue;
     const cur = Number(inp.value);
-    if (!limitFormNeedsResync(cur, deskLast, false, 0.02)) continue;
+    // Compare to resting target (not raw Last) so ±15 bps offset is not a false drift.
     const resting = deskLast * (side === "buy" ? 0.9985 : 1.0015);
+    if (!limitFormNeedsResync(cur, resting, false, 0.0075)) continue;
     inp.value = tickInputValue(resting, pairId);
     changed = true;
   }

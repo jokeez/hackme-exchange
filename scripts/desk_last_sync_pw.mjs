@@ -136,10 +136,11 @@ async function main() {
           }
         }
         if (snap.buyPx > 0 && snap.headerLast > 0) {
-          const d = Math.abs(snap.buyPx - snap.headerLast) / Math.max(snap.buyPx, snap.headerLast);
-          if (d > 0.03) {
+          const resting = snap.headerLast * 0.9985;
+          const d = Math.abs(snap.buyPx - resting) / Math.max(snap.buyPx, resting);
+          if (d > 0.01) {
             bad(
-              `${pair} ${tf}: buy form↔header drift ${(d * 100).toFixed(2)}% form=${snap.buyPx} last=${snap.headerLast}`,
+              `${pair} ${tf}: buy form↔resting drift ${(d * 100).toFixed(2)}% form=${snap.buyPx} resting=${resting}`,
             );
           }
         }

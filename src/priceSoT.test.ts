@@ -88,8 +88,11 @@ describe("limitFormNeedsResync", () => {
 
   it("resyncs undirtied HMC/BTC form when Last snapped to Soft-MM mid", () => {
     const deskLast = 0.00089365;
-    expect(limitFormNeedsResync(0.0009119, deskLast, false, 0.02)).toBe(true);
-    expect(limitFormNeedsResync(deskLast * 0.9985, deskLast, false, 0.02)).toBe(false);
+    const resting = deskLast * 0.9985;
+    expect(limitFormNeedsResync(0.0009119, resting, false, 0.0075)).toBe(true);
+    expect(limitFormNeedsResync(resting, resting, false, 0.0075)).toBe(false);
+    // ~0.85% stale form vs resting must resync (was hidden under 2% tol).
+    expect(limitFormNeedsResync(deskLast * 1.0085, resting, false, 0.0075)).toBe(true);
   });
 });
 
