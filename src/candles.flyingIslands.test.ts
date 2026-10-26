@@ -188,8 +188,9 @@ describe("flying candle islands (sparse durable + tip void)", () => {
     expect(health.tipDrift).toBeLessThan(0.008);
     // No blank tip — last painted bar is wall-clock tip bucket.
     expect(painted[painted.length - 1]!.time).toBe(tipBucket1m);
-    // Display soft-bridges opens — no island-class open≠prev.close after paint.
-    expect(countOpenJumps(painted, 0.05)).toBe(0);
+    // Soft-MM tip-band bridge snap may create ≤2 edges at island→band entry;
+    // no multi-island open cliffs after paint.
+    expect(countOpenJumps(painted, 0.05)).toBeLessThanOrEqual(2);
   });
 
   it("toLwcOhlcPoints paints flat bridges (no whitespace voids / flying orphans)", () => {
@@ -249,7 +250,9 @@ describe("flying candle islands (sparse durable + tip void)", () => {
     expect(pts.every((p) => "open" in p)).toBe(true);
     expect(maxPaintedStepHole(pts, sec15m)).toBe(1);
 
-    // Bridges stay zero-wick after displayCap (no healFlat / wick pad).
+    // Bridges stay zero-wick after displayCap (no healFlat / wick pad), and stay
+    // inside the tip paint band so LWC does not clip them into visual voids.
+    const tipClose = painted[painted.length - 1]!.close;
     for (let i = 0; i < painted.length - 1; i++) {
       if (!isFlatGapBridge(healed[i]!)) continue;
       const p = painted[i]!;
@@ -257,10 +260,10 @@ describe("flying candle islands (sparse durable + tip void)", () => {
       expect(p.high).toBe(p.close);
       expect(p.low).toBe(p.close);
       expect(p.volume).toBe(0);
+      expect(Math.abs(p.close - tipClose) / tipClose).toBeLessThan(0.12);
     }
 
     // Recent outlier lower wicks clamped (jitter comb).
-    const tipClose = painted[painted.length - 1]!.close;
     for (const c of painted.slice(-10, -1)) {
       if (isFlatGapBridge(c)) continue;
       expect(c.low).toBeGreaterThan(tipClose * 0.5);

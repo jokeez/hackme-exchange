@@ -478,10 +478,14 @@ function isPaintFlatGapBridge(c: Candle): boolean {
  */
 function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
   const maxWick = maxWickFracForTf(tf);
-  const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.2);
+  const paintSpan = paintMaxSpanFracForTf(tf);
+  const tipWick = Math.max(maxWick, paintSpan * 0.2);
   const minTipBody = Math.min(Math.max(paintMaxBodyFracForTf(tf) * 0.25, 0.0008), 0.0025);
   // Multiplier vs series median — day pumps OK; minors/sci spikes rejected.
-  const outlierMult = tf === "1D" || tf === "1W" ? 4.5 : tf === "4H" || tf === "2H" ? 3.5 : 2.75;
+  // Tighter than before: screenshot-class mile wicks were blowing Y-scale so flat
+  // Soft-MM bridges (at island closes) clipped off-pane → multi-day visual voids.
+  const outlierMult =
+    tf === "1D" || tf === "1W" ? 3.2 : tf === "4H" || tf === "2H" ? 2.6 : 2.1;
   const tipIdx = candles.length - 1;
   const tipClose = finitePos(candles[tipIdx]!.close)
     ? candles[tipIdx]!.close
@@ -492,6 +496,14 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
 
   const closes = candles.map((c) => c.close).filter(finitePos).sort((a, b) => a - b);
   const seriesMid = median(closes) || tipClose;
+  // Bridge-only tip envelope: robust Y prefers recent tape, so Soft-MM flat holds
+  // parked at old island closes clipped off-pane → empty LWC columns (flying voids)
+  // even when the series was time-contiguous. Snap bridge dojis into the tip pane;
+  // printed/durable OHLC stay honest (not dragged to Last).
+  const bridgeSpan = Math.min(paintSpan * 0.55, Math.max(paintMinSpanFracForTf(tf) * 1.6, 0.045));
+  const bridgeLo = tipClose * (1 - bridgeSpan);
+  const bridgeHi = tipClose * (1 + bridgeSpan);
+  const clampBridge = (px: number) => Math.min(bridgeHi, Math.max(bridgeLo, px));
 
   const out: Candle[] = new Array(candles.length);
   let lastPrintedClose = 0;
@@ -502,16 +514,18 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
     let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
 
-    // Empty-bucket holds stay pristine thin dojis (paint continuous Soft-MM path).
-    // Never fatten / invent volume / wick pad — that painted the flat horizontal comb.
+    // Empty-bucket holds: O=H=L=C doji inside tip band (continuous Soft-MM path).
+    // Never invent volume / wick pad — that painted the flat horizontal comb.
     const flatGapBridge = i !== tipIdx && isPaintFlatGapBridge(raw);
     if (flatGapBridge) {
       const prev = i > 0 ? out[i - 1]!.close : 0;
-      const hold = finitePos(raw.close)
-        ? raw.close
-        : finitePos(prev)
-          ? prev
+      // Prefer already-painted prev (stays in tip band across long Soft-MM holes).
+      let hold = finitePos(prev)
+        ? prev
+        : finitePos(raw.close)
+          ? raw.close
           : tipClose;
+      hold = clampBridge(hold);
       out[i] = {
         time: raw.time,
         open: hold,
@@ -523,11 +537,16 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
       continue;
     }
 
-    // Soft-bridge opens only vs the prior *printed* close — not across flat fillers.
-    if (i > 0 && finitePos(lastPrintedClose) && Math.abs(open - lastPrintedClose) / lastPrintedClose > 0.0004) {
-      open = lastPrintedClose;
-      high = Math.max(high, open, close);
-      low = Math.min(low, open, close);
+    // Soft-bridge opens vs prior *painted* close (includes tip-banded flat bridges).
+    // Using only lastPrinted skipped Soft-MM holds and reintroduced island open cliffs
+    // after long quiet holes (flying orphan edges).
+    if (i > 0) {
+      const prevClose = out[i - 1]!.close;
+      if (finitePos(prevClose) && Math.abs(open - prevClose) / prevClose > 0.0004) {
+        open = prevClose;
+        high = Math.max(high, open, close);
+        low = Math.min(low, open, close);
+      }
     }
 
     // Reject impossible highs/lows (minors leak, sci glitch) — never rewrite honest closes.
@@ -551,13 +570,16 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     if (i === tipIdx) {
       // Tip open = last printed close (skip trailing flat holds); close = Last.
       // Body from last print → Last so tip never collapses to an invisible hairline.
-      open = finitePos(lastPrintedClose)
-        ? lastPrintedClose
-        : tipIdx > 0 && finitePos(out[tipIdx - 1]!.close)
+      // Prior painted close (may be tip-banded Soft-MM bridge) — not lastPrinted
+      // across a quiet hole (that reopened island-class tip open cliffs).
+      open =
+        tipIdx > 0 && finitePos(out[tipIdx - 1]!.close)
           ? out[tipIdx - 1]!.close
-          : finitePos(raw.open)
-            ? raw.open
-            : tipClose;
+          : finitePos(lastPrintedClose)
+            ? lastPrintedClose
+            : finitePos(raw.open)
+              ? raw.open
+              : tipClose;
       close = tipClose;
       // Tip H/L from fills in this bucket only — never stamp 24h / paper extremes.
       high = Math.max(open, tipClose, finitePos(raw.high) ? raw.high : tipClose);

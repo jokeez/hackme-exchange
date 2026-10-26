@@ -9479,6 +9479,8 @@ async function refresh(): Promise<void> {
         }
         void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
           if (!ok) return;
+          // Always full setData after hydrate — tip-only update leaves sparse LWC
+          // series while getDisplayedCandles looks contiguous (flying orphans).
           chartNeedsFullReplace = true;
           if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
           else if (state.mainView === "spot" && p.id === state.activePair) render();
@@ -9487,6 +9489,7 @@ async function refresh(): Promise<void> {
         // One-shot warm merge after boot so public prints land before the next F5.
         void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
           if (!ok) return;
+          chartNeedsFullReplace = true;
           if (state.mainView === "spot" && chartMounted) patchLive();
         });
       }

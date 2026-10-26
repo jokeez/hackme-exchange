@@ -983,7 +983,19 @@ function makeRobustAutoscaleProvider() {
       if (recent && full) {
         const rSpan = recent.maxValue - recent.minValue;
         const fSpan = full.maxValue - full.minValue;
-        if (fSpan > rSpan * 2.2 && rSpan > 0) robust = recent;
+        // Prefer recent only when it still covers most visible closes — otherwise
+        // Soft-MM flat bridges at older island px clip off-pane (visual voids).
+        if (fSpan > rSpan * 2.2 && rSpan > 0) {
+          let outside = 0;
+          let n = 0;
+          for (let i = fromIdx; i <= toIdx; i++) {
+            const c = currentCandles[i];
+            if (!c || !(c.close > 0)) continue;
+            n++;
+            if (c.close < recent.minValue || c.close > recent.maxValue) outside++;
+          }
+          if (n < 8 || outside / n <= 0.12) robust = recent;
+        }
       }
       const tip = currentCandles[currentCandles.length - 1]!.close;
       const tf = lastOpts?.tf ?? "1m";
@@ -3194,12 +3206,13 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
   const d = currentCandles[currentCandles.length - 1];
   if (!d) return false;
 
-  // Soft-MM cliff heal rewrites closed OHLC — series.update tip-only would leave
-  // stale history as floor-dashes under a skyscraper tip. Force full setData.
-  if (
-    prevPainted.length === currentCandles.length &&
-    prevPainted.length > 1
-  ) {
+  // Soft-MM cliff heal / contiguous expand rewrites closed OHLC — series.update
+  // tip-only would leave sparse LWC history (flying islands) while memory looks dense.
+  // Force full setData whenever painted length changes or history OHLC drifts.
+  if (prevPainted.length !== currentCandles.length) {
+    return false;
+  }
+  if (prevPainted.length > 1) {
     for (let i = 0; i < currentCandles.length - 1; i++) {
       const a = prevPainted[i]!;
       const b = currentCandles[i]!;
@@ -3212,8 +3225,6 @@ export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
         return false;
       }
     }
-  } else if (prevPainted.length !== currentCandles.length && prevPainted.length > 0) {
-    return false;
   }
 
   // While scrubbing: keep in-memory tip fresh, defer series.update (LWC recalculate fights the hair).
@@ -3428,6 +3439,16 @@ function bindChartDebugProbe(): void {
     getPriceScaleDebug,
     getDisplayedLastCandle,
     getDisplayedCandles: () => currentCandles.slice(),
+    /** Playwright / debug: force full setData through prepCandles (contiguous + displayCap). */
+    injectCandlesForTest(candles: Candle[], tf?: Timeframe) {
+      if (!lastOpts) return false;
+      setCandleData(
+        candles,
+        { ...lastOpts, tf: tf ?? lastOpts.tf, mode: lastOpts.mode ?? "candles" },
+        { scrollToLive: true },
+      );
+      return true;
+    },
     healVisiblePriceScale,
     clampVisiblePriceRange,
     zoomPriceRange,
