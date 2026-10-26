@@ -200,17 +200,13 @@ function slotKey(el: HTMLElement): string {
 
 function candlePoints(candles: Candle[]) {
   const sorted = [...candles].sort((a, b) => a.time - b.time);
-  return toLwcOhlcPoints(sorted).map((d) =>
-    "open" in d
-      ? {
-          time: d.time as UTCTimestamp,
-          open: d.open,
-          high: d.high,
-          low: d.low,
-          close: d.close,
-        }
-      : { time: d.time as UTCTimestamp },
-  );
+  return toLwcOhlcPoints(sorted).map((d) => ({
+    time: d.time as UTCTimestamp,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+  }));
 }
 
 function rememberRange(slot: Slot): void {

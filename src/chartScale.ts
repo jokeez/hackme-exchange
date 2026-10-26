@@ -457,7 +457,7 @@ function clampDisplayExtreme(px: number, seriesMid: number, maxMult = 2.75): num
   return Math.min(hi, Math.max(lo, px));
 }
 
-/** Empty-bucket hold (vol=0, O=H=L=C) — display keeps pristine for LWC whitespace. */
+/** Empty-bucket hold (vol=0, O=H=L=C) — display keeps pristine (thin doji, zero wick). */
 function isPaintFlatGapBridge(c: Candle): boolean {
   if (!c || c.volume !== 0) return false;
   const p = c.close;
@@ -469,8 +469,9 @@ function isPaintFlatGapBridge(c: Candle): boolean {
  * CEX desk paint — truthful history from prints/fills:
  * - Closed bars keep real aggregated closes (prints / seed / aggregate). No affine-pin,
  *   no drift-pull toward Last — that faked multi-day ramps after a recent pump.
+ * - Flat gap bridges stay O=H=L=C (paint as continuous Soft-MM path; never wick-pad).
  * - Soft-bridge opens only between *adjacent printed* bars (skip flat gap fillers) so
- *   hundreds of empty buckets never invent a continuous flat doji ribbon.
+ *   auction jumps stay honest without inventing diagonal ramps across quiet holes.
  * - Clip Soft-MM mile wicks + reject oracle-class single-bar glitches vs series median.
  * - Never invent wick forests on sticky Soft-MM pegs (that painted the flat comb).
  * - Tip: close = Last; open from last printed close → Last body; H/L from tip fills only.
@@ -501,7 +502,7 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
     let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
 
-    // Empty-bucket holds stay pristine so LWC can hide them as whitespace.
+    // Empty-bucket holds stay pristine thin dojis (paint continuous Soft-MM path).
     // Never fatten / invent volume / wick pad — that painted the flat horizontal comb.
     const flatGapBridge = i !== tipIdx && isPaintFlatGapBridge(raw);
     if (flatGapBridge) {

@@ -94,7 +94,7 @@ describe("textureLiveBar", () => {
     const healed = healFlatPaperBars("HMC_USDT", "1m", flat, mid, (t0 + 19 * 60) * 1000 + 30_000, {
       scope: "tipRun",
     });
-    // Empty-bucket holds stay O=H=L=C vol=0 for LWC whitespace — never paper-walk comb.
+    // Empty-bucket holds stay O=H=L=C vol=0 thin dojis — never paper-walk comb.
     for (const c of healed.slice(0, -1)) {
       expect(c.volume).toBe(0);
       expect(c.open).toBe(c.close);

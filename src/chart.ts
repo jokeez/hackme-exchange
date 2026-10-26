@@ -3079,24 +3079,19 @@ export function setCandleData(
     return;
   }
 
-  // Flat vol=0 bridges → LWC whitespace (no diagonal dojis); tip always painted.
-  const candleData = toLwcOhlcPoints(currentCandles).map((d) =>
-    "open" in d
-      ? {
-          time: d.time as UTCTimestamp,
-          open: d.open,
-          high: d.high,
-          low: d.low,
-          close: d.close,
-        }
-      : { time: d.time as UTCTimestamp },
-  );
+  // Flat vol=0 bridges paint as thin dojis (continuous Soft-MM path — no LWC voids).
+  const candleData = toLwcOhlcPoints(currentCandles).map((d) => ({
+    time: d.time as UTCTimestamp,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+  }));
   const barData = candleData;
-  const lineData = toLwcLinePoints(currentCandles).map((d) =>
-    "value" in d
-      ? { time: d.time as UTCTimestamp, value: d.value }
-      : { time: d.time as UTCTimestamp },
-  );
+  const lineData = toLwcLinePoints(currentCandles).map((d) => ({
+    time: d.time as UTCTimestamp,
+    value: d.value,
+  }));
   const volData = currentCandles.map((c) => ({
     time: c.time as UTCTimestamp,
     value: c.volume,

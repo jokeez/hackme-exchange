@@ -1081,7 +1081,8 @@ function finiteMid(n: number | undefined): n is number {
 /**
  * Idle UTC hole — true flat hold O=H=L=C=prev.close.
  * Must not drift / ramp toward the next print (that painted diagonal doji stairs).
- * Display paint may hide these as LWC whitespace while keeping time continuity.
+ * Paint as a thin doji (continuous Soft-MM path) — never LWC `{time}` whitespace
+ * (that left multi-day voids + flying orphan wicks over quiet tape).
  */
 function flatGapBar(t: number, px: number): Candle {
   const p = px > 0 && Number.isFinite(px) ? px : 1e-12;
@@ -1104,31 +1105,26 @@ export function isFlatGapBridge(c: Candle): boolean {
 }
 
 /**
- * LWC OHLC points — hide flat gap bridges as whitespace (time continuity kept for tip).
- * Tip bar always paints so Last stays visible.
+ * LWC OHLC points — paint every bar including flat gap bridges (O=H=L=C doji).
+ * Hiding bridges as `{time}` whitespace caused multi-day voids + flying orphans.
  */
 export function toLwcOhlcPoints(
   candles: Candle[],
-): Array<
-  | { time: number; open: number; high: number; low: number; close: number }
-  | { time: number }
-> {
-  const tip = candles.length - 1;
-  return candles.map((c, i) => {
-    if (i !== tip && isFlatGapBridge(c)) return { time: c.time };
-    return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
-  });
+): Array<{ time: number; open: number; high: number; low: number; close: number }> {
+  return candles.map((c) => ({
+    time: c.time,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+  }));
 }
 
-/** LWC line/area points — same whitespace hide for flat bridges. */
+/** LWC line/area points — continuous close path across flat bridges. */
 export function toLwcLinePoints(
   candles: Candle[],
-): Array<{ time: number; value: number } | { time: number }> {
-  const tip = candles.length - 1;
-  return candles.map((c, i) => {
-    if (i !== tip && isFlatGapBridge(c)) return { time: c.time };
-    return { time: c.time, value: c.close };
-  });
+): Array<{ time: number; value: number }> {
+  return candles.map((c) => ({ time: c.time, value: c.close }));
 }
 
 /**
@@ -1364,7 +1360,7 @@ export function healFlatPaperBars(
     for (let i = start; i <= end; i++) {
       if (i === tipIdx) continue;
       const lived = out[i]!;
-      // Empty-bucket flat bridges stay pristine → LWC whitespace. Rewriting them into
+      // Empty-bucket flat bridges stay pristine (thin doji, zero wick). Rewriting them into
       // paper-walk OHLC+volume painted the flat horizontal wick comb after Soft-MM gaps.
       if (isFlatGapBridge(lived)) {
         px = lived.close > 0 ? lived.close : px;

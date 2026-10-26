@@ -67,15 +67,23 @@ async function localUnitProof() {
     if (base.at(-1).time !== tip) fail.push("unit: hydrate tip missing");
     if (Math.abs(base.at(-1).close - 0.069) / 0.069 > 0.008) fail.push("unit: tip≠Last");
 
-    // No long synthetic Soft-MM wick comb (tiny body + invented mid-span wick).
-    // Honest durable dojis with wide traded H/L must not trip this.
+    // Bridges must paint (no LWC whitespace voids); never invent Soft-MM wick comb.
     const { displayCapCandles } = await server.ssrLoadModule("/src/chartScale.ts");
     const { toLwcOhlcPoints, isFlatGapBridge } = mod;
     const painted = displayCapCandles(base, "1m");
     const pts = toLwcOhlcPoints(painted);
-    let comb = 0, maxComb = 0, visFlat = 0, maxVisFlat = 0;
-    for (let i = 0; i < painted.length - 1; i++) {
-      if (!("open" in pts[i])) { comb = 0; visFlat = 0; continue; }
+    let comb = 0, maxComb = 0, paintedBridges = 0, whitespace = 0;
+    let maxHole = 0;
+    for (let i = 0; i < painted.length; i++) {
+      if (!("open" in pts[i])) {
+        whitespace++;
+        continue;
+      }
+      if (i > 0 && "open" in pts[i - 1]) {
+        const hole = Math.round((pts[i].time - pts[i - 1].time) / sec);
+        if (hole > maxHole) maxHole = hole;
+      }
+      if (i === painted.length - 1) continue;
       const c = painted[i];
       const body = Math.abs(c.close - c.open) / Math.max(c.close, 1e-12);
       const span = (c.high - c.low) / Math.max(c.close, 1e-12);
@@ -84,16 +92,50 @@ async function localUnitProof() {
         comb++;
         maxComb = Math.max(maxComb, comb);
       } else comb = 0;
-      if (isFlatGapBridge(c) && "open" in pts[i]) {
-        visFlat++;
-        maxVisFlat = Math.max(maxVisFlat, visFlat);
-      } else visFlat = 0;
+      if (isFlatGapBridge(c)) {
+        paintedBridges++;
+        if (span !== 0) fail.push(`unit: bridge wick at t=${c.time}`);
+      }
     }
     if (maxComb >= 6) fail.push(`unit: flat wick comb run=${maxComb}`);
-    if (maxVisFlat >= 4) fail.push(`unit: visible flat-bridge run=${maxVisFlat}`);
+    if (whitespace > 0) fail.push(`unit: LWC whitespace holes=${whitespace}`);
+    if (maxHole > 1) fail.push(`unit: painted step hole=${maxHole} (>1 interval)`);
+    if (paintedBridges < 10) fail.push(`unit: expected painted flat bridges, got ${paintedBridges}`);
     if (!("open" in pts[pts.length - 1])) fail.push("unit: tip not painted");
 
-    console.log(`[continuity] unit ok n=${base.length}`);
+    // Screenshot-class 15m multi-day void + mid-orphan must paint contiguous bridges.
+    const sec15 = 900;
+    const tip15 = Math.floor(nowMs / 1000 / sec15) * sec15;
+    const sparse15 = [
+      { time: tip15 - 288 * sec15, open: 0.072, high: 0.073, low: 0.071, close: 0.072, volume: 2 },
+      { time: tip15 - 200 * sec15, open: 0.074, high: 0.0745, low: 0.0705, close: 0.071, volume: 0.5 },
+      { time: tip15 - 80 * sec15, open: 0.068, high: 0.069, low: 0.067, close: 0.068, volume: 2 },
+      { time: tip15 - 10 * sec15, open: 0.078, high: 0.079, low: 0.07, close: 0.079, volume: 3 },
+    ];
+    const healed15 = ensureContiguousCandles(sparse15, "15m", {
+      pairId: "HMC_USDT",
+      fillToNow: true,
+      nowMs,
+    });
+    if (!candlesAreContiguous(healed15, "15m")) fail.push("unit15: not contiguous");
+    if (healed15.at(-1).time !== tip15) fail.push("unit15: tip not filled to now");
+    const painted15 = displayCapCandles(healed15, "15m");
+    const pts15 = toLwcOhlcPoints(painted15);
+    let hole15 = 0;
+    let ws15 = 0;
+    for (let i = 0; i < pts15.length; i++) {
+      if (!("open" in pts15[i])) ws15++;
+      else if (i > 0 && "open" in pts15[i - 1]) {
+        const h = Math.round((pts15[i].time - pts15[i - 1].time) / sec15);
+        if (h > hole15) hole15 = h;
+      }
+    }
+    if (ws15 > 0) fail.push(`unit15: whitespace=${ws15}`);
+    if (hole15 > 1) fail.push(`unit15: painted hole=${hole15} (>1 × 15m)`);
+    const bridges15 = healed15.filter(isFlatGapBridge).length;
+    if (bridges15 < 50) fail.push(`unit15: expected multi-day bridges, got ${bridges15}`);
+
+    console.log(`[continuity] unit ok n=${base.length} bridges15=${bridges15}`);
   } finally {
     await server.close();
   }
