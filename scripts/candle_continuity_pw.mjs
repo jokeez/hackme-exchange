@@ -66,6 +66,33 @@ async function localUnitProof() {
     if (!candlesAreContiguous(base, "1m")) fail.push("unit: hydrate not contiguous");
     if (base.at(-1).time !== tip) fail.push("unit: hydrate tip missing");
     if (Math.abs(base.at(-1).close - 0.069) / 0.069 > 0.008) fail.push("unit: tip≠Last");
+
+    // No long synthetic Soft-MM wick comb (tiny body + invented mid-span wick).
+    // Honest durable dojis with wide traded H/L must not trip this.
+    const { displayCapCandles } = await server.ssrLoadModule("/src/chartScale.ts");
+    const { toLwcOhlcPoints, isFlatGapBridge } = mod;
+    const painted = displayCapCandles(base, "1m");
+    const pts = toLwcOhlcPoints(painted);
+    let comb = 0, maxComb = 0, visFlat = 0, maxVisFlat = 0;
+    for (let i = 0; i < painted.length - 1; i++) {
+      if (!("open" in pts[i])) { comb = 0; visFlat = 0; continue; }
+      const c = painted[i];
+      const body = Math.abs(c.close - c.open) / Math.max(c.close, 1e-12);
+      const span = (c.high - c.low) / Math.max(c.close, 1e-12);
+      // Invented flatTape pad lived ~0.15–0.9%; exclude real ≥1% traded ranges.
+      if (body < 0.0015 && span > 0.0012 && span < 0.009) {
+        comb++;
+        maxComb = Math.max(maxComb, comb);
+      } else comb = 0;
+      if (isFlatGapBridge(c) && "open" in pts[i]) {
+        visFlat++;
+        maxVisFlat = Math.max(maxVisFlat, visFlat);
+      } else visFlat = 0;
+    }
+    if (maxComb >= 6) fail.push(`unit: flat wick comb run=${maxComb}`);
+    if (maxVisFlat >= 4) fail.push(`unit: visible flat-bridge run=${maxVisFlat}`);
+    if (!("open" in pts[pts.length - 1])) fail.push("unit: tip not painted");
+
     console.log(`[continuity] unit ok n=${base.length}`);
   } finally {
     await server.close();

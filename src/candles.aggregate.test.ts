@@ -80,7 +80,7 @@ describe("textureLiveBar", () => {
     expect(Math.abs(tip.close - mid) / mid).toBeLessThan(0.002);
   });
 
-  it("healFlatPaperBars rewrites a trailing doji ruler", () => {
+  it("healFlatPaperBars leaves flat gap bridges pristine (no paper comb)", () => {
     const mid = 0.053116;
     const t0 = 1_700_000_000;
     const flat = Array.from({ length: 20 }, (_, i) => ({
@@ -91,12 +91,16 @@ describe("textureLiveBar", () => {
       close: mid,
       volume: 0,
     }));
-    const healed = healFlatPaperBars("HMC_USDT", "1m", flat, mid, (t0 + 19 * 60) * 1000 + 30_000);
-    let fatBodies = 0;
+    const healed = healFlatPaperBars("HMC_USDT", "1m", flat, mid, (t0 + 19 * 60) * 1000 + 30_000, {
+      scope: "tipRun",
+    });
+    // Empty-bucket holds stay O=H=L=C vol=0 for LWC whitespace — never paper-walk comb.
     for (const c of healed.slice(0, -1)) {
-      if (Math.abs(c.close - c.open) / mid > 0.0004) fatBodies++;
+      expect(c.volume).toBe(0);
+      expect(c.open).toBe(c.close);
+      expect(c.high).toBe(c.close);
+      expect(c.low).toBe(c.close);
     }
-    expect(fatBodies).toBeGreaterThan(8);
     expect(Math.abs(healed[healed.length - 1]!.close - mid) / mid).toBeLessThan(0.002);
   });
 

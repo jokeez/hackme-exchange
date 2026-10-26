@@ -194,10 +194,11 @@ describe("robustPriceRange", () => {
         const bodyFrac = Math.abs(c.close - c.open) / Math.max(c.open, 1e-12);
         expect(bodyFrac).toBeLessThanOrEqual(paintMaxBodyFracForTf(tf) + 1e-6);
       }
-      if (tf === "1m" || tf === "15m") {
-        const wickSpan = painted.slice(0, -1).map((c) => (c.high - c.low) / c.close);
-        expect(Math.max(...wickSpan)).toBeGreaterThan(0.001);
-      }
+      // Dump bars keep a clipped lower wick; quiet pegs must NOT get invented wick forests.
+      const dumpIdx = 3;
+      expect(painted[dumpIdx]!.low).toBeLessThan(painted[dumpIdx]!.close * 0.999);
+      const quiet = painted[1]!;
+      expect((quiet.high - quiet.low) / quiet.close).toBeLessThan(0.004);
     }
   });
 
@@ -224,9 +225,11 @@ describe("robustPriceRange", () => {
       px = close;
     }
     const painted = displayCapCandles(candles, "1m");
-    for (let i = 1; i < painted.length; i++) {
+    // Closed bars soft-bridge; tip may nudge open for a visible Last body.
+    for (let i = 1; i < painted.length - 1; i++) {
       expect(painted[i]!.open).toBeCloseTo(painted[i - 1]!.close, 8);
     }
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(candles[candles.length - 1]!.close, 8);
     const withWick = painted.filter(
       (c) => c.high > Math.max(c.open, c.close) * 1.0002 || c.low < Math.min(c.open, c.close) * 0.9998,
     );
@@ -451,15 +454,30 @@ describe("honest history + recent pump (no fake multi-day ramp)", () => {
     expect(paintMinSpanFracForTf("1D")).toBeGreaterThanOrEqual(paintMinSpanFracForTf("1m"));
   });
 
-  it("sticky peg Soft-MM ruler breathes into candles on short TF", () => {
+  it("sticky peg Soft-MM does not invent a wick comb on short TF", () => {
     const tip = 0.0915;
     const candles = Array.from({ length: 40 }, (_, i) =>
       bar(1_700_000_000 + i * 60, tip, tip * 1.0001, tip * 0.9999, tip),
     );
     const painted = displayCapCandles(candles, "1m");
-    const health = paintedCandleHealth(painted, tip, "1m");
-    const withWick = painted.filter((c) => (c.high - c.low) / c.close > 0.0015);
-    expect(withWick.length).toBeGreaterThan(10);
     expect(historyCloseDrift(candles, painted)).toBeLessThan(0.0005);
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 10);
+    // Tip must stay visible (body from last print→Last); closed pegs stay honest hairlines.
+    const tipBody =
+      Math.abs(painted[painted.length - 1]!.close - painted[painted.length - 1]!.open) /
+      tip;
+    expect(tipBody).toBeGreaterThan(0.0005);
+    let comb = 0;
+    let maxComb = 0;
+    for (let i = 0; i < painted.length - 1; i++) {
+      const c = painted[i]!;
+      const body = Math.abs(c.close - c.open) / Math.max(c.close, 1e-12);
+      const span = (c.high - c.low) / Math.max(c.close, 1e-12);
+      if (body < 0.0015 && span > 0.0012 && span < 0.009) {
+        comb++;
+        maxComb = Math.max(maxComb, comb);
+      } else comb = 0;
+    }
+    expect(maxComb).toBeLessThan(4);
   });
 });

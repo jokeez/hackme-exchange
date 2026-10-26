@@ -161,6 +161,60 @@ describe("flying candle islands (sparse durable + tip void)", () => {
     expect(ohlc).toBeGreaterThan(sparse.length);
   });
 
+  it("sparse Soft-MM does not paint a long flat wick comb or blank tip", () => {
+    const tip = 0.079;
+    const prints = [];
+    for (let i = 90; i >= 0; i -= 3) {
+      const px = tip * (1 + Math.sin(i) * 0.0003);
+      prints.push({ ts: (tipBucket - i * sec) * 1000 + 500, price: px, amountBase: 1 });
+    }
+    prints.push({ ts: tipBucket * 1000 + 200, price: tip, amountBase: 2 });
+    const all = hydrateLiveCandlesFromPrints("HMC_USDT", prints, tip, nowMs, null);
+    const base = all[CANDLE_BASE_TF]!;
+    expect(base[base.length - 1]!.time).toBe(tipBucket);
+    // Flat bridges must remain vol=0 holds (heal must not rewrite them into paper comb).
+    const bridges = base.filter(isFlatGapBridge);
+    expect(bridges.length).toBeGreaterThan(10);
+    for (const b of bridges) {
+      expect(b.volume).toBe(0);
+      expect(b.open).toBe(b.close);
+      expect(b.high).toBe(b.close);
+      expect(b.low).toBe(b.close);
+    }
+    const painted = displayCapCandles(base, "1m");
+    const pts = toLwcOhlcPoints(painted);
+    expect("open" in pts[pts.length - 1]!).toBe(true);
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(tip, 8);
+    const tipBody =
+      Math.abs(painted[painted.length - 1]!.close - painted[painted.length - 1]!.open) / tip;
+    expect(tipBody).toBeGreaterThan(0.0004);
+    // No long synthetic Soft-MM wick comb (tiny body + invented mid-span wick).
+    let comb = 0;
+    let maxComb = 0;
+    let visFlat = 0;
+    let maxVisFlat = 0;
+    for (let i = 0; i < painted.length - 1; i++) {
+      if (!("open" in pts[i]!)) {
+        comb = 0;
+        visFlat = 0;
+        continue;
+      }
+      const c = painted[i]!;
+      const body = Math.abs(c.close - c.open) / Math.max(c.close, 1e-12);
+      const span = (c.high - c.low) / Math.max(c.close, 1e-12);
+      if (body < 0.0015 && span > 0.0012 && span < 0.009) {
+        comb++;
+        maxComb = Math.max(maxComb, comb);
+      } else comb = 0;
+      if (isFlatGapBridge(c)) {
+        visFlat++;
+        maxVisFlat = Math.max(maxVisFlat, visFlat);
+      } else visFlat = 0;
+    }
+    expect(maxComb).toBeLessThan(6);
+    expect(maxVisFlat).toBe(0); // flat bridges must stay whitespace, never painted
+  });
+
   it("tip pump does not remap closed durable print closes after contiguous heal", () => {
     const durable = sparseFlyingDurable();
     const durableT = new Set(durable.map((c) => c.time));

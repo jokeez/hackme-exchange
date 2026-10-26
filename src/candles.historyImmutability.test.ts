@@ -87,8 +87,11 @@ describe("closed candle immutability under tip pump", () => {
 
   beforeEach(() => {
     stubSessionStorage();
+    // applyMid/ensureContiguous fillToNow use Date.now() — pin wall clock to fixture.
+    vi.useFakeTimers({ now: nowMs });
   });
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 

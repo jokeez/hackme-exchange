@@ -434,13 +434,6 @@ export function robustPriceRange(
   return { minValue: minValue - pad, maxValue: maxValue + pad };
 }
 
-/** Deterministic ∈ [-1,1] from bar time — display breathe only (not trading state). */
-function paintNoise(time: number, salt: number): number {
-  let x = (Math.imul(time ^ salt, 0x9e3779b9) >>> 0) / 0x100000000;
-  x = x * 2 - 1;
-  return x;
-}
-
 /**
  * Display-only: price looks like an oracle / minors-leak spike vs series mid.
  * Real Soft-MM day pumps (~1.2–2×) pass; minors (1e6+) or `1.0` vs `0.07` fail.
@@ -464,19 +457,28 @@ function clampDisplayExtreme(px: number, seriesMid: number, maxMult = 2.75): num
   return Math.min(hi, Math.max(lo, px));
 }
 
+/** Empty-bucket hold (vol=0, O=H=L=C) — display keeps pristine for LWC whitespace. */
+function isPaintFlatGapBridge(c: Candle): boolean {
+  if (!c || c.volume !== 0) return false;
+  const p = c.close;
+  if (!(p > 0) || !Number.isFinite(p)) return false;
+  return c.open === p && c.high === p && c.low === p;
+}
+
 /**
- * CEX desk paint — truthful history, readable quiet tape:
+ * CEX desk paint — truthful history from prints/fills:
  * - Closed bars keep real aggregated closes (prints / seed / aggregate). No affine-pin,
  *   no drift-pull toward Last — that faked multi-day ramps after a recent pump.
- * - Soft-bridge opens to prior close (display only) so durable auction gaps don't "fly".
+ * - Soft-bridge opens only between *adjacent printed* bars (skip flat gap fillers) so
+ *   hundreds of empty buckets never invent a continuous flat doji ribbon.
  * - Clip Soft-MM mile wicks + reject oracle-class single-bar glitches vs series median.
- * - Sticky peg dojis: display-only micro body+wick (bar-local, does not rewrite trend).
- * - Tip: close = Last; open bridges from prior close; real multi-bar pumps stay large.
+ * - Never invent wick forests on sticky Soft-MM pegs (that painted the flat comb).
+ * - Tip: close = Last; open from last printed close → Last body; H/L from tip fills only.
  */
 function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
   const maxWick = maxWickFracForTf(tf);
   const tipWick = Math.max(maxWick, paintMaxSpanFracForTf(tf) * 0.2);
-  const minBody = Math.min(Math.max(paintMaxBodyFracForTf(tf) * 0.35, 0.001), 0.003);
+  const minTipBody = Math.min(Math.max(paintMaxBodyFracForTf(tf) * 0.25, 0.0008), 0.0025);
   // Multiplier vs series median — day pumps OK; minors/sci spikes rejected.
   const outlierMult = tf === "1D" || tf === "1W" ? 4.5 : tf === "4H" || tf === "2H" ? 3.5 : 2.75;
   const tipIdx = candles.length - 1;
@@ -491,6 +493,7 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
   const seriesMid = median(closes) || tipClose;
 
   const out: Candle[] = new Array(candles.length);
+  let lastPrintedClose = 0;
   for (let i = 0; i < candles.length; i++) {
     const raw = candles[i]!;
     let open = finitePos(raw.open) ? raw.open : finitePos(raw.close) ? raw.close : tipClose;
@@ -498,15 +501,32 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     let high = Math.max(open, close, finitePos(raw.high) ? raw.high : close);
     let low = Math.min(open, close, finitePos(raw.low) ? raw.low : open);
 
-    // Display contiguity: durable/print opens may jump off prior close (freezeExisting SoT).
-    // Bridge open only — never rewrite close (honest auction print).
-    if (i > 0) {
-      const prevClose = out[i - 1]!.close;
-      if (finitePos(prevClose) && Math.abs(open - prevClose) / prevClose > 0.0004) {
-        open = prevClose;
-        high = Math.max(high, open, close);
-        low = Math.min(low, open, close);
-      }
+    // Empty-bucket holds stay pristine so LWC can hide them as whitespace.
+    // Never fatten / invent volume / wick pad — that painted the flat horizontal comb.
+    const flatGapBridge = i !== tipIdx && isPaintFlatGapBridge(raw);
+    if (flatGapBridge) {
+      const prev = i > 0 ? out[i - 1]!.close : 0;
+      const hold = finitePos(raw.close)
+        ? raw.close
+        : finitePos(prev)
+          ? prev
+          : tipClose;
+      out[i] = {
+        time: raw.time,
+        open: hold,
+        high: hold,
+        low: hold,
+        close: hold,
+        volume: 0,
+      };
+      continue;
+    }
+
+    // Soft-bridge opens only vs the prior *printed* close — not across flat fillers.
+    if (i > 0 && finitePos(lastPrintedClose) && Math.abs(open - lastPrintedClose) / lastPrintedClose > 0.0004) {
+      open = lastPrintedClose;
+      high = Math.max(high, open, close);
+      low = Math.min(low, open, close);
     }
 
     // Reject impossible highs/lows (minors leak, sci glitch) — never rewrite honest closes.
@@ -527,62 +547,26 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     high = Math.max(high, open, close);
     low = Math.min(low, open, close);
 
-    const midRef = Math.max(Math.abs(open), Math.abs(close), 1e-12);
-    const bodyLo = Math.min(open, close);
-    const dumpNeedle =
-      bodyLo > 0 && (bodyLo - low) / bodyLo > Math.max(maxWick * 2.5, 0.008);
-    // Empty-bucket holds (vol=0, O=H=L=C) stay pristine so LWC can hide them as whitespace.
-    // Never fatten / invent volume — that painted diagonal cross stairs after gap ramps.
-    const flatGapBridge =
-      i !== tipIdx &&
-      raw.volume === 0 &&
-      raw.open === raw.close &&
-      raw.high === raw.close &&
-      raw.low === raw.close;
-    if (flatGapBridge) {
-      const prev = i > 0 ? out[i - 1]!.close : 0;
-      const hold = finitePos(raw.close)
-        ? raw.close
-        : finitePos(prev)
-          ? prev
-          : tipClose;
-      out[i] = {
-        time: raw.time,
-        open: hold,
-        high: hold,
-        low: hold,
-        close: hold,
-        volume: 0,
-      };
-      continue;
-    }
-    const flatTape =
-      i !== tipIdx &&
-      Math.abs(close - open) / midRef < minBody * 0.55 &&
-      (high - low) / midRef < minBody * 1.2 &&
-      !dumpNeedle;
-
-    if (flatTape) {
-      // Wicks only — never rewrite close (honest pre-pump / peg history).
-      const wickPad = Math.max(midRef * maxWick, midRef * minBody * 0.55, 1e-12);
-      high = Math.max(high, Math.max(open, close) + wickPad * (0.35 + 0.55 * Math.abs(paintNoise(raw.time, 0x4111))));
-      low = Math.max(
-        midRef * 1e-6,
-        Math.min(low, Math.min(open, close) - wickPad * (0.35 + 0.55 * Math.abs(paintNoise(raw.time, 0x1010)))),
-      );
-    }
-
     if (i === tipIdx) {
-      // Tip open continues prior painted close (CEX contiguity); close = Last.
-      open =
-        tipIdx > 0 && finitePos(out[tipIdx - 1]!.close)
+      // Tip open = last printed close (skip trailing flat holds); close = Last.
+      // Body from last print → Last so tip never collapses to an invisible hairline.
+      open = finitePos(lastPrintedClose)
+        ? lastPrintedClose
+        : tipIdx > 0 && finitePos(out[tipIdx - 1]!.close)
           ? out[tipIdx - 1]!.close
           : finitePos(raw.open)
             ? raw.open
             : tipClose;
       close = tipClose;
+      // Tip H/L from fills in this bucket only — never stamp 24h / paper extremes.
       high = Math.max(open, tipClose, finitePos(raw.high) ? raw.high : tipClose);
       low = Math.min(open, tipClose, finitePos(raw.low) ? raw.low : tipClose);
+      const tipMidRef = Math.max(Math.abs(open), Math.abs(tipClose), 1e-12);
+      if (Math.abs(tipClose - open) / tipMidRef < minTipBody * 0.7) {
+        // Quiet Soft-MM: keep a readable tip body without inventing mile wicks.
+        const sign = open <= tipClose ? -1 : 1;
+        open = tipClose * (1 + sign * minTipBody);
+      }
       if (isDisplayOutlierPx(high, seriesMid, outlierMult)) {
         high = clampDisplayExtreme(high, Math.max(seriesMid, tipClose), outlierMult);
       }
@@ -603,11 +587,12 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
         ...painted,
         volume: raw.volume > 0 ? raw.volume : Math.max(Math.abs(open) * 0.02, 1e-6),
       };
+      lastPrintedClose = tipClose;
       continue;
     }
 
-    // Do not rewrite durable/print closes for large bodies — only wick outliers were clamped.
-    // Open may already be soft-bridged to prior close (display contiguity).
+    // Honest print/seed OHLC — clip outlier wicks only. Do NOT invent wick pads on
+    // sticky Soft-MM pegs (flatTape breathe → flat horizontal comb).
     const painted = clipBarWicks(
       {
         ...raw,
@@ -620,8 +605,10 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
     );
     out[i] = {
       ...painted,
-      volume: raw.volume > 0 ? raw.volume : Math.max(Math.abs(open) * 0.02, 1e-6),
+      // Keep vol=0 non-bridge bars volume-less so they don't look like Soft-MM prints.
+      volume: raw.volume > 0 ? raw.volume : 0,
     };
+    lastPrintedClose = out[i]!.close;
   }
   return out;
 }

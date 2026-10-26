@@ -972,14 +972,21 @@ export function applyMidToPairCandles(
   pairId: PairId,
   mid: number,
   prevMid?: number,
-  opts?: { syntheticVolume?: boolean; dayRange?: LiveDayRange; freezeClosedTip?: boolean },
+  opts?: {
+    syntheticVolume?: boolean;
+    dayRange?: LiveDayRange;
+    freezeClosedTip?: boolean;
+    nowMs?: number;
+  },
 ): Partial<Record<Timeframe, Candle[]>> {
+  const nowMs = opts?.nowMs ?? Date.now();
   let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
   // Always bridge to wall-clock tip — stale contiguous caches otherwise freeze at last closed bar.
   if (prevBase.length >= 1) {
     prevBase = ensureContiguousCandles(prevBase, CANDLE_BASE_TF, {
       pairId,
       fillToNow: true,
+      nowMs,
     });
   }
   const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid, {
@@ -987,7 +994,8 @@ export function applyMidToPairCandles(
     freezeClosedTip: opts?.syntheticVolume === false || opts?.freezeClosedTip === true,
   });
   // Tip-run heal for Soft-MM шильдики — never rewrite mid-history closed OHLC.
-  const healedRaw = healFlatPaperBars(pairId, CANDLE_BASE_TF, nextRaw, mid, Date.now(), {
+  // Must not rewrite flat gap bridges into paper-walk comb candles.
+  const healedRaw = healFlatPaperBars(pairId, CANDLE_BASE_TF, nextRaw, mid, nowMs, {
     scope: "tipRun",
   });
   // CRITICAL: sanitize ONLY the forming tip. sanitizeCandleExtremes median-clips the
@@ -1023,7 +1031,7 @@ export function applyMidToPairCandles(
       low: Math.min(pinned.low, pinned.open, mid),
     };
   }
-  const all = deriveAllTimeframes(nextBase, pairId, undefined, { retainPrev: false });
+  const all = deriveAllTimeframes(nextBase, pairId, undefined, { nowMs, retainPrev: false });
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
     if (tf === CANDLE_BASE_TF) {
@@ -1036,7 +1044,7 @@ export function applyMidToPairCandles(
     series = finalizeTfSeries(tf, series, pairId);
     // Coarser TF holes after idle rotate — walk-fill so every market stays contiguous.
     if (series.length >= 2 && !candlesAreContiguous(series, tf)) {
-      series = ensureContiguousCandles(series, tf, { pairId, fillToNow: true });
+      series = ensureContiguousCandles(series, tf, { pairId, fillToNow: true, nowMs });
       series = finalizeTfSeries(tf, series, pairId);
     }
     all[tf] = series;
@@ -1046,7 +1054,6 @@ export function applyMidToPairCandles(
   // /tickers dayRange onto 1D/1W only (never 1m tip wick skyscraper).
   const dayHiLo = liveDayHiLo(opts?.dayRange);
   if (dayHiLo) {
-    const nowMs = Date.now();
     for (const tf of Object.keys(all) as Timeframe[]) {
       if (!tfPaintsDayRangeLegend(tf)) continue;
       const series = all[tf];
@@ -1357,9 +1364,21 @@ export function healFlatPaperBars(
     for (let i = start; i <= end; i++) {
       if (i === tipIdx) continue;
       const lived = out[i]!;
+      // Empty-bucket flat bridges stay pristine → LWC whitespace. Rewriting them into
+      // paper-walk OHLC+volume painted the flat horizontal wick comb after Soft-MM gaps.
+      if (isFlatGapBridge(lived)) {
+        px = lived.close > 0 ? lived.close : px;
+        continue;
+      }
       // Live tipRun: print-backed bars are ground truth — never replace with paper walk.
       // scope "all" (paper/seed) may still rewrite Soft-MM combs that carry seed volume.
       if (scope === "tipRun" && (lived.volume || 0) > 0) {
+        px = lived.close > 0 ? lived.close : px;
+        continue;
+      }
+      // Live tipRun: never invent OHLC for zero-volume holds (same class as flat bridges
+      // that lost exact O=H=L=C after an earlier soft pass).
+      if (scope === "tipRun" && !(lived.volume > 0)) {
         px = lived.close > 0 ? lived.close : px;
         continue;
       }
@@ -2102,8 +2121,8 @@ export function hydrateLiveCandlesFromPrints(
   let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
   const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
 
-  // Pad ONLY when tape+durable+cache are nearly empty — never invent a paper walk
-  // over real Soft-MM / server history after a tip-drift cache prune.
+  // Pad ONLY when tape+durable+cache are empty — never invent a paper walk over
+  // sparse durable islands / Soft-MM prints (that painted the flat wick comb).
   const want = Math.min(barCountForTf(CANDLE_BASE_TF, nowMs), 400);
   const printAnchor =
     sortedPrints.length > 0
@@ -2115,8 +2134,8 @@ export function hydrateLiveCandlesFromPrints(
     base.length < 12 &&
     printBucketsN < 6 &&
     sortedPrints.length < 20 &&
-    !(cached1m && cached1m.length >= 12) &&
-    !(durable1m && durable1m.length >= 12);
+    !(cached1m && cached1m.length >= 4) &&
+    !(durable1m && durable1m.length > 0);
   if (allowSeedPad) {
     const open24 = dayRange?.open && dayRange.open > 0 ? dayRange.open : 0;
     const anchor =
