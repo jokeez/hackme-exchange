@@ -1,4 +1,5 @@
 /* HackMe Exchange — offline shell only. Never pin index/boot forever. */
+/* bust: flying-candle tip-band paint 2026-10-26 */
 const CACHE = "hackme-ex-v5";
 const SHELL = [
   "/offline.html",
