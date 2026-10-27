@@ -78,7 +78,17 @@ async function browserCheck() {
     throw err;
   }
   try {
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem("hackme-ex-tour-v1", "1");
+      sessionStorage.setItem("hackme-ex-tour-v1", "1");
+      localStorage.setItem("hackme.tour.v2.done", "1");
+    } catch {
+      /* ignore */
+    }
+  });
+  const page = await context.newPage();
   const consoleErrs = [];
   const pageErrs = [];
   const badResponses = [];
@@ -98,6 +108,9 @@ async function browserCheck() {
   // Soft dismiss tour if present
   const skip = page.locator("#tour-v2-skip, #tour-skip");
   if (await skip.count()) await skip.first().click({ timeout: 2000 }).catch(() => {});
+  await page.evaluate(() => {
+    document.querySelectorAll(".tour-backdrop, #tour-v2-backdrop, .tour-v2-backdrop").forEach((el) => el.remove());
+  }).catch(() => {});
 
   // Spot shell
   const spotOk = await page.locator("#chart-host, #chart-wrap, .order-col").first().isVisible().catch(() => false);
@@ -106,6 +119,7 @@ async function browserCheck() {
 
   // Convert
   await page.goto(`${BASE}/#convert`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.waitForTimeout(2000);
   await page.waitForSelector("#cv-go, .convert-page, .convert-shell", { state: "visible", timeout: 15_000 }).catch(() => null);
   const cv = await page.locator("#cv-go, .convert-page, .convert-shell").first().isVisible().catch(() => false);
   if (!cv) fail("convert desk not visible");

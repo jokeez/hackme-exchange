@@ -148,10 +148,24 @@ async function liveProbe() {
   }
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    // Tour backdrop blanks mid-pane pixels and false-trips voidN — skip both tours.
+    await context.addInitScript(() => {
+      try {
+        localStorage.setItem("hackme-ex-tour-v1", "1");
+        sessionStorage.setItem("hackme-ex-tour-v1", "1");
+        localStorage.setItem("hackme.tour.v2.done", "1");
+      } catch {
+        /* ignore */
+      }
+    });
+    const page = await context.newPage();
     await page.goto(`${BASE}/#spot/HMC_USDT/15m`, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await page.waitForSelector("#chart-host canvas, #chart-host", { timeout: 25_000 });
-    await page.locator('button:has-text("Skip")').click({ timeout: 4000 }).catch(() => {});
+    await page.locator("#tour-skip, #tour-v2-skip, button:has-text('Skip')").first().click({ timeout: 2500 }).catch(() => {});
+    await page.evaluate(() => {
+      document.querySelectorAll(".tour-backdrop, #tour-v2-backdrop, .tour-v2-backdrop").forEach((el) => el.remove());
+    });
     await page.waitForTimeout(3500);
     await page.locator('[data-tf="15m"], .tfq[data-tf="15m"]').first().click({ timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(1500);

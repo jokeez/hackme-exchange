@@ -768,9 +768,10 @@ export function upsertTick(
   mid: number,
   pairId: PairId,
   prevMid?: number,
-  opts?: { syntheticVolume?: boolean; freezeClosedTip?: boolean },
+  opts?: { syntheticVolume?: boolean; freezeClosedTip?: boolean; nowMs?: number },
 ): Candle[] {
-  const t = bucket(Date.now(), tf);
+  // Optional nowMs keeps soak / replay clocks frozen; live callers omit → Date.now().
+  const t = bucket(opts?.nowMs ?? Date.now(), tf);
   const sec = TF_SEC[tf];
   const maxJump = maxJumpFracForTf(tf);
   const maxBody = maxBodyFracForTf(tf);
@@ -992,6 +993,7 @@ export function applyMidToPairCandles(
   const nextRaw = upsertTick(prevBase, CANDLE_BASE_TF, mid, pairId, prevMid, {
     syntheticVolume: opts?.syntheticVolume,
     freezeClosedTip: opts?.syntheticVolume === false || opts?.freezeClosedTip === true,
+    nowMs,
   });
   // Tip-run heal for Soft-MM шильдики — never rewrite mid-history closed OHLC.
   // Must not rewrite flat gap bridges into paper-walk comb candles.

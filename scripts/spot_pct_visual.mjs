@@ -66,7 +66,7 @@ async function main() {
     localStorage.setItem(key, JSON.stringify(state));
   }, STORAGE_KEY);
 
-  await page.goto(`${BASE.replace(/\/?$/, "/")}#spot`, { waitUntil: "networkidle", timeout: 45_000 });
+  await page.goto(`${BASE.replace(/\/?$/, "/")}#spot`, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await sleep(4000);
   await page.keyboard.press("Escape").catch(() => {});
   await page.evaluate(() => {

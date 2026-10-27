@@ -86,9 +86,12 @@ async function runLocalSoak() {
         { high: Math.max(0.083, tip), low: 0.05 },
         durable,
       );
+      // Freeze wall clock — without nowMs, fillToNow bridges to Date.now() and
+      // slice(-MAX_CANDLES) drops synthetic "yesterday" outside the live window.
       all = applyMidToPairCandles(all, "HMC_USDT", tip, prev, {
         syntheticVolume: false,
         dayRange: { high: Math.max(0.083, tip), low: 0.05 },
+        nowMs,
       });
       prev = tip;
       base = all[CANDLE_BASE_TF];
