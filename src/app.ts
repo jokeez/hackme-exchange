@@ -23,6 +23,7 @@ import {
   ensureTfSeriesCadence,
   hydrateLiveCandlesFromPrints,
   loadLiveCandleCache,
+  mergeDurableCoarseTfCandles,
   nudgeCloseTowardFill,
   prependOlderCandles,
   saveLiveCandleCache,
@@ -736,15 +737,24 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   let durableBars: Candle[] = [];
   await hydrateDeskApiTickers();
   const apiPair = pairIdToApi(pairId);
-  // Closed-bar SoT: durable server OHLC. Tip still comes from last trade / Soft-MM.
-  const candleRes = await fetchPublicCandles(apiPair, {
-    interval: "1m",
-    limit: 1500,
-    timeoutMs: 12_000,
-  });
-  if (candleRes.ok && candleRes.candles.length) {
-    durableBars = apiCandlesToDemoBars(candleRes.candles);
+  // Closed-bar SoT: 1m tip path + coarse durable history (1m alone ≤~2d → 1D voids
+  // after synth/cache gated off). Tip still comes from last trade / Soft-MM.
+  const [candle1m, candle15m, candle1h, candle4h, candle1d] = await Promise.all([
+    fetchPublicCandles(apiPair, { interval: "1m", limit: 1500, timeoutMs: 12_000 }),
+    fetchPublicCandles(apiPair, { interval: "15m", limit: 500, timeoutMs: 12_000 }),
+    fetchPublicCandles(apiPair, { interval: "1h", limit: 500, timeoutMs: 12_000 }),
+    fetchPublicCandles(apiPair, { interval: "4h", limit: 500, timeoutMs: 12_000 }),
+    fetchPublicCandles(apiPair, { interval: "1d", limit: 400, timeoutMs: 12_000 }),
+  ]);
+  if (candle1m.ok && candle1m.candles.length) {
+    durableBars = apiCandlesToDemoBars(candle1m.candles);
   }
+  const durableCoarse = {
+    "15m": candle15m.ok ? apiCandlesToDemoBars(candle15m.candles) : [],
+    "1H": candle1h.ok ? apiCandlesToDemoBars(candle1h.candles) : [],
+    "4H": candle4h.ok ? apiCandlesToDemoBars(candle4h.candles) : [],
+    "1D": candle1d.ok ? apiCandlesToDemoBars(candle1d.candles) : [],
+  };
   const res = await fetchPublicTrades(apiPair, 2000, 15_000, undefined, { window: "24h" });
   if (res.ok) {
     apiPrints = candlePrintsFromApiTrades(res.trades, pairId);
@@ -786,15 +796,21 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   if (!prints.length && !(cached?.length) && !(durableBars.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
   // Merge by time: durable closed bars win; tip paints live. Never tip-scale history.
-  state.candles[pairId] = hydrateLiveCandlesFromPrints(
+  const nowMs = Date.now();
+  let hydrated = hydrateLiveCandlesFromPrints(
     pairId,
     prints,
     tip,
-    Date.now(),
+    nowMs,
     cached,
     liveDayRangeForPair(pairId),
     durableBars,
   );
+  // Restore multi-day 1D/4h/1h from server SoT (carry-forward gaps + real fill days).
+  state.candles[pairId] = mergeDurableCoarseTfCandles(hydrated, durableCoarse, {
+    pairId,
+    nowMs,
+  }) as typeof hydrated;
   prevMids[pairId] = tip;
   persistLiveCandleCache(pairId, true);
   liveHydratedPairs.add(pairId);

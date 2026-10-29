@@ -1937,6 +1937,56 @@ export function constrainLiveHistoryToTape(
 }
 
 /**
+ * Merge durable coarse `/candles` (15m/1h/4h/1d) into TF series after 1m hydrate.
+ * 1m-only SoT left multi-day 1D history as flying voids once synth pad + local
+ * cache were gated off — server already has contiguous day/hour OHLC from fills.
+ * Closed durable buckets win; forming tip stays from 1m reagg / last trade.
+ * Gaps between first→last durable get wickless flat bridges (visible on 1D).
+ */
+export function mergeDurableCoarseTfCandles(
+  all: Partial<Record<Timeframe, Candle[]>>,
+  durableByTf: Partial<Record<Timeframe, Candle[]>>,
+  opts?: { pairId?: PairId; nowMs?: number },
+): Partial<Record<Timeframe, Candle[]>> {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const pairId = opts?.pairId ?? "HMC_USDT";
+  const out: Partial<Record<Timeframe, Candle[]>> = { ...all };
+  const coarse: Timeframe[] = ["15m", "1H", "2H", "4H", "1D"];
+  for (const tf of coarse) {
+    const durable = durableByTf[tf];
+    if (!durable?.length) continue;
+    const tipBucket = bucket(nowMs, tf);
+    const local = out[tf] ?? [];
+    let merged = mergeDurableApiCandlesIntoBase(local, durable, tipBucket);
+    if (merged.length >= 2) {
+      merged = ensureContiguousCandles(merged, tf, {
+        pairId,
+        fillToNow: true,
+        nowMs,
+      });
+    }
+    out[tf] = merged;
+  }
+  // 1W from contiguous 1D (API has no 1w interval) — keep left history honest.
+  const d1 = out["1D"];
+  if (d1?.length) {
+    let w1 = aggregateCandles(d1, "1D", "1W");
+    const tipW = bucket(nowMs, "1W");
+    const localW = out["1W"] ?? [];
+    if (localW.length) {
+      w1 = mergeDurableApiCandlesIntoBase(localW, w1, tipW);
+    }
+    if (w1.length >= 2) {
+      w1 = ensureContiguousCandles(w1, "1W", { pairId, fillToNow: true, nowMs });
+    }
+    out["1W"] = w1;
+  }
+  const base = out[CANDLE_BASE_TF];
+  if (base?.length) pinAllTfTipsToBase(out, base);
+  return out;
+}
+
+/**
  * Merge durable server `/candles` (closed SoT) with a local tip series by time.
  * Server OHLC wins for every closed bucket; local tip bucket keeps live last/VWAP.
  * Never scale/replace older bars when tip moves.

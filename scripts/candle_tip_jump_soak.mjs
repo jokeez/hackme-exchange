@@ -78,9 +78,11 @@ for (let i = 0; i < 50; i++) {
     { high: Math.max(0.083, tip), low: 0.05, open: 0.07 },
     durable,
   );
+  // Freeze soak clock — wall Date.now() would fillToNow→truncate left history.
   all = applyMidToPairCandles(all, "HMC_USDT", tip, prev, {
     syntheticVolume: false,
     dayRange: { high: Math.max(0.083, tip), low: 0.05, open: 0.07 },
+    nowMs,
   });
   prev = tip;
   base = all[CANDLE_BASE_TF];
