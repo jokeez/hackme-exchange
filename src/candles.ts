@@ -452,18 +452,20 @@ export function seedCandles(
  * Higher TFs only cover the 1m window (~1–2 days) — pad left with synthetic
  * history (and keep prior older bars) so 1D/1W look like a real CEX desk, not 2–4 mega-candles.
  * Pass `opts.retainPrev=false` (paper clock) so devices never reattach forked left pads.
+ * Pass `opts.allowSynthPad=false` on live Soft-MM desk — never invent left history.
  */
 export function deriveAllTimeframes(
   base1m: Candle[],
   pairId?: PairId,
   prev?: Partial<Record<Timeframe, Candle[]>>,
-  opts?: { nowMs?: number; retainPrev?: boolean },
+  opts?: { nowMs?: number; retainPrev?: boolean; allowSynthPad?: boolean },
 ): Partial<Record<Timeframe, Candle[]>> {
   const nowMs = opts?.nowMs ?? Date.now();
   const retainPrev = opts?.retainPrev !== false;
+  const allowSynthPad = opts?.allowSynthPad !== false;
   let base = base1m.slice(-MAX_CANDLES);
   // Max out 1m history first so higher TFs aggregate the widest real window (CEX desk).
-  if (pairId) {
+  if (allowSynthPad && pairId) {
     const target1m = barCountForTf(CANDLE_BASE_TF, nowMs);
     if (base.length < target1m) {
       base = prependOlderCandles(base, pairId, CANDLE_BASE_TF, target1m - base.length, nowMs);
@@ -484,7 +486,7 @@ export function deriveAllTimeframes(
       if (older.length) series = [...older, ...series];
     }
     const need = barCountForTf(tf, nowMs);
-    if (pairId && series.length > 0 && series.length < need) {
+    if (allowSynthPad && pairId && series.length > 0 && series.length < need) {
       series = prependOlderCandles(series, pairId, tf, need - series.length, nowMs);
     }
     out[tf] = series.slice(-MAX_CANDLES);
@@ -968,6 +970,95 @@ export function reaggregateLiveBarsFromBase(
   }
 }
 
+/**
+ * Live Soft-MM desk SoT tip updater.
+ * - Closed candles: never remapped (no heal / texture / seed / prepend).
+ * - Tip close: last TRADE price only — book mid ticks must not walk OHLC.
+ * - Quiet hours: wickless flat bridges at last trade close (honest hold, not gap void).
+ */
+export function applyLiveTradeTipToPairCandles(
+  candlesByTf: Partial<Record<Timeframe, Candle[]>>,
+  _pairId: PairId,
+  tradePx: number,
+  opts?: {
+    fromTrade?: boolean;
+    amountBase?: number;
+    dayRange?: LiveDayRange;
+    nowMs?: number;
+  },
+): Partial<Record<Timeframe, Candle[]>> {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const sec = TF_SEC[CANDLE_BASE_TF];
+  const t = bucket(nowMs, CANDLE_BASE_TF);
+  let base = (candlesByTf[CANDLE_BASE_TF] ?? []).map((c) => ({ ...c }));
+  const holdPx =
+    tradePx > 0 && Number.isFinite(tradePx)
+      ? tradePx
+      : base[base.length - 1]?.close ?? 0;
+  if (!(holdPx > 0)) return candlesByTf;
+
+  if (!base.length) {
+    base = [
+      {
+        time: t,
+        open: holdPx,
+        high: holdPx,
+        low: holdPx,
+        close: holdPx,
+        volume: opts?.fromTrade && opts.amountBase && opts.amountBase > 0 ? opts.amountBase : 0,
+      },
+    ];
+  } else {
+    const last = base[base.length - 1]!;
+    if (last.time < t) {
+      // Prior tip freezes as lived; idle buckets = flat hold at last trade close.
+      for (let bt = last.time + sec; bt < t; bt += sec) {
+        const prevClose = base[base.length - 1]!.close;
+        base.push(flatGapBar(bt, prevClose > 0 ? prevClose : holdPx));
+        if (base.length >= MAX_CANDLES) break;
+      }
+      const open = base[base.length - 1]?.close ?? holdPx;
+      base.push({
+        time: t,
+        open,
+        high: Math.max(open, holdPx),
+        low: Math.min(open, holdPx),
+        close: holdPx,
+        volume: opts?.fromTrade && opts.amountBase && opts.amountBase > 0 ? opts.amountBase : 0,
+      });
+    } else if (last.time === t) {
+      if (opts?.fromTrade && tradePx > 0) {
+        last.close = holdPx;
+        last.high = Math.max(last.high, last.open, holdPx);
+        last.low = Math.min(last.low, last.open, holdPx);
+        if (opts.amountBase && opts.amountBase > 0) {
+          last.volume = (last.volume || 0) + opts.amountBase;
+        }
+      } else if (tradePx > 0) {
+        // Hold last trade on tip — never invent mid walk / paper texture.
+        last.close = holdPx;
+        last.high = Math.max(last.high, last.open, holdPx);
+        last.low = Math.min(last.low, last.open, holdPx);
+      }
+    }
+  }
+
+  const nextBase = base.slice(-MAX_CANDLES);
+  const all = deriveAllTimeframes(nextBase, undefined, candlesByTf, {
+    nowMs,
+    retainPrev: true,
+    allowSynthPad: false,
+  });
+  all[CANDLE_BASE_TF] = nextBase;
+  reaggregateLiveBarsFromBase(all, nextBase);
+  pinAllTfTipsToBase(all, nextBase);
+  if (opts?.dayRange) {
+    return applyLiveDayRangeToPairCandles(all, opts.dayRange, nowMs);
+  }
+  return all;
+}
+
+/** @deprecated Paper / tests only. Live Soft-MM desk must use {@link applyLiveTradeTipToPairCandles}. */
 export function applyMidToPairCandles(
   candlesByTf: Partial<Record<Timeframe, Candle[]>>,
   pairId: PairId,
@@ -978,8 +1069,18 @@ export function applyMidToPairCandles(
     dayRange?: LiveDayRange;
     freezeClosedTip?: boolean;
     nowMs?: number;
+    /** Live desk: skip heal/texture — closed SoT + trade tip only. */
+    liveTradeSoT?: boolean;
   },
 ): Partial<Record<Timeframe, Candle[]>> {
+  if (opts?.liveTradeSoT) {
+    // Live Soft-MM path: mid argument is last-trade tip (caller must not pass book mid).
+    return applyLiveTradeTipToPairCandles(candlesByTf, pairId, mid, {
+      fromTrade: false,
+      dayRange: opts?.dayRange,
+      nowMs: opts?.nowMs,
+    });
+  }
   const nowMs = opts?.nowMs ?? Date.now();
   let prevBase = candlesByTf[CANDLE_BASE_TF] ?? [];
   // Always bridge to wall-clock tip — stale contiguous caches otherwise freeze at last closed bar.
@@ -1033,7 +1134,11 @@ export function applyMidToPairCandles(
       low: Math.min(pinned.low, pinned.open, mid),
     };
   }
-  const all = deriveAllTimeframes(nextBase, pairId, undefined, { nowMs, retainPrev: false });
+  const all = deriveAllTimeframes(nextBase, pairId, undefined, {
+    nowMs,
+    retainPrev: false,
+    allowSynthPad: opts?.syntheticVolume !== false,
+  });
   reaggregateLiveBarsFromBase(all, nextBase);
   for (const tf of Object.keys(all) as Timeframe[]) {
     if (tf === CANDLE_BASE_TF) {
@@ -1655,11 +1760,17 @@ export type CandlePrint = {
   amountBase?: number;
 };
 
-/** v20: key by boot asset + shorter max-age; drop cache when tip Last desyncs hard. */
-const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v20:";
+/**
+ * v21: local OHLC is NOT a source of truth. Persist disabled — durable `/candles`
+ * wins on every hydrate. Prefix kept only so legacy v20 keys can be cleared.
+ */
+const LIVE_CANDLE_CACHE_PREFIX = "hackme-ex-live-1m:v21:";
 
-/** Default session OHLC TTL — long enough for F5, short enough to shed stale morph. */
-export const LIVE_CANDLE_CACHE_MAX_AGE_MS = 90 * 60_000;
+/** Default session OHLC TTL — legacy loaders only; save is a no-op. */
+export const LIVE_CANDLE_CACHE_MAX_AGE_MS = 5 * 60_000;
+
+/** Live Soft-MM desk: never persist morphable tip OHLC that can beat server history. */
+export const LIVE_CANDLE_CACHE_PERSIST = false;
 
 /** Tip vs cached last close beyond this → discard (do not paint month-old morph). */
 export const LIVE_CANDLE_TIP_DESYNC_FRAC = 0.28;
@@ -1922,7 +2033,7 @@ export function clearLiveCandleCache(pairId: PairId): void {
     sessionStorage.removeItem(liveCandleCacheKey(pairId));
     sessionStorage.removeItem(LIVE_CANDLE_CACHE_PREFIX + pairId);
     // Legacy prefixes (pre-boot-keyed + older morph versions).
-    for (const ver of ["v19", "v18", "v17", "v16", "v15", "v14", "v13"]) {
+    for (const ver of ["v20", "v19", "v18", "v17", "v16", "v15", "v14", "v13"]) {
       sessionStorage.removeItem(`hackme-ex-live-1m:${ver}:${pairId}`);
     }
     // Drop any boot-tagged keys for this pair (other deploys in same tab session).
@@ -1938,12 +2049,14 @@ export function clearLiveCandleCache(pairId: PairId): void {
   }
 }
 
-/** Persist 1m series across F5 (sessionStorage — survives reload, not cross-browser). */
+/**
+ * Persist 1m series (tests / legacy). Live Soft-MM desk must NOT call this on mid
+ * ticks — {@link LIVE_CANDLE_CACHE_PERSIST} gates app.ts. Durable `/candles` is SoT.
+ */
 export function saveLiveCandleCache(pairId: PairId, base1m: Candle[]): void {
   if (typeof sessionStorage === "undefined" || !base1m.length) return;
   try {
     const boot = currentBootAssetTag();
-    // Keep ~24h of 1m (not 6h) so tip pumps cannot orphan yesterday on F5 before /candles returns.
     const slim = base1m.slice(-1500).map((c) => ({
       t: c.time,
       o: c.open,
@@ -2119,34 +2232,8 @@ export function hydrateLiveCandlesFromPrints(
   let base = [...byBucket.values()].sort((a, b) => a.time - b.time);
   const tip = tipMid > 0 && Number.isFinite(tipMid) ? tipMid : base[base.length - 1]?.close ?? 0;
 
-  // Pad ONLY when tape+durable+cache are empty — never invent a paper walk over
-  // sparse durable islands / Soft-MM prints (that painted the flat wick comb).
-  const want = Math.min(barCountForTf(CANDLE_BASE_TF, nowMs), 400);
-  const printAnchor =
-    sortedPrints.length > 0
-      ? medianPrintPrice(sortedPrints) || sortedPrints[0]!.price
-      : 0;
-  const printBucketsN = printBuckets.size;
-  const allowSeedPad =
-    tip > 0 &&
-    base.length < 12 &&
-    printBucketsN < 6 &&
-    sortedPrints.length < 20 &&
-    !(cached1m && cached1m.length >= 4) &&
-    !(durable1m && durable1m.length > 0);
-  if (allowSeedPad) {
-    const open24 = dayRange?.open && dayRange.open > 0 ? dayRange.open : 0;
-    const anchor =
-      printAnchor > 0 ? printAnchor : open24 > 0 ? open24 : base[0]?.open || tip;
-    const seedMid = chartAnchorMid(anchor) || tip;
-    const seeded = seedCandles(pairId, CANDLE_BASE_TF, seedMid, want, nowMs);
-    const firstReal = base[0]?.time;
-    if (firstReal) {
-      base = [...seeded.filter((c) => c.time < firstReal), ...base];
-    } else {
-      base = seeded;
-    }
-  }
+  // Live Soft-MM SoT: NEVER invent paper seed / random-walk history. Empty hours
+  // stay as flat bridges (or sparse durable islands) — not synth diagonals.
 
   // Ensure forming tip bucket exists. Never overwrite print close with Soft-MM tipMid.
   if (tip > 0) {
@@ -2199,12 +2286,13 @@ export function hydrateLiveCandlesFromPrints(
   if (tip > 0) {
     base = constrainLiveHistoryToTape(base, sortedPrints, tip, 0.22, dayHiLo, { nowMs });
   }
-  // Tip-run only — never rewrite mid-history print/seed into fake chop.
-  if (tip > 0) {
-    base = healFlatPaperBars(pairId, CANDLE_BASE_TF, base, tip, nowMs, { scope: "tipRun" });
-  }
+  // Never heal/texture on live hydrate — that rewrote tip/open on every Soft-MM mid tick.
   // Never stamp 24h ticker H/L onto 1m tip (skyscraper wick). Daily+ only after derive.
-  const all = deriveAllTimeframes(base, pairId, undefined, { nowMs, retainPrev: false });
+  const all = deriveAllTimeframes(base, undefined, undefined, {
+    nowMs,
+    retainPrev: false,
+    allowSynthPad: false,
+  });
   reaggregateLiveBarsFromBase(all, base);
   if (tip > 0) {
     for (const tf of TIMEFRAMES) {

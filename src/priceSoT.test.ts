@@ -4,12 +4,22 @@ import {
   pinTipCloseToLast,
   priceDriftFrac,
   pricesAligned,
+  resolveCandleTip,
   resolveDeskLast,
   tapeOutsideBbo,
 } from "./priceSoT";
 import { maxBuyBaseAmount, maxOrderBaseAmount } from "./balance";
 import { notionalMeetsMin } from "./money";
 import { baseState, sampleMarket } from "./testFixtures";
+
+describe("resolveCandleTip", () => {
+  it("uses last trade only — never invents Soft-MM mid", () => {
+    expect(resolveCandleTip({ tape: 0.064, tipClose: 0.06 })).toBeCloseTo(0.064, 8);
+    expect(resolveCandleTip({ apiLast: 0.07 })).toBeCloseTo(0.07, 8);
+    expect(resolveCandleTip({ tipClose: 0.06, prevTrade: 0.05 })).toBeCloseTo(0.06, 8);
+    expect(resolveCandleTip({})).toBe(0);
+  });
+});
 
 describe("resolveDeskLast", () => {
   it("prefers Soft-MM mid when fresh tape desyncs >2%", () => {

@@ -113,6 +113,27 @@ export function limitFormNeedsResync(
   return priceDriftFrac(formPrice, deskLast) > tolFrac;
 }
 
+/**
+ * Chart candle tip — last TRADE only. Never Soft-MM book mid (mid jumps painted
+ * fake crashes). Header/form may still use {@link resolveDeskLast}.
+ */
+export function resolveCandleTip(input: {
+  tape?: number;
+  apiLast?: number;
+  tipClose?: number;
+  prevTrade?: number;
+}): number {
+  const tape = input.tape && input.tape > 0 && Number.isFinite(input.tape) ? input.tape : 0;
+  const api = input.apiLast && input.apiLast > 0 && Number.isFinite(input.apiLast) ? input.apiLast : 0;
+  const tip = input.tipClose && input.tipClose > 0 && Number.isFinite(input.tipClose) ? input.tipClose : 0;
+  const prev = input.prevTrade && input.prevTrade > 0 && Number.isFinite(input.prevTrade) ? input.prevTrade : 0;
+  if (tape > 0) return tape;
+  if (api > 0) return api;
+  if (tip > 0) return tip;
+  if (prev > 0) return prev;
+  return 0;
+}
+
 /** Pin forming tip close to desk Last (mutate series tip in place). */
 export function pinTipCloseToLast<T extends { close: number; high: number; low: number; open: number }>(
   series: T[] | undefined,

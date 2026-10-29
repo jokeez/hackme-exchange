@@ -14,10 +14,10 @@ import { aggregateBookLevels, buildOrderBook, matchMarket } from "./book";
 import { bookStepsForPair } from "./bookSteps";
 import {
   applyLiveDayRangeToPairCandles,
-  applyMidToPairCandles,
+  applyLiveTradeTipToPairCandles,
   applyPaperClockToPairCandles,
+  LIVE_CANDLE_CACHE_PERSIST,
   CANDLE_BASE_TF,
-  chartAnchorMid,
   clampFillWickPx,
   deriveAllTimeframes,
   ensureTfSeriesCadence,
@@ -26,7 +26,6 @@ import {
   nudgeCloseTowardFill,
   prependOlderCandles,
   saveLiveCandleCache,
-  seedAllTimeframes,
   stats24h,
   type CandlePrint,
   type LiveDayRange,
@@ -178,6 +177,7 @@ import {
   limitFormNeedsResync,
   pinTipCloseToLast,
   pricesAligned,
+  resolveCandleTip,
   resolveDeskLast,
 } from "./priceSoT";
 import { nodeWalletUrl } from "./adapters/walletLinks";
@@ -672,6 +672,9 @@ function ensurePublicTape(force = false): void {
 
 let lastLiveCandleCacheSaveAt = 0;
 function persistLiveCandleCache(pairId: PairId = state.activePair, force = false): void {
+  // v21 SoT: durable `/candles` wins — never persist morphable tip OHLC that
+  // forks history across devices and then fights the server on reload.
+  if (!LIVE_CANDLE_CACHE_PERSIST) return;
   if (!useLiveBook()) return;
   const now = Date.now();
   if (!force && now - lastLiveCandleCacheSaveAt < 2_500) return;
@@ -770,15 +773,15 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.ts ?? Date.now()
     : 0;
   if (lastPrint > 0) setLastPublicMid(pairId, lastPrint, lastPrintTs || Date.now());
-  const tip =
-    liveLastPrice(pairId) ||
-    (lastPrint > 0 ? lastPrint : 0) ||
-    (tipMid > 0 ? tipMid : 0) ||
-    lastPublicMid(pairId) ||
-    labBookMid(pairId) ||
-    durableBars[durableBars.length - 1]?.close ||
-    cached?.[cached.length - 1]?.close ||
-    0;
+  // Candle tip = last TRADE only — never Soft-MM book mid (resolveDeskLast).
+  const tip = resolveCandleTip({
+    tape: lastPrint > 0 ? lastPrint : lastPublicMid(pairId),
+    apiLast: deskApiTickers.get(pairId)?.last ?? 0,
+    tipClose:
+      durableBars[durableBars.length - 1]?.close ||
+      cached?.[cached.length - 1]?.close ||
+      (tipMid > 0 ? tipMid : 0),
+  });
   // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
   if (!prints.length && !(cached?.length) && !(durableBars.length) && !(tip > 0)) return false;
   if (!(tip > 0)) return false;
@@ -9118,38 +9121,26 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
   const prev = prevMids[pairId];
 
   if (useServerMatching() || useLiveBook()) {
-    // Live desk: seed tape from the print, then tip close = desk Last (Soft-MM wins
-    // outside BBO / >2%). Wick expands toward the fill; never pin close above ask.
-    const refPx = tapeMid || bookMid || prev || 0;
+    // Live SoT: tip OHLC only from the trade/fill — never book mid.
+    const refPx = tapeMid || prev || bookMid || 0;
     const fillOk =
       fillPx > 0 &&
       Number.isFinite(fillPx) &&
       fillPx < 50 &&
       (!(refPx > 0) || (fillPx <= refPx * 4.5 && fillPx >= refPx / 4.5));
     if (fillOk) setLastPublicMid(pairId, fillPx);
-    const tipPx = liveLastPrice(pairId) || (fillOk ? fillPx : 0) || tapeMid || bookMid || prev || 0;
+    const tipPx = resolveCandleTip({
+      tape: fillOk ? fillPx : tapeMid,
+      tipClose: state.candles[pairId]?.[CANDLE_BASE_TF]?.at(-1)?.close,
+      prevTrade: prev,
+    });
     if (!(tipPx > 0)) return;
-    const wickPx = fillOk ? fillPx : tipPx;
     const dayRange = liveDayRangeForPair(pairId);
-    let next = applyMidToPairCandles(state.candles[pairId]!, pairId, tipPx, prev, {
-      syntheticVolume: false,
+    state.candles[pairId] = applyLiveTradeTipToPairCandles(state.candles[pairId]!, pairId, tipPx, {
+      fromTrade: fillOk,
+      amountBase: fillOk && amountBase > 0 ? amountBase : 0,
       dayRange,
     });
-    if (fillOk) {
-      const volAdd = amountBase > 0 ? amountBase : 0;
-      for (const tf of Object.keys(next) as Timeframe[]) {
-        const series = next[tf];
-        if (!series?.length) continue;
-        const tip = { ...series[series.length - 1]! };
-        tip.close = tipPx;
-        tip.high = Math.max(tip.high, tip.open, tip.close, wickPx);
-        tip.low = Math.min(tip.low, tip.open, tip.close, wickPx);
-        tip.volume = (tip.volume || 0) + volAdd;
-        series[series.length - 1] = tip;
-      }
-      next = applyLiveDayRangeToPairCandles(next, dayRange);
-    }
-    state.candles[pairId] = next;
     prevMids[pairId] = tipPx;
     persistLiveCandleCache(pairId, true);
     return;
@@ -9178,36 +9169,35 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
 
 
 /**
- * Advance candle tip for one pair. Live desk: tip ≈ L2 mid (with tape fallback),
- * so every device paints from the same book; always roll time even if mid is sticky.
+ * Advance candle tip for one pair.
+ * Live Soft-MM: tip = last TRADE only (never book mid). Mid ticks only roll UTC
+ * buckets with flat holds at last trade close — no random walk / heal / texture.
  */
 function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean): void {
   if (!state.candles[pairId]) state.candles[pairId] = {};
   const prev = prevMids[pairId];
   if (labLive) {
     const tipClose = state.candles[pairId]?.[CANDLE_BASE_TF]?.at(-1)?.close ?? 0;
-    const mid =
-      displayMid > 0
-        ? displayMid
-        : lastPublicMid(pairId) > 0
-          ? lastPublicMid(pairId)
-          : prev && prev > 0
-            ? prev
-            : tipClose > 0
-              ? tipClose
-              : 0;
-    if (!(mid > 0)) return;
-    state.candles[pairId] = applyMidToPairCandles(state.candles[pairId]!, pairId, mid, prev, {
-      syntheticVolume: false,
-      dayRange: liveDayRangeForPair(pairId),
+    const tradeTip = resolveCandleTip({
+      tape: lastPublicMid(pairId),
+      apiLast: deskApiTickers.get(pairId)?.last ?? 0,
+      tipClose,
+      prevTrade: prev,
     });
-    // Hard pin every TF tip close to desk Last — aggregation / day-range paint must
-    // never leave 1D tip at ~day-low while toolbar Last tracks Soft-MM.
+    // Ignore Soft-MM book mid passed as displayMid — mid jumps must not paint crashes.
+    void displayMid;
+    if (!(tradeTip > 0)) return;
+    state.candles[pairId] = applyLiveTradeTipToPairCandles(
+      state.candles[pairId]!,
+      pairId,
+      tradeTip,
+      { fromTrade: false, dayRange: liveDayRangeForPair(pairId) },
+    );
     const byTf = state.candles[pairId]!;
     for (const tf of Object.keys(byTf) as Timeframe[]) {
-      pinTipCloseToLast(byTf[tf], mid);
+      pinTipCloseToLast(byTf[tf], tradeTip);
     }
-    prevMids[pairId] = mid;
+    prevMids[pairId] = tradeTip;
     persistLiveCandleCache(pairId);
     return;
   }
@@ -9447,8 +9437,7 @@ async function refresh(): Promise<void> {
       if (state.mainView === "spot") throttledBookTapePatch();
     });
   }
-  // Live desk: seed CEX-like walk around shared anchor (last print / L2), not per-tab noise.
-  // Tip close still tracks live BBO via tipCandlesForPair every tick.
+  // Live desk: durable `/candles` only — never seedAllTimeframes / mid cliff reseed.
   if (!useLiveBook()) {
     if (needsCandleReseedForMarket(state, market)) {
       reseedCandlesFromMarket(state, market);
@@ -9459,38 +9448,26 @@ async function refresh(): Promise<void> {
   } else {
     for (const p of PAIRS) {
       if (!state.candles[p.id]) state.candles[p.id] = {};
-      const labMid = labBookMid(p.id) || lastPublicMid(p.id);
-      if (!(labMid > 0)) continue;
-      const seedMid = chartAnchorMid(labMid) || labMid;
-      const base = state.candles[p.id]![CANDLE_BASE_TF] ?? [];
-      const tipClose = base[base.length - 1]?.close ?? 0;
-      const empty = base.length < 8;
-      const cliff =
-        tipClose > 0 && (seedMid / tipClose > 1.08 || seedMid / tipClose < 0.92);
-      if (empty || cliff) {
-        // Prefer session cache + public prints over wiping with synthetic seed (F5 spike loss).
-        // Never cliff-wipe an existing series — Soft-MM mid vs last print routinely drifts >8%.
-        if (restoreLiveCandlesFromCache(p.id, seedMid)) {
-          chartNeedsFullReplace = true;
-        } else if (empty) {
-          state.candles[p.id] = seedAllTimeframes(p.id, seedMid);
-          prevMids[p.id] = labMid;
-          chartNeedsFullReplace = true;
-        }
-        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
+      const tradeTip =
+        lastPublicMid(p.id) || deskApiTickers.get(p.id)?.last || labBookMid(p.id) || 0;
+      if (!(tradeTip > 0) && (state.candles[p.id]![CANDLE_BASE_TF]?.length ?? 0) === 0) {
+        // Wait for hydrate — do not invent paper history.
+        void hydrateLivePairCandlesFromApi(p.id, tradeTip).then((ok) => {
           if (!ok) return;
-          // Always full setData after hydrate — tip-only update leaves sparse LWC
-          // series while getDisplayedCandles looks contiguous (flying orphans).
           chartNeedsFullReplace = true;
           if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
           else if (state.mainView === "spot" && p.id === state.activePair) render();
         });
-      } else if (p.id === state.activePair && !liveHydratedPairs.has(p.id)) {
-        // One-shot warm merge after boot so public prints land before the next F5.
-        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || seedMid).then((ok) => {
+        continue;
+      }
+      const base = state.candles[p.id]![CANDLE_BASE_TF] ?? [];
+      const empty = base.length < 8;
+      if (empty || (p.id === state.activePair && !liveHydratedPairs.has(p.id))) {
+        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || tradeTip).then((ok) => {
           if (!ok) return;
           chartNeedsFullReplace = true;
-          if (state.mainView === "spot" && chartMounted) patchLive();
+          if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
+          else if (state.mainView === "spot" && p.id === state.activePair) render();
         });
       }
     }
