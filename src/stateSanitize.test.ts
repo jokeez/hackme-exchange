@@ -78,5 +78,7 @@ describe("paper build CSP (FE-M-CSP)", () => {
     const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
     expect(html).toContain("127.0.0.1:18443");
     expect(html).toMatch(/Content-Security-Policy/);
+    expect(html).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(html).not.toMatch(/script-src[^;]*blob:/);
   });
 });
