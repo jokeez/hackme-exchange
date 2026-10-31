@@ -6334,6 +6334,10 @@ function mountChartPanel(): void {
       saveState(state);
     },
     onNeedHistory: (bars) => {
+      // Live Soft-MM: durable `/candles` is SoT. Never prependOlderCandles —
+      // that invented a 0.05 paper walk left of the tip and painted the
+      // "old flat + crooked spike" 15m chart after pan/bootstrap needHistory.
+      if (useLiveBook()) return 0;
       if (!market) return 0;
       const pair = state.activePair;
       const tf = state.activeTf;
@@ -9478,31 +9482,33 @@ async function refresh(): Promise<void> {
       ensureCandles(state, market);
     }
   } else {
-    for (const p of PAIRS) {
-      if (!state.candles[p.id]) state.candles[p.id] = {};
-      const tradeTip =
-        lastPublicMid(p.id) || deskApiTickers.get(p.id)?.last || labBookMid(p.id) || 0;
-      if (!(tradeTip > 0) && (state.candles[p.id]![CANDLE_BASE_TF]?.length ?? 0) === 0) {
-        // Wait for hydrate — do not invent paper history.
-        void hydrateLivePairCandlesFromApi(p.id, tradeTip).then((ok) => {
-          if (!ok) return;
-          chartNeedsFullReplace = true;
-          if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
-          else if (state.mainView === "spot" && p.id === state.activePair) render();
-        });
-        continue;
+    // Active pair first — parallel hydrate of every pair × 5 TF floods
+    // BookLimit burst (candles:IP) with 429s and left 15m on paper pad.
+    const hydrateOrder = [
+      state.activePair,
+      ...PAIRS.map((p) => p.id).filter((id) => id !== state.activePair),
+    ];
+    void (async () => {
+      for (let i = 0; i < hydrateOrder.length; i++) {
+        const id = hydrateOrder[i]!;
+        if (!state.candles[id]) state.candles[id] = {};
+        const tradeTip =
+          lastPublicMid(id) || deskApiTickers.get(id)?.last || labBookMid(id) || 0;
+        const base = state.candles[id]![CANDLE_BASE_TF] ?? [];
+        const empty = base.length < 8;
+        const need =
+          empty ||
+          (id === state.activePair && !liveHydratedPairs.has(id)) ||
+          (!(tradeTip > 0) && base.length === 0);
+        if (!need) continue;
+        if (i > 0) await new Promise((r) => setTimeout(r, 180));
+        const ok = await hydrateLivePairCandlesFromApi(id, lastPublicMid(id) || tradeTip);
+        if (!ok) continue;
+        chartNeedsFullReplace = true;
+        if (state.mainView === "spot" && id === state.activePair && chartMounted) patchLive();
+        else if (state.mainView === "spot" && id === state.activePair) render();
       }
-      const base = state.candles[p.id]![CANDLE_BASE_TF] ?? [];
-      const empty = base.length < 8;
-      if (empty || (p.id === state.activePair && !liveHydratedPairs.has(p.id))) {
-        void hydrateLivePairCandlesFromApi(p.id, lastPublicMid(p.id) || tradeTip).then((ok) => {
-          if (!ok) return;
-          chartNeedsFullReplace = true;
-          if (state.mainView === "spot" && p.id === state.activePair && chartMounted) patchLive();
-          else if (state.mainView === "spot" && p.id === state.activePair) render();
-        });
-      }
-    }
+    })();
   }
   seedEquitySnapshots(state, market);
   snapshotEquity(state, market);
