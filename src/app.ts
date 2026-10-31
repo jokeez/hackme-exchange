@@ -828,6 +828,11 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     nowMs,
   }) as typeof hydrated;
   prevMids[pairId] = tip;
+  // Drop paper-seed OHLC legend (0.05…) left over from pre-hydrate paint.
+  if (pairId === state.activePair) {
+    lastOhlc = null;
+    lastOhlcLegendText = "";
+  }
   persistLiveCandleCache(pairId, true);
   liveHydratedPairs.add(pairId);
   return true;
