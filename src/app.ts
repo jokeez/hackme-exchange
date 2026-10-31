@@ -9648,6 +9648,17 @@ export async function boot(): Promise<void> {
   if (useLiveBook()) {
     void hydrateDeskApiTickers(true);
     for (const p of PAIRS) void hydrateDeskVolFromApi(p.id);
+    // Kick active-pair candle SoT immediately — waiting for the oracle refresh
+    // loop left 15m on a single tip bar for 15–25s (looked empty/crooked).
+    void hydrateLivePairCandlesFromApi(state.activePair, lastPublicMid(state.activePair) || 0).then(
+      (ok) => {
+        if (!ok) return;
+        chartNeedsFullReplace = true;
+        liveHydratedPairs.add(state.activePair);
+        if (state.mainView === "spot" && chartMounted) patchLive();
+        else if (state.mainView === "spot") render();
+      },
+    );
   }
   render();
   // First-visit prefs must run before oracle await — otherwise settings/UI race with defaults.
