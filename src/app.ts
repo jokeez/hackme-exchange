@@ -746,10 +746,11 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     fetchPublicCandles(apiPair, { interval, limit, timeoutMs: coarseTimeoutMs }).then(
       async (res) => {
         if (res.ok && res.candles.length) return res;
-        // One retry — CF 403/timeout flaps hit 15m hardest.
+        // Retry with a smaller window — CF 403/timeout flaps hit 15m/1h hardest;
+        // half-limit still restores multi-day contiguous history after server CF.
         return fetchPublicCandles(apiPair, {
           interval,
-          limit,
+          limit: Math.max(80, Math.floor(limit / 2)),
           timeoutMs: coarseTimeoutMs,
         });
       },
