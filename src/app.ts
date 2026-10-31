@@ -726,6 +726,38 @@ function candlePrintsFromLocalTape(pairId: PairId): CandlePrint[] {
   return out;
 }
 
+/** Map desk TF → `/candles` interval for priority hydrate. */
+function candlesIntervalForTf(tf: string): string {
+  switch (tf) {
+    case "30s":
+    case "1m":
+    case "3m":
+    case "5m":
+      return "1m";
+    case "15m":
+      return "15m";
+    case "1H":
+      return "1h";
+    case "2H":
+    case "4H":
+      return "4h";
+    case "1D":
+    case "1W":
+      return "1d";
+    default:
+      return "15m";
+  }
+}
+
+function paintHydratedPair(pairId: PairId): void {
+  if (pairId !== state.activePair) return;
+  lastOhlc = null;
+  lastOhlcLegendText = "";
+  chartNeedsFullReplace = true;
+  if (state.mainView === "spot" && chartMounted) patchLive();
+  else if (state.mainView === "spot") render();
+}
+
 /** Restore live OHLC from durable /candles + session cache + /trades (survives F5 + tip pumps). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
   let cached =
@@ -735,13 +767,13 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
       : null);
   let apiPrints: CandlePrint[] = [];
   let durableBars: Candle[] = [];
-  await hydrateDeskApiTickers();
+  void hydrateDeskApiTickers();
   const apiPair = pairIdToApi(pairId);
   // Closed-bar SoT: 1m tip path + coarse durable history (1m alone ≤~2d → 1D voids
   // after synth/cache gated off). Tip still comes from last trade / Soft-MM.
   // Coarse TF `/candles` often 7–15s behind CF; short timeouts left 15m/1H empty
   // so the desk fell back to short 1m-reagg history (looked "old" + crooked).
-  const coarseTimeoutMs = 28_000;
+  const coarseTimeoutMs = 22_000;
   const fetchCoarse = (interval: string, limit: number) =>
     fetchPublicCandles(apiPair, { interval, limit, timeoutMs: coarseTimeoutMs }).then(
       async (res) => {
@@ -755,28 +787,77 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
         });
       },
     );
-  const [candle1m, candle15m, candle1h, candle4h, candle1d] = await Promise.all([
-    fetchPublicCandles(apiPair, { interval: "1m", limit: 1500, timeoutMs: 20_000 }),
-    fetchCoarse("15m", 500),
-    fetchCoarse("1h", 500),
-    fetchCoarse("4h", 500),
-    fetchCoarse("1d", 400),
+
+  const applySeries = (
+    durable1m: Candle[],
+    durableCoarse: Partial<Record<Timeframe, Candle[]>>,
+    prints: CandlePrint[],
+    tipHint: number,
+  ): boolean => {
+    const lastPrint = prints.length
+      ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.price ?? 0
+      : 0;
+    const lastPrintTs = prints.length
+      ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.ts ?? Date.now()
+      : 0;
+    if (lastPrint > 0) setLastPublicMid(pairId, lastPrint, lastPrintTs || Date.now());
+    const tip = resolveCandleTip({
+      tape: lastPrint > 0 ? lastPrint : lastPublicMid(pairId),
+      apiLast: deskApiTickers.get(pairId)?.last ?? 0,
+      tipClose:
+        durable1m[durable1m.length - 1]?.close ||
+        cached?.[cached.length - 1]?.close ||
+        (tipHint > 0 ? tipHint : tipMid > 0 ? tipMid : 0),
+    });
+    if (!prints.length && !(cached?.length) && !(durable1m.length) && !(tip > 0)) return false;
+    if (!(tip > 0)) return false;
+    const nowMs = Date.now();
+    const hydrated = hydrateLiveCandlesFromPrints(
+      pairId,
+      prints,
+      tip,
+      nowMs,
+      cached,
+      liveDayRangeForPair(pairId),
+      durable1m,
+    );
+    state.candles[pairId] = mergeDurableCoarseTfCandles(hydrated, durableCoarse, {
+      pairId,
+      nowMs,
+    }) as typeof hydrated;
+    prevMids[pairId] = tip;
+    persistLiveCandleCache(pairId, true);
+    liveHydratedPairs.add(pairId);
+    paintHydratedPair(pairId);
+    return true;
+  };
+
+  // Phase 1 — active TF first so 15m is not blocked behind 4h/1d CF latency.
+  // Trades run in parallel; we paint as soon as priority candles land.
+  const preferIv = candlesIntervalForTf(
+    pairId === state.activePair ? state.activeTf : "15m",
+  );
+  const tradesP = fetchPublicTrades(apiPair, 2000, 12_000, undefined, { window: "24h" });
+  const candle1mP = fetchPublicCandles(apiPair, {
+    interval: "1m",
+    limit: 1500,
+    timeoutMs: 18_000,
+  });
+  const priorityP =
+    preferIv === "1m" ? Promise.resolve(null) : fetchCoarse(preferIv, preferIv === "1d" ? 400 : 500);
+
+  const [candle1m, priorityCandles, tradesRes] = await Promise.all([
+    candle1mP,
+    priorityP,
+    tradesP,
   ]);
   if (candle1m.ok && candle1m.candles.length) {
     durableBars = apiCandlesToDemoBars(candle1m.candles);
   }
-  const durableCoarse = {
-    "15m": candle15m.ok ? apiCandlesToDemoBars(candle15m.candles) : [],
-    "1H": candle1h.ok ? apiCandlesToDemoBars(candle1h.candles) : [],
-    "4H": candle4h.ok ? apiCandlesToDemoBars(candle4h.candles) : [],
-    "1D": candle1d.ok ? apiCandlesToDemoBars(candle1d.candles) : [],
-  };
-  const res = await fetchPublicTrades(apiPair, 2000, 15_000, undefined, { window: "24h" });
-  if (res.ok) {
-    apiPrints = candlePrintsFromApiTrades(res.trades, pairId);
-    // Same /trades payload feeds 24h Vol — don't wait for WS/poll push.
+  if (tradesRes.ok) {
+    apiPrints = candlePrintsFromApiTrades(tradesRes.trades, pairId);
     const volPrints: { id?: string; ts: number; amountBase: number; price?: number }[] = [];
-    for (const t of res.trades) {
+    for (const t of tradesRes.trades) {
       const pid = t.pair ? apiPairToId(t.pair) ?? pairId : pairId;
       if (pid !== pairId) continue;
       const amountBase = minorToDisplay(Number(t.qty));
@@ -790,52 +871,41 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     if (pairId === state.activePair) patchTickerBar();
   }
   const prints = [...apiPrints, ...candlePrintsFromLocalTape(pairId)];
-  // Seed tape from newest print, then resolve Last via Soft-MM SoT (outside-BBO /
-  // desync snaps to book mid so hydrate cannot leave tip above the offer).
-  const lastPrint = prints.length
-    ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.price ?? 0
-    : 0;
-  const lastPrintTs = prints.length
-    ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.ts ?? Date.now()
-    : 0;
-  if (lastPrint > 0) setLastPublicMid(pairId, lastPrint, lastPrintTs || Date.now());
-  // Candle tip = last TRADE only — never Soft-MM book mid (resolveDeskLast).
-  const tip = resolveCandleTip({
-    tape: lastPrint > 0 ? lastPrint : lastPublicMid(pairId),
-    apiLast: deskApiTickers.get(pairId)?.last ?? 0,
-    tipClose:
-      durableBars[durableBars.length - 1]?.close ||
-      cached?.[cached.length - 1]?.close ||
-      (tipMid > 0 ? tipMid : 0),
-  });
-  // Soft-MM quiet pairs: no tape yet — still seed from tip so 24h Vol / OHLC aren't blank.
-  if (!prints.length && !(cached?.length) && !(durableBars.length) && !(tip > 0)) return false;
-  if (!(tip > 0)) return false;
-  // Merge by time: durable closed bars win; tip paints live. Never tip-scale history.
-  const nowMs = Date.now();
-  let hydrated = hydrateLiveCandlesFromPrints(
-    pairId,
-    prints,
-    tip,
-    nowMs,
-    cached,
-    liveDayRangeForPair(pairId),
-    durableBars,
-  );
-  // Restore multi-day 1D/4h/1h from server SoT (carry-forward gaps + real fill days).
-  state.candles[pairId] = mergeDurableCoarseTfCandles(hydrated, durableCoarse, {
-    pairId,
-    nowMs,
-  }) as typeof hydrated;
-  prevMids[pairId] = tip;
-  // Drop paper-seed OHLC legend (0.05…) left over from pre-hydrate paint.
-  if (pairId === state.activePair) {
-    lastOhlc = null;
-    lastOhlcLegendText = "";
+  const earlyCoarse: Partial<Record<Timeframe, Candle[]>> = {};
+  if (priorityCandles && priorityCandles.ok && priorityCandles.candles.length) {
+    const bars = apiCandlesToDemoBars(priorityCandles.candles);
+    if (preferIv === "15m") earlyCoarse["15m"] = bars;
+    else if (preferIv === "1h") earlyCoarse["1H"] = bars;
+    else if (preferIv === "4h") earlyCoarse["4H"] = bars;
+    else if (preferIv === "1d") earlyCoarse["1D"] = bars;
   }
-  persistLiveCandleCache(pairId, true);
-  liveHydratedPairs.add(pairId);
-  return true;
+  const painted = applySeries(durableBars, earlyCoarse, prints, tipMid);
+  if (!painted && !(durableBars.length || Object.keys(earlyCoarse).length)) return false;
+
+  // Phase 2 — remaining coarse TFs (do not block first paint).
+  const need15 = preferIv !== "15m";
+  const need1h = preferIv !== "1h";
+  const need4h = preferIv !== "4h";
+  const need1d = preferIv !== "1d";
+  const [candle15m, candle1h, candle4h, candle1d] = await Promise.all([
+    need15 ? fetchCoarse("15m", 500) : Promise.resolve(priorityCandles),
+    need1h ? fetchCoarse("1h", 500) : Promise.resolve(priorityCandles),
+    need4h ? fetchCoarse("4h", 500) : Promise.resolve(null),
+    need1d ? fetchCoarse("1d", 400) : Promise.resolve(preferIv === "1d" ? priorityCandles : null),
+  ]);
+  const durableCoarse: Partial<Record<Timeframe, Candle[]>> = {
+    "15m":
+      candle15m && candle15m.ok
+        ? apiCandlesToDemoBars(candle15m.candles)
+        : earlyCoarse["15m"] ?? [],
+    "1H":
+      candle1h && candle1h.ok ? apiCandlesToDemoBars(candle1h.candles) : earlyCoarse["1H"] ?? [],
+    "4H":
+      candle4h && candle4h.ok ? apiCandlesToDemoBars(candle4h.candles) : earlyCoarse["4H"] ?? [],
+    "1D":
+      candle1d && candle1d.ok ? apiCandlesToDemoBars(candle1d.candles) : earlyCoarse["1D"] ?? [],
+  };
+  return applySeries(durableBars, durableCoarse, prints, tipMid);
 }
 
 /** Sync path: session cache only (before GET /trades returns). */
