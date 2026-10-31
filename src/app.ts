@@ -657,6 +657,7 @@ async function ensureAlertNotifications(): Promise<void> {
 }
 
 const liveHydratedPairs = new Set<PairId>();
+const hydrateInflight = new Map<PairId, Promise<boolean>>();
 
 function ensurePublicTape(force = false): void {
   // Live L2: public prints come from GET /trades (marketStream), never oracle seeds.
@@ -753,6 +754,9 @@ function paintHydratedPair(pairId: PairId): void {
   if (pairId !== state.activePair) return;
   lastOhlc = null;
   lastOhlcLegendText = "";
+  // Force HUD off paper-seed 0.05… onto durable tip OHLC immediately.
+  const tipBar = state.candles[pairId]?.[state.activeTf]?.at(-1) ?? null;
+  updateOhlcDisplays(tipBar);
   chartNeedsFullReplace = true;
   if (state.mainView === "spot" && chartMounted) patchLive();
   else if (state.mainView === "spot") render();
@@ -760,6 +764,18 @@ function paintHydratedPair(pairId: PairId): void {
 
 /** Restore live OHLC from durable /candles + session cache + /trades (survives F5 + tip pumps). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
+  const existing = hydrateInflight.get(pairId);
+  if (existing) return existing;
+  const run = hydrateLivePairCandlesFromApiUniq(pairId, tipMid);
+  hydrateInflight.set(pairId, run);
+  try {
+    return await run;
+  } finally {
+    hydrateInflight.delete(pairId);
+  }
+}
+
+async function hydrateLivePairCandlesFromApiUniq(pairId: PairId, tipMid: number): Promise<boolean> {
   let cached =
     loadLiveCandleCache(pairId, undefined, tipMid) ??
     (state.candles[pairId]?.[CANDLE_BASE_TF]?.length
@@ -801,15 +817,29 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
       ? [...prints].sort((a, b) => a.ts - b.ts).at(-1)?.ts ?? Date.now()
       : 0;
     if (lastPrint > 0) setLastPublicMid(pairId, lastPrint, lastPrintTs || Date.now());
+    const coarseTip =
+      durableCoarse["15m"]?.at(-1)?.close ||
+      durableCoarse["1H"]?.at(-1)?.close ||
+      durableCoarse["4H"]?.at(-1)?.close ||
+      durableCoarse["1D"]?.at(-1)?.close ||
+      0;
     const tip = resolveCandleTip({
       tape: lastPrint > 0 ? lastPrint : lastPublicMid(pairId),
       apiLast: deskApiTickers.get(pairId)?.last ?? 0,
       tipClose:
         durable1m[durable1m.length - 1]?.close ||
+        coarseTip ||
         cached?.[cached.length - 1]?.close ||
         (tipHint > 0 ? tipHint : tipMid > 0 ? tipMid : 0),
     });
-    if (!prints.length && !(cached?.length) && !(durable1m.length) && !(tip > 0)) return false;
+    if (
+      !prints.length &&
+      !(cached?.length) &&
+      !(durable1m.length) &&
+      !coarseTip &&
+      !(tip > 0)
+    )
+      return false;
     if (!(tip > 0)) return false;
     const nowMs = Date.now();
     const hydrated = hydrateLiveCandlesFromPrints(
@@ -832,8 +862,8 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     return true;
   };
 
-  // Phase 1 — active TF first so 15m is not blocked behind 4h/1d CF latency.
-  // Trades run in parallel; we paint as soon as priority candles land.
+  // Phase 1 — active TF + trades only (do NOT wait on 1m×1500 / 4h / 1d).
+  // Waiting on the full candle fan-out left 15m stuck on a single tip bar ~40s.
   const preferIv = candlesIntervalForTf(
     pairId === state.activePair ? state.activeTf : "15m",
   );
@@ -844,16 +874,11 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
     timeoutMs: 18_000,
   });
   const priorityP =
-    preferIv === "1m" ? Promise.resolve(null) : fetchCoarse(preferIv, preferIv === "1d" ? 400 : 500);
+    preferIv === "1m"
+      ? candle1mP
+      : fetchCoarse(preferIv, preferIv === "1d" ? 400 : 500);
 
-  const [candle1m, priorityCandles, tradesRes] = await Promise.all([
-    candle1mP,
-    priorityP,
-    tradesP,
-  ]);
-  if (candle1m.ok && candle1m.candles.length) {
-    durableBars = apiCandlesToDemoBars(candle1m.candles);
-  }
+  const [priorityCandles, tradesRes] = await Promise.all([priorityP, tradesP]);
   if (tradesRes.ok) {
     apiPrints = candlePrintsFromApiTrades(tradesRes.trades, pairId);
     const volPrints: { id?: string; ts: number; amountBase: number; price?: number }[] = [];
@@ -874,7 +899,9 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   const earlyCoarse: Partial<Record<Timeframe, Candle[]>> = {};
   if (priorityCandles && priorityCandles.ok && priorityCandles.candles.length) {
     const bars = apiCandlesToDemoBars(priorityCandles.candles);
-    if (preferIv === "15m") earlyCoarse["15m"] = bars;
+    if (preferIv === "1m") {
+      durableBars = bars;
+    } else if (preferIv === "15m") earlyCoarse["15m"] = bars;
     else if (preferIv === "1h") earlyCoarse["1H"] = bars;
     else if (preferIv === "4h") earlyCoarse["4H"] = bars;
     else if (preferIv === "1d") earlyCoarse["1D"] = bars;
@@ -882,17 +909,22 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   const painted = applySeries(durableBars, earlyCoarse, prints, tipMid);
   if (!painted && !(durableBars.length || Object.keys(earlyCoarse).length)) return false;
 
-  // Phase 2 — remaining coarse TFs (do not block first paint).
+  // Phase 2 — 1m tip path + remaining coarse (background; re-paint when ready).
+  const need1m = preferIv !== "1m";
   const need15 = preferIv !== "15m";
   const need1h = preferIv !== "1h";
   const need4h = preferIv !== "4h";
   const need1d = preferIv !== "1d";
-  const [candle15m, candle1h, candle4h, candle1d] = await Promise.all([
+  const [candle1m, candle15m, candle1h, candle4h, candle1d] = await Promise.all([
+    need1m ? candle1mP : Promise.resolve(priorityCandles),
     need15 ? fetchCoarse("15m", 500) : Promise.resolve(priorityCandles),
     need1h ? fetchCoarse("1h", 500) : Promise.resolve(priorityCandles),
     need4h ? fetchCoarse("4h", 500) : Promise.resolve(null),
     need1d ? fetchCoarse("1d", 400) : Promise.resolve(preferIv === "1d" ? priorityCandles : null),
   ]);
+  if (candle1m && candle1m.ok && candle1m.candles.length) {
+    durableBars = apiCandlesToDemoBars(candle1m.candles);
+  }
   const durableCoarse: Partial<Record<Timeframe, Candle[]>> = {
     "15m":
       candle15m && candle15m.ok
@@ -9715,19 +9747,14 @@ export async function boot(): Promise<void> {
     for (const p of PAIRS) restoreDeskVolCache(p.id);
   }
   // Live: durable /tickers (fills DB) + short /trades ring. Never seed/demo vol.
-  if (useLiveBook()) {
+  if (useLiveBook() || isDeskConnectEnabled() || usePublicDeskBook()) {
     void hydrateDeskApiTickers(true);
     for (const p of PAIRS) void hydrateDeskVolFromApi(p.id);
     // Kick active-pair candle SoT immediately — waiting for the oracle refresh
     // loop left 15m on a single tip bar for 15–25s (looked empty/crooked).
-    void hydrateLivePairCandlesFromApi(state.activePair, lastPublicMid(state.activePair) || 0).then(
-      (ok) => {
-        if (!ok) return;
-        chartNeedsFullReplace = true;
-        liveHydratedPairs.add(state.activePair);
-        if (state.mainView === "spot" && chartMounted) patchLive();
-        else if (state.mainView === "spot") render();
-      },
+    void hydrateLivePairCandlesFromApi(
+      state.activePair,
+      lastPublicMid(state.activePair) || deskApiTickers.get(state.activePair)?.last || 0,
     );
   }
   render();
