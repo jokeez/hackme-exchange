@@ -739,12 +739,27 @@ async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Pr
   const apiPair = pairIdToApi(pairId);
   // Closed-bar SoT: 1m tip path + coarse durable history (1m alone ≤~2d → 1D voids
   // after synth/cache gated off). Tip still comes from last trade / Soft-MM.
+  // Coarse TF `/candles` often 7–15s behind CF; short timeouts left 15m/1H empty
+  // so the desk fell back to short 1m-reagg history (looked "old" + crooked).
+  const coarseTimeoutMs = 28_000;
+  const fetchCoarse = (interval: string, limit: number) =>
+    fetchPublicCandles(apiPair, { interval, limit, timeoutMs: coarseTimeoutMs }).then(
+      async (res) => {
+        if (res.ok && res.candles.length) return res;
+        // One retry — CF 403/timeout flaps hit 15m hardest.
+        return fetchPublicCandles(apiPair, {
+          interval,
+          limit,
+          timeoutMs: coarseTimeoutMs,
+        });
+      },
+    );
   const [candle1m, candle15m, candle1h, candle4h, candle1d] = await Promise.all([
-    fetchPublicCandles(apiPair, { interval: "1m", limit: 1500, timeoutMs: 12_000 }),
-    fetchPublicCandles(apiPair, { interval: "15m", limit: 500, timeoutMs: 12_000 }),
-    fetchPublicCandles(apiPair, { interval: "1h", limit: 500, timeoutMs: 12_000 }),
-    fetchPublicCandles(apiPair, { interval: "4h", limit: 500, timeoutMs: 12_000 }),
-    fetchPublicCandles(apiPair, { interval: "1d", limit: 400, timeoutMs: 12_000 }),
+    fetchPublicCandles(apiPair, { interval: "1m", limit: 1500, timeoutMs: 20_000 }),
+    fetchCoarse("15m", 500),
+    fetchCoarse("1h", 500),
+    fetchCoarse("4h", 500),
+    fetchCoarse("1d", 400),
   ]);
   if (candle1m.ok && candle1m.candles.length) {
     durableBars = apiCandlesToDemoBars(candle1m.candles);

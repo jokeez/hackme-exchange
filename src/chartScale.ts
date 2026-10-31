@@ -64,27 +64,30 @@ export function maxJumpFracForTf(tf: Timeframe | string): number {
  * the body into a “spike forest” on every bar.
  */
 export function maxWickFracForTf(tf: Timeframe | string): number {
+  // Soft-MM auction ranges on 15m/1H routinely print 3–8% H–L; the old
+  // sub-1% caps body-collapsed those bars into a crooked thin ribbon while
+  // still leaving mile dump needles clipped (tests use ~18% Soft-MM dumps).
   switch (tf) {
     case "30s":
-      return 0.0025;
+      return 0.004;
     case "1m":
-      return 0.0032;
-    case "3m":
-      return 0.0045;
-    case "5m":
       return 0.006;
-    case "15m":
-      return 0.0075;
-    case "1H":
-      return 0.011;
-    case "2H":
-      return 0.014;
-    case "4H":
+    case "3m":
+      return 0.01;
+    case "5m":
       return 0.018;
-    case "1D":
-      return 0.025;
-    case "1W":
+    case "15m":
       return 0.04;
+    case "1H":
+      return 0.055;
+    case "2H":
+      return 0.065;
+    case "4H":
+      return 0.08;
+    case "1D":
+      return 0.1;
+    case "1W":
+      return 0.14;
     default:
       return MAX_WICK_FRAC;
   }
@@ -470,8 +473,8 @@ function isPaintFlatGapBridge(c: Candle): boolean {
  * - Closed bars keep real aggregated closes (prints / seed / aggregate). No affine-pin,
  *   no drift-pull toward Last — that faked multi-day ramps after a recent pump.
  * - Flat gap bridges stay O=H=L=C (paint as continuous Soft-MM path; never wick-pad).
- * - Soft-bridge opens only between *adjacent printed* bars (skip flat gap fillers) so
- *   auction jumps stay honest without inventing diagonal ramps across quiet holes.
+ * - Soft-bridge opens after flat Soft-MM holds (reconnect islands) or tiny micro-gaps;
+ *   large auction jumps between adjacent printed bars stay honest (no diagonal bodies).
  * - Clip Soft-MM mile wicks + reject oracle-class single-bar glitches vs series median.
  * - Never invent wick forests on sticky Soft-MM pegs (that painted the flat comb).
  * - Tip: close = Last; open from last printed close → Last body; H/L from tip fills only.
@@ -537,15 +540,22 @@ function displayCapCex(candles: Candle[], tf: Timeframe | string): Candle[] {
       continue;
     }
 
-    // Soft-bridge opens vs prior *painted* close (includes tip-banded flat bridges).
-    // Using only lastPrinted skipped Soft-MM holds and reintroduced island open cliffs
-    // after long quiet holes (flying orphan edges).
+    // Soft-bridge opens vs prior *painted* close only when:
+    // - prior bar is a flat Soft-MM hold (reconnect after quiet hole — no island cliff), or
+    // - jump is a micro-gap (<1.5%) between adjacent prints.
+    // Large Soft-MM auction open jumps stay honest — rewriting them into full bodies
+    // painted the crooked diagonal 15m path.
     if (i > 0) {
-      const prevClose = out[i - 1]!.close;
-      if (finitePos(prevClose) && Math.abs(open - prevClose) / prevClose > 0.0004) {
-        open = prevClose;
-        high = Math.max(high, open, close);
-        low = Math.min(low, open, close);
+      const prev = out[i - 1]!;
+      const prevClose = prev.close;
+      if (finitePos(prevClose)) {
+        const jump = Math.abs(open - prevClose) / prevClose;
+        const prevBridge = isPaintFlatGapBridge(prev);
+        if (jump > 0.0004 && (prevBridge || jump < 0.015)) {
+          open = prevClose;
+          high = Math.max(high, open, close);
+          low = Math.min(low, open, close);
+        }
       }
     }
 

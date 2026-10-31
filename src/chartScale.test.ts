@@ -69,8 +69,8 @@ describe("clipBarWicks / sanitizeCandleExtremes", () => {
       if (up > 1e-9 || dn > 1e-9) withWick += 1;
     }
     expect(withWick).toBeGreaterThan(20);
-    // Soft cap for 15m is 0.75% beyond body mid.
-    expect(maxWickFrac).toBeLessThanOrEqual(0.008);
+    // Soft-MM 15m auction wick budget (not the old sub-1% body-collapse).
+    expect(maxWickFrac).toBeLessThanOrEqual(maxWickFracForTf("15m") + 1e-6);
     const closes = candles.map((c) => c.close);
     const cMin = Math.min(...closes);
     const cMax = Math.max(...closes);
@@ -211,6 +211,46 @@ describe("robustPriceRange", () => {
     const painted = displayCapCandles(candles, "1m");
     expect(historyCloseDrift(candles, painted)).toBeLessThan(0.002);
     expect(Math.min(...painted.map((c) => c.low))).toBeGreaterThan(tip * 0.95);
+  });
+
+  it("15m Soft-MM auction ranges survive paint (no crooked body-collapse)", () => {
+    // Live Soft-MM 15m often prints 4–7% H–L with modest bodies — old 0.75%
+    // wick caps crushed those into a thin crooked ribbon.
+    const candles: Candle[] = [];
+    let px = 0.076;
+    for (let i = 0; i < 48; i++) {
+      const open = px;
+      const close = px * (1 + (i % 4 === 0 ? 0.012 : i % 4 === 1 ? -0.01 : 0.003));
+      const high = Math.max(open, close) * 1.035;
+      const low = Math.min(open, close) * 0.965;
+      candles.push(bar(1_700_000_000 + i * 900, open, high, low, close));
+      px = close;
+    }
+    const painted = displayCapCandles(candles, "15m");
+    expect(historyCloseDrift(candles, painted)).toBeLessThan(0.002);
+    expect(painted[painted.length - 1]!.close).toBeCloseTo(candles[candles.length - 1]!.close, 10);
+    let keptAuction = 0;
+    for (let i = 0; i < candles.length - 1; i++) {
+      const raw = candles[i]!;
+      const p = painted[i]!;
+      const rawRng = (raw.high - raw.low) / raw.close;
+      const paintRng = (p.high - p.low) / p.close;
+      if (rawRng > 0.04) {
+        expect(paintRng).toBeGreaterThan(0.03);
+        keptAuction++;
+      }
+    }
+    expect(keptAuction).toBeGreaterThan(10);
+    // Mile Soft-MM dump needle still clipped.
+    const spiked = [
+      ...candles.slice(0, -1),
+      bar(candles[candles.length - 1]!.time, px, px, px * 0.7, px),
+    ];
+    const spikedPaint = displayCapCandles(spiked, "15m");
+    const tip = spikedPaint[spikedPaint.length - 1]!;
+    expect((Math.min(tip.open, tip.close) - tip.low) / tip.close).toBeLessThanOrEqual(
+      maxWickFracForTf("15m") + 1e-4,
+    );
   });
 
   it("1m CEX paint keeps real wicks (not Soft-MM Renko tip-walk)", () => {
