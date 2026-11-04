@@ -1,0 +1,15 @@
+import { chromium } from "playwright";
+const SEED = process.env.QA_SEED, ADDR = process.env.QA_ADDR;
+const b = await chromium.launch(); const p = await b.newPage();
+const seen = new Map(); const navs = [];
+const t0 = Date.now();
+p.on("response", async (r) => { const u = new URL(r.url()); if (/auth\/(session|verify)/.test(u.pathname)) { let body = ""; try { body = (await r.text()).slice(0, 90); } catch {} console.log(((Date.now() - t0) / 1000).toFixed(1) + "s", r.status(), u.pathname, body); } });
+p.on("request", (r) => { const u = new URL(r.url()); if (/auth|balances|orders|session/.test(u.pathname)) { const k = r.method() + " " + u.origin + u.pathname; seen.set(k, (seen.get(k) || 0) + 1); } });
+p.on("framenavigated", (f) => { if (f === p.mainFrame()) navs.push(f.url()); });
+await p.addInitScript(([s, a]) => { localStorage.setItem("hackme-ex-tour-v1", "1"); localStorage.setItem("hackme.desk.wallet.seed.v1", s); localStorage.setItem("hackme.desk.wallet.lastAddress.v1", a); }, [SEED, ADDR]);
+await p.goto("https://exchange.hackme.tech/", { waitUntil: "domcontentloaded", timeout: 45000 });
+await p.waitForTimeout(15000);
+console.log([...seen.entries()].map(([k, v]) => v + "x " + k).join("\n"));
+console.log("navigations:", navs);
+console.log("cookies:", (await p.context().cookies()).map((c) => c.domain + " " + c.name).join(", "));
+await b.close();

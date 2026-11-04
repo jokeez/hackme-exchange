@@ -97,7 +97,12 @@ export function initPwa(): void {
   });
 
   let refreshing = false;
+  // First visit: the new SW claiming an uncontrolled page also fires controllerchange.
+  // Only an *update* (page already controlled) needs a reload — otherwise every new
+  // visitor got a full reload a few seconds in, mid Connect/hydrate.
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController) return;
     if (refreshing) return;
     refreshing = true;
     location.reload();
