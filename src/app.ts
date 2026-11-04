@@ -1265,7 +1265,7 @@ type VipProgLike = ReturnType<typeof nextVipProgress>;
 function vipBadgeInner(vip: VipTierLike, vipProg: VipProgLike): string {
   return `<span class="vip-name" title="${
           hasServerVipVolume()
-            ? "Your VIP tier from 30-day USDT taker volume"
+            ? "Your VIP tier from 30-day trading volume (maker + taker)"
             : useServerMatching()
               ? "Loading your VIP tier…"
               : useLiveBook() || usePublicDeskBook()

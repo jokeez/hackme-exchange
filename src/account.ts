@@ -858,7 +858,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
       </div>
       <div class="acct-vip-pill" title="${
         hasServerVipVolume()
-          ? "VIP from server GET /vip (30d USDT fills)"
+          ? "Your VIP tier from 30-day trading volume (maker + taker)"
           : deskOn
             ? "VIP syncs from desk fills after Connect — local estimate until then"
             : "Demo VIP from local paper trade history"
@@ -965,7 +965,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <div class="acct-vip-row">
             <span class="vip-badge lg" title="${
               hasServerVipVolume()
-                ? "VIP from server GET /vip (30d USDT fills)"
+                ? "Your VIP tier from 30-day trading volume (maker + taker)"
                 : deskOn
                   ? "VIP schedule from desk · volume syncs after fills"
                   : "Demo VIP from local paper trade history"
