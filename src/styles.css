@@ -937,6 +937,14 @@ a:hover { text-decoration: underline; }
     display: flex !important;
   }
   .chart-host { min-height: 200px; flex: 1; }
+  .chart-host[data-loading] { position: relative; }
+  .chart-host[data-loading]::after {
+    content: attr(data-loading);
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; letter-spacing: .02em; color: var(--muted, #8a94a6);
+    pointer-events: none;
+  }
   .chart-body { min-height: 0; flex: 1; }
   .chart-main { min-height: 0; }
   .col-center { min-height: 0; }

@@ -798,12 +798,24 @@ async function syncServerCandles(pairId: PairId, tf: Timeframe, mode: "full" | "
   const running = liveSyncInflight.get(key);
   if (running) return running;
   const run = (async () => {
+    // Tip polls fetch every bar since the last one we hold (+2), not a fixed 3: after a
+    // hidden tab, a sleeping phone or a network drop a fixed tip left a hole in the series.
+    let limit = 1500;
+    if (mode === "tip") {
+      const lastT = state.candles[pairId]?.[tf]?.at(-1)?.time ?? 0;
+      const sec = TF_SEC[tf] || 60;
+      const need = lastT > 0 ? Math.ceil((Date.now() / 1000 - lastT) / sec) + 2 : 1500;
+      limit = Math.min(1500, Math.max(3, need));
+    }
     const res = await fetchPublicCandles(pairIdToApi(pairId), {
       interval,
-      limit: mode === "full" ? 1500 : 3,
-      timeoutMs: mode === "full" ? 20_000 : 8_000,
+      limit,
+      timeoutMs: limit > 50 ? 20_000 : 8_000,
     });
-    if (!res.ok || !res.candles.length) return false;
+    if (!res.ok || !res.candles.length) {
+      updateLiveChartLoading(res.ok ? "" : "retry");
+      return false;
+    }
     const bars = apiCandlesToDemoBars(res.candles);
     if (!bars.length) return false;
     if (!state.candles[pairId]) state.candles[pairId] = {};
@@ -819,6 +831,7 @@ async function syncServerCandles(pairId: PairId, tf: Timeframe, mode: "full" | "
       if (chartMounted) patchLive();
       // Legend was painted on TF switch before this TF loaded ("O — H — L —").
       if (isMain && !lastOhlc) refreshOhlcLegendIdle();
+      if (isMain) updateLiveChartLoading();
     }
     return true;
   })();
@@ -837,6 +850,36 @@ function ensureLiveServerTf(pairId: PairId, tf: Timeframe): void {
   if (!(state.candles[pairId]?.[t]?.length) || Date.now() - at > LIVE_FULL_STALE_MS) {
     void syncServerCandles(pairId, t, "full");
   }
+  if (pairId === state.activePair && t === liveTf(state.activeTf)) queueMicrotask(() => updateLiveChartLoading());
+}
+
+/** "Loading 1H…" over the empty main chart until its server series lands (was a blank pane). */
+function updateLiveChartLoading(kind: "" | "retry" = ""): void {
+  const host = document.getElementById("chart-host");
+  if (!host) return;
+  const empty = useLiveBook() && !(state.candles[state.activePair]?.[liveTf(state.activeTf)]?.length);
+  if (!empty) {
+    host.removeAttribute("data-loading");
+    return;
+  }
+  host.setAttribute("data-loading", kind === "retry" ? `Reconnecting… ${state.activeTf}` : `Loading ${state.activeTf}…`);
+}
+
+/** After the first paint, warm the remaining quick TFs so switching is instant. */
+const livePrefetchedAt = new Map<string, number>();
+function prefetchLiveQuickTfs(pairId: PairId): void {
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  if (conn?.saveData) return;
+  if (Date.now() - (livePrefetchedAt.get(pairId) ?? 0) < LIVE_FULL_STALE_MS) return;
+  livePrefetchedAt.set(pairId, Date.now());
+  const todo = QUICK_TFS.map(liveTf).filter((tf) => !(state.candles[pairId]?.[tf]?.length));
+  let i = 0;
+  const next = (): void => {
+    if (i >= todo.length || pairId !== state.activePair || document.hidden) return;
+    const tf = todo[i++]!;
+    void syncServerCandles(pairId, tf, "full").finally(() => setTimeout(next, 400));
+  };
+  setTimeout(next, 1500);
 }
 
 /** Poll the newest bars of every TF on screen (+1m for Last/legend). */
@@ -857,6 +900,15 @@ function pollLiveServerTips(): void {
     if (!(state.candles[pid]?.[tf]?.length)) void syncServerCandles(pid, tf, "full");
     else void syncServerCandles(pid, tf, "tip");
   }
+}
+
+// Polls pause while hidden; catch up the moment the tab is back instead of on the next tick.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || !useLiveBook()) return;
+    liveTipAt.clear();
+    pollLiveServerTips();
+  });
 }
 
 /** Pan-left paging: prepend server bars ending just before the oldest loaded bar. */
@@ -930,6 +982,7 @@ async function hydrateLiveServerCandles(pairId: PairId): Promise<boolean> {
     if (tip > 0) prevMids[pairId] = tip;
     liveHydratedPairs.add(pairId);
     paintHydratedPair(pairId);
+    if (pairId === state.activePair) prefetchLiveQuickTfs(pairId);
   }
   return ok;
 }

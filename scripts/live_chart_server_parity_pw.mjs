@@ -2,6 +2,8 @@
 import { chromium } from "playwright";
 const URL = process.env.EX_URL || "https://exchange.hackme.tech/";
 const API = process.env.EX_API || "https://exchange.hackme.tech/desk-api";
+const PAIR = process.env.PAIR || "HMC/USDT";
+const PAIR_ID = PAIR.replace("/", "_");
 const TFS = [["1m","1m"],["3m","3m"],["5m","5m"],["15m","15m"],["1H","1h"],["2H","2h"],["4H","4h"],["1D","1d"],["1W","1w"]];
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
@@ -10,6 +12,10 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 await page.waitForFunction(() => window.__hackmeChart && window.__hackmeChart.getDisplayedCandles().length > 10, null, { timeout: 90000 });
+if (PAIR_ID !== "HMC_USDT") {
+  await page.evaluate((id) => document.querySelector(`.market-row[data-pair="${id}"]`)?.click(), PAIR_ID);
+  await page.waitForTimeout(5000);
+}
 let fail = 0;
 for (const [tf, iv] of TFS) {
   await page.evaluate((tf) => {
@@ -34,9 +40,9 @@ for (const [tf, iv] of TFS) {
   if (activeTf !== tf) console.log(`  WARN active TF is ${activeTf}, wanted ${tf}`);
   // wait for server full load of this TF
   await page.waitForTimeout(6000);
-  const res = await page.evaluate(async ({ API, iv }) => {
+  const res = await page.evaluate(async ({ API, iv, PAIR }) => {
     const painted = window.__hackmeChart.getDisplayedCandles();
-    const r = await fetch(`${API}/candles?pair=HMC/USDT&interval=${iv}&limit=1500`, { cache: "no-store" });
+    const r = await fetch(`${API}/candles?pair=${PAIR}&interval=${iv}&limit=1500`, { cache: "no-store" });
     const j = await r.json();
     const srv = new Map(j.candles.map((c) => [Math.floor(Date.parse(c.open_time) / 1000), c]));
     let cmp = 0, bad = 0, missing = 0, ex = null, scale = 0;
@@ -51,7 +57,7 @@ for (const [tf, iv] of TFS) {
     // ascending + contiguous
     const steps = new Set(); for (let i = 1; i < painted.length; i++) steps.add(painted[i].time - painted[i-1].time);
     return { n: painted.length, cmp, bad, missing, ex, steps: [...steps].slice(0, 4), tip: painted.at(-1) };
-  }, { API, iv });
+  }, { API, iv, PAIR });
   const legend = await page.evaluate(() => document.getElementById("ohlc-legend")?.textContent || "");
   if (/O\s*—/.test(legend)) { fail++; console.log(`  FAIL ${tf}: empty OHLC legend "${legend}"`); }
   // last 2 bars may legitimately differ (bar moved between paint and fetch)
