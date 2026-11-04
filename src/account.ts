@@ -238,7 +238,7 @@ function renderScreeningHoldBanner(): string {
     .map((h) => `<strong class="mono">${escapeHtml(formatNum(h.hold, 4))} ${escapeHtml(h.asset)}</strong>`)
     .join(" · ");
   return `<div class="cex-callout cex-callout--warn acct-screening-hold" role="status" aria-live="polite">
-    <strong>Screening hold</strong> — ${bits} is not tradable yet. USDT deposits stay held until KYT clears (Didit/ops — not automatic hot-send).
+    <span><strong>Screening hold</strong> — ${bits} is not tradable yet. USDT deposits stay held until the compliance check clears.</span>
   </div>`;
 }
 
@@ -441,7 +441,7 @@ function renderDepositCard(
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Select an asset to show your deposit address.</p>
           ${depositLimitsPlateHtml()}
           <div class="cex-callout cex-callout--warn" role="note">
-            <strong>Never send to your login address.</strong> Only use <strong>Copy address</strong> above.
+            <span><strong>Never send to your login address.</strong> Only use the <strong>Copy address</strong> button above.</span>
             ${
               session.address
                 ? `<span class="mono cex-callout-login">Login only: ${escapeHtml(session.address)}</span>`
@@ -486,7 +486,7 @@ function renderWithdrawCard(
               ? `${
             need2faBanner
               ? `<div class="cex-callout cex-callout--warn" role="status">
-            <strong>Enable 2FA to withdraw</strong> — one-time setup under Wallet &amp; security.
+            <span><strong>Enable 2FA to withdraw</strong> — one-time setup under Wallet &amp; security.</span>
             <button type="button" class="btn-sm btn-primary" id="btn-acct-jump-2fa">Open 2FA</button>
           </div>`
               : ""

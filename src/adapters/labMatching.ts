@@ -702,6 +702,13 @@ export async function syncLabBalancesAndBook(
   }
   const bal = await fetchExchangeBalances();
   if (!bal.ok) return bal;
+  // VIP tier/volume from GET /vip (throttled 15s). Was never called: the header VIP chip
+  // stayed "sync…" and fee previews used a local estimate instead of the server tier.
+  void refreshServerVip()
+    .then((ok) => {
+      if (ok && typeof window !== "undefined") window.dispatchEvent(new Event("hackme:vip-updated"));
+    })
+    .catch(() => false);
   // HOLD desk: never treat empty ledger as authoritative — keeps paper Spot funds.
   const authoritative = useServerMatching();
   state.wallet = mergeApiBalancesIntoWallet(state.wallet, bal.balances ?? [], {

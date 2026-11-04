@@ -1069,6 +1069,10 @@ a:hover { text-decoration: underline; }
     flex-wrap: nowrap;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    /* Fade the right edge so a clipped "Stop Li…" reads as "scroll for more", not a bug. */
+    -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent);
+    mask-image: linear-gradient(90deg, #000 82%, transparent);
+    padding-right: 1.2rem;
   }
   html.mobile-layout .terminal.mobile-stack[data-mobile-panel="trade"] .type-tabs.scroll-x::-webkit-scrollbar {
     display: none;
@@ -1425,6 +1429,9 @@ a:hover { text-decoration: underline; }
     white-space: nowrap;
   }
 }
+/* Base before the ≤390px override: it used to sit after the media block and win the
+   cascade, hiding both "Account" and "Acct" on iPhone-width screens (empty nav pill). */
+.nav-btn .nav-label-short { display: none; }
 @media (max-width: 390px) {
   .ex-brand span { display: none; }
   .demo-badge { font-size: 0.5rem; }
@@ -1433,7 +1440,6 @@ a:hover { text-decoration: underline; }
   .nav-btn .nav-label-full { display: none; }
   .nav-btn .nav-label-short { display: inline; }
 }
-.nav-btn .nav-label-short { display: none; }
 .col-book, .col-center, .col-right {
   border-right: 1px solid var(--edge);
   display: flex; flex-direction: column; overflow: hidden;

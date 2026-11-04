@@ -120,7 +120,8 @@ describe("convertUi recent empty", () => {
   it("renders desk empty copy for live convert path", () => {
     const html = renderConvertRecentList([], "desk");
     expect(html).toContain('data-empty="convert"');
-    expect(html).toContain("server mid + VIP taker");
+    expect(html).toContain("market reference price with your VIP taker fee");
+    expect(html).not.toContain("Connect on Account");
     expect(html).not.toContain("paper balances until health advertises convert");
   });
 

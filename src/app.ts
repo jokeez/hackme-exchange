@@ -1259,6 +1259,50 @@ const deskApiTickers = new Map<PairId, DeskApiTicker>();
 let deskApiTickersReady = false;
 let lastDeskApiTickersAt = 0;
 
+type VipTierLike = ReturnType<typeof activeVipTier>;
+type VipProgLike = ReturnType<typeof nextVipProgress>;
+/** Header VIP chip body (re-painted in place when GET /vip lands). */
+function vipBadgeInner(vip: VipTierLike, vipProg: VipProgLike): string {
+  return `<span class="vip-name" title="${
+          hasServerVipVolume()
+            ? "Your VIP tier from 30-day USDT taker volume"
+            : useServerMatching()
+              ? "Loading your VIP tier…"
+              : useLiveBook() || usePublicDeskBook()
+                ? "Connect a wallet to see your VIP tier"
+                : "VIP from local paper trade history"
+        }">${escapeHtml(vip.name)}</span>
+        ${
+          hasServerVipVolume()
+            ? `<span class="vip-demo muted small">live</span>`
+            : useServerMatching()
+              ? `<span class="vip-demo muted small">sync…</span>`
+              : useLiveBook() || usePublicDeskBook()
+                ? `<span class="vip-demo muted small">connect</span>`
+                : `<span class="vip-demo muted small">paper</span>`
+        }
+        <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
+        <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>`;
+}
+
+function patchVipBadge(): void {
+  const el = document.getElementById("vip-badge");
+  if (!el || !market) return;
+  const vip = activeVipTier(state, market);
+  const vipProg = nextVipProgress(state, market);
+  el.innerHTML = vipBadgeInner(vip, vipProg);
+  el.title = `30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}`;
+}
+if (typeof window !== "undefined") window.addEventListener("hackme:vip-updated", () => patchVipBadge());
+
+/** Live desk: BTC valued at HMC/USDT ÷ HMC/BTC from this book (BTC has no rail here). */
+function applyLiveImpliedBtcUsd(m: MarketSnapshot): void {
+  if (!useLiveBook()) return;
+  const hu = deskApiTickers.get("HMC_USDT" as PairId)?.last ?? 0;
+  const hb = deskApiTickers.get("HMC_BTC" as PairId)?.last ?? 0;
+  if (hu > 0 && hb > 0) m.btcUsd = hu / hb;
+}
+
 async function hydrateDeskApiTickers(force = false): Promise<boolean> {
   if (!useLiveBook()) return false;
   const now = Date.now();
@@ -1293,6 +1337,10 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
     deskVolReady.add(pid);
   }
   deskApiTickersReady = true;
+  // On the live desk BTC is an in-book asset (no BTC rail); value it at the price this book
+  // implies (HMC/USDT ÷ HMC/BTC), not an external BTC/USD mark — otherwise BTC bought here
+  // for ~$100 showed up in Account at ~$67k.
+  if (market) applyLiveImpliedBtcUsd(market);
   // Toolbar H/L come from /tickers; tip ticks re-aggregate candles and would drop those
   // extremes — re-paint so 1D legend stays aligned with the durable 24h range.
   // Live: bars are server OHLC — never re-shape them to the ticker's 24h range.
@@ -1451,7 +1499,7 @@ function renderAnnounce(): string {
   const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
-    · ${label}
+    ${label.startsWith("Soft-launch Spot") && bold.startsWith("Soft-launch Spot") ? "" : `· ${label}`}
     · ${detail}
     ${badge}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
@@ -3209,7 +3257,8 @@ async function refreshConvertPreviewAsync(): Promise<void> {
     const reject = formatExchangeReject(q);
     gotEl.textContent = "—";
     rateEl.textContent = "—";
-    feeEl.textContent = reject;
+    // The hint below explains capacity; the Fee row only shows fees.
+    feeEl.textContent = q.code === "convert_inventory" ? "—" : reject;
     if (payEl) payEl.textContent = "—";
     if (recvLine) recvLine.textContent = "—";
     paintConvertQuoteAge(false);
@@ -3220,7 +3269,7 @@ async function refreshConvertPreviewAsync(): Promise<void> {
           : q.code === "invalid_order"
             ? `${reject} — try a smaller size (pair qty/price caps)`
             : q.code === "convert_inventory"
-              ? `${reject} — try a smaller size or open Spot`
+              ? "Convert can't fill this size right now — try a smaller amount, or trade it on the Spot book."
               : reject;
     }
     paintConvertCta(go, amt, true);
@@ -3829,28 +3878,7 @@ function renderSpot(): string {
       <div><label>Spread</label><span class="mono notranslate" translate="no">${formatNum(liveSpreadPct(t), 3)}%</span></div>
     </div>
     <div class="tb-right">
-      <div class="vip-badge mono" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">
-        <span class="vip-name" title="${
-          hasServerVipVolume()
-            ? "VIP from server GET /vip (30d USDT fills)"
-            : useServerMatching()
-              ? "VIP pending server sync — local estimate"
-              : useLiveBook() || usePublicDeskBook()
-                ? "Live book — Connect to sync desk VIP volume"
-                : "VIP from local paper trade history"
-        }">${escapeHtml(vip.name)}</span>
-        ${
-          hasServerVipVolume()
-            ? `<span class="vip-demo muted small">live</span>`
-            : useServerMatching()
-              ? `<span class="vip-demo muted small">sync…</span>`
-              : useLiveBook() || usePublicDeskBook()
-                ? `<span class="vip-demo muted small">sync…</span>`
-                : `<span class="vip-demo muted small">paper</span>`
-        }
-        <span class="vip-rates">${formatBps(vip.makerBps)} / ${formatBps(vip.takerBps)}</span>
-        <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
-      </div>
+      <div class="vip-badge mono" id="vip-badge" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">${vipBadgeInner(vip, vipProg)}</div>
       <button type="button" class="btn-sm alerts-chip" id="btn-open-alerts" title="Price alerts">Alerts${alertCount ? ` · ${alertCount}` : ""}</button>
       <button type="button" class="btn-sm" id="btn-hotkeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
     <div class="pnl-chip mono">PnL <span class="${Math.abs(pnl) < 5e-3 ? "flat" : pnl >= 0 ? "up" : "down"}">${Math.abs(pnl) < 5e-3 ? "flat" : `${pnl >= 0 ? "+" : ""}${formatNum(pnl, 2)}%`}</span></div>
@@ -4519,7 +4547,8 @@ async function maybeAutoReconnectLabSession(): Promise<void> {
           ? "Desk wallet reconnected"
           : "Fixture re-signed";
     if (msg) msg.textContent = `${note} · ${res.address.slice(0, 14)}…`;
-    toast(note, "ok");
+    // Silent restore on page load (cookie / saved desk seed) — the user did nothing, so no
+    // toast; two stacked "reconnected" toasts used to cover the Sell button on every visit.
     refreshAccountAfterLab();
     patchOpenSettingsWalletChrome();
   } else if (msg) {
@@ -7206,7 +7235,8 @@ function startLabSessionLoop(): void {
       const msg = document.getElementById("lab-api-msg");
       if (msg) msg.textContent = note;
     },
-    onReconnected: (note) => toast(note, "ok"),
+    // Mid-session drop → re-signed: one short, quiet notice (no address dump).
+    onReconnected: () => toast("Session restored", "info"),
     onSync: () => {
       // Deposit credits + fills — refresh Account / Avbl without waiting for manual Sync.
       if (state.mainView === "account") refreshAccountAfterLab();
@@ -9826,6 +9856,7 @@ async function refresh(): Promise<void> {
   // else keep previous live telemetry on a slow tick
 
   market = m!;
+  applyLiveImpliedBtcUsd(market);
   poolLive = live!;
   oracleMeta = { source, fetchedAt: Date.now(), poolStatus: live!.status };
   if (useLiveBook()) {
