@@ -882,8 +882,30 @@ function clearOverlays(): void {
   if (!chart) return;
   for (const s of overlaySeries) chart.removeSeries(s);
   overlaySeries = [];
-  for (const s of oscSeries) chart.removeSeries(s);
+}
+
+/** Oscillators (RSI / MACD / Stoch) each live in their own pane below the price pane. */
+type OscKind = "rsi" | "macd" | "stoch";
+let oscKindsKey = "";
+let oscByKey = new Map<string, ISeriesApi<"Line"> | ISeriesApi<"Histogram">>();
+
+function clearOscillators(): void {
+  if (!chart) return;
+  for (const s of oscSeries) {
+    try {
+      chart.removeSeries(s);
+    } catch {
+      /* chart rebuilt */
+    }
+  }
   oscSeries = [];
+  oscByKey = new Map();
+  oscKindsKey = "";
+}
+
+function oscPaneStretch(count: number): number {
+  // Price pane keeps the majority: 1 osc ≈ 24%, 3 osc ≈ 16% each (TV-like).
+  return count <= 1 ? 0.32 : count === 2 ? 0.26 : 0.2;
 }
 
 function clearPriceLines(): void {
@@ -1081,36 +1103,91 @@ function applyIndicators(candles: Candle[], settings: ChartSettings, maConfig?: 
     overlaySeries.push(addLine(bb.lower, "rgba(77,228,255,0.55)"));
   }
 
-  if (ind.rsi) {
-    oscSeries.push(addLine(rsi(candles), "#ce93d8", 2, "rsi"));
-  }
-  if (ind.macd) {
-    const m = macd(candles);
-    const histData = m.hist.map((p) => ({
+  applyOscillators(candles, ind);
+}
+
+function applyOscillators(candles: Candle[], ind: ChartSettings["indicators"]): void {
+  if (!chart) return;
+  const kinds: OscKind[] = (["rsi", "macd", "stoch"] as OscKind[]).filter((k) => !!ind[k]);
+  const key = kinds.join(",");
+  const toTs = (d: { time: number; value: number }[]) => d.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
+  const macdHist = (m: ReturnType<typeof macd>) =>
+    m.hist.map((p) => ({
       time: p.time as UTCTimestamp,
       value: p.value,
-      color: p.value >= 0 ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+      color: p.value >= 0 ? "rgba(38,166,154,0.55)" : "rgba(239,83,80,0.55)",
     }));
-    const hist = chart!.addSeries(HistogramSeries, {
-      priceScaleId: "macd",
-      lastValueVisible: false,
-      priceLineVisible: false,
-      priceFormat: { type: "price", precision: 6, minMove: 1e-8 },
-    });
-    hist.setData(histData);
-    oscSeries.push(hist);
-    const hostH = hostEl?.clientHeight ?? 0;
-    const hasVol = lastOpts?.overlays.showVolume === true;
-    const oscTop = isMobileLayout() && hostH > 0 && hostH < 460 ? 0.58 : hasVol ? 0.72 : 0.78;
-    chart!.priceScale("macd").applyOptions({ scaleMargins: { top: oscTop, bottom: hasVol ? 0.1 : 0.04 }, visible: false });
-    oscSeries.push(addLine(m.macd, "#4fc3f7", 1, "macd"));
-    oscSeries.push(addLine(m.signal, "#ffb74d", 1, "macd"));
+  if (key === oscKindsKey && oscByKey.size) {
+    // Same set: refresh in place (no pane rebuild → no flicker, user pane heights kept).
+    if (ind.rsi) oscByKey.get("rsi")?.setData(toTs(rsi(candles)));
+    if (ind.macd) {
+      const m = macd(candles);
+      oscByKey.get("macd_hist")?.setData(macdHist(m));
+      oscByKey.get("macd")?.setData(toTs(m.macd));
+      oscByKey.get("macd_sig")?.setData(toTs(m.signal));
+    }
+    if (ind.stoch) {
+      const st = stochastic(candles);
+      oscByKey.get("stoch_k")?.setData(toTs(st.k));
+      oscByKey.get("stoch_d")?.setData(toTs(st.d));
+    }
+    return;
   }
-  if (ind.stoch) {
-    const st = stochastic(candles);
-    oscSeries.push(addLine(st.k, "#81c784", 1, "stoch"));
-    oscSeries.push(addLine(st.d, "#e57373", 1, "stoch"));
-  }
+  clearOscillators();
+  oscKindsKey = key;
+  if (!kinds.length) return;
+  const line = (paneIdx: number, k: string, color: string, width: 1 | 2, data: { time: number; value: number }[], precision = 2, lastLabel = true) => {
+    const sr = chart!.addSeries(
+      LineSeries,
+      {
+        color,
+        lineWidth: width,
+        priceLineVisible: false,
+        lastValueVisible: lastLabel,
+        crosshairMarkerVisible: false,
+        priceFormat: { type: "price", precision, minMove: 1 / 10 ** precision },
+      },
+      paneIdx,
+    );
+    sr.setData(toTs(data));
+    oscSeries.push(sr);
+    oscByKey.set(k, sr);
+    return sr;
+  };
+  const guide = (sr: ISeriesApi<"Line">, price: number) =>
+    sr.createPriceLine({ price, color: "rgba(148,163,184,0.45)", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" });
+  kinds.forEach((kind, i) => {
+    const pane = i + 1;
+    if (kind === "rsi") {
+      const sr = line(pane, "rsi", "#ce93d8", 2, rsi(candles));
+      guide(sr, 70);
+      guide(sr, 30);
+    } else if (kind === "macd") {
+      const m = macd(candles);
+      const hist = chart!.addSeries(
+        HistogramSeries,
+        { lastValueVisible: false, priceLineVisible: false, priceFormat: { type: "price", precision: 6, minMove: 1e-8 } },
+        pane,
+      );
+      hist.setData(macdHist(m));
+      oscSeries.push(hist);
+      oscByKey.set("macd_hist", hist);
+      // MACD on sub-cent prices is ~1e-5: the global price formatter would print "—";
+      // keep the line labels off and let the pane axis carry the scale.
+      line(pane, "macd", "#4fc3f7", 1, m.macd, 8, false);
+      line(pane, "macd_sig", "#ffb74d", 1, m.signal, 8, false);
+    } else {
+      const st = stochastic(candles);
+      const k = line(pane, "stoch_k", "#81c784", 1, st.k);
+      line(pane, "stoch_d", "#e57373", 1, st.d);
+      guide(k as ISeriesApi<"Line">, 80);
+      guide(k as ISeriesApi<"Line">, 20);
+    }
+  });
+  const panes = chart.panes();
+  const stretch = oscPaneStretch(kinds.length);
+  panes[0]?.setStretchFactor(1);
+  for (let i = 1; i < panes.length; i++) panes[i]!.setStretchFactor(stretch);
 }
 
 function renderOrderLines(
@@ -4311,6 +4388,8 @@ export function destroyChart(): void {
     volumeSeries = null;
     overlaySeries = [];
     oscSeries = [];
+    oscByKey = new Map();
+    oscKindsKey = "";
     priceLines = [];
     drawCanvas = null;
     hostEl = null;
