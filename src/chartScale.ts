@@ -679,7 +679,21 @@ export function medianCloseBefore(candles: Candle[], beforeIdx: number): number 
  * Display-only OHLC for LWC — CEX aggregation paint on every TF / pair / ticker.
  * State/cache untouched. Tip close always = Last.
  */
+/**
+ * Live desk paints server OHLC verbatim: no wick caps, outlier rejection, bridge
+ * clamping or walk-fill. Those display rewrites made the chart differ from the data
+ * (and from every other client). Paper/demo keeps the display layer.
+ */
+let paintVerbatim = false;
+export function setPaintVerbatim(v: boolean): void {
+  paintVerbatim = v;
+}
+export function isPaintVerbatim(): boolean {
+  return paintVerbatim;
+}
+
 export function displayCapCandles(candles: Candle[], tf: Timeframe | string): Candle[] {
+  if (paintVerbatim) return candles;
   if (candles.length < 2) return candles;
   return displayCapCex(candles, tf);
 }

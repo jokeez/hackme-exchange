@@ -11,7 +11,7 @@ import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter, chartTickMarkFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
-import { displayCapCandles, logicalRangeToIndices, robustPriceRange } from "./chartScale";
+import { displayCapCandles, isPaintVerbatim, logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isChartPointerBusy, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, noteChartPointerBusy, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
 import { CHART_SHOT_BG, registerChartScreenshotHooks } from "./chartScreenshot";
@@ -316,7 +316,7 @@ function paintSecondaryBars(slot: Slot, candles: Candle[]): Candle[] {
   let cleaned = normalizeSecondaryBars(candles);
   if (cleaned.length < 2) return cleaned;
   const first = cleaned[0]!.time;
-  if (first > 1_000_000_000) {
+  if (first > 1_000_000_000 && !isPaintVerbatim()) {
     cleaned = ensureContiguousCandles(cleaned, slot.tf, {
       pairId: slot.pairId,
       fillToNow: true,

@@ -17,6 +17,7 @@ import {
   applyLiveTradeTipToPairCandles,
   applyPaperClockToPairCandles,
   LIVE_CANDLE_CACHE_PERSIST,
+  MAX_CANDLES,
   CANDLE_BASE_TF,
   clampFillWickPx,
   deriveAllTimeframes,
@@ -31,6 +32,8 @@ import {
   type CandlePrint,
   type LiveDayRange,
 } from "./candles";
+import { setPaintVerbatim } from "./chartScale";
+import { LIVE_TF_INTERVAL, liveTf, mergeServerBars } from "./liveServerCandles";
 import {
   applyOverlays,
   chartScreenshot,
@@ -762,8 +765,175 @@ function paintHydratedPair(pairId: PairId): void {
   else if (state.mainView === "spot") render();
 }
 
+// ---------------------------------------------------------------------------
+// Live desk candles — server is the only source of truth (v22).
+//
+// Every bar on the live chart is exactly what GET /candles returns for that exact
+// timeframe (durable store, written with each fill). The tip refreshes by polling the
+// last bars; older history pages in with `end=`. No client-side re-aggregation, tip
+// "healing" toward the ticker/mid, trade-print rebuilds or session OHLC caches — those
+// made every device draw its own chart and drift from the server.
+// ---------------------------------------------------------------------------
+const LIVE_TIP_POLL_MS = 2_000;
+/** Pre-v22 tape → OHLC rebuild on WS prints; kept compiled for paper parity, never on live. */
+const LEGACY_LIVE_TAPE_HYDRATE = false as boolean;
+const LIVE_FULL_STALE_MS = 5 * 60_000;
+const liveFullAt = new Map<string, number>();
+const liveTipAt = new Map<string, number>();
+const liveSyncInflight = new Map<string, Promise<boolean>>();
+let liveOlderBusy = false;
+
+function liveChartShows(pairId: PairId, tf: Timeframe): boolean {
+  if (pairId === state.activePair && tf === state.activeTf) return true;
+  if (state.multiChartLayout === "1") return false;
+  const n = state.multiChartLayout === "4" ? 4 : 2;
+  for (let i = 2; i <= n; i++) if (panePair(i) === pairId && paneTf(i) === tf) return true;
+  return false;
+}
+
+async function syncServerCandles(pairId: PairId, tf: Timeframe, mode: "full" | "tip"): Promise<boolean> {
+  const interval = LIVE_TF_INTERVAL[tf];
+  if (!interval) return false;
+  const key = `${pairId}|${tf}|${mode}`;
+  const running = liveSyncInflight.get(key);
+  if (running) return running;
+  const run = (async () => {
+    const res = await fetchPublicCandles(pairIdToApi(pairId), {
+      interval,
+      limit: mode === "full" ? 1500 : 3,
+      timeoutMs: mode === "full" ? 20_000 : 8_000,
+    });
+    if (!res.ok || !res.candles.length) return false;
+    const bars = apiCandlesToDemoBars(res.candles);
+    if (!bars.length) return false;
+    if (!state.candles[pairId]) state.candles[pairId] = {};
+    const prev = state.candles[pairId]![tf] ?? [];
+    // Full load replaces the series (keeps only paged-in history older than it).
+    state.candles[pairId]![tf] = mergeServerBars(mode === "full" ? prev.filter((c) => c.time < bars[0]!.time) : prev, bars);
+    const now = Date.now();
+    liveTipAt.set(`${pairId}|${tf}`, now);
+    if (mode === "full") liveFullAt.set(`${pairId}|${tf}`, now);
+    if (liveChartShows(pairId, tf) && state.mainView === "spot") {
+      if (mode === "full" && pairId === state.activePair && tf === state.activeTf) chartNeedsFullReplace = true;
+      if (chartMounted) patchLive();
+    }
+    return true;
+  })();
+  liveSyncInflight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    liveSyncInflight.delete(key);
+  }
+}
+
+/** Ensure a TF is loaded (TF switch / pane change) — never mutates bars locally. */
+function ensureLiveServerTf(pairId: PairId, tf: Timeframe): void {
+  const t = liveTf(tf);
+  const at = liveFullAt.get(`${pairId}|${t}`) ?? 0;
+  if (!(state.candles[pairId]?.[t]?.length) || Date.now() - at > LIVE_FULL_STALE_MS) {
+    void syncServerCandles(pairId, t, "full");
+  }
+}
+
+/** Poll the newest bars of every TF on screen (+1m for Last/legend). */
+function pollLiveServerTips(): void {
+  if (!useLiveBook() || document.hidden) return;
+  const want = new Set<string>();
+  want.add(`${state.activePair}|${liveTf(state.activeTf)}`);
+  want.add(`${state.activePair}|1m`);
+  if (state.multiChartLayout !== "1") {
+    const n = state.multiChartLayout === "4" ? 4 : 2;
+    for (let i = 2; i <= n; i++) want.add(`${panePair(i)}|${liveTf(paneTf(i))}`);
+  }
+  const now = Date.now();
+  for (const k of want) {
+    if (now - (liveTipAt.get(k) ?? 0) < LIVE_TIP_POLL_MS) continue;
+    liveTipAt.set(k, now);
+    const [pid, tf] = k.split("|") as [PairId, Timeframe];
+    if (!(state.candles[pid]?.[tf]?.length)) void syncServerCandles(pid, tf, "full");
+    else void syncServerCandles(pid, tf, "tip");
+  }
+}
+
+/** Pan-left paging: prepend server bars ending just before the oldest loaded bar. */
+async function loadOlderServerCandles(pairId: PairId, tf: Timeframe): Promise<void> {
+  const interval = LIVE_TF_INTERVAL[tf];
+  const series = state.candles[pairId]?.[tf];
+  if (!interval || !series?.length || liveOlderBusy) return;
+  liveOlderBusy = true;
+  try {
+    const oldest = series[0]!.time;
+    const res = await fetchPublicCandles(pairIdToApi(pairId), {
+      interval,
+      limit: 1000,
+      end: new Date((oldest - 1) * 1000).toISOString(),
+      timeoutMs: 20_000,
+    });
+    if (!res.ok) return;
+    const cur = state.candles[pairId]?.[tf] ?? [];
+    const older = apiCandlesToDemoBars(res.candles).filter((c) => c.time < (cur[0]?.time ?? oldest));
+    if (!older.length) return;
+    state.candles[pairId]![tf] = older.concat(cur);
+    if (pairId === state.activePair && tf === state.activeTf && chartMounted) {
+      const opts = { ...chartOpts(), drawingsLocked: state.drawingsLocked };
+      setCandleData(state.candles[pairId]![tf]!, opts, { preserveLogicalRange: true, prepended: older.length });
+    }
+  } finally {
+    liveOlderBusy = false;
+  }
+}
+
+/** Tape → desk volume / Last (no OHLC writes). */
+async function refreshLiveTapeVol(pairId: PairId): Promise<void> {
+  const tradesRes = await fetchPublicTrades(pairIdToApi(pairId), 2000, 12_000, undefined, { window: "24h" });
+  if (!tradesRes.ok) return;
+  const volPrints: { id?: string; ts: number; amountBase: number; price?: number }[] = [];
+  let lastTs = 0;
+  let lastPx = 0;
+  for (const t of tradesRes.trades) {
+    const pid = t.pair ? apiPairToId(t.pair) ?? pairId : pairId;
+    if (pid !== pairId) continue;
+    const amountBase = minorToDisplay(Number(t.qty));
+    if (!(amountBase > 0)) continue;
+    const price = apiPriceToDisplay(Number(t.price));
+    const ts = t.created_at ? Date.parse(t.created_at) || Date.now() : Date.now();
+    if (price > 0 && ts >= lastTs) {
+      lastTs = ts;
+      lastPx = price;
+    }
+    volPrints.push({ id: t.id, ts, amountBase, price: price > 0 ? price : undefined });
+  }
+  if (lastPx > 0) setLastPublicMid(pairId, lastPx, lastTs);
+  ingestDeskVolPrints(pairId, volPrints);
+  markDeskVolReady(pairId);
+  if (pairId === state.activePair) patchTickerBar();
+}
+
+async function hydrateLiveServerCandles(pairId: PairId): Promise<boolean> {
+  if (state.activeTf === "30s") state.activeTf = "1m";
+  const tfs = new Set<Timeframe>(["1m", "15m"]);
+  if (pairId === state.activePair) tfs.add(liveTf(state.activeTf));
+  if (state.multiChartLayout !== "1") {
+    const n = state.multiChartLayout === "4" ? 4 : 2;
+    for (let i = 2; i <= n; i++) if (panePair(i) === pairId) tfs.add(liveTf(paneTf(i)));
+  }
+  void hydrateDeskApiTickers();
+  void refreshLiveTapeVol(pairId);
+  const res = await Promise.all([...tfs].map((tf) => syncServerCandles(pairId, tf, "full")));
+  const ok = res.some(Boolean);
+  if (ok) {
+    const tip = state.candles[pairId]?.["1m"]?.at(-1)?.close ?? 0;
+    if (tip > 0) prevMids[pairId] = tip;
+    liveHydratedPairs.add(pairId);
+    paintHydratedPair(pairId);
+  }
+  return ok;
+}
+
 /** Restore live OHLC from durable /candles + session cache + /trades (survives F5 + tip pumps). */
 async function hydrateLivePairCandlesFromApi(pairId: PairId, tipMid: number): Promise<boolean> {
+  if (useLiveBook()) return hydrateLiveServerCandles(pairId);
   const existing = hydrateInflight.get(pairId);
   if (existing) return existing;
   const run = hydrateLivePairCandlesFromApiUniq(pairId, tipMid);
@@ -942,6 +1112,7 @@ async function hydrateLivePairCandlesFromApiUniq(pairId: PairId, tipMid: number)
 
 /** Sync path: session cache only (before GET /trades returns). */
 function restoreLiveCandlesFromCache(pairId: PairId, tipMid: number): boolean {
+  if (useLiveBook()) return false; // server /candles is the only live source
   const cached = loadLiveCandleCache(pairId, undefined, tipMid);
   if (!cached?.length) return false;
   const tip = tipMid > 0 ? tipMid : cached[cached.length - 1]?.close ?? 0;
@@ -1068,13 +1239,7 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
   deskApiTickersReady = true;
   // Toolbar H/L come from /tickers; tip ticks re-aggregate candles and would drop those
   // extremes — re-paint so 1D legend stays aligned with the durable 24h range.
-  if (useLiveBook()) {
-    for (const p of PAIRS) {
-      const series = state.candles[p.id];
-      if (!series) continue;
-      state.candles[p.id] = applyLiveDayRangeToPairCandles(series, liveDayRangeForPair(p.id));
-    }
-  }
+  // Live: bars are server OHLC — never re-shape them to the ticker's 24h range.
   if (state.mainView === "spot") {
     patchTickerBar();
     patchMarketRowsInPlace();
@@ -1528,6 +1693,7 @@ function placeOcoOrWarn(
 }
 
 function chartOpts() {
+  setPaintVerbatim(useLiveBook());
   const q = activePairQuote();
   return getChartMountOpts(state, state.activePair, state.activeTf, q.mid, {
     lastPriceUp: q.tone !== "down",
@@ -3668,7 +3834,7 @@ function renderSpot(): string {
         <div class="tf-block">
           ${QUICK_TFS.map((tf) => `<button type="button" class="tfq ${tf === state.activeTf ? "active" : ""}" data-tf="${tf}">${tf}</button>`).join("")}
           <select id="tf-more" class="tf-more mono" title="More timeframes">
-            ${TIMEFRAMES.filter((tf) => !(QUICK_TFS as string[]).includes(tf)).map((tf) => `<option value="${tf}" ${tf === state.activeTf ? "selected" : ""}>${tf}</option>`).join("")}
+            ${TIMEFRAMES.filter((tf) => !(QUICK_TFS as string[]).includes(tf) && !(useLiveBook() && !LIVE_TF_INTERVAL[tf])).map((tf) => `<option value="${tf}" ${tf === state.activeTf ? "selected" : ""}>${tf}</option>`).join("")}
             <option disabled>──</option>
             ${QUICK_TFS.map((tf) => `<option value="${tf}" ${tf === state.activeTf ? "selected" : ""}>${tf} ✓</option>`).join("")}
           </select>
@@ -6400,6 +6566,10 @@ function refreshOhlcLegendIdle(): void {
 
 /** Repair corrupt TF series before any paint (F5 / hotkeys / hash). */
 function repairPairTfCandles(pairId: PairId, tf: Timeframe): void {
+  if (useLiveBook()) {
+    ensureLiveServerTf(pairId, tf);
+    return;
+  }
   state.candles[pairId] = ensureTfSeriesCadence(state.candles[pairId] ?? {}, pairId, tf);
 }
 
@@ -6444,7 +6614,10 @@ function mountChartPanel(): void {
       // Live Soft-MM: durable `/candles` is SoT. Never prependOlderCandles —
       // that invented a 0.05 paper walk left of the tip and painted the
       // "old flat + crooked spike" 15m chart after pan/bootstrap needHistory.
-      if (useLiveBook()) return 0;
+      if (useLiveBook()) {
+        void loadOlderServerCandles(state.activePair, state.activeTf);
+        return 0;
+      }
       if (!market) return 0;
       const pair = state.activePair;
       const tf = state.activeTf;
@@ -6653,13 +6826,7 @@ function patchLive(): void {
   markPerf("patchLive-start");
   const quote = activePairQuote();
   // Heal tip↔Last immediately on tape/fill patches (don't wait for microTick).
-  if (useLiveBook() && quote.mid > 0) {
-    const series = state.candles[state.activePair]?.[state.activeTf];
-    const tipClose = series?.[series.length - 1]?.close ?? 0;
-    if (tipClose > 0 && !pricesAligned(quote.mid, tipClose, 0.005)) {
-      tipCandlesForPair(state.activePair, quote.mid, true);
-    }
-  }
+  // Live: no tip "heal" toward the ticker — the bar is whatever the server says.
   patchTickerBar(quote);
   patchMarketRowsInPlace();
   // Order book is NOT patched here — chart ticks must stay smooth (see startBookLoop).
@@ -6818,6 +6985,9 @@ function handleMarketStreamEvent(ev: import("./adapters/marketStream").MarketStr
       setLastPublicMid(ev.pairId, newest.price, newest.ts || Date.now());
       // Rebuild OHLC from tape+cache so F5-restored spikes and multi-print moves stick.
       if (ev.pairId === state.activePair && useLiveBook()) {
+        liveTipAt.delete(`${ev.pairId}|${liveTf(state.activeTf)}`);
+        pollLiveServerTips();
+      } else if (LEGACY_LIVE_TAPE_HYDRATE && ev.pairId === state.activePair) {
         // Tip close = desk Last (outside-BBO / >2% snaps to Soft-MM). Wick still
         // expands toward the print via upsertAllCandles — never leave tip above ask.
         const tip = liveLastPrice(ev.pairId) || newest.price;
@@ -9272,6 +9442,13 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
       fillPx < 50 &&
       (!(refPx > 0) || (fillPx <= refPx * 4.5 && fillPx >= refPx / 4.5));
     if (fillOk) setLastPublicMid(pairId, fillPx);
+    if (useLiveBook()) {
+      if (fillPx > 0) prevMids[pairId] = fillPx;
+      liveTipAt.delete(`${pairId}|${liveTf(state.activeTf)}`);
+      liveTipAt.delete(`${pairId}|1m`);
+      pollLiveServerTips();
+      return;
+    }
     const tipPx = resolveCandleTip({
       tape: fillOk ? fillPx : tapeMid,
       tipClose: state.candles[pairId]?.[CANDLE_BASE_TF]?.at(-1)?.close,
@@ -9319,6 +9496,13 @@ function upsertAllCandles(fillPx: number, amountBase = 0): void {
 function tipCandlesForPair(pairId: PairId, displayMid: number, labLive: boolean): void {
   if (!state.candles[pairId]) state.candles[pairId] = {};
   const prev = prevMids[pairId];
+  if (labLive) {
+    // Live: bars come only from GET /candles (pollLiveServerTips); just keep prevMids.
+    const lastPx = lastPublicMid(pairId) || deskApiTickers.get(pairId)?.last || 0;
+    if (lastPx > 0) prevMids[pairId] = lastPx;
+    pollLiveServerTips();
+    return;
+  }
   if (labLive) {
     const tipClose = state.candles[pairId]?.[CANDLE_BASE_TF]?.at(-1)?.close ?? 0;
     const tradeTip = resolveCandleTip({

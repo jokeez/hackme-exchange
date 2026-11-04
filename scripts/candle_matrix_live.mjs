@@ -5,8 +5,8 @@
  */
 const API = (process.env.EXCHANGE_API || "https://exchange-api.hackme.tech").replace(/\/$/, "");
 const PAIRS = ["HMC/USDT", "SUP/USDT", "HMC/SUP", "HMC/BTC", "SUP/BTC"];
-const TFS = ["1m", "15m", "1h", "4h", "1d"];
-const STEP = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
+const TFS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"];
+const STEP = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400, "1w": 604800 };
 const TIP_MAX = Number(process.env.TIP_DRIFT_MAX || 0.025);
 
 async function get(path) {

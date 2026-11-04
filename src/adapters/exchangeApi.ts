@@ -1560,12 +1560,15 @@ export async function fetchPublicCandles(
     timeoutMs?: number;
     baseOverride?: string;
     path?: "candles" | "klines";
+    /** RFC3339 — last bar is the bucket containing `end` (older-history paging). */
+    end?: string;
   },
 ): Promise<{ ok: true; candles: ApiCandle[]; interval: string } | ExchangeApiError> {
   const q = new URLSearchParams();
   q.set("pair", pair);
   q.set("interval", opts?.interval ?? "1m");
   q.set("limit", String(Math.max(1, Math.min(1500, opts?.limit ?? 500))));
+  if (opts?.end) q.set("end", opts.end);
   const path = opts?.path ?? "candles";
   const url = apiUrl(`/${path}?${q}`, opts?.baseOverride);
   if (!url) return disabled();

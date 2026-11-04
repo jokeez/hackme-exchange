@@ -43,6 +43,7 @@ import { ensureContiguousCandles, MAX_CANDLES, toLwcLinePoints, toLwcOhlcPoints 
 import {
   clampPaintPriceSpan,
   displayCapCandles,
+  isPaintVerbatim,
   logicalRangeToIndices,
   paintMaxSpanFracForTf,
   paintMinSpanFracForTf,
@@ -950,7 +951,8 @@ function prepCandles(
     low: Math.min(c.low, c.open, c.close),
   }));
   // LWC leaves blank strips when UTC buckets skip — walk-fill before paint.
-  if (tf && cleaned.length >= 2) {
+  // (Live server series are already time-contiguous and painted verbatim.)
+  if (tf && cleaned.length >= 2 && !isPaintVerbatim()) {
     cleaned = ensureContiguousCandles(cleaned, tf, {
       pairId: pairId ?? "HMC_USDT",
       fillToNow: true,
