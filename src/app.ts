@@ -814,8 +814,11 @@ async function syncServerCandles(pairId: PairId, tf: Timeframe, mode: "full" | "
     liveTipAt.set(`${pairId}|${tf}`, now);
     if (mode === "full") liveFullAt.set(`${pairId}|${tf}`, now);
     if (liveChartShows(pairId, tf) && state.mainView === "spot") {
-      if (mode === "full" && pairId === state.activePair && tf === state.activeTf) chartNeedsFullReplace = true;
+      const isMain = pairId === state.activePair && tf === state.activeTf;
+      if (mode === "full" && isMain) chartNeedsFullReplace = true;
       if (chartMounted) patchLive();
+      // Legend was painted on TF switch before this TF loaded ("O — H — L —").
+      if (isMain && !lastOhlc) refreshOhlcLegendIdle();
     }
     return true;
   })();
