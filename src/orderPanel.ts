@@ -143,7 +143,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       ${fld(
         `Amount (${noTranslateText(pair.base)})`,
         noTranslateText(pair.base),
-        `<input id="${side}-amt" class="inp mono" type="number" value="1000" min="0" />`,
+        `<input id="${side}-amt" class="inp mono" type="number" value="" min="0" placeholder="0" />`,
       )}
       <div class="quick-size">
         <button type="button" data-qs="50" data-side="${side}">+50</button>

@@ -3987,23 +3987,7 @@ function render(): void {
   syncRouteHash();
   const embed = isHubEmbed();
   const brandTitle = embed ? "Exchange" : isMobileLayout() ? "HackMe" : "HackMe Exchange";
-  const brandSub = embed
-    ? isDeskConnectEnabled()
-      ? useDeskMatching() || usePublicDeskBook()
-        ? "hub embed · desk live"
-        : "hub embed · desk"
-      : isLabLoopbackApi()
-        ? "hub embed · lab"
-        : "hub embed · paper"
-    : isDeskConnectEnabled()
-      ? useDeskMatching()
-        ? "Spot · desk live"
-        : usePublicDeskBook()
-          ? "Spot · desk · Connect to trade"
-          : "Spot · desk"
-      : isLabLoopbackApi()
-        ? "Spot · lab"
-        : "Spot · paper";
+  const brandSub = brandSubLabel(embed);
   // Live oracle / lab sync used to remount the whole tree every few seconds and
   // collapse <details>, wipe withdraw fields, etc. Capture → restore after wire.
   const uiSnap = captureEphemeralUi(app);
@@ -4012,7 +3996,7 @@ function render(): void {
   <header class="ex-header">
     <div class="ex-brand">
       <img class="brand-logo" src="/logo-hex.png" alt="HackMe" />
-      <div><strong>${brandTitle}</strong><span>${brandSub}</span></div>
+      <div><strong>${brandTitle}</strong><span id="brand-sub">${brandSub}</span></div>
     </div>
     <nav class="ex-nav" id="main-nav">
       <button type="button" class="nav-btn ${view === "spot" ? "active" : ""}" data-view="spot">Spot</button>
@@ -6824,6 +6808,35 @@ function syncMultiCharts(): void {
   });
 }
 
+/** Header sub-label (mode + connect state). Patched live: it used to stay
+ * "Connect to trade" after Connect because only a full render recomputed it. */
+function brandSubLabel(embed = isHubEmbed()): string {
+  return embed
+    ? isDeskConnectEnabled()
+      ? useDeskMatching() || usePublicDeskBook()
+        ? "hub embed · desk live"
+        : "hub embed · desk"
+      : isLabLoopbackApi()
+        ? "hub embed · lab"
+        : "hub embed · paper"
+    : isDeskConnectEnabled()
+      ? useDeskMatching()
+        ? "Spot · desk live"
+        : usePublicDeskBook()
+          ? "Spot · desk · Connect to trade"
+          : "Spot · desk"
+      : isLabLoopbackApi()
+        ? "Spot · lab"
+        : "Spot · paper";
+}
+
+function patchBrandSub(): void {
+  const el = document.getElementById("brand-sub");
+  if (!el) return;
+  const t = brandSubLabel();
+  if (el.textContent !== t) el.textContent = t;
+}
+
 function patchLive(): void {
   if (state.mainView !== "spot") return;
   markPerf("patchLive-start");
@@ -6831,6 +6844,7 @@ function patchLive(): void {
   // Heal tip↔Last immediately on tape/fill patches (don't wait for microTick).
   // Live: no tip "heal" toward the ticker — the bar is whatever the server says.
   patchTickerBar(quote);
+  patchBrandSub();
   patchMarketRowsInPlace();
   // Order book is NOT patched here — chart ticks must stay smooth (see startBookLoop).
   if (chartMounted) {

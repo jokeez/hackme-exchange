@@ -7,7 +7,7 @@ const check = (n, ok, d = "") => { results.push([n, !!ok, d]); console.log((ok ?
 const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1600, height: 1000 } });
 const errs = []; p.on("pageerror", (e) => errs.push(String(e)));
 p.on("dialog", (d) => d.accept());
-await p.addInitScript(([s, a]) => { localStorage.setItem("hackme-ex-tour-v1", "1"); localStorage.setItem("hackme.desk.wallet.seed.v1", s); localStorage.setItem("hackme.desk.wallet.lastAddress.v1", a); }, [SEED, ADDR]);
+await p.addInitScript(([s, a]) => { localStorage.setItem("hackme-ex-tour-v1", "1"); localStorage.setItem("hackme.tour.v2.done", "1"); localStorage.setItem("hackme.desk.wallet.seed.v1", s); localStorage.setItem("hackme.desk.wallet.lastAddress.v1", a); }, [SEED, ADDR]);
 for (let i = 0; i < 3; i++) { try { await p.goto("https://exchange.hackme.tech/", { waitUntil: "domcontentloaded", timeout: 45000 }); break; } catch (e) { if (i === 2) throw e; } }
 await p.waitForFunction(() => /Avbl\s+[\d,.]+\s+USDT/.test(document.querySelector("#order-zone")?.innerText || ""), null, { timeout: 60000 });
 const api = (path, opt = {}) => p.evaluate(async ([API, path, opt]) => { const r = await fetch(API + path, { credentials: "include", cache: "no-store", ...opt }); let j = {}; try { j = await r.json(); } catch {} return { st: r.status, j }; }, [API, path, opt]);
@@ -22,6 +22,14 @@ for (let i = 0; i < 30; i++) { sess = await api("/auth/session"); if (sess.j.add
 check("browser session authenticated as test wallet", sess.st === 200 && JSON.stringify(sess.j).toLowerCase().includes(ADDR.toLowerCase()), sess);
 const before = await openOrders();
 for (const o of before) await p.evaluate(async ([API, id]) => {}, [API, o.id]);
+
+// 0. empty amount must not place anything (no default size)
+const amt0 = await p.inputValue("#buy-amt");
+check("no default order size in form", amt0 === "" || Number(amt0) === 0, amt0);
+const n0 = (await openOrders()).length;
+await p.click("#btn-buy");
+await p.waitForTimeout(1500);
+check("Buy with empty amount places nothing", (await openOrders()).length === n0, await toastText());
 
 // 1. LIMIT buy below market through the form
 const { bid, ask } = await bookTop();
@@ -41,12 +49,11 @@ const tableHas = await p.evaluate((px) => document.body.innerText.includes(Numbe
 check("open order visible in UI", tableHas);
 
 // 2. cancel through the UI
-const cancelled = await p.evaluate(() => {
-  const btns = [...document.querySelectorAll("button")].filter((b) => /^(cancel|×|✕)$/i.test(b.innerText.trim()) || /cancel/i.test(b.title || "") || b.dataset.cancel || b.dataset.orderId);
-  const vis = btns.filter((b) => b.offsetWidth);
-  if (vis[0]) { vis[0].click(); return vis[0].outerHTML.slice(0, 120); }
-  return "";
-});
+const cancelled = await p.evaluate((id) => {
+  const b = [...document.querySelectorAll("[data-cancel]")].find((x) => x.dataset.cancel === id && x.offsetWidth);
+  if (b) { b.click(); return "clicked"; }
+  return "no cancel button for " + id;
+}, lim?.id);
 await p.waitForTimeout(2500);
 oo = await openOrders();
 check("UI cancel removed the order", lim && !oo.find((o) => o.id === lim.id), { cancelled, left: oo.map((o) => o.id) });
@@ -87,7 +94,7 @@ if (sid) {
   await p.click("#btn-sell");
   await p.waitForTimeout(2500);
   const all = (await api("/orders")).j;
-  const armed = JSON.stringify(all).includes("armed");
+  const armed = (all.orders || []).some((o) => /stop/i.test(o.type || "") && o.side === "sell");
   check("UI stop-limit armed on server", armed, { all: JSON.stringify(all).slice(0, 300), toast: await toastText() });
   await shot("stop_limit");
 }
@@ -113,4 +120,8 @@ const rest = (await api("/orders")).j;
 console.log("left open:", JSON.stringify(rest).slice(0, 300));
 check("no page errors", errs.length === 0, errs.slice(0, 3));
 console.log("\nSUMMARY", results.filter((r) => r[1]).length, "/", results.length);
+for (const o of rest.orders || []) await p.evaluate(async ([API, id]) => {
+  const c = await (await fetch(API + "/auth/session", { credentials: "include" })).json();
+  await fetch(API + "/orders/" + id, { method: "DELETE", credentials: "include", headers: { "X-CSRF-Token": c.csrf_token || "" } });
+}, [API, o.id]).catch(() => {});
 await b.close();

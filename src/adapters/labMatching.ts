@@ -475,6 +475,11 @@ export function fillStatsFromApi(fills: ApiFill[]): { filledBase: number; vwap: 
 }
 
 /** Human note for lab place — distinguishes thin-book cancel from full fill. */
+function orderTypeLabel(type: string): string {
+  const t = type.replace(/_/g, "-");
+  return t ? t[0]!.toUpperCase() + t.slice(1) : "Order";
+}
+
 export function labPlaceNote(
   type: string,
   fillCount: number,
@@ -488,7 +493,7 @@ export function labPlaceNote(
     type === "trailing_stop" ||
     type === "oco"
   ) {
-    return { note: `Lab ${type} armed · synced` };
+    return { note: `${orderTypeLabel(type)} armed` };
   }
   const st = (status || "").toLowerCase();
   const cancelled = st === "cancelled" || st === "canceled";
@@ -505,10 +510,10 @@ export function labPlaceNote(
     };
   }
   if (fillCount > 0) {
-    return { note: `Lab ${type} · ${fillCount} fill(s) · synced balances` };
+    return { note: `${orderTypeLabel(type)} filled · ${fillCount} fill(s)` };
   }
   return {
-    note: `Lab ${type} ${status ?? "accepted"} · open on server book`,
+    note: `${orderTypeLabel(type)} ${status ?? "accepted"} · open on book`,
   };
 }
 
