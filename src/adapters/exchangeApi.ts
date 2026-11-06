@@ -777,6 +777,14 @@ export async function auth2faConfirm(
   }
 }
 
+/** 2FA disable / recovery rotate end every other session and re-issue ours (new CSRF). */
+function adoptRotatedSession(body: unknown): void {
+  const b = body as { session_rotated?: boolean; address?: string; csrf_token?: string; expires_at?: string };
+  if (b && b.session_rotated && b.address && b.csrf_token) {
+    persistSession(b.address, b.csrf_token, b.expires_at);
+  }
+}
+
 /** POST /auth/2fa/recovery/rotate */
 export async function auth2faRecoveryRotate(
   code: string,
@@ -799,6 +807,7 @@ export async function auth2faRecoveryRotate(
     );
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "2fa recovery rotate failed");
+    adoptRotatedSession(body);
     return body as TwoFAConfirmResponse;
   } catch (e) {
     return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
@@ -827,6 +836,7 @@ export async function auth2faDisable(
     );
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "2fa disable failed");
+    adoptRotatedSession(body);
     return body as { ok: true; enabled: boolean; note?: string };
   } catch (e) {
     return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
