@@ -63,8 +63,10 @@ export function loadConvertDesk(): { from: keyof Wallet; to: keyof Wallet; amt: 
   if (to === from) {
     to = from === "hmc" ? "usdt" : "hmc";
   }
-  const amt = readStorage(() => localStorage.getItem(KEYS.convertAmt)) ?? "100";
-  return { from, to, amt: amt.trim() || "100" };
+  // 10, not 100: 100 USDT → HMC exceeded the desk's convert liquidity, so a first visit opened
+  // straight into a "not enough liquidity" quote.
+  const amt = readStorage(() => localStorage.getItem(KEYS.convertAmt)) ?? "10";
+  return { from, to, amt: amt.trim() || "10" };
 }
 
 export function saveConvertDesk(from: keyof Wallet, to: keyof Wallet, amt: string): void {
