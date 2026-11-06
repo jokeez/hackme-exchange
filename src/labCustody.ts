@@ -6,7 +6,8 @@
 import { isDeskConnectEnabled, isLabLoopbackApi } from "./config/integration";
 import { NATIVE_WITHDRAW_MIN, USDT_WITHDRAW_MIN } from "./custodyLimits";
 
-const HMC_DEST_RE = /^HMC-[0-9a-fA-F]{16}$/;
+/** Legacy HMC- + 16 hex, or (from chain block 550,000) long HMC- + 64 hex — API enforces the height. */
+const HMC_DEST_RE = /^HMC-(?:[0-9a-fA-F]{16}|[0-9a-fA-F]{64})$/;
 const EVM_DEST_RE = /^0x[0-9a-fA-F]{40}$/;
 
 /** Soft-launch desk (not lab loopback): USDT outs must be real BEP-20 0x. */
@@ -38,7 +39,7 @@ export type WithdrawDestCheck = { ok: true } | { ok: false; hint: string };
 
 /**
  * Client-side withdraw destination gate (mirrors API).
- * HMC/SUP → on-chain HMC- + 16 hex. USDT/BTC → paper ops stubs (not HMC- / not deposit stubs).
+ * HMC/SUP → on-chain HMC- + 16 hex (or 64 hex once the chain accepts long addresses). USDT/BTC → paper ops stubs (not HMC- / not deposit stubs).
  * Optional `selfAddress` rejects withdrawing to the session account (API ErrWithdrawSelfDest).
  */
 export function validateLabWithdrawDestination(
@@ -55,13 +56,14 @@ export function validateLabWithdrawDestination(
     return { ok: false, hint: "Destination too long (max 128)" };
   }
   const self = (selfAddress || "").trim();
-  if (self && dest.toLowerCase() === self.toLowerCase()) {
+  // The long form of your own address (same key) is your account too.
+  if (self && (dest.toLowerCase() === self.toLowerCase() || (dest.length === 68 && dest.slice(0, 20).toLowerCase() === self.toLowerCase()))) {
     return { ok: false, hint: "Cannot withdraw to your own account address" };
   }
   // HMC + SUP share the Ed25519 rail (API ValidateWithdrawDestination).
   if (a === "HMC" || a === "SUP") {
     if (!HMC_DEST_RE.test(dest)) {
-      return { ok: false, hint: `${a} destination must be HMC- + 16 hex (e.g. HMC-ffffffffffffffff)` };
+      return { ok: false, hint: `${a} destination must be HMC- + 16 hex (or HMC- + 64 hex from block 550,000)` };
     }
     return { ok: true };
   }
