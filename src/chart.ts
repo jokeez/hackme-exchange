@@ -2937,6 +2937,7 @@ export function mountChart(el: HTMLElement, candles: Candle[], opts: ChartMountO
     }
     if (!range) return;
     maybeLoadHistory(range);
+    updateJumpLiveBtn(range);
   });
 
   el.addEventListener("pointerdown", () => setFocusedChartPane("chart-host"));
@@ -3256,6 +3257,7 @@ export function setCandleData(
   } else if (flags?.scrollToLive) {
     anchorToLatestCandle();
   }
+  updateJumpLiveBtn();
 }
 
 export function updateLastCandle(c: Candle, opts: ChartMountOpts): boolean {
@@ -4024,6 +4026,35 @@ function setupPriceScaleWheel(shell: HTMLElement): void {
 /** Pin the time scale so the latest candle sits at the right (TF/pair remount).
  * CEX-like: keep fixed barSpacing — never stretch 2–4 bars across the whole pane.
  */
+let jumpLiveEl: HTMLButtonElement | null = null;
+
+/**
+ * "Latest ›" once the view is panned away from the newest bar — without it a chart dragged
+ * back in time looked frozen (new bars kept arriving off-screen to the right).
+ */
+function updateJumpLiveBtn(range?: { from: number; to: number } | null): void {
+  if (!hostEl || !chart) return;
+  if (!jumpLiveEl || !hostEl.contains(jumpLiveEl)) {
+    jumpLiveEl = document.createElement("button");
+    jumpLiveEl.type = "button";
+    jumpLiveEl.className = "chart-jump-live hidden";
+    jumpLiveEl.textContent = "Latest ›";
+    jumpLiveEl.title = "Scroll to the newest bar";
+    jumpLiveEl.setAttribute("aria-label", "Scroll chart to the newest bar");
+    jumpLiveEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      anchorToLatestCandle();
+      jumpLiveEl?.classList.add("hidden");
+    });
+    hostEl.appendChild(jumpLiveEl);
+  }
+  const r = range ?? chart.timeScale().getVisibleLogicalRange();
+  const n = currentCandles.length;
+  const away = !!r && n > 2 && r.to < n - 1 - 2;
+  jumpLiveEl.classList.toggle("hidden", !away);
+}
+
 export function anchorToLatestCandle(barCount?: number): void {
   if (!chart || currentCandles.length < 2) return;
   const n = currentCandles.length;

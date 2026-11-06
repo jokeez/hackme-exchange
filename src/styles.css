@@ -8181,3 +8181,20 @@ html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
   font-size: 0.74rem;
 }
 .quiet-market-note .qm-tf.active { background: rgba(251, 191, 36, 0.18); }
+
+/* Back to the newest bar after panning (chart.ts updateJumpLiveBtn). */
+.chart-jump-live {
+  position: absolute;
+  right: 4.6rem;
+  bottom: 2.1rem;
+  z-index: 7;
+  padding: 0.22rem 0.6rem;
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: 0.4rem;
+  background: rgba(8, 47, 73, 0.92);
+  color: #bae6fd;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.chart-jump-live:hover { background: rgba(12, 74, 110, 0.95); }
+.chart-jump-live.hidden { display: none; }
