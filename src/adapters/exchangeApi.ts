@@ -1632,6 +1632,10 @@ export type ApiMarketTicker = {
   volume_24h_quote?: number;
   n_trades_24h?: number;
   change_bps?: number;
+  /** Newest durable fill (RFC 3339); null when the pair never traded. */
+  last_trade_at?: string | null;
+  /** last is the last trade price from before the 24h window (no trades inside it). */
+  last_is_stale?: boolean;
 };
 
 /** GET /tickers — all pairs 24h stats from durable fills. */

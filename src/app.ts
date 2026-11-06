@@ -1254,8 +1254,42 @@ type DeskApiTicker = {
   volume24hBase: number;
   nTrades24h: number;
   changePct: number;
+  /** Newest durable fill (ms); 0 = none. A quiet market keeps its last price, not 0. */
+  lastTradeAtMs: number;
 };
 const deskApiTickers = new Map<PairId, DeskApiTicker>();
+
+/** Live desk pair with no fills in the rolling 24h window. */
+function deskPairQuiet(pid: PairId): DeskApiTicker | null {
+  if (!useLiveBook()) return null;
+  const t = deskApiTickers.get(pid);
+  return t && t.nTrades24h === 0 ? t : null;
+}
+
+function formatTradeAgo(ms: number, now = Date.now()): string {
+  if (!(ms > 0)) return "none yet";
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/** Chart notice for a quiet market: flat bars are real (no trades), not a broken chart. */
+function updateQuietMarketNote(): void {
+  const el = document.getElementById("quiet-market-note");
+  if (!el) return;
+  const t = deskPairQuiet(state.activePair);
+  el.classList.toggle("hidden", !t);
+  if (!t) return;
+  const txt = el.querySelector("[data-qm-text]");
+  if (txt) {
+    const when = t.lastTradeAtMs > 0 ? new Date(t.lastTradeAtMs).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "";
+    txt.textContent = t.lastTradeAtMs > 0
+      ? `No trades in 24h — last trade ${formatTradeAgo(t.lastTradeAtMs)} (${when}) at ${formatPrice(t.last)}. The book is live: bars stay flat until someone trades.`
+      : "No trades yet on this pair. The book is live: bars appear with the first trade.";
+  }
+}
 let deskApiTickersReady = false;
 let lastDeskApiTickersAt = 0;
 
@@ -1333,6 +1367,7 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
       volume24hBase: vol > 0 ? vol : 0,
       nTrades24h: Number(row.n_trades_24h ?? 0) || 0,
       changePct,
+      lastTradeAtMs: Date.parse(String(row.last_trade_at ?? "")) || 0,
     });
     deskVolReady.add(pid);
   }
@@ -2050,12 +2085,13 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
     const spans = statsEl.querySelectorAll("span.mono");
     const live = useLiveBook();
     const vol = live ? deskVol24hBase() : quote.vol24h;
-    if (spans[0] && quote.high24h > 0) {
-      spans[0].textContent = formatPrice(quote.high24h);
+    const quiet = deskPairQuiet(state.activePair);
+    if (spans[0] && (quiet || quote.high24h > 0)) {
+      spans[0].textContent = quiet ? "—" : formatPrice(quote.high24h);
       markNoTranslate(spans[0]);
     }
-    if (spans[1] && quote.low24h > 0) {
-      spans[1].textContent = formatPrice(quote.low24h);
+    if (spans[1] && (quiet || quote.low24h > 0)) {
+      spans[1].textContent = quiet ? "—" : formatPrice(quote.low24h);
       markNoTranslate(spans[1]);
     }
     if (spans[2]) {
@@ -2066,7 +2102,10 @@ function patchTickerBar(quote: PairQuote = activePairQuote()): void {
       spans[3].textContent = `${formatNum(liveSpreadPct(), 3)}%`;
       markNoTranslate(spans[3]);
     }
+    const lt = document.getElementById("tb-last-trade");
+    if (lt) lt.textContent = formatTradeAgo(deskApiTickers.get(state.activePair)?.lastTradeAtMs ?? 0);
   }
+  updateQuietMarketNote();
 }
 
 let lastOhlcLegendText = "";
@@ -3868,14 +3907,15 @@ function renderSpot(): string {
       </div>
     </div>
     <div class="tb-stats">
-      <div><label>24h High</label><span class="mono notranslate" translate="no">${formatPrice(s24.high24h || t.high24h)}</span></div>
-      <div><label>24h Low</label><span class="mono notranslate" translate="no">${formatPrice(s24.low24h || t.low24h)}</span></div>
+      <div><label>24h High</label><span class="mono notranslate" translate="no">${deskPairQuiet(pair.id) ? "—" : formatPrice(s24.high24h || t.high24h)}</span></div>
+      <div><label>24h Low</label><span class="mono notranslate" translate="no">${deskPairQuiet(pair.id) ? "—" : formatPrice(s24.low24h || t.low24h)}</span></div>
       <div title="Rolling 24h base volume from durable fills (not calendar midnight reset)"><label>24h Vol (${noTranslateText(pair.base)})</label><span class="mono notranslate" translate="no">${
         useLiveBook()
           ? formatLiveVol24h(pair.id, pair.base)
           : formatVolBase(s24.vol24h || t.volume24hBase, pair.base)
       }</span></div>
       <div><label>Spread</label><span class="mono notranslate" translate="no">${formatNum(liveSpreadPct(t), 3)}%</span></div>
+      ${useLiveBook() ? `<div title="Newest trade on this pair (durable fills)"><label>Last trade</label><span class="notranslate" translate="no" id="tb-last-trade">${formatTradeAgo(deskApiTickers.get(pair.id)?.lastTradeAtMs ?? 0)}</span></div>` : ""}
     </div>
     <div class="tb-right">
       <div class="vip-badge mono" id="vip-badge" title="30d vol ${formatNum(vipProg.vol, 0)} USDT${vipProg.next ? ` · next ${vipProg.next.name}` : ""}">${vipBadgeInner(vip, vipProg)}</div>
@@ -3961,6 +4001,11 @@ function renderSpot(): string {
           <div class="ohlc-legend mono" id="ohlc-legend">${ohlc}</div>
           <div class="mobile-ohlc-bar mono" id="mobile-ohlc-bar" aria-live="polite">${ohlc}</div>
           <div class="chart-split ${layoutClass}">
+          <div id="quiet-market-note" class="quiet-market-note hidden" role="status">
+            <span data-qm-text></span>
+            <button type="button" class="tfq qm-tf" data-tf="1H" title="Show hourly history">1H history</button>
+            <button type="button" class="tfq qm-tf" data-tf="1D" title="Show daily history">1D</button>
+          </div>
           <div id="chart-host" class="chart-host"></div>
           ${state.multiChartLayout !== "1" ? `<div id="chart-host-2" class="chart-host chart-host-sub"></div>` : ""}
           ${state.multiChartLayout === "4" ? `<div id="chart-host-3" class="chart-host chart-host-sub"></div><div id="chart-host-4" class="chart-host chart-host-sub"></div>` : ""}

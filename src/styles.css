@@ -8148,3 +8148,36 @@ html.mobile-layout .acct-desk-cash-cta {
 html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
   width: 100%;
 }
+
+/* Quiet market: flat bars are real (no trades) — say so instead of looking broken. */
+.quiet-market-note {
+  position: absolute;
+  top: 2.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: min(46rem, calc(100% - 1.5rem));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 0.5rem;
+  background: rgba(15, 23, 42, 0.88);
+  color: #fde68a;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+.quiet-market-note.hidden { display: none; }
+.quiet-market-note .qm-tf {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #fde68a;
+  cursor: pointer;
+  font-size: 0.74rem;
+}
+.quiet-market-note .qm-tf.active { background: rgba(251, 191, 36, 0.18); }
