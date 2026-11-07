@@ -8249,3 +8249,8 @@ a.nav-btn.nav-extra { text-decoration: none; opacity: 0.8; }
   .acct-asset-table td.acct-asset-cell { gap: 0.5rem; }
   .acct-denom-seg .acct-denom-cap { display: none; }
 }
+
+/* Ledger rows are long mono lines: let them wrap instead of widening the card on phones. */
+.acct-ledger-card { min-width: 0; }
+.acct-ledger-card .acct-card-title-row { flex-wrap: wrap; gap: 0.4rem; }
+.ledger-mini li { white-space: normal; overflow-wrap: anywhere; }
