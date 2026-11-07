@@ -114,6 +114,7 @@ import {
   exchangeHealth,
   fetchCustodyFees,
   fetchDepositAddress,
+  fetchPendingDeposits,
   fetchPublicCandles,
   fetchPublicTrades,
   fetchPublicTickers,
@@ -135,7 +136,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress } from "./adapters/deskWallet";
+import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress, isDeskBackupDone, markDeskBackupDone } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import {
   cancelLabOrder,
@@ -294,7 +295,7 @@ import {
   pctTone,
   tickerFromMarket,
 } from "./market";
-import { formatAssetQty, formatTxTime, renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
+import { formatAssetQty, formatTxTime, renderPendingDeposits, renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
 import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
 import { LANES, PAIRS, pairById } from "./pairs";
 import {
@@ -1333,7 +1334,12 @@ if (typeof window !== "undefined") window.addEventListener("hackme:vip-updated",
 function applyLiveImpliedBtcUsd(m: MarketSnapshot): void {
   if (!useLiveBook()) return;
   const hu = deskApiTickers.get("HMC_USDT" as PairId)?.last ?? 0;
+  const su = deskApiTickers.get("SUP_USDT" as PairId)?.last ?? 0;
   const hb = deskApiTickers.get("HMC_BTC" as PairId)?.last ?? 0;
+  // HMC/SUP are valued at this book's last price, not the oracle seed reference: Account
+  // showed HMC at 0.050 and Convert previewed 27% below the live 0.069 market.
+  if (hu > 0) m.hmcUsdt = hu;
+  if (su > 0) m.supUsdt = su;
   if (hu > 0 && hb > 0) m.btcUsd = hu / hb;
 }
 
@@ -4879,22 +4885,55 @@ async function deskNewWalletUi(): Promise<void> {
   patchOpenSettingsWalletChrome();
 }
 
-function deskExportSeedUi(): void {
+function deskExportSeedUi(opts: { skipConfirm?: boolean } = {}): boolean {
   if (!isDeskConnectEnabled()) {
     toast("Desk Connect off in this build", "warn");
-    return;
+    return false;
   }
   if (
+    !opts.skipConfirm &&
     !window.confirm(
       "Export SECRET desk seed backup?\n\nAnyone with this file can Connect as your HMC address. Never share, screenshot, or commit it.",
     )
   ) {
-    return;
+    return false;
   }
   const backup = buildDeskSeedBackup();
   const stamp = backup.address.replace(/^HMC-/, "").slice(0, 8);
   downloadText(`hackme-desk-seed-${stamp}.json`, `${JSON.stringify(backup, null, 2)}\n`);
+  markDeskBackupDone(backup.address);
   toast(`Seed backup saved · ${backup.address.slice(0, 14)}… — keep offline`, "warn");
+  if (state.mainView === "account") render();
+  return true;
+}
+
+/**
+ * Your exchange account lives in this browser's key. Before the first deposit address is shown,
+ * the owner must save the recovery file — otherwise clearing the browser or switching device
+ * loses access to the deposited funds.
+ */
+function deskBackupGateOk(): boolean {
+  if (!isDeskConnectEnabled() || isLabLoopbackApi() || !hasDeskSeed()) return true;
+  let addr = "";
+  try {
+    addr = deskWalletIdentity().address;
+  } catch {
+    return true;
+  }
+  if (!addr || isDeskBackupDone(addr)) return true;
+  const ok = window.confirm(
+    "SAVE YOUR RECOVERY FILE FIRST\n\n" +
+      "Your exchange account is a key stored only in this browser. If you clear the browser, " +
+      "switch device or lose this computer without the recovery file, the funds you deposit " +
+      "can no longer be reached.\n\n" +
+      "OK = download the recovery file now (keep it offline, never share it), then show the deposit address.\n" +
+      "Cancel = not now.",
+  );
+  if (!ok) {
+    toast("Deposit address hidden until the recovery file is saved", "warn");
+    return false;
+  }
+  return deskExportSeedUi({ skipConfirm: true });
 }
 
 async function applyDeskSeedImport(raw: string): Promise<void> {
@@ -4934,6 +4973,8 @@ async function applyDeskSeedImport(raw: string): Promise<void> {
     clearLabBookCache();
   }
   persistDeskSeed(parsed.seedHex);
+  // Imported from a backup the owner already holds — no need to make them save it again.
+  markDeskBackupDone(parsed.address);
   toast(`Seed imported · ${parsed.address.slice(0, 14)}… — syncing desk ledger…`, "info");
   await deskWalletConnectUi();
   // Second sync — first paint can race CSRF/session; ensure ledger lands in UI.
@@ -5107,6 +5148,7 @@ async function showDepositAddrUi(asset: string): Promise<void> {
     toast("Deposits are HOLD on this edge", "warn");
     return;
   }
+  if (!labOk && !deskBackupGateOk()) return;
   const msg = document.getElementById("lab-deposit-msg");
   const res = await fetchDepositAddress(asset);
   if (!res.ok) {
@@ -5273,6 +5315,27 @@ async function watchDeskBalancesAfterDeposit(asset = ""): Promise<void> {
   };
   void tick();
   depositWatchTimer = window.setInterval(() => void tick(), 8_000);
+}
+
+/** Last pending-deposit count, to refresh balances when one gets credited. */
+let pendingDepositsLast = 0;
+let pendingDepositsHtml = "";
+
+/** Account view: show chain-applied deposits still in the confirmation wait. */
+async function refreshPendingDepositsUi(): Promise<void> {
+  if (state.mainView !== "account" || !isDeskConnectEnabled() || !getLabSessionMeta().hasCsrf) return;
+  if (typeof document !== "undefined" && document.hidden) return;
+  const el = document.getElementById("acct-dep-pending");
+  if (!el) return;
+  const res = await fetchPendingDeposits();
+  if (!res.ok) return;
+  pendingDepositsHtml = renderPendingDeposits(res.pending);
+  el.innerHTML = pendingDepositsHtml;
+  if (res.pending.length < pendingDepositsLast) refreshAccountAfterLab();
+  pendingDepositsLast = res.pending.length;
+}
+if (typeof window !== "undefined") {
+  window.setInterval(() => void refreshPendingDepositsUi(), 15_000);
 }
 
 async function labShowDepositAddr(asset: string): Promise<void> {
@@ -5979,7 +6042,12 @@ function wireLabApiButtons(): void {
     void labRevokeAllUi();
   });
   click("btn-desk-copy-addr", () => void deskCopyAddressUi());
-  click("btn-desk-export-seed", () => deskExportSeedUi());
+  click("btn-desk-export-seed", () => void deskExportSeedUi());
+  click("btn-desk-export-seed-banner", () => void deskExportSeedUi({ skipConfirm: true }));
+  {
+    const dp = document.getElementById("acct-dep-pending");
+    if (dp && pendingDepositsHtml) dp.innerHTML = pendingDepositsHtml;
+  }
   click("btn-desk-import-seed", () => deskImportSeedUi());
   click("btn-desk-import-seed-banner", () => deskImportSeedUi());
   click("btn-desk-new-key", () => {
@@ -8387,7 +8455,7 @@ function showSettings(opts?: { tab?: SettingsTabId }): void {
         gotoMainView("account");
         void deskNewWalletUi();
       },
-      onExportDeskSeed: () => deskExportSeedUi(),
+      onExportDeskSeed: () => void deskExportSeedUi(),
       onImportDeskSeed: () => deskImportSeedUi(),
       onOpenAccount: () => gotoMainView("account"),
       onRefreshDeskHealth: () => refreshDeskEdgeHealthUi(),

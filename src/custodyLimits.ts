@@ -43,7 +43,7 @@ export function depositLimitsPlateHtml(): string {
   return `<p class="cex-dep-note muted small" role="note" aria-label="Deposit network">
     <strong>USDT</strong> ${USDT_STANDARD} · BSC ${USDT_CHAIN_ID} · min <strong class="mono">${USDT_DEPOSIT_MIN}</strong>
     · after ≥${USDT_CONFIRMATIONS} confs, manual review before Available
-    · <strong>HMC / SUP</strong> HackMe chain · usually ~30s
+    · <strong>HMC / SUP</strong> HackMe chain · credited after ~6 blocks (about 3–4 min)
   </p>`;
 }
 

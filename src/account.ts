@@ -1,6 +1,6 @@
 import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
 import { getLedgerHolds, labSessionLabel } from "./adapters/exchangeApi";
-import { hasDeskSeed, lastKnownDeskAddress } from "./adapters/deskWallet";
+import { hasDeskSeed, isDeskBackupDone, lastKnownDeskAddress } from "./adapters/deskWallet";
 import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
@@ -250,6 +250,13 @@ function renderImportSeedBanner(hasSpotInventory: boolean): string {
   if (!isDeskConnectEnabled() || isLabLoopbackApi()) return "";
   const prev = lastKnownDeskAddress();
   const seedOk = hasDeskSeed();
+  if (seedOk && hasSpotInventory && prev && !isDeskBackupDone(prev)) {
+    return `<div class="cex-callout cex-callout--warn acct-import-seed-banner" role="alert" data-import-seed-reason="backup_missing">
+      <strong>Save your recovery file</strong>
+      <p class="muted small" style="margin:0.35rem 0 0.55rem">Your exchange account is a key stored only in this browser. Without the recovery file, clearing the browser or switching device means losing access to these balances. Keep the file offline and never share it.</p>
+      <button type="button" class="btn-lab btn-lab-primary" id="btn-desk-export-seed-banner">Download recovery file</button>
+    </div>`;
+  }
   if (seedOk && (hasSpotInventory || !prev)) return "";
   if (!seedOk && prev) {
     const short = escapeHtml(prev.slice(0, 14) + "…");
@@ -439,6 +446,7 @@ function renderDepositCard(
             </div>
           </div>
           <p id="lab-deposit-msg" class="muted small sync-msg" role="status">Select an asset to show your deposit address.</p>
+          <div id="acct-dep-pending" class="acct-dep-pending" role="status" aria-live="polite"></div>
           ${depositLimitsPlateHtml()}
           <div class="cex-callout cex-callout--warn" role="note">
             <span><strong>Never send to your login address.</strong> Only use the <strong>Copy address</strong> button above.</span>

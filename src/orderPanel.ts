@@ -29,10 +29,11 @@ export type OrderPanelCtx = {
   deskSession?: boolean;
 };
 
-const PRIMARY_TYPES: { id: OrderKind; label: string }[] = [
+const PRIMARY_TYPES: { id: OrderKind; label: string; short?: string }[] = [
   { id: "limit", label: "Limit" },
   { id: "market", label: "Market" },
-  { id: "stop_limit", label: "Stop Limit" },
+  // Phones cut "Stop Limit" to "Stop Li" — show "Stop" there (CSS .ot-short).
+  { id: "stop_limit", label: "Stop Limit", short: "Stop" },
 ];
 
 const ADVANCED_TYPES: { id: OrderKind; label: string }[] = [
@@ -192,7 +193,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
       </div>
       <div class="order-type-row">
         <div class="type-tabs scroll-x binance-type-tabs" id="type-tabs" role="tablist" aria-label="Order type">
-          ${PRIMARY_TYPES.map((ot) => `<button type="button" class="type ${!advanced && uiType === ot.id ? "active" : ""}" data-type="${ot.id}" role="tab" aria-selected="${!advanced && uiType === ot.id}">${ot.label}</button>`).join("")}
+          ${PRIMARY_TYPES.map((ot) => `<button type="button" class="type ${!advanced && uiType === ot.id ? "active" : ""}" data-type="${ot.id}" role="tab" aria-selected="${!advanced && uiType === ot.id}" title="${ot.label}">${ot.short ? `<span class="ot-full">${ot.label}</span><span class="ot-short">${ot.short}</span>` : ot.label}</button>`).join("")}
           <label class="type-adv ${advanced ? "active" : ""}" title="Advanced order types">
             <select id="order-type-adv" class="type-adv-select" aria-label="Advanced order type">
               <option value="" disabled ${!advanced ? "selected" : ""}>More</option>

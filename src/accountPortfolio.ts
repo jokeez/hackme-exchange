@@ -457,6 +457,13 @@ export function custodyStatusMeta(
   if (st === "kyt_pending" || st === "submitted" || st === "review") {
     return { label: `KYT review${age}`, tone: "review", cssClass: "pending" };
   }
+  if (st === "kyt_approved") {
+    const hint = assetU === "USDT" ? " · manual payout, usually within 24h" : " · queued to send";
+    return { label: `Approved${age}${hint}`, tone: "pending", cssClass: "pending" };
+  }
+  if (st === "broadcasting") {
+    return { label: `Sending${age} · on-chain`, tone: "pending", cssClass: "pending" };
+  }
   if (st === "pending" || st === "queued" || st === "processing") {
     const hint =
       assetU === "USDT" ? " · KYT / ops broadcast" : assetU ? " · waiting on-chain" : "";
@@ -505,6 +512,22 @@ export function renderLedgerListItem(r: LedgerEntry): string {
   return `<li data-ledger-kind="${bucket}"><span class="acct-ledger-kind ${tone}">${kind}</span> <strong class="mono ${tone}">${escapeHtml(amt)}</strong>${note} ${when}</li>`;
 }
 
+/**
+ * Where a completed withdraw can be checked: BscScan tx for USDT (0x hash), the HackMe explorer
+ * page of the destination for HMC/SUP (the explorer has no tx deep link). "" when unknown.
+ */
+export function withdrawExplorerUrl(asset: string, txId?: string, destination?: string): string {
+  const a = String(asset || "").toUpperCase();
+  const tx = String(txId || "").trim();
+  if (!tx) return "";
+  if (a === "USDT" && /^0x[0-9a-fA-F]{64}$/.test(tx)) return `https://bscscan.com/tx/${tx}`;
+  const dest = String(destination || "").trim();
+  if ((a === "HMC" || a === "SUP") && /^HMC-[0-9a-f]{16}([0-9a-f]{48})?$/.test(dest)) {
+    return `https://explorer.hackme.tech/explorer?addr=${encodeURIComponent(dest)}`;
+  }
+  return "";
+}
+
 /** Withdraw history row HTML (escaped) — amount, fee, destination, status, time. */
 export function renderWithdrawHistoryItem(w: {
   id: string;
@@ -530,8 +553,12 @@ export function renderWithdrawHistoryItem(w: {
       : "";
   const dest = escapeHtml(truncateMid(w.destination, 12, 8));
   const idShort = escapeHtml(truncateMid(w.id, 8, 4));
+  const txUrl = withdrawExplorerUrl(w.asset, w.tx_id, w.destination);
+  const txLabel = w.tx_id ? `tx ${escapeHtml(truncateMid(w.tx_id, 8, 6))}` : "";
   const txPart = w.tx_id
-    ? `<span class="dim" title="${escapeHtml(w.tx_id)}">tx ${escapeHtml(truncateMid(w.tx_id, 8, 6))}</span>`
+    ? txUrl
+      ? `<a class="dim" href="${escapeHtml(txUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(w.tx_id)}">${txLabel} ↗</a>`
+      : `<span class="dim" title="${escapeHtml(w.tx_id)}">${txLabel}</span>`
     : "";
   return `<li class="lab-wd-row">
     <div class="lab-wd-row-main">
@@ -625,3 +652,19 @@ export function walletFreeSummary(state: DemoState, market: MarketSnapshot): {
 }
 
 export { equityUsdt };
+
+/** Incoming deposits seen on chain but still in the confirmation wait. */
+export function renderPendingDeposits(
+  rows: { asset: string; tx_hash: string; amount: number; eta_sec: number }[],
+): string {
+  if (!rows.length) return "";
+  const items = rows
+    .slice(0, 6)
+    .map((r) => {
+      const amt = escapeHtml(formatAssetQty(r.amount / 1e8, r.asset));
+      const eta = r.eta_sec > 0 ? `credited in ~${Math.max(1, Math.ceil(r.eta_sec / 60))} min` : "crediting now";
+      return `<li><strong class="mono">+${amt} ${escapeHtml(r.asset)}</strong> <span class="dim">· seen on chain · ${eta}</span> <span class="dim mono" title="${escapeHtml(r.tx_hash)}">${escapeHtml(truncateMid(r.tx_hash, 6, 4))}</span></li>`;
+    })
+    .join("");
+  return `<div class="cex-callout"><strong>Incoming deposits</strong><ul class="acct-dep-pending-list">${items}</ul><p class="muted small" style="margin:0.3rem 0 0">Deposits are credited after ~6 blocks so a chain reorganisation cannot take them back.</p></div>`;
+}

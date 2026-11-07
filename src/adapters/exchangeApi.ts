@@ -998,6 +998,39 @@ export async function fetchDepositAddress(
   }
 }
 
+export type PendingDeposit = {
+  asset: string;
+  tx_hash: string;
+  /** Minor units (1e8). */
+  amount: number;
+  applied_unix: number;
+  to: string;
+  /** Seconds left of the confirmation wait; 0 = credited on the next poll. */
+  eta_sec: number;
+};
+
+/** GET /deposit/pending — chain-applied deposits still in the confirmation wait. */
+export async function fetchPendingDeposits(
+  timeoutMs = 8_000,
+  baseOverride?: string,
+): Promise<{ ok: true; pending: PendingDeposit[] } | ExchangeApiError> {
+  const url = apiUrl("/deposit/pending", baseOverride);
+  if (!url) return disabled();
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store", mode: "cors", credentials: "include", headers: { Accept: "application/json" } },
+      timeoutMs,
+    );
+    const body = await parseJson(res);
+    if (!res.ok) return asError(res.status, body, "pending deposits failed");
+    const rows = Array.isArray((body as { pending?: unknown }).pending) ? (body as { pending: PendingDeposit[] }).pending : [];
+    return { ok: true, pending: rows };
+  } catch (e) {
+    return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** POST /withdraw — request only; admin complete is CLI/API (never SPA admin token). */
 export async function requestWithdraw(
   body: { asset: string; amount: number; destination: string; totp_code?: string; client_withdraw_id?: string },

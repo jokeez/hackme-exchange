@@ -8198,3 +8198,10 @@ html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
 }
 .chart-jump-live:hover { background: rgba(12, 74, 110, 0.95); }
 .chart-jump-live.hidden { display: none; }
+
+/* Order type tabs: short labels on phones ("Stop Limit" was clipped to "Stop Li"). */
+.ot-short { display: none; }
+@media (max-width: 520px) {
+  .ot-full { display: none; }
+  .ot-short { display: inline; }
+}

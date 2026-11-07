@@ -70,6 +70,29 @@ function rememberLastAddress(address: string): void {
   }
 }
 
+const BACKUP_DONE_PREFIX = "hackme.desk.wallet.backupDone.v1.";
+
+/** The owner downloaded (or imported from) a recovery file for this desk address. */
+export function isDeskBackupDone(address: string): boolean {
+  const a = address.trim().toLowerCase();
+  if (!a) return false;
+  try {
+    return localStorage.getItem(BACKUP_DONE_PREFIX + a) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markDeskBackupDone(address: string): void {
+  const a = address.trim().toLowerCase();
+  if (!a) return;
+  try {
+    localStorage.setItem(BACKUP_DONE_PREFIX + a, "1");
+  } catch {
+    /* private mode: the gate simply asks again next time */
+  }
+}
+
 /** Last known desk address (non-secret) for reconnect recovery UX. */
 export function lastKnownDeskAddress(): string | null {
   try {
