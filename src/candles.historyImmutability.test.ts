@@ -115,7 +115,7 @@ describe("closed candle immutability under tip pump", () => {
       );
       assertClosedFrozen(closed, cur, tipBucket, `constrain tip=${tip}`);
     }
-  });
+  }, 30_000); // 36h of 1m bars: ~5s alone, timed out at the 5s default under full-suite load
 
   it(
     "hydrate + applyMid soak: 50 tip jumps leave yesterday/month OHLC unchanged",
