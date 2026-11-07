@@ -1335,6 +1335,16 @@ function patchVipBadge(): void {
 if (typeof window !== "undefined") window.addEventListener("hackme:vip-updated", () => patchVipBadge());
 
 /** Live desk: BTC valued at HMC/USDT ÷ HMC/BTC from this book (BTC has no rail here). */
+// Read-only price diagnostics (?debug=1): public tickers + the snapshot Account renders from.
+if (typeof window !== "undefined" && /[?&]debug=1\b/.test(window.location.search)) {
+  (window as Window & { __hackmePrices?: unknown }).__hackmePrices = {
+    tickers: () => Object.fromEntries([...deskApiTickers].map(([k, v]) => [k, v.last])),
+    live: () => useLiveBook(),
+    market: () => (market ? { hmc: market.hmcUsdt, sup: market.supUsdt, btc: market.btcUsd } : null),
+    priced: () => (market ? (({ hmcUsdt, supUsdt, btcUsd }) => ({ hmcUsdt, supUsdt, btcUsd }))(livePriced(market)) : null),
+  };
+}
+
 /** Copy of m valued at this book's live prices (Account / Fees); m itself is untouched. */
 function livePriced(m: MarketSnapshot): MarketSnapshot {
   if (!useLiveBook()) return m;
