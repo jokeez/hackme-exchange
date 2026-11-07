@@ -138,6 +138,7 @@ import {
 import { labFixtureConnect } from "./adapters/labFixture";
 import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress, isDeskBackupDone, markDeskBackupDone } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
+import { completeWalletLoginFromLocation, isWalletLoginMode, setWalletLoginMode, startWalletLogin } from "./walletLogin";
 import {
   cancelLabOrder,
   clearLabBookCache,
@@ -4747,6 +4748,11 @@ async function labFixtureConnectUi(): Promise<void> {
 }
 
 async function deskWalletConnectUi(): Promise<void> {
+  if (isWalletLoginMode() && !hasDeskSeed()) {
+    startWalletLogin();
+    toast("Approve the login in your HackMe dashboard", "info");
+    return;
+  }
   const msg = document.getElementById("desk-api-msg");
   if (msg) msg.textContent = "Connecting browser HMC wallet…";
   const paperEq =
@@ -4871,6 +4877,7 @@ async function deskNewWalletUi(): Promise<void> {
     clearLabBookCache();
   }
   clearDeskSeed();
+  setWalletLoginMode(false);
   toast("Desk seed cleared — connecting new wallet…", "info");
   const res = await deskWalletConnect(undefined, { createIfMissing: true });
   if (!res.ok) {
@@ -5514,7 +5521,7 @@ async function labWithdrawRequestUi(): Promise<void> {
     return;
   }
   const selfAddr = getLabSessionMeta().address || "";
-  const destCheck = validateLabWithdrawDestination(asset, destination, selfAddr);
+  const destCheck = validateLabWithdrawDestination(asset, destination, isWalletLoginMode() ? "" : selfAddr);
   if (!destCheck.ok) {
     if (msg) msg.textContent = destCheck.hint;
     toast(destCheck.hint, "warn");
@@ -6030,6 +6037,10 @@ function wireLabApiButtons(): void {
   click("btn-lab-fixture-connect", () => void labFixtureConnectUi());
   click("btn-desk-wallet-connect", () => void deskWalletConnectUi());
   click("btn-desk-cash-connect", () => void deskWalletConnectUi());
+  click("btn-desk-wallet-login", () => {
+    startWalletLogin();
+    toast("Approve the login in your HackMe dashboard (desktop app must be running)", "info");
+  });
   click("btn-desk-jump-panel", () => {
     const panel = document.getElementById("acct-desk") as HTMLDetailsElement | null;
     if (panel) panel.open = true;
@@ -10202,7 +10213,21 @@ export async function boot(): Promise<void> {
   startLabSessionLoop();
   startSessionExpiryWatch();
   // Restore desk/lab CSRF as early as boot (not only when Account is open).
-  if (isLabApiEnabled()) void maybeAutoReconnectLabSession();
+  if (isLabApiEnabled()) {
+    // Returning from the HackMe dashboard with a signed login: finish it before any restore.
+    void (async () => {
+      const wl = await completeWalletLoginFromLocation();
+      if (wl && wl.ok) {
+        toast(`Signed in with your HackMe wallet · ${wl.address.slice(0, 14)}…`, "ok");
+        const sync = await syncLabBalancesAndBook(state, market);
+        if (sync.ok) saveState(state);
+        render();
+        return;
+      }
+      if (wl && !wl.ok) toast(wl.message, "warn");
+      void maybeAutoReconnectLabSession();
+    })();
+  }
   void refreshTradingGuardsFromHealth();
   pollTimer = window.setInterval(async () => {
     try {

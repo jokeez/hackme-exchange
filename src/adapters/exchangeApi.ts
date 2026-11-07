@@ -849,6 +849,8 @@ export async function authVerify(
     address: string;
     pubkey_ed25519: string;
     sig_ed25519: string;
+    /** "hackme_wallet" when the HackMe node signed the challenge. */
+    via?: string;
   },
   timeoutMs = 5_000,
   baseOverride?: string,

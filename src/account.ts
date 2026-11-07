@@ -1,6 +1,7 @@
 import { INTEGRATION, isDemoMode, isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi, isLiveModeBlocked } from "./config/integration";
 import { getLedgerHolds, labSessionLabel } from "./adapters/exchangeApi";
 import { hasDeskSeed, isDeskBackupDone, lastKnownDeskAddress } from "./adapters/deskWallet";
+import { isWalletLoginMode, walletLoginButtonEnabled } from "./walletLogin";
 import { useLabMatching, useDeskMatching, usePublicDeskBook } from "./adapters/labMatching";
 import { escapeHtml } from "./sanitize";
 import { nodeWalletUrl } from "./adapters/walletLinks";
@@ -248,6 +249,8 @@ function renderScreeningHoldBanner(): string {
  */
 function renderImportSeedBanner(hasSpotInventory: boolean): string {
   if (!isDeskConnectEnabled() || isLabLoopbackApi()) return "";
+  // HackMe-wallet login: the account key lives in the HackMe app, not in this browser.
+  if (isWalletLoginMode() && !hasDeskSeed()) return "";
   const prev = lastKnownDeskAddress();
   const seedOk = hasDeskSeed();
   if (seedOk && hasSpotInventory && prev && !isDeskBackupDone(prev)) {
@@ -582,7 +585,8 @@ function renderCashDock(
           ? `<div class="acct-desk-cash-cta">
         <p class="muted small">Session <strong class="mono">${escapeHtml(session.label)}</strong></p>
         <div class="acct-cash-actions">
-          <button type="button" class="btn-sm btn-primary" id="btn-desk-cash-connect">${session.live ? "Reconnect" : "Connect"}</button>
+          ${session.live || !walletLoginButtonEnabled() ? "" : `<button type="button" class="btn-sm btn-primary" id="btn-desk-wallet-login" title="Use your HackMe wallet as your exchange account — approve in the HackMe dashboard">Sign in with HackMe</button>`}
+          <button type="button" class="btn-sm${session.live || !walletLoginButtonEnabled() ? " btn-primary" : ""}" id="btn-desk-cash-connect">${session.live ? "Reconnect" : isWalletLoginMode() ? "Sign in again" : walletLoginButtonEnabled() ? "Browser wallet" : "Connect"}</button>
           <button type="button" class="btn-sm" id="btn-desk-jump-panel">Wallet &amp; security</button>
         </div>
       </div>`
