@@ -4253,7 +4253,7 @@ function render(): void {
     const el = document.getElementById("node-status");
     if (!el) return;
     const base = modeStatusPill();
-    el.textContent = ok ? `${base} · node up` : base;
+    el.textContent = ok && !isDeskConnectEnabled() ? `${base} · node up` : base;
   });
 }
 
