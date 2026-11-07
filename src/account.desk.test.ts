@@ -73,7 +73,7 @@ describe("Account desk session (HOLD)", () => {
       feeWallet: null,
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: false },
     });
-    expect(html).toContain("Spot balances · soft-launch");
+    expect(html).toContain("Your exchange balances");
     expect(html).toContain('id="acct-desk"');
     expect(html).toContain(">Connect<");
     expect(html).not.toContain('data-wallet-slice="desk"');
@@ -117,7 +117,7 @@ describe("Account desk session (HOLD)", () => {
     const html = renderAccountPage(baseState(), sampleMarket(), {
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
-    expect(html).toContain("Spot balances · soft-launch");
+    expect(html).toContain("Your exchange balances");
     expect(html).toContain("VIP schedule from desk");
     expect(html).toContain("sync…");
     expect(html).not.toMatch(/vip-demo[^>]*>\s*demo\s*</);
@@ -138,7 +138,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toMatch(/Withdraw limits|lab-wd-limits-plate/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
-    expect(html).toMatch(/Never send to your login address|Login addr ≠ deposit/i);
+    expect(html).toMatch(/Send only to the deposit address|Never send to your login address/i);
+    expect(html).toMatch(/is not a deposit address/);
     expect(html).toContain("deposit on");
     expect(html).toContain("withdraw on");
     expect(html).toContain("Wallet &amp; security");

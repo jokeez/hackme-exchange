@@ -215,7 +215,7 @@ export function formatBps(bps: number): string {
 
 export function feeScheduleLabel(state: DemoState, market?: MarketSnapshot | null): string {
   const tier = activeVipTier(state, market);
-  const src = hasServerVipVolume() ? "desk VIP · server volume" : "demo VIP · local history";
+  const src = hasServerVipVolume() ? "30-day volume" : "demo VIP · local history";
   return `Maker ${formatBps(tier.makerBps)} · Taker ${formatBps(tier.takerBps)} · ${tier.name} (${src})`;
 }
 

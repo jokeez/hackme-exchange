@@ -102,7 +102,7 @@ describe("Account custody UI (buttons + copy)", () => {
     expect(html).toContain('data-ph-sup="HMC-ffffffffffffffff"');
     expect(html).not.toContain('data-ph-sup="paper-sup-ops-wallet-01"');
     expect(html).toContain("lab-wd-limits-plate");
-    expect(html).toMatch(/external HMC-|HMC- wallet/i);
+    expect(html).toMatch(/HackMe wallet address/i);
     expect(html).toContain('data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"');
     const { withdrawLimitsPlateHtml } = await import("./custodyLimits");
     const usdtNote = withdrawLimitsPlateHtml("USDT");

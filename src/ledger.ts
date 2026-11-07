@@ -27,6 +27,8 @@ export function recordTradeLedger(
 ): void {
   const pair = pairById(pairId);
   const ts = Date.now();
+  // The "lab:<fill id>" marker is the dedupe key mergeServerFills looks for; it stays in the
+  // stored note and is stripped only when rendered (cleanLedgerNote).
   const labTag = labFillId ? ` · lab:${labFillId}` : "";
   appendLedger(state, {
     kind: "trade",

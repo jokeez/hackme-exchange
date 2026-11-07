@@ -9,15 +9,15 @@ export function modeChromeLabel(): string {
   if (isStagingMode() && useLabMatching()) return "D1 staging · loopback ledger (local only)";
   if (isStagingMode()) return "D1 staging — connect fixture to loopback API";
   if (useLabMatching()) return "Lab matching (loopback) — DEMO/LAB only";
-  if (useDeskMatching()) return "Soft-launch Spot — session connected";
-  if (usePublicDeskBook()) return "Soft-launch Spot — Connect wallet to trade";
+  if (useDeskMatching()) return "Live trading — connected";
+  if (usePublicDeskBook()) return "Live trading — connect to trade";
   if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) {
-    return "Soft-launch Spot — Connect wallet to trade";
+    return "Live trading — connect to trade";
   }
   if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) {
-    return "Soft-launch Spot — checking edge…";
+    return "Connecting to the exchange…";
   }
-  if (isDeskConnectEnabled()) return "Desk Connect — Connect wallet to trade when matching is GO";
+  if (isDeskConnectEnabled()) return "Trading opens soon";
   switch (INTEGRATION.mode) {
     case "paper":
       return "Paper Spot — simulated balances";
@@ -30,10 +30,10 @@ export function modeStatusPill(): string {
   if (isLiveModeBlocked()) return "⛔ Live blocked";
   if (isStagingMode()) return useLabMatching() ? "◈ D1 local" : "◈ D1 staging";
   if (useLabMatching()) return "◎ Lab";
-  if (useDeskMatching()) return "◎ Desk · live";
-  if (usePublicDeskBook()) return "◎ Desk · Connect";
-  if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) return "◎ Desk · Connect";
-  if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) return "◎ Desk · …";
-  if (isDeskConnectEnabled()) return "◎ Desk · Connect";
+  if (useDeskMatching()) return "● Live";
+  if (usePublicDeskBook()) return "● Live · Connect";
+  if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) return "● Live · Connect";
+  if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) return "○ Connecting…";
+  if (isDeskConnectEnabled()) return "○ Connect";
   return "◎ Paper";
 }

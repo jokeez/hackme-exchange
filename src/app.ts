@@ -295,6 +295,7 @@ import {
   midForPair,
   pctTone,
   tickerFromMarket,
+  resyncCrossMids,
 } from "./market";
 import { formatAssetQty, formatTxTime, renderPendingDeposits, renderWithdrawHistoryItem, truncateMid } from "./accountPortfolio";
 import { isMarketableLimit, orderTypeLabel, placeOco, placeOrder, processOpenOrders, validateLimitOrder } from "./orders";
@@ -1341,9 +1342,13 @@ function applyLiveImpliedBtcUsd(m: MarketSnapshot): void {
   const hb = deskApiTickers.get("HMC_BTC" as PairId)?.last ?? 0;
   // HMC/SUP are valued at this book's last price, not the oracle seed reference: Account
   // showed HMC at 0.050 and Convert previewed 27% below the live 0.069 market.
-  if (hu > 0) m.hmcUsdt = hu;
-  if (su > 0) m.supUsdt = su;
-  if (hu > 0 && hb > 0) m.btcUsd = hu / hb;
+  const next = { ...m };
+  if (hu > 0) next.hmcUsdt = hu;
+  if (su > 0) next.supUsdt = su;
+  if (hu > 0 && hb > 0) next.btcUsd = hu / hb;
+  // Recompute the cached assetUsd map and cross mids too: Account/Fees read those, and
+  // patching only the USDT legs left them on the 0.05 / $67,500 reference prices.
+  Object.assign(m, resyncCrossMids(next));
 }
 
 async function hydrateDeskApiTickers(force = false): Promise<boolean> {
@@ -1538,23 +1543,23 @@ function renderAnnounce(): string {
     : lab
       ? "Private lab matching — not production custody"
       : deskLive
-        ? "Soft-launch Spot — live matching · deposit/withdraw on"
+        ? "Early access — live trading · deposits & withdrawals open"
         : deskBook
-          ? "Soft-launch Spot — live book · Connect to trade"
+          ? "Early access — live market · connect to trade"
           : desk
-            ? "Soft-launch Spot — Connect wallet to trade when matching is GO"
+            ? "Early access — trading opens soon"
             : "Paper Spot — simulated balances · reference mids";
   const detail = lab
     ? "lab ledger"
     : deskLive || deskBook
-      ? "live L2 · public tape"
+      ? "real HMC, SUP and USDT"
       : desk
-        ? "browser wallet · Connect for live session"
+        ? "connect to trade"
         : "paper balances in localStorage";
   const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
-    ${label.startsWith("Soft-launch Spot") && bold.startsWith("Soft-launch Spot") ? "" : `· ${label}`}
+    ${(deskLive || deskBook || desk) && !lab ? "" : `· ${label}`}
     · ${detail}
     ${badge}
     <button type="button" class="announce-x" id="btn-announce-x" aria-label="Dismiss">×</button>
@@ -1588,7 +1593,8 @@ function patchModeChrome(): void {
       const el = document.getElementById("node-status");
       if (!el) return;
       const base = modeStatusPill();
-      el.textContent = ok ? `${base} · node up` : base;
+      // "node up" is a lab/hub detail; the public desk pill stays simple.
+      el.textContent = ok && !isDeskConnectEnabled() ? `${base} · node up` : base;
     });
   }
   const tbSub = document.querySelector(".tb-sub");
@@ -3905,9 +3911,9 @@ function renderSpot(): string {
             useLabMatching()
               ? "Lab book · live matching"
               : useDeskMatching()
-                ? "Desk book · live matching"
+                ? "Live order book"
                 : usePublicDeskBook()
-                  ? "Desk book · Connect to trade"
+                  ? "Live order book · connect to trade"
                   : "Paper Spot · reference mids"
           }</span>
     </div>
@@ -4159,7 +4165,7 @@ function render(): void {
         <div class="sys-drop hidden" id="sys-drop" role="menu">
           <p class="muted small">${
             useDeskMatching() || usePublicDeskBook()
-              ? `Soft-launch Spot · ${modeChromeLabel()}`
+              ? modeChromeLabel()
               : useLabMatching()
                 ? `Lab · ${modeChromeLabel()}`
                 : `Mode <b class="mono">${INTEGRATION.mode}</b> · ${modeChromeLabel()}`
@@ -5600,7 +5606,7 @@ async function labWithdrawQuoteUi(): Promise<void> {
   const amtDisp = Number((document.getElementById("lab-wd-amt") as HTMLInputElement | null)?.value || 0);
   const amount = displayToMinor(amtDisp);
   if (!(amount > 0)) {
-    if (quoteEl) quoteEl.textContent = "Enter amount · Quote fee for custody total";
+    if (quoteEl) quoteEl.textContent = "Enter an amount to see the fee";
     return;
   }
   const res = await fetchCustodyFees({ side: "withdraw", asset, amount });
@@ -5684,7 +5690,7 @@ async function labFillsRefreshUi(): Promise<void> {
   }
   if (msg2) {
     msg2.textContent = res.fills.length
-      ? `${res.fills.length} fill(s)${res.source ? ` · ${res.source}` : ""}${added ? ` · +${added} ledger` : ""}`
+      ? `${res.fills.length} trade${res.fills.length === 1 ? "" : "s"}`
       : "No fills yet";
   }
 }
@@ -5748,7 +5754,11 @@ function applyLab2faPanels(enabled: boolean, pending: boolean, recoveryLeft = 0)
     wd2fa.placeholder = enabled ? "TOTP or recovery code" : "enable 2FA first";
     wd2fa.inputMode = "text";
   }
+  // The withdraw card was painted before this status arrived ("Enable 2FA to withdraw" while
+  // 2FA is on): repaint once when the flag actually changes.
+  const changed = labUser2faEnabled !== enabled;
   labUser2faEnabled = enabled;
+  if (changed && state.mainView === "account") render();
 }
 
 function clearTotpQr(): void {
@@ -7042,10 +7052,10 @@ function brandSubLabel(embed = isHubEmbed()): string {
         : "hub embed · paper"
     : isDeskConnectEnabled()
       ? useDeskMatching()
-        ? "Spot · desk live"
+        ? "Spot exchange · live"
         : usePublicDeskBook()
-          ? "Spot · desk · Connect to trade"
-          : "Spot · desk"
+          ? "Spot exchange · connect to trade"
+          : "Spot exchange"
       : isLabLoopbackApi()
         ? "Spot · lab"
         : "Spot · paper";

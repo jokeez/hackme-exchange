@@ -11,10 +11,11 @@ import { validateLabWithdrawAmount, validateLabWithdrawDestination } from "./lab
 describe("custodyLimits soft-launch", () => {
   it("exposes compact deposit network note for USDT", () => {
     const html = depositLimitsPlateHtml();
-    expect(html).toContain("cex-dep-note");
+    expect(html).toContain("cex-dep-networks");
     expect(html).toContain(`${USDT_DEPOSIT_MIN}`);
     expect(html).toMatch(/BEP-20/);
-    expect(html).toMatch(/manual review/i);
+    expect(html).toMatch(/screening/i);
+    expect(html).toMatch(/BNB Smart Chain/);
   });
 
   it("switches withdraw note by asset", () => {

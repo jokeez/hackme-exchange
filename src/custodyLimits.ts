@@ -32,19 +32,18 @@ export function withdrawFeeHint(asset: string): string {
 export function withdrawDestHint(asset: string): string {
   const a = asset.trim().toUpperCase();
   if (a === "USDT") {
-    return `${USDT_STANDARD} BSC ${USDT_CHAIN_ID} · 0x… only (not TRC/ERC)`;
+    return `to a BNB Smart Chain (${USDT_STANDARD}) 0x… address — not TRON, not Ethereum`;
   }
   if (a === "BTC") return "BTC rail not live yet";
-  return "external HMC- wallet · not login/deposit addr";
+  return "to a HackMe wallet address";
 }
 
 /** One-line network/min note for desk deposit (Binance-simple; no ops jargon wall). */
 export function depositLimitsPlateHtml(): string {
-  return `<p class="cex-dep-note muted small" role="note" aria-label="Deposit network">
-    <strong>USDT</strong> ${USDT_STANDARD} · BSC ${USDT_CHAIN_ID} · min <strong class="mono">${USDT_DEPOSIT_MIN}</strong>
-    · after ≥${USDT_CONFIRMATIONS} confs, manual review before Available
-    · <strong>HMC / SUP</strong> HackMe chain · credited after ~6 blocks (about 3–4 min)
-  </p>`;
+  return `<ul class="cex-dep-networks" role="note" aria-label="Deposit networks">
+    <li><span class="cex-net-tag">USDT</span><span>BNB Smart Chain (${USDT_STANDARD}) only · min <strong class="mono">${USDT_DEPOSIT_MIN}</strong> · available after ${USDT_CONFIRMATIONS} confirmations and a short screening</span></li>
+    <li><span class="cex-net-tag">HMC · SUP</span><span>HackMe chain · credited after ~6 blocks (about 3–4 min)</span></li>
+  </ul>`;
 }
 
 export function withdrawLimitsPlateHtml(asset = "HMC"): string {
@@ -53,8 +52,6 @@ export function withdrawLimitsPlateHtml(asset = "HMC"): string {
   const fee = withdrawFeeHint(a);
   const dest = withdrawDestHint(a);
   return `<p class="cex-dep-note muted small" id="lab-wd-limits-plate" data-asset="${a}" role="note" aria-label="Withdraw limits">
-    <strong>${a}</strong> · min <strong class="mono">${min}</strong> · fee ${fee}
-    · ${dest}
-    · reserved until broadcast
+    <strong>${a}</strong> · minimum <strong class="mono">${min}</strong> · fee ${fee} · ${dest}
   </p>`;
 }

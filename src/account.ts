@@ -122,7 +122,7 @@ function modeBlurb(): string {
 
 /** Build mode label — never append misleading Vite mode "paper" when desk matching is live. */
 function modeSubtitle(): string {
-  if (isDeskConnectEnabled()) return "Spot balances · soft-launch";
+  if (isDeskConnectEnabled()) return "Your exchange balances";
   if (isLabLoopbackApi()) return "Lab ledger";
   return "Paper Spot";
 }
@@ -452,12 +452,11 @@ function renderDepositCard(
           <div id="acct-dep-pending" class="acct-dep-pending" role="status" aria-live="polite"></div>
           ${depositLimitsPlateHtml()}
           <div class="cex-callout cex-callout--warn" role="note">
-            <span><strong>Never send to your login address.</strong> Only use the <strong>Copy address</strong> button above.</span>
-            ${
+            <span><strong>Send only to the deposit address shown above.</strong> ${
               session.address
-                ? `<span class="mono cex-callout-login">Login only: ${escapeHtml(session.address)}</span>`
-                : `<span>Connect first, then pick an asset.</span>`
-            }
+                ? `Your account ID <span class="mono">${escapeHtml(session.address)}</span> is not a deposit address.`
+                : `Connect first, then pick an asset.`
+            }</span>
           </div>`
               : `<div class="acct-cash-actions">
             <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>
@@ -575,7 +574,6 @@ function renderCashDock(
     .join(" ");
   return `
     <section class="acct-cash-dock glass-inset${dockClass ? ` ${dockClass}` : ""}" id="acct-cash" aria-label="Deposit and withdraw">
-      <p class="acct-info-links"><a href="/info/buy.html" rel="noopener">How to buy HMC</a><a href="/info/reserves.html" rel="noopener">Proof of reserves</a></p>
       <div class="acct-cash-tabs" role="tablist" aria-label="Funds">
         <button type="button" class="acct-cash-tab active" data-cash-tab="deposit" role="tab" aria-selected="true">Deposit</button>
         <button type="button" class="acct-cash-tab" data-cash-tab="withdraw" role="tab" aria-selected="false">Withdraw</button>
@@ -599,6 +597,7 @@ function renderCashDock(
       <div class="acct-cash-panel" data-cash-panel="withdraw" id="acct-cash-withdraw" hidden>
         ${renderWithdrawCard(labOn, labLive, session, opts?.deskEdge, opts?.wallet ?? null, !!opts?.totpEnabled)}
       </div>
+      <p class="acct-info-links"><a href="/info/buy.html" rel="noopener">How to buy HMC</a><a href="/info/reserves.html" rel="noopener">Proof of reserves</a></p>
       ${
         labOn
           ? `<details class="lab-ops acct-cash-ops" data-ui="wd-complete-cli">
@@ -639,7 +638,7 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
   return `
     <section class="acct-fees-block glass-inset" id="acct-fees">
       <header class="acct-block-head">
-        <h3>Fees · VIP · Oracle</h3>
+        <h3>Fees &amp; VIP levels</h3>
         <p class="muted small">30d volume <strong class="mono">${formatNum(vol, 0)} USDT</strong> · ${feeScheduleLabel(state)}</p>
         <div class="vip-progress fee-vip-progress">
           <div class="vip-bar"><i style="width:${vipProg.pct.toFixed(0)}%"></i></div>
@@ -757,7 +756,7 @@ function renderActivityBlock(
             <h4>${escapeHtml(fillsLabel)}</h4>
             <button type="button" class="btn-lab btn-lab-muted" id="btn-lab-fills-refresh"${labLive ? "" : " disabled"}>↻ Sync</button>
           </div>
-          <p class="muted small">Server SQLite · GET /fills</p>
+          <p class="muted small">Your latest trades</p>
           <ul id="lab-fills-list" class="pool-list mono ledger-mini" aria-live="polite"></ul>
           <p id="lab-fills-msg" class="muted small sync-msg" role="status">${
             labLive

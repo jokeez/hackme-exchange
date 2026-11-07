@@ -92,7 +92,7 @@ describe("fees extras", () => {
 
   it("feeScheduleLabel switches to desk VIP when server volume synced", () => {
     setServerVipVolumeUsdt(0);
-    expect(feeScheduleLabel(baseState())).toMatch(/desk VIP · server volume/);
+    expect(feeScheduleLabel(baseState())).toMatch(/30-day volume/);
     clearServerVipVolume();
     expect(feeScheduleLabel(baseState())).toMatch(/demo VIP · local history/);
   });

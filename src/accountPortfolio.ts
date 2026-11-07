@@ -16,7 +16,8 @@ export type EquityDenom = "USDT" | "BTC" | "HMC" | "RUB";
 export function getEquityDenom(): EquityDenom {
   try {
     const v = localStorage.getItem(EQUITY_DENOM_KEY);
-    if (v === "USDT" || v === "BTC" || v === "HMC" || v === "RUB") return v;
+    // BTC is book-internal here (no BTC rail): a total "in BTC" is not meaningful — fall back.
+    if (v === "USDT" || v === "HMC" || v === "RUB") return v;
   } catch {
     /* ignore */
   }
@@ -81,24 +82,19 @@ export function syncDenomRingDom(denom: EquityDenom): void {
 }
 
 export function renderDenomRing(active: EquityDenom): string {
-  const items: { id: EquityDenom; label: string; icon?: string }[] = [
-    { id: "USDT", label: "USDT", icon: "USDT" },
-    { id: "BTC", label: "BTC", icon: "BTC" },
-    { id: "HMC", label: "HMC", icon: "HMC" },
-    { id: "RUB", label: "RUB" },
+  const items: { id: EquityDenom; label: string }[] = [
+    { id: "USDT", label: "USDT" },
+    { id: "HMC", label: "HMC" },
+    { id: "RUB", label: "₽ RUB" },
   ];
-  return `<div class="acct-denom-ring" role="radiogroup" aria-label="Display currency">
+  // A compact "Show total in" switch — not a row of coin icons that read as assets.
+  return `<div class="acct-denom-ring acct-denom-seg" role="radiogroup" aria-label="Show total in">
+    <span class="acct-denom-cap">Show total in</span>
     ${items
       .map((it) => {
         const on = it.id === active;
-        const inner =
-          it.id === "RUB"
-            ? `<span class="acct-denom-fiat-mark" aria-hidden="true">₽</span>`
-            : assetBadgeLg(it.icon!);
         return `<button type="button" class="acct-denom-orb${on ? " active" : ""}${it.id === "RUB" ? " fiat" : ""}"
           data-denom="${it.id}" role="radio" aria-checked="${on}" title="Show total in ${it.label}">
-          <span class="acct-denom-glow" aria-hidden="true"></span>
-          ${inner}
           <span class="acct-denom-label">${it.label}</span>
         </button>`;
       })
@@ -436,6 +432,14 @@ export function truncateMid(s: string, head = 10, tail = 6): string {
   return `${t.slice(0, head)}…${t.slice(-tail)}`;
 }
 
+/** 5m · 3h · 2d — "1110m" was unreadable. */
+export function humanAge(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m}m`;
+  if (m < 48 * 60) return `${Math.round(m / 60)}h`;
+  return `${Math.round(m / 1440)}d`;
+}
+
 export type TxStatusTone = "completed" | "pending" | "failed" | "review";
 
 /** Normalize withdraw / custody status → CEX badge label + CSS tone. */
@@ -445,7 +449,7 @@ export function custodyStatusMeta(
 ): { label: string; tone: TxStatusTone; cssClass: string } {
   const st = String(status || "").toLowerCase().trim();
   const age =
-    opts?.ageMin != null && Number.isFinite(opts.ageMin) ? ` · ${Math.max(0, Math.round(opts.ageMin))}m` : "";
+    opts?.ageMin != null && Number.isFinite(opts.ageMin) ? ` · ${humanAge(opts.ageMin)}` : "";
   const assetU = String(opts?.asset || "").toUpperCase();
   if (st === "completed" || st === "complete" || st === "confirmed" || st === "credited") {
     return { label: `Complete${age}`, tone: "completed", cssClass: "completed" };
@@ -501,13 +505,21 @@ export function formatCustodyWhen(isoOrTs?: string | number): { absolute: string
   return { absolute: formatTxTime(ms), ageMin };
 }
 
+/** Readable ledger note: drop internal fill ids ("lab:<uuid>"), sentence-case SELL/TAKER/…. */
+export function cleanLedgerNote(note: string): string {
+  return String(note || "")
+    .replace(/\s*·\s*lab:[0-9A-Za-z-]+/g, "")
+    .replace(/\b(SELL|BUY|TAKER|MAKER|CONVERT)\b/g, (w) => w[0] + w.slice(1).toLowerCase())
+    .trim();
+}
+
 /** One ledger list row HTML (escaped). */
 export function renderLedgerListItem(r: LedgerEntry): string {
   const bucket = r.kind === "trade" || r.kind === "fee" ? r.kind : "other";
   const amt = formatSignedAssetQty(r.amount, r.asset);
   const tone = r.amount >= 0 ? "up" : "down";
   const kind = escapeHtml(ledgerKindLabel(r.kind, r.asset));
-  const note = r.note ? ` <span class="dim">${escapeHtml(r.note)}</span>` : "";
+  const note = r.note ? ` <span class="dim">${escapeHtml(cleanLedgerNote(r.note))}</span>` : "";
   const when = `<span class="dim acct-ledger-when">${escapeHtml(formatTxTime(r.ts))}</span>`;
   return `<li data-ledger-kind="${bucket}"><span class="acct-ledger-kind ${tone}">${kind}</span> <strong class="mono ${tone}">${escapeHtml(amt)}</strong>${note} ${when}</li>`;
 }

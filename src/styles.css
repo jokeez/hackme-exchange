@@ -8209,6 +8209,30 @@ html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
 /* Info links (Buy HMC / Reserves) — desktop nav; phones reach them from Account. */
 a.nav-btn.nav-extra { text-decoration: none; opacity: 0.8; }
 @media (max-width: 760px) { a.nav-btn.nav-extra { display: none; } }
-.acct-info-links { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0 0; font-size: 0.85rem; }
+.acct-info-links { display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: flex-end; margin: 1rem 0 0; padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.8rem; }
+.acct-info-links a { color: var(--muted, #8a97ad); text-decoration: none; }
+.acct-info-links a:hover { color: var(--accent, #22d3ee); }
 
 .tb-vol-mm { font-size: 0.7em; opacity: 0.65; letter-spacing: 0.02em; text-transform: none; }
+
+/* Deposit networks — two clear rows instead of a jargon line. */
+.cex-dep-networks { list-style: none; margin: 0.75rem 0; padding: 0; display: grid; gap: 0.45rem; font-size: 0.82rem; color: var(--muted, #8a97ad); }
+.cex-dep-networks li { display: flex; gap: 0.6rem; align-items: baseline; line-height: 1.45; }
+.cex-net-tag { flex: 0 0 auto; min-width: 5.5rem; font-weight: 600; color: var(--text, #e6edf6); font-size: 0.75rem; letter-spacing: 0.04em; padding: 0.15rem 0.5rem; border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; text-align: center; }
+
+/* "Show total in" — compact segmented switch (was big coin orbs that looked like assets). */
+.acct-denom-seg { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem; margin: 0.6rem 0 0.2rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; background: rgba(255,255,255,0.02); flex-wrap: wrap; }
+.acct-denom-seg .acct-denom-cap { font-size: 0.72rem; color: var(--muted, #8a97ad); padding: 0 0.5rem 0 0.6rem; letter-spacing: 0.02em; }
+.acct-denom-seg .acct-denom-orb { all: unset; cursor: pointer; padding: 0.28rem 0.75rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; color: var(--muted, #8a97ad); transition: background 0.15s, color 0.15s; }
+.acct-denom-seg .acct-denom-orb:hover { color: var(--text, #e6edf6); background: rgba(255,255,255,0.05); }
+.acct-denom-seg .acct-denom-orb.active { color: #04121c; background: var(--accent, #22d3ee); }
+.acct-denom-seg .acct-denom-orb:focus-visible { outline: 2px solid var(--accent, #22d3ee); outline-offset: 2px; }
+
+/* Phones: the 5-column asset table overflowed the screen — keep Asset · Amount · Value. */
+@media (max-width: 640px) {
+  .acct-asset-table th:nth-child(3), .acct-asset-table td.acct-asset-price,
+  .acct-asset-table th:nth-child(4), .acct-asset-table td.acct-asset-pnl { display: none; }
+  .acct-asset-table { width: 100%; table-layout: auto; }
+  .acct-asset-table td.acct-asset-cell { max-width: 46vw; }
+  .acct-asset-table td.acct-asset-cell * { overflow: hidden; text-overflow: ellipsis; }
+}
