@@ -1335,6 +1335,14 @@ function patchVipBadge(): void {
 if (typeof window !== "undefined") window.addEventListener("hackme:vip-updated", () => patchVipBadge());
 
 /** Live desk: BTC valued at HMC/USDT ÷ HMC/BTC from this book (BTC has no rail here). */
+/** Copy of m valued at this book's live prices (Account / Fees); m itself is untouched. */
+function livePriced(m: MarketSnapshot): MarketSnapshot {
+  if (!useLiveBook()) return m;
+  const copy = { ...m };
+  applyLiveImpliedBtcUsd(copy);
+  return copy;
+}
+
 function applyLiveImpliedBtcUsd(m: MarketSnapshot): void {
   if (!useLiveBook()) return;
   const hu = deskApiTickers.get("HMC_USDT" as PairId)?.last ?? 0;
@@ -4191,7 +4199,7 @@ function render(): void {
       ? renderSpot()
       : view === "convert"
         ? renderConvert()
-        : renderAccountPage(state, market, {
+        : renderAccountPage(state, livePriced(market), {
             feeWallet: labFeeWallet,
             nodeWallet: cachedNodeWallet,
             deskEdge: deskEdgeSnap,
@@ -4248,7 +4256,7 @@ function patchNonSpotChrome(): void {
     strip.textContent = `${p.base}_${p.quote} · ${formatGh(poolLive.poolGh)} · ${poolLive.workers} workers · #${formatNum(poolLive.blockHeight, 0)}`;
   }
   if (state.mainView === "account" && market) {
-    patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
+    patchAccountFundsDom(state, livePriced(market), { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
   }
   if (state.mainView === "convert") {
     refreshConvertPreview();
@@ -4527,7 +4535,7 @@ function showSystemDrop(show?: boolean): void {
 function patchAccountDomIfPresent(): void {
   if (!market || !document.getElementById("acct-total-eq")) return;
   snapshotEquity(state, market);
-  patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
+  patchAccountFundsDom(state, livePriced(market), { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
 }
 
 function refreshAfterLabTrade(): void {
@@ -4571,7 +4579,7 @@ function refreshAccountAfterLab(): void {
   if (repairStaleEquityBaseline(state, market)) saveState(state);
   if (state.mainView === "account") {
     snapshotEquity(state, market);
-    patchAccountFundsDom(state, market, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
+    patchAccountFundsDom(state, livePriced(market), { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
     patchNonSpotChrome();
     return;
   }
@@ -4732,7 +4740,7 @@ async function syncNodeHmcSupUi(): Promise<void> {
   if (msgEl) msgEl.textContent = note;
   toast(note, "ok");
   if (state.mainView === "account") {
-    patchAccountFundsDom(state, market!, { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
+    patchAccountFundsDom(state, livePriced(market!), { feeWallet: labFeeWallet, nodeWallet: cachedNodeWallet });
     patchNonSpotChrome();
   } else patchLive();
 }
