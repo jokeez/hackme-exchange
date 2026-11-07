@@ -5277,8 +5277,8 @@ async function showDepositAddrUi(asset: string): Promise<void> {
   if (msg) {
     const creditHint =
       res.kind === "evm_bep20"
-        ? `BEP-20 BSC · min ${USDT_DEPOSIT_MIN} · ≥${USDT_CONFIRMATIONS} confs then manual review before Available`
-        : "usually credits within ~30s";
+        ? `BNB Smart Chain (BEP-20) only · min ${USDT_DEPOSIT_MIN} · available after ${USDT_CONFIRMATIONS} confirmations and a short screening`
+        : "credited after ~6 blocks (about 3–4 min)";
     msg.innerHTML = `<strong>${escapeHtml(res.asset)} address ready</strong> · ${creditHint}${
       res.warning ? ` · <span class="muted">${escapeHtml(res.warning)}</span>` : ""
     }`;
