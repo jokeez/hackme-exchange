@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Proof of reserves — HackMe Exchange</title><link rel="icon" href="/icons/favicon.ico?v=3"><link rel="stylesheet" href="/info/info.css"></head>
+<body><main>
+<header class="top"><a class="home" href="/"><img src="/logo-hex.png" alt="">HackMe Exchange</a>
+<nav><a href="/">Trade</a><a href="/info/buy.html">How to buy HMC</a></nav></header>
+<h1>Proof of reserves</h1>
+<p class="dim">What the exchange owes its customers, next to the coins anyone can check on chain. Updated live; <span id="asof">loading…</span> <button id="refresh" type="button">Refresh</button></p>
+<div id="assets" class="grid"></div>
+<h2>How this is calculated</h2>
+<div class="card"><p id="method" class="dim">—</p>
+<p class="dim">Every wallet below links to a public explorer, so you can verify the balance yourself instead of trusting this page.</p></div>
+<h2>Wallets</h2>
+<div class="card"><table><thead><tr><th>Asset</th><th>Chain</th><th>Address</th><th>Balance</th></tr></thead><tbody id="wallets"></tbody></table></div>
+</main><script src="/info/reserves.js"></script></body></html>

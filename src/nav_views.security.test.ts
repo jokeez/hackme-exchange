@@ -159,7 +159,13 @@ describe("Account view XSS / DOM sinks", () => {
     for (const a of document.querySelectorAll<HTMLAnchorElement>("a[href]")) {
       const href = a.getAttribute("href") || "";
       if (href.startsWith("#")) continue;
-      expect(href).toMatch(/^https?:\/\//);
+      // Same-origin paths ("/info/…", never protocol-relative "//host") cannot carry a script
+      // scheme; everything else must be http(s).
+      if (/^\/(?!\/)/.test(href)) {
+        expect(href).not.toMatch(/[\s<>"'`]/);
+      } else {
+        expect(href).toMatch(/^https?:\/\//);
+      }
       expect(a.rel).toMatch(/noopener/);
     }
     expect(sanitizeHttpUrl(nodeWalletUrl(), "")).toMatch(/^https?:\/\//);

@@ -8205,3 +8205,10 @@ html.mobile-layout .acct-desk-cash-cta .acct-cash-actions {
   .ot-full { display: none; }
   .ot-short { display: inline; }
 }
+
+/* Info links (Buy HMC / Reserves) — desktop nav; phones reach them from Account. */
+a.nav-btn.nav-extra { text-decoration: none; opacity: 0.8; }
+@media (max-width: 760px) { a.nav-btn.nav-extra { display: none; } }
+.acct-info-links { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0 0; font-size: 0.85rem; }
+
+.tb-vol-mm { font-size: 0.7em; opacity: 0.65; letter-spacing: 0.02em; text-transform: none; }

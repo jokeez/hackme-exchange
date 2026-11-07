@@ -575,6 +575,7 @@ function renderCashDock(
     .join(" ");
   return `
     <section class="acct-cash-dock glass-inset${dockClass ? ` ${dockClass}` : ""}" id="acct-cash" aria-label="Deposit and withdraw">
+      <p class="acct-info-links"><a href="/info/buy.html" rel="noopener">How to buy HMC</a><a href="/info/reserves.html" rel="noopener">Proof of reserves</a></p>
       <div class="acct-cash-tabs" role="tablist" aria-label="Funds">
         <button type="button" class="acct-cash-tab active" data-cash-tab="deposit" role="tab" aria-selected="true">Deposit</button>
         <button type="button" class="acct-cash-tab" data-cash-tab="withdraw" role="tab" aria-selected="false">Withdraw</button>

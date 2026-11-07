@@ -1258,6 +1258,8 @@ type DeskApiTicker = {
   changePct: number;
   /** Newest durable fill (ms); 0 = none. A quiet market keeps its last price, not 0. */
   lastTradeAtMs: number;
+  /** Base volume of fills with a customer on at least one side (null = server did not say). */
+  customerVol24hBase: number | null;
 };
 const deskApiTickers = new Map<PairId, DeskApiTicker>();
 
@@ -1375,6 +1377,10 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
       nTrades24h: Number(row.n_trades_24h ?? 0) || 0,
       changePct,
       lastTradeAtMs: Date.parse(String(row.last_trade_at ?? "")) || 0,
+      customerVol24hBase:
+        (row as { customer_volume_24h_base?: number }).customer_volume_24h_base != null
+          ? minorToDisplay(Number((row as { customer_volume_24h_base?: number }).customer_volume_24h_base))
+          : null,
     });
     deskVolReady.add(pid);
   }
@@ -1448,6 +1454,13 @@ function persistDeskVolCache(pairId: PairId = state.activePair, force = false): 
   } catch {
     /* quota */
   }
+}
+
+/** Honest volume tooltip: the market maker's share is part of the headline number. */
+function volTitle(pairId: PairId, base: string): string {
+  const cv = deskApiTickers.get(pairId)?.customerVol24hBase;
+  if (!useLiveBook() || cv == null) return "Rolling 24h base volume from durable fills (not calendar midnight reset)";
+  return `Rolling 24h base volume, including the exchange's market maker. With customers on at least one side: ${formatVolBase(cv, base)}.`;
 }
 
 /** Sync restore so first paint can show last-known 24h Vol (survives F5). */
@@ -3916,7 +3929,7 @@ function renderSpot(): string {
     <div class="tb-stats">
       <div><label>24h High</label><span class="mono notranslate" translate="no">${deskPairQuiet(pair.id) ? "—" : formatPrice(s24.high24h || t.high24h)}</span></div>
       <div><label>24h Low</label><span class="mono notranslate" translate="no">${deskPairQuiet(pair.id) ? "—" : formatPrice(s24.low24h || t.low24h)}</span></div>
-      <div title="Rolling 24h base volume from durable fills (not calendar midnight reset)"><label>24h Vol (${noTranslateText(pair.base)})</label><span class="mono notranslate" translate="no">${
+      <div title="${escapeHtml(volTitle(pair.id, pair.base))}"><label>24h Vol (${noTranslateText(pair.base)})${useLiveBook() && deskApiTickers.get(pair.id)?.customerVol24hBase != null ? ` <span class="tb-vol-mm">incl. MM</span>` : ""}</label><span class="mono notranslate" translate="no">${
         useLiveBook()
           ? formatLiveVol24h(pair.id, pair.base)
           : formatVolBase(s24.vol24h || t.volume24hBase, pair.base)
@@ -4135,6 +4148,8 @@ function render(): void {
       <button type="button" class="nav-btn ${view === "spot" ? "active" : ""}" data-view="spot">Spot</button>
       <button type="button" class="nav-btn ${view === "convert" ? "active" : ""}" data-view="convert">Convert</button>
       <button type="button" class="nav-btn ${view === "account" ? "active" : ""}" data-view="account"><span class="nav-label-full">Account</span><span class="nav-label-short" aria-hidden="true">Acct</span></button>
+      <a class="nav-btn nav-extra" href="/info/buy.html">Buy HMC</a>
+      <a class="nav-btn nav-extra" href="/info/reserves.html">Reserves</a>
     </nav>
     <div class="ex-actions">
       <span class="pill-live paper" id="node-status">${modeStatusPill()}</span>
