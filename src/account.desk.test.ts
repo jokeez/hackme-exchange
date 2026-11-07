@@ -35,8 +35,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain('id="acct-desk"');
     expect(html).toContain("Wallet &amp; security");
     expect(html).toMatch(/HOLD/);
-    expect(html).toContain("deposit HOLD");
-    expect(html).toContain("withdraw HOLD");
+    expect(html).toContain("Deposits paused");
+    expect(html).toContain("Withdrawals paused");
     expect(html).toContain("Deposit · HOLD");
     expect(html).toContain("Withdraw · HOLD");
     expect(html).toContain("btn-desk-wallet-connect");
@@ -140,8 +140,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toContain("lab-deposit-reveal");
     expect(html).toMatch(/Send only to the deposit address|Never send to your login address/i);
     expect(html).toMatch(/is not a deposit address/);
-    expect(html).toContain("deposit on");
-    expect(html).toContain("withdraw on");
+    expect(html).toContain("Deposits open");
+    expect(html).toContain("Withdrawals open");
     expect(html).toContain("Wallet &amp; security");
     expect(html).toContain("desk-custody-live");
     expect(html).not.toContain("desk-hold-card");
@@ -176,8 +176,8 @@ describe("Account desk session (HOLD)", () => {
     });
     expect(html).toContain('id="btn-acct-deposit"');
     expect(html).toContain('id="btn-acct-withdraw"');
-    expect(html).toContain("deposit …");
-    expect(html).toContain("withdraw …");
+    expect(html).toContain("Deposits …");
+    expect(html).toContain("Withdrawals …");
     expect(html).not.toContain("Deposit · HOLD");
   });
 

@@ -317,9 +317,9 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
       : "";
   return `<div class="settings-edge-card acct-desk-edge" aria-live="polite">
         <div class="settings-hold-row acct-desk-hold">
-        <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">${escapeHtml(matching)}</span>
-        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">deposit ${pending ? "…" : dep ? "on" : "HOLD"}</span>
-        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">withdraw ${pending ? "…" : wd ? "on" : "HOLD"}</span>
+        <span class="settings-hold-pill" data-on="${live ? "1" : "0"}">${live ? "Trading open" : `Trading ${escapeHtml(matching)}`}</span>
+        <span class="settings-hold-pill" data-on="${dep ? "1" : "0"}">Deposits ${pending ? "…" : dep ? "open" : "paused"}</span>
+        <span class="settings-hold-pill" data-on="${wd ? "1" : "0"}">Withdrawals ${pending ? "…" : wd ? "open" : "paused"}</span>
       </div>${capsLine}</div>`;
 }
 
@@ -1067,7 +1067,7 @@ export function renderAccountPage(state: DemoState, market: MarketSnapshot, opts
           <input type="file" id="desk-seed-import-file" accept="application/json,.json,.txt,text/plain" class="hidden" />
           ${
               custodyOn
-              ? `<p class="muted small acct-dep-warn"><strong>Login ≠ deposit.</strong> Use the Deposit tab for the on-chain address.</p>`
+              ? `<p class="muted small acct-dep-warn"><strong>This is your account ID, not a deposit address.</strong> Use the Deposit tab to get one.</p>`
               : ""
           }
         </details>

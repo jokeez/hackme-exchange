@@ -8236,3 +8236,16 @@ a.nav-btn.nav-extra { text-decoration: none; opacity: 0.8; }
   .acct-asset-table td.acct-asset-cell { max-width: 46vw; }
   .acct-asset-table td.acct-asset-cell * { overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Phones: three nested padded cards left ~270px of 390 for content; tables overflowed. */
+@media (max-width: 640px) {
+  .account-page { margin: 0.5rem; padding: 0.9rem 0.75rem; }
+  .account-page .acct-panel, .account-page .glass-sub, .account-page details > div { padding-left: 0.6rem; padding-right: 0.6rem; }
+  .acct-tx-table th:nth-child(3), .acct-tx-table td:nth-child(3) { display: none; }
+  .acct-tx-table, .acct-asset-table { width: 100%; }
+  .acct-tx-table td, .acct-asset-table td { word-break: break-word; }
+  .acct-asset-table td.acct-asset-cell .acct-asset-meta .muted { display: none; }
+  .acct-asset-table td.acct-asset-cell .acct-asset-expand { display: none; }
+  .acct-asset-table td.acct-asset-cell { gap: 0.5rem; }
+  .acct-denom-seg .acct-denom-cap { display: none; }
+}
