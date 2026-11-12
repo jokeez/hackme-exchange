@@ -135,7 +135,7 @@ import {
   getLabConvertQuote,
   requestWithdraw,
 } from "./adapters/exchangeApi";
-import { labFixtureConnect } from "./adapters/labFixture";
+import { labFixtureConnect, labFixtureIdentity } from "./adapters/labFixture";
 import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress, isDeskBackupDone, markDeskBackupDone } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import { completeWalletLoginFromLocation, isWalletLoginMode, setWalletLoginMode, startWalletLogin } from "./walletLogin";
@@ -4576,7 +4576,13 @@ function applyLabPlaceSuccess(
     const tipPx = lab.fillVwap || lab.order.price || fallbackPx;
     upsertAllCandles(tipPx, lab.filledBase || 0);
   } else if (opts?.restingHint) {
-    toast(isPaperMode() ? "Resting on book — Account → Counterparty bot to fill" : "Order is on the book — it fills when someone trades at your price", "info");
+    toast(
+      // isPaperMode() is true on the live desk too (legacy name) — key off the lab fixture account.
+      getLabSessionMeta().address === labFixtureIdentity().address
+        ? "Resting on book — Account → Counterparty bot to fill"
+        : "Order is on the book — it fills when someone trades at your price",
+      "info",
+    );
   }
 }
 
@@ -10242,7 +10248,7 @@ export async function boot(): Promise<void> {
     // Don't claim "offline" while still pending / first paint — only after confirmed miss.
     if (oracleMeta.source === "live" && oracleMeta.poolStatus === "ok") {
       toast(
-        isPaperMode() ? "Paper mode · pool oracle connected" : "Pool oracle connected",
+        "Pool oracle connected", // "paper" is the public desk build — never say "paper mode" to users
         "ok",
       );
     } else if (oracleMeta.poolStatus === "offline") {
