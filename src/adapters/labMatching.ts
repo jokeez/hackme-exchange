@@ -349,16 +349,23 @@ export function apiOrderToDemo(o: ApiOrder): Order | null {
 }
 
 /** Merge server open orders (incl. OCO/trailing armed). Drop local paper dupes of same id. */
+/** Server orders younger than this survive a merge with a possibly stale order list. */
+export const FRESH_SERVER_ORDER_MS = 15_000;
+
 export function mergeServerOpenOrders(state: DemoState, serverOrders: ApiOrder[]): void {
   const mapped = serverOrders
     .map(apiOrderToDemo)
     .filter((o): o is Order => !!o && (o.status === "open" || o.status === "triggered"));
   const serverIds = new Set(mapped.map((o) => o.id));
+  const now = Date.now();
   const paperKeep = state.orders.filter(
     (o) =>
       (o.status === "open" || o.status === "triggered") &&
-      o.source !== "lab" &&
-      !serverIds.has(o.id),
+      !serverIds.has(o.id) &&
+      // A server order placed moments ago can be missing from a list that was fetched
+      // before the POST landed (a background sync racing the submit). Dropping it hid
+      // the user's fresh order until the next light sync (up to ~30 s).
+      (o.source !== "lab" || now - (o.createdAt || 0) < FRESH_SERVER_ORDER_MS),
   );
   const closedKeep = state.orders.filter((o) => o.status === "filled" || o.status === "cancelled").slice(0, 40);
   state.orders = [...mapped, ...paperKeep, ...closedKeep].slice(0, 80);
