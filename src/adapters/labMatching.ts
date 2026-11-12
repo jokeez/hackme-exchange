@@ -600,6 +600,11 @@ export async function placeLabOrder(
   }
 
   const demoOrder = apiOrderToDemo(res.order);
+  // Show the order in Open orders right away. Before, only the next server sync
+  // (0–30 s later) inserted it, so a resting limit looked like it had vanished.
+  if (demoOrder && (demoOrder.status === "open" || demoOrder.status === "triggered")) {
+    state.orders = [demoOrder, ...state.orders.filter((o) => o.id !== demoOrder.id)].slice(0, 80);
+  }
   const account = getLabSessionMeta().address;
   const fillCount = mergeServerFills(state, res.fills, account, marketSnap ?? null);
   await syncLabBalancesAndBook(state, marketSnap ?? null);
