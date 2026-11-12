@@ -665,7 +665,7 @@ export async function cancelLabOrder(
   // Mark local row cancelled immediately (incl. OCO siblings). Full ledger sync is
   // slow and used to freeze the Cancel button for many seconds — run it in background.
   cancelOrder(state, orderId);
-  return { ok: true, note: "Lab order cancelled", syncPending: true };
+  return { ok: true, note: "Order cancelled", syncPending: true };
 }
 
 /**

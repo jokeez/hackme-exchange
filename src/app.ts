@@ -4576,7 +4576,7 @@ function applyLabPlaceSuccess(
     const tipPx = lab.fillVwap || lab.order.price || fallbackPx;
     upsertAllCandles(tipPx, lab.filledBase || 0);
   } else if (opts?.restingHint) {
-    toast("Resting on book — Account → Counterparty bot to fill", "info");
+    toast(isPaperMode() ? "Resting on book — Account → Counterparty bot to fill" : "Order is on the book — it fills when someone trades at your price", "info");
   }
 }
 
@@ -7882,7 +7882,7 @@ function submitOrder(side: "buy" | "sell"): void {
           return;
         }
         if (uiPostOnly || uiTif !== "GTC") {
-          toast("Stop-limit: TIF/Post-only applied client-side; lab trigger rests as GTC", "info");
+          toast("Stop-limit: after it triggers, the limit order rests as GTC (TIF / Post-only are not applied)", "info");
         }
         const lab = await placeLabOrder(
           state,
@@ -8199,7 +8199,7 @@ async function handleCancelOrderClick(btn: HTMLElement): Promise<void> {
         local?.source === "paper";
       // Never cancel locally on CORS/network/unreachable — that desyncs the ledger.
       if (!notOnServer) {
-        toast(`Lab cancel failed: ${lab.reason}`, "warn");
+        toast(`Cancel failed: ${lab.reason}`, "warn");
         asBtn.disabled = false;
         btn.removeAttribute("aria-busy");
         btn.classList.remove("is-busy");

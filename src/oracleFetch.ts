@@ -19,7 +19,9 @@ let workInflight: Promise<WorkStats> | null = null;
 const POOL_TTL_MS = 2_500;
 const WORK_TTL_MS = 3_000;
 const POOL_TIMEOUT_MS = 1_800;
-const WORK_TIMEOUT_MS = 900;
+// Exchange → hub proxy round-trip is ~0.9 s; 900 ms aborted about half the polls and
+// flashed "Pool oracle offline" while the pool was fine. Best-effort, non-blocking.
+const WORK_TIMEOUT_MS = 3_000;
 
 export function peekCachedPoolStats(): PoolStats | null {
   if (!poolCache) return null;
