@@ -35,7 +35,7 @@ describe("multi-TF CEX audit (all timeframes)", () => {
         assertOhlcValid(cur, `${tf} @${i}`);
       }
     }
-  });
+  }, 20_000); // seeds every TF (~4–6 s); 5 s default flaked under parallel load and blocked d0:static
 
   it("completed coarser bars match 1m aggregation in the overlapping window", () => {
     const all = seedAllTimeframes("SUP_USDT", 0.000051);
