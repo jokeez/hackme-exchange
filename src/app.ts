@@ -4562,6 +4562,16 @@ function refreshAfterLabTrade(): void {
   patchAccountDomIfPresent();
 }
 
+/** True only when the desk is signed in as the lab fixture. The public build has no
+ * fixture seed and labFixtureIdentity() throws there — never let that abort a UI path. */
+function isLabFixtureSession(): boolean {
+  try {
+    return getLabSessionMeta().address === labFixtureIdentity().address;
+  } catch {
+    return false;
+  }
+}
+
 /** Toast + chart tip after a successful lab place (VWAP tip; warn on thin-book cancel/partial). */
 function applyLabPlaceSuccess(
   lab: Extract<LabPlaceResult, { ok: true }>,
@@ -4578,7 +4588,7 @@ function applyLabPlaceSuccess(
   } else if (opts?.restingHint) {
     toast(
       // isPaperMode() is true on the live desk too (legacy name) — key off the lab fixture account.
-      getLabSessionMeta().address === labFixtureIdentity().address
+      isLabFixtureSession()
         ? "Resting on book — Account → Counterparty bot to fill"
         : "Order is on the book — it fills when someone trades at your price",
       "info",
