@@ -99,11 +99,13 @@ describe("Account custody UI (buttons + copy)", () => {
   it("withdraw hint: HMC/SUP use HMC- destinations; USDT is BEP-20 with fee policy", async () => {
     if (!isLabApiEnabled()) return;
     const html = renderAccountPage(baseState(), sampleMarket());
-    expect(html).toContain('data-ph-sup="HMC-ffffffffffffffff"');
+    expect(html).toContain('data-ph-sup="Your HackMe wallet address (HMC-…)"');
     expect(html).not.toContain('data-ph-sup="paper-sup-ops-wallet-01"');
     expect(html).toContain("lab-wd-limits-plate");
     expect(html).toMatch(/HackMe wallet address/i);
-    expect(html).toContain('data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"');
+    // Never a real, copyable example address (that one is a well-known live wallet).
+    expect(html).toContain('data-ph-usdt="Your BNB Smart Chain address (0x…)"');
+    expect(html).not.toContain("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0");
     const { withdrawLimitsPlateHtml } = await import("./custodyLimits");
     const usdtNote = withdrawLimitsPlateHtml("USDT");
     expect(usdtNote).toMatch(/BEP-20|BSC/);
