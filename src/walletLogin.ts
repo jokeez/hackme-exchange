@@ -1,7 +1,7 @@
 /**
  * "Sign in with HackMe" — the exchange account is the miner's own HackMe wallet.
  *
- * The button opens the local HackMe dashboard (http://127.0.0.1:18080/exchange-login). The node
+ * The button opens the local HackMe dashboard (http://127.0.0.1:8080/exchange-login). The node
  * shows "Log in to exchange.hackme.tech as HMC-…?", and on approval asks the exchange for a login
  * challenge, signs it with the wallet key and sends the browser back to this page with
  *   #hm-login=v1.<challenge_id>.<address>.<pubkey_hex>.<sig_hex>
@@ -13,7 +13,23 @@ import { authVerify } from "./adapters/exchangeApi";
 
 const MODE_KEY = "hackme.desk.loginMode.v1";
 const URL_KEY = "hackme.walletLogin.url.v1";
-export const DEFAULT_WALLET_LOGIN_URL = "http://127.0.0.1:18080/exchange-login";
+// Desktop nodes (Miner and Orders) serve the dashboard on 127.0.0.1:8080; 18080 is the hub's port.
+export const DEFAULT_WALLET_LOGIN_URL = "http://127.0.0.1:8080/exchange-login";
+
+/**
+ * The signed fragment is captured and wiped when this module loads — before the app's first
+ * render. The router rewrites the hash to #spot/<pair>/<tf> during boot, so reading it later (the
+ * login used to run after boot) always found nothing and "Sign in with HackMe" never logged in.
+ */
+let bootLoginHash = "";
+if (typeof window !== "undefined" && /hm-login=/.test(window.location.hash)) {
+  bootLoginHash = window.location.hash;
+  try {
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  } catch {
+    window.location.hash = "";
+  }
+}
 
 /**
  * The dashboard side ships with the next HackMe release (rc20). Until then the button stays
@@ -96,14 +112,21 @@ export function startWalletLogin(): void {
  */
 export async function completeWalletLoginFromLocation(): Promise<{ ok: true; address: string } | { ok: false; message: string } | null> {
   if (typeof window === "undefined") return null;
-  const payload = parseWalletLoginHash(window.location.hash);
-  if (!/hm-login=/.test(window.location.hash)) return null;
-  // Wipe first: the signed tuple must not linger in the URL bar, history or a shared link.
-  try {
-    window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  } catch {
-    window.location.hash = "";
+  // Prefer the fragment captured at module load (already wiped from the URL); fall back to the
+  // live hash for a same-page return.
+  let hash = bootLoginHash;
+  bootLoginHash = "";
+  if (!/hm-login=/.test(hash)) {
+    hash = window.location.hash;
+    if (!/hm-login=/.test(hash)) return null;
+    // Wipe first: the signed tuple must not linger in the URL bar, history or a shared link.
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch {
+      window.location.hash = "";
+    }
   }
+  const payload = parseWalletLoginHash(hash);
   if (!payload) return { ok: false, message: "HackMe login link is malformed — start again from the exchange" };
   const res = await authVerify({
     challenge_id: payload.challengeId,
