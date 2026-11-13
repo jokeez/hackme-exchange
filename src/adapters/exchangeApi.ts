@@ -432,6 +432,7 @@ export function formatExchangeReject(err: ExchangeApiError): string {
     hmc_price_unavailable: "HMC mid unavailable for fee conversion",
     too_many_open: "Too many open orders",
     invalid_order: "Invalid order",
+    order_too_large: "Order too large — at most 10,000 per order",
     invalid_destination: "Invalid destination address",
   };
   if (code && msg) {

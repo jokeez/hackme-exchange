@@ -515,7 +515,7 @@ function renderWithdrawCard(
               <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.01" ${need2faBanner ? "disabled" : ""} />
             </label>
             <label class="lab-field lab-field-wide">Destination address
-              <input id="lab-wd-dest" class="mono" type="text" placeholder="HMC-ffffffffffffffff" autocomplete="off" spellcheck="false" data-ph-hmc="HMC-ffffffffffffffff" data-ph-sup="HMC-ffffffffffffffff" data-ph-usdt="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" data-ph-btc="lab-ops-btc-01" ${need2faBanner ? "disabled" : ""} />
+              <input id="lab-wd-dest" class="mono" type="text" placeholder="Your HackMe wallet address (HMC-…)" autocomplete="off" spellcheck="false" data-ph-hmc="Your HackMe wallet address (HMC-…)" data-ph-sup="Your HackMe wallet address (HMC-…)" data-ph-usdt="Your BNB Smart Chain address (0x…)" data-ph-btc="lab-ops-btc-01" ${need2faBanner ? "disabled" : ""} />
             </label>
             <p class="muted small lab-wd-dest-hint" id="lab-wd-dest-hint" hidden aria-hidden="true"></p>
             <label class="lab-field">2FA code
@@ -585,7 +585,7 @@ function renderCashDock(
         <p class="muted small">Session <strong class="mono">${escapeHtml(session.label)}</strong></p>
         <div class="acct-cash-actions">
           ${session.live || !walletLoginButtonEnabled() ? "" : `<button type="button" class="btn-sm btn-primary" id="btn-desk-wallet-login" title="Use your HackMe wallet as your exchange account — approve in the HackMe dashboard">Sign in with HackMe</button>`}
-          <button type="button" class="btn-sm${session.live || !walletLoginButtonEnabled() ? " btn-primary" : ""}" id="btn-desk-cash-connect">${session.live ? "Reconnect" : isWalletLoginMode() ? "Sign in again" : walletLoginButtonEnabled() ? "Browser wallet" : "Connect"}</button>
+          <button type="button" class="btn-sm${session.live ? "" : " btn-primary"}" id="btn-desk-cash-connect" title="${session.live ? "Session is active — only use if balances stop updating" : ""}">${session.live ? "Reconnect" : isWalletLoginMode() ? "Sign in again" : walletLoginButtonEnabled() ? "Browser wallet" : "Connect"}</button>
           <button type="button" class="btn-sm" id="btn-desk-jump-panel">Wallet &amp; security</button>
         </div>
       </div>`
