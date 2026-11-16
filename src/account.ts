@@ -452,11 +452,11 @@ function renderDepositCard(
           <div id="acct-dep-pending" class="acct-dep-pending" role="status" aria-live="polite"></div>
           ${depositLimitsPlateHtml()}
           <div class="cex-callout cex-callout--warn" role="note">
-            <span><strong>Send only to the deposit address shown above.</strong> ${
+            <span><strong>Use Deposit → HMC / SUP / USDT to reveal the custody address</strong> — never send to your Connect/login ID${
               session.address
-                ? `Your account ID <span class="mono">${escapeHtml(session.address)}</span> is not a deposit address.`
-                : `Connect first, then pick an asset.`
-            }</span>
+                ? ` (<span class="mono">${escapeHtml(session.address)}</span>)`
+                : ""
+            }. Login ≠ deposit.</span>
           </div>`
               : `<div class="acct-cash-actions">
             <button type="button" class="btn-sm" id="btn-sync-node">↻ Sync HMC/SUP from node</button>

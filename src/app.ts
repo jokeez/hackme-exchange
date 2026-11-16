@@ -5252,6 +5252,9 @@ async function showDepositAddrUi(asset: string): Promise<void> {
       ].filter(Boolean);
       metaEl.hidden = false;
       metaEl.textContent = bits.join(" · ");
+    } else if (res.deposit_address_long) {
+      metaEl.hidden = false;
+      metaEl.textContent = `Primary (legacy short) · also credited: long ${res.deposit_address_long}`;
     } else {
       metaEl.hidden = true;
       metaEl.textContent = "";

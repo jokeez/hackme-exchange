@@ -32,8 +32,7 @@ describe("deposit UX contracts", () => {
       feeWallet: null,
       deskEdge: { matching: "ok", depositEnabled: true, withdrawEnabled: true },
     });
-    expect(html).toMatch(/Send only to the deposit address|Never send to your login address/i);
-    expect(html).toMatch(/is not a deposit address/);
+    expect(html).toMatch(/Use Deposit|Never send to your Connect\/login|Login ≠ deposit/i);
     expect(html).toContain("btn-desk-dep-hmc");
     expect(html).toContain("btn-desk-dep-sup");
     expect(html).toContain("btn-desk-dep-usdt");
@@ -42,7 +41,7 @@ describe("deposit UX contracts", () => {
     expect(html).toMatch(/manual review|screening|KYT/i);
     expect(html).toMatch(/HMC (\/|·) SUP/i);
     expect(html).toContain("HMC-09dc5f553bfff940");
-    expect(html).toMatch(/account ID[\s\S]{0,120}is not a deposit address/);
+    expect(html).toMatch(/Login ≠ deposit|not for deposits|Connect\/login/i);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     // Copy-addr path must stay labeled as login-only when custody is live
     expect(html).toMatch(/Login ≠ deposit|not for deposits|Copy login/i);

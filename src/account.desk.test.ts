@@ -138,8 +138,8 @@ describe("Account desk session (HOLD)", () => {
     expect(html).toMatch(/Withdraw limits|lab-wd-limits-plate/);
     expect(html).not.toMatch(/stub addresses reject mainnet funds/);
     expect(html).toContain("lab-deposit-reveal");
-    expect(html).toMatch(/Send only to the deposit address|Never send to your login address/i);
-    expect(html).toMatch(/is not a deposit address/);
+    expect(html).toMatch(/Use Deposit|Never send to your Connect\/login|Login ≠ deposit/i);
+    expect(html).toMatch(/Login ≠ deposit|Connect\/login/i);
     expect(html).toContain("Deposits open");
     expect(html).toContain("Withdrawals open");
     expect(html).toContain("Wallet &amp; security");

@@ -963,6 +963,8 @@ export type DepositAddressResponse = {
   account_address: string;
   asset: string;
   deposit_address: string;
+  /** Economics v2 long form of the same deposit key (also watched/credited). */
+  deposit_address_long?: string;
   kind: string;
   bridge_model?: string;
   warning?: string;
