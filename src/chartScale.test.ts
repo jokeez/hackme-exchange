@@ -388,7 +388,9 @@ describe("paper tip + volume hygiene", () => {
     const tip = candles[candles.length - 1]!;
     const bodyFrac = Math.abs(tip.close - tip.open) / tip.open;
     expect(bodyFrac).toBeLessThanOrEqual(maxBodyFracForTf("15m") + 1e-9);
-    expect(tip.high / tip.low).toBeLessThan(1.04);
+    // High/low may use the full 15m wick budget (±maxWick) around the body — not a flat 4% ratio.
+    const wick = maxWickFracForTf("15m");
+    expect(tip.high / tip.low).toBeLessThanOrEqual((1 + wick) / (1 - wick) + 1e-9);
     // Tip close stays near mid (clamped), not a mile away
     expect(Math.abs(tip.close - mid) / mid).toBeLessThan(0.035);
   });
