@@ -49,7 +49,14 @@ export function parseWalletLoginHash(hash: string): WalletLoginPayload | null {
   const h = String(hash || "").replace(/^#/, "");
   const m = /(?:^|&)hm-login=([^&]+)/.exec(h);
   if (!m) return null;
-  const parts = decodeURIComponent(m[1]!).split(".");
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(m[1]!);
+  } catch {
+    // D12: malformed percent-encoding → treat as bad login link, not an uncaught URIError.
+    return null;
+  }
+  const parts = decoded.split(".");
   if (parts.length !== 5 || parts[0] !== "v1") return null;
   const [, id, addr, pub, sig] = parts as [string, string, string, string, string];
   const p = { challengeId: id.toLowerCase(), address: addr.toLowerCase().replace(/^hmc-/, "HMC-"), pubkeyHex: pub.toLowerCase(), sigHex: sig.toLowerCase() };
@@ -96,14 +103,15 @@ export function startWalletLogin(): void {
  */
 export async function completeWalletLoginFromLocation(): Promise<{ ok: true; address: string } | { ok: false; message: string } | null> {
   if (typeof window === "undefined") return null;
-  const payload = parseWalletLoginHash(window.location.hash);
   if (!/hm-login=/.test(window.location.hash)) return null;
-  // Wipe first: the signed tuple must not linger in the URL bar, history or a shared link.
+  // Wipe first (D12): even a malformed fragment must not linger if parse throws/fails.
+  const hash = window.location.hash;
   try {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
   } catch {
     window.location.hash = "";
   }
+  const payload = parseWalletLoginHash(hash);
   if (!payload) return { ok: false, message: "HackMe login link is malformed — start again from the exchange" };
   const res = await authVerify({
     challenge_id: payload.challengeId,
