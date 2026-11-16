@@ -65,7 +65,14 @@ export function parseWalletLoginHash(hash: string): WalletLoginPayload | null {
   const h = String(hash || "").replace(/^#/, "");
   const m = /(?:^|&)hm-login=([^&]+)/.exec(h);
   if (!m) return null;
-  const parts = decodeURIComponent(m[1]!).split(".");
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(m[1]!);
+  } catch {
+    // D12: malformed percent-encoding → bad login link, not an uncaught URIError.
+    return null;
+  }
+  const parts = decoded.split(".");
   if (parts.length !== 5 || parts[0] !== "v1") return null;
   const [, id, addr, pub, sig] = parts as [string, string, string, string, string];
   const p = { challengeId: id.toLowerCase(), address: addr.toLowerCase().replace(/^hmc-/, "HMC-"), pubkeyHex: pub.toLowerCase(), sigHex: sig.toLowerCase() };
