@@ -195,6 +195,14 @@ describe("tradingGuards", () => {
         message: "session required",
       }),
     ).toMatch(/reconnect desk/i);
+    expect(
+      formatExchangeReject({
+        ok: false,
+        status: 400,
+        code: "max_tx_exceeded",
+        message: "amount exceeds soft-launch per-tx hot-wallet cap (split into ≤5 HMC/SUP)",
+      }),
+    ).toMatch(/5 HMC/i);
   });
 
   it("isSessionRequiredError detects hub cookie drop", async () => {

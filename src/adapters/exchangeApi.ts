@@ -434,6 +434,10 @@ export function formatExchangeReject(err: ExchangeApiError): string {
     invalid_order: "Invalid order",
     order_too_large: "Order too large — at most 10,000 per order",
     invalid_destination: "Invalid destination address",
+    max_tx_exceeded:
+      "Amount exceeds soft-launch per-tx hot-wallet cap (5 HMC / 5 SUP) — withdraw in smaller chunks",
+    daily_cap_exceeded: "Daily withdraw cap exceeded — try again tomorrow or smaller size",
+    hot_cap_exceeded: "Hot wallet daily/tx cap exceeded — try a smaller withdraw",
   };
   if (code && msg) {
     const soft = code.replace(/_/g, " ");

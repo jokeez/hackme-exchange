@@ -5604,15 +5604,16 @@ async function labWithdrawRequestUi(): Promise<void> {
     if (totp) body.totp_code = totp;
     const res = await requestWithdraw(body);
     if (!res.ok) {
-      const lower = res.message.toLowerCase();
+      const reject = formatExchangeReject(res);
+      const lower = `${res.code || ""} ${res.message}`.toLowerCase();
       if (lower.includes("2fa") || lower.includes("totp")) {
         document.getElementById("acct-security-2fa")?.scrollIntoView({ behavior: "smooth", block: "center" });
-        if (msg) msg.textContent = `${res.message} — enroll 2FA below if needed`;
-        toast(res.message, "warn");
+        if (msg) msg.textContent = `${reject} — enroll 2FA below if needed`;
+        toast(reject, "warn");
         return;
       }
-      if (msg) msg.textContent = res.message;
-      toast(res.message, "warn");
+      if (msg) msg.textContent = reject;
+      toast(reject, "warn");
       return;
     }
     const totpEl = document.getElementById("lab-wd-2fa") as HTMLInputElement | null;
