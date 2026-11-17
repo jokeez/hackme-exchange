@@ -48,6 +48,25 @@ describe("deskWallet", () => {
     expect(second).not.toBe(first);
   });
 
+  it("logout hold survives reload until Connect clears it", async () => {
+    vi.doMock("../config/integration", () => ({
+      isDeskConnectEnabled: () => true,
+      isExchangeApiWired: () => true,
+      isLabLoopbackApi: () => false,
+    }));
+    const {
+      markDeskLogoutHold,
+      clearDeskLogoutHold,
+      isDeskLogoutHold,
+    } = await import("./deskWallet");
+    expect(isDeskLogoutHold()).toBe(false);
+    markDeskLogoutHold();
+    expect(isDeskLogoutHold()).toBe(true);
+    expect(localStorage.getItem("hackme.desk.wallet.logoutHold.v1")).toBe("1");
+    clearDeskLogoutHold();
+    expect(isDeskLogoutHold()).toBe(false);
+  });
+
   it("migrates legacy session-only seed into durable localStorage", async () => {
     vi.doMock("../config/integration", () => ({
       isDeskConnectEnabled: () => true,

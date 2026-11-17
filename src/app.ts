@@ -136,7 +136,7 @@ import {
   requestWithdraw,
 } from "./adapters/exchangeApi";
 import { labFixtureConnect, labFixtureIdentity } from "./adapters/labFixture";
-import { clearDeskSeed, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress, isDeskBackupDone, markDeskBackupDone } from "./adapters/deskWallet";
+import { clearDeskSeed, clearDeskLogoutHold, deskWalletConnect, deskWalletIdentity, buildDeskSeedBackup, hasDeskSeed, markDeskLogoutHold, parseDeskSeedImport, persistDeskSeed, deskSeedStorageKind, lastKnownDeskAddress, isDeskBackupDone, markDeskBackupDone } from "./adapters/deskWallet";
 import { labSessionRestoreOrConnect } from "./adapters/labSessionRestore";
 import { completeWalletLoginFromLocation, isWalletLoginMode, setWalletLoginMode, startWalletLogin } from "./walletLogin";
 import {
@@ -4847,6 +4847,7 @@ async function deskWalletConnectUi(): Promise<void> {
     }
     return;
   }
+  clearDeskLogoutHold();
   if (msg) {
     msg.textContent = `Connected ${res.wallet.address} · ${
       useServerMatching()
@@ -5149,6 +5150,8 @@ async function refreshDeskEdgeHealthUi(): Promise<boolean> {
 async function labApiLogoutUi(): Promise<void> {
   const res = await authLogout();
   clearLabBookCache();
+  // Block seed/cookie auto-reconnect until the user clicks Connect again.
+  if (res.ok) markDeskLogoutHold();
   const desk = isDeskConnectEnabled();
   const msg =
     document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
@@ -5795,7 +5798,11 @@ function applyLab2faPanels(enabled: boolean, pending: boolean, recoveryLeft = 0)
   // 2FA is on): repaint once when the flag actually changes.
   const changed = labUser2faEnabled !== enabled;
   labUser2faEnabled = enabled;
-  if (changed && state.mainView === "account") render();
+  if (changed && state.mainView === "account") {
+    render();
+    // Full account remount wipes the one-time recovery grid — restore sticky codes.
+    restoreStickyRecoveryCodes();
+  }
 }
 
 function clearTotpQr(): void {
@@ -5891,6 +5898,17 @@ async function paintTotpQr(otpauthUrl: string): Promise<void> {
   }
 }
 
+/** One-time recovery codes survive account remount until the user dismisses them. */
+let stickyRecoveryCodes: string[] | undefined;
+
+function clearStickyRecoveryCodes(): void {
+  stickyRecoveryCodes = undefined;
+}
+
+function restoreStickyRecoveryCodes(): void {
+  if (stickyRecoveryCodes?.length) showRecoveryCodesOnce(stickyRecoveryCodes);
+}
+
 function showRecoveryCodesOnce(codes: string[] | undefined): void {
   const block = document.getElementById("lab-2fa-recovery-block");
   const grid = document.getElementById("lab-2fa-recovery-codes");
@@ -5903,8 +5921,11 @@ function showRecoveryCodesOnce(codes: string[] | undefined): void {
     grid.replaceChildren();
     if (copySrc) copySrc.value = "";
     if (actions) actions.hidden = true;
+    const doneBtn = document.getElementById("btn-lab-2fa-recovery-done");
+    doneBtn?.remove();
     return;
   }
+  stickyRecoveryCodes = [...codes];
   const plain = codes.join("\n");
   if (copySrc) copySrc.value = plain;
   if (block) block.hidden = false;
@@ -5918,7 +5939,22 @@ function showRecoveryCodesOnce(codes: string[] | undefined): void {
       return chip;
     }),
   );
-  if (actions) actions.hidden = false;
+  if (actions) {
+    actions.hidden = false;
+    if (!document.getElementById("btn-lab-2fa-recovery-done")) {
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btn-sm btn-secondary";
+      done.id = "btn-lab-2fa-recovery-done";
+      done.textContent = "I've saved these";
+      done.addEventListener("click", () => {
+        clearStickyRecoveryCodes();
+        showRecoveryCodesOnce(undefined);
+        toast("Recovery codes dismissed — store them offline", "info");
+      });
+      actions.appendChild(done);
+    }
+  }
 }
 
 async function lab2faRefreshUi(): Promise<void> {
@@ -6018,6 +6054,7 @@ async function lab2faDisableUi(): Promise<void> {
     toast(res.message, "warn");
     return;
   }
+  clearStickyRecoveryCodes();
   showRecoveryCodesOnce(undefined);
   clearPending2faEnrollment();
   clearTotpQr();
@@ -7014,15 +7051,22 @@ function syncMultiCharts(): void {
     wireMultiChartSync();
     return;
   }
-  if (market) ensureCandles(state, market);
+  // Live desk: never seed paper OHLCV into multi panes (PQA-01).
+  if (market && !useLiveBook()) ensureCandles(state, market);
   const pairOpts = PAIRS.map((p) => ({ id: p.id, label: p.label }));
+  const liveTfs = TIMEFRAMES.filter((tf) => !!LIVE_TF_INTERVAL[tf]);
+  const paneTfs = useLiveBook() ? liveTfs : TIMEFRAMES;
   const n = state.multiChartLayout === "4" ? 4 : 2;
   for (let i = 2; i <= n; i++) {
     const host = document.getElementById(`chart-host-${i}`);
     if (!host) continue;
     const pairId = panePair(i);
     const pair = pairById(pairId);
-    const tf = paneTf(i);
+    let tf = paneTf(i);
+    if (useLiveBook() && !LIVE_TF_INTERVAL[tf]) {
+      tf = liveTf(tf);
+      setPaneTf(i, tf);
+    }
     repairPairTfCandles(pairId, tf);
     const c = state.candles[pairId]?.[tf] ?? [];
     if (c.length < 2) {
@@ -7034,7 +7078,7 @@ function syncMultiCharts(): void {
       pairLabel: pair.label,
       tf,
       pairs: pairOpts,
-      timeframes: TIMEFRAMES,
+      timeframes: paneTfs,
       onTfChange: (next) => setPaneTf(i, next),
       onPairChange: (next) => setPanePair(i, next),
       onContextMenu: (price, x, y) => openPaneContextMenu(pairId, `chart-host-${i}`, price, x, y),

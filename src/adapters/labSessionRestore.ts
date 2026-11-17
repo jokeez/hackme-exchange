@@ -8,7 +8,7 @@ import {
   type ExchangeApiError,
   type SessionRestoreResponse,
 } from "./exchangeApi";
-import { deskWalletConnect, hasDeskSeed } from "./deskWallet";
+import { deskWalletConnect, hasDeskSeed, isDeskLogoutHold } from "./deskWallet";
 import { labFixtureConnect } from "./labFixture";
 import { isDeskConnectEnabled, isLabApiEnabled, isLabLoopbackApi } from "../config/integration";
 
@@ -32,6 +32,16 @@ export async function labSessionRestoreOrConnect(): Promise<LabReconnectResult> 
       status: 0,
       code: "disabled",
       message: "Lab API disabled — set VITE_EXCHANGE_API_ORIGIN or VITE_LAB_API=1 (loopback only)",
+    };
+  }
+
+  // Explicit Logout: stay disconnected on render / guard / reload until Connect.
+  if (isDeskLogoutHold()) {
+    return {
+      ok: false,
+      status: 401,
+      code: "logout_hold",
+      message: "logged out — Connect to sign in again",
     };
   }
 

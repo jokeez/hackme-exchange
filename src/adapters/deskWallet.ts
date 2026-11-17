@@ -20,9 +20,36 @@ ed.etc.sha512Sync ??= (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 const SEED_KEY = "hackme.desk.wallet.seed.v1";
 /** Non-secret last Connect address — warns before minting a new empty wallet. */
 const LAST_ADDR_KEY = "hackme.desk.wallet.lastAddress.v1";
+/** Survives reload: explicit Logout must not auto re-sign until Connect. */
+const LOGOUT_HOLD_KEY = "hackme.desk.wallet.logoutHold.v1";
 
 /** In-tab memory mirror so same-tick races after clear still work. */
 let memorySeed: string | null = null;
+
+/** After Logout — block cookie/seed auto-reconnect across reload until Connect. */
+export function markDeskLogoutHold(): void {
+  try {
+    localStorage.setItem(LOGOUT_HOLD_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearDeskLogoutHold(): void {
+  try {
+    localStorage.removeItem(LOGOUT_HOLD_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isDeskLogoutHold(): boolean {
+  try {
+    return localStorage.getItem(LOGOUT_HOLD_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function bytesToHex(b: Uint8Array): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
