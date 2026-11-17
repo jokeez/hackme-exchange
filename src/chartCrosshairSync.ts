@@ -23,6 +23,23 @@ export function setCrosshairSyncEnabled(on: boolean): void {
   if (!on) clearAllCrosshairs();
 }
 
+export function isCrosshairSyncEnabled(): boolean {
+  return enabled;
+}
+
+/**
+ * Free-crosshair overlay steals hover from LWC, so subscribeCrosshairMove never fires.
+ * Call this from free-hair pointer moves when Link panes is on (PQA-05).
+ */
+export function emitExternalCrosshair(
+  fromId: string,
+  time: number | null,
+  price: number | null = null,
+): void {
+  if (!enabled) return;
+  propagate(fromId, time, price);
+}
+
 export function registerCrosshairPane(pane: CrosshairPane): () => void {
   panes.set(pane.id, pane);
   bindPane(pane);

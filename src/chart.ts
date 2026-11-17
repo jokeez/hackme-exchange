@@ -27,6 +27,7 @@ import type {
 } from "./types";
 import { CANDLE_SCHEME_PRESETS, DEFAULT_INDICATOR_CONFIG, TF_SEC } from "./types";
 import { bumpTimeSyncPane } from "./chartTimeSync";
+import { emitExternalCrosshair, isCrosshairSyncEnabled } from "./chartCrosshairSync";
 import { chartLocalization, chartPriceFormatter, chartTickMarkFormatter } from "./format";
 import { bindLongPress, longPressRecentlyFired } from "./longPress";
 import { getPair } from "./registry";
@@ -313,11 +314,12 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
   const flushOhlc = () => {
     ohlcRaf = 0;
     const cb = lastOpts?.onCrosshair;
-    if (!cb || !chart || !candleSeries) return;
+    if (!chart || !candleSeries) return;
     try {
       const t = chart.timeScale().coordinateToTime(ohlcX) as number | null;
       if (t == null || !Number.isFinite(t)) {
-        cb(null);
+        cb?.(null);
+        if (isCrosshairSyncEnabled()) emitExternalCrosshair("chart-host", null, null);
         return;
       }
       const fromRaw = candleAtTime(rawCandlesCache, t);
@@ -326,10 +328,19 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
           ? (candleAtTime(currentCandles, t) ?? fromRaw)
           : (fromRaw ?? candleAtTime(currentCandles, t));
       if (!bar) {
-        cb(null);
+        cb?.(null);
+        if (isCrosshairSyncEnabled()) emitExternalCrosshair("chart-host", null, null);
         return;
       }
-      cb({
+      let price: number | null = bar.close;
+      try {
+        const pr = candleSeries.coordinateToPrice(ohlcY);
+        if (pr != null && Number.isFinite(pr) && (pr as number) > 0) price = pr as number;
+      } catch {
+        /* keep bar.close */
+      }
+      if (isCrosshairSyncEnabled()) emitExternalCrosshair("chart-host", t, price);
+      cb?.({
         time: t,
         open: bar.open,
         high: bar.high,
@@ -527,6 +538,7 @@ function bindFreeCrosshairTracking(host: HTMLElement): void {
     releasePinchBusy();
     clearChartPointerBusy();
     lastOpts?.onCrosshair?.(null);
+    if (isCrosshairSyncEnabled()) emitExternalCrosshair("chart-host", null, null);
   };
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;

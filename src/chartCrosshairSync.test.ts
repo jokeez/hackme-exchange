@@ -21,7 +21,21 @@ describe("chartCrosshairSync registry", () => {
     const mod = await import("./chartCrosshairSync");
     expect(typeof mod.setCrosshairSyncEnabled).toBe("function");
     expect(typeof mod.registerCrosshairPane).toBe("function");
+    expect(typeof mod.emitExternalCrosshair).toBe("function");
     mod.setCrosshairSyncEnabled(false);
     mod.setCrosshairSyncEnabled(true);
+  });
+
+  it("emitExternalCrosshair updates lastSyncedTime when Link is on (PQA-05)", async () => {
+    const mod = await import("./chartCrosshairSync");
+    mod.clearCrosshairRegistry();
+    mod.setCrosshairSyncEnabled(true);
+    mod.emitExternalCrosshair("chart-host", 1_700_000_000, 0.064);
+    expect(mod.getCrosshairSyncDebug().lastSyncedTime).toBe(1_700_000_000);
+    mod.emitExternalCrosshair("chart-host", null, null);
+    expect(mod.getCrosshairSyncDebug().lastSyncedTime).toBeNull();
+    mod.setCrosshairSyncEnabled(false);
+    mod.emitExternalCrosshair("chart-host", 1_700_000_100, 0.065);
+    expect(mod.getCrosshairSyncDebug().lastSyncedTime).toBeNull();
   });
 });

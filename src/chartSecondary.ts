@@ -11,6 +11,7 @@ import type { Candle, Order, PairId, Timeframe } from "./types";
 import { TF_SEC, TIMEFRAMES } from "./types";
 import { chartLocalization, chartPriceFormatter, chartTickMarkFormatter } from "./format";
 import { bumpTimeSyncPane } from "./chartTimeSync";
+import { emitExternalCrosshair, isCrosshairSyncEnabled } from "./chartCrosshairSync";
 import { displayCapCandles, isPaintVerbatim, logicalRangeToIndices, robustPriceRange } from "./chartScale";
 import { applyPlotWheelZoom, applyPriceWheelZoom, barSpacingForWidth, clampVisiblePriceRange, crosshairPaintOptions, isChartPointerBusy, isOverPriceScaleEl, MIN_PLOT_BAR_SPACING, normalizeWheelDeltaY, noteChartPointerBusy, panLogicalRangeByWheel, PLOT_WHEEL_UNIT, priceAnchorFromPointer, priceRangeNeedsHeal, registerSecondaryPaneDraw, setFocusedChartPane, setupPortableChartPan, getActiveDrawTool, updateSecondaryPaneMeta, visibleBarBudget, wheelZoomStep } from "./chart";
 import { mountFreeCrosshair, type FreeCrosshairHandle } from "./chartFreeCrosshair";
@@ -492,7 +493,27 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   const freeXh = mountFreeCrosshair(el);
   freeXh.setCapturing(true);
   freeXh.setPlotInsets(58, 28);
-  const onXhMove = (e: PointerEvent) => freeXh.move(e.clientX, e.clientY);
+  const onXhMove = (e: PointerEvent) => {
+    const local = freeXh.move(e.clientX, e.clientY);
+    if (!isCrosshairSyncEnabled()) return;
+    try {
+      const t = slot.chart.timeScale().coordinateToTime(local.x) as number | null;
+      if (t == null || !Number.isFinite(t)) {
+        emitExternalCrosshair(key, null, null);
+        return;
+      }
+      let price: number | null = null;
+      try {
+        const pr = slot.series.coordinateToPrice(local.y);
+        if (pr != null && Number.isFinite(pr) && (pr as number) > 0) price = pr as number;
+      } catch {
+        /* ignore */
+      }
+      emitExternalCrosshair(key, t, price);
+    } catch {
+      /* ignore */
+    }
+  };
   const onXhEnter = () => {
     freeXh.refreshRect();
     noteChartPointerBusy(true);
@@ -500,6 +521,7 @@ export function mountSecondaryChart(el: HTMLElement, candles: Candle[], opts: Se
   const onXhLeave = () => {
     freeXh.hide();
     noteChartPointerBusy(false);
+    if (isCrosshairSyncEnabled()) emitExternalCrosshair(key, null, null);
   };
   el.addEventListener("pointerenter", onXhEnter);
   el.addEventListener("pointerleave", onXhLeave);

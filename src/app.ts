@@ -459,6 +459,12 @@ function onMobileLayoutChange(): void {
   syncMobileLayoutClass();
   const nowMobile = isMobileLayout();
   showChartTypeDrop(false);
+  // PQA-07: brand title is baked at render(); resize must shrink it or Account is covered.
+  const brandStrong = document.querySelector(".ex-brand strong");
+  if (brandStrong && !isHubEmbed()) {
+    const next = nowMobile ? "HackMe" : "HackMe Exchange";
+    if (brandStrong.textContent !== next) brandStrong.textContent = next;
+  }
   if (wasMobile !== nowMobile) {
     mobileToolsOpen = false;
     document.getElementById("terminal")?.classList.remove("mobile-tools-open");
