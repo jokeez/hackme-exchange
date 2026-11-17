@@ -5154,18 +5154,18 @@ async function refreshDeskEdgeHealthUi(): Promise<boolean> {
 }
 
 async function labApiLogoutUi(): Promise<void> {
+  // User intent first — block seed/cookie auto-reconnect even if the network logout flakes.
+  markDeskLogoutHold();
   const res = await authLogout();
   clearLabBookCache();
-  // Block seed/cookie auto-reconnect until the user clicks Connect again.
-  if (res.ok) markDeskLogoutHold();
   const desk = isDeskConnectEnabled();
   const msg =
     document.getElementById(desk ? "desk-api-msg" : "lab-api-msg") ||
     document.getElementById("lab-api-msg") ||
     document.getElementById("desk-api-msg");
-  if (msg) msg.textContent = res.ok ? "Logged out" : res.message;
+  if (msg) msg.textContent = res.ok ? "Logged out" : `Logged out locally · ${res.message}`;
   toast(
-    res.ok ? (desk ? "Desk session cleared" : "Lab session cleared") : res.message,
+    res.ok ? (desk ? "Desk session cleared" : "Lab session cleared") : "Session cleared locally — Connect to sign in again",
     res.ok ? "info" : "warn",
   );
   if (state.mainView === "account") render();
