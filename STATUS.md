@@ -2,7 +2,9 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-10-09 · **Source:** public · **Product:** soft-launch desk · **Matching / HMC·SUP custody:** **Full GO**
+**Updated:** 2026-11-17 · **Source:** public · **Product:** soft-launch desk · **Matching / HMC·SUP custody:** **Full GO**
+
+Prod QA follow-ups shipped on public SPA (`boot-DV7pqbPA…`): live multi-charts no longer seed paper OHLCV / `30s`; 2FA recovery codes stick until dismissed; Logout holds auto-reconnect until Connect; 2FA confirm adopts rotated CSRF.
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
