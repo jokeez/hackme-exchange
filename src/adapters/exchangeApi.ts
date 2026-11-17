@@ -772,6 +772,8 @@ export async function auth2faConfirm(
     );
     const body = await parseJson(res);
     if (!res.ok) return asError(res.status, body, "2fa confirm failed");
+    // Confirm rotates the session cookie + CSRF (same as disable / recovery rotate).
+    adoptRotatedSession(body);
     return body as TwoFAConfirmResponse;
   } catch (e) {
     return { ok: false, status: 0, code: "unreachable", message: e instanceof Error ? e.message : String(e) };
