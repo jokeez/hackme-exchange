@@ -2,9 +2,9 @@
 
 # HackMe Exchange — Status
 
-**Updated:** 2026-11-17 · **Source:** public · **Product:** soft-launch desk · **Matching / HMC·SUP custody:** **Full GO**
+**Updated:** 2026-11-18 · **Source:** public · **Product:** soft-launch desk · **Matching / HMC·SUP custody:** **Full GO** · **USDT:** Didit TM wired (HOT_SEND off)
 
-Prod QA follow-ups shipped on public SPA (`boot-DV7pqbPA…`): live multi-charts no longer seed paper OHLCV / `30s`; 2FA recovery codes stick until dismissed; Logout holds auto-reconnect until Connect; 2FA confirm adopts rotated CSRF.
+Prod QA + money-path (HMC) green on public desk. USDT = BEP-20 watch + Didit KYT + manual ops broadcast (no auto hot-send).
 
 [![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
@@ -26,7 +26,7 @@ Prod QA follow-ups shipped on public SPA (`boot-DV7pqbPA…`): live multi-charts
 | **Desk matching** | **GO** — `matching: ok` · `max_open_orders=96` · `price_band_bps=1500` · `min_notional=1e6` · Soft-MM tape |
 | **Desk deposit** | **GO** — HMC/SUP deposit addresses; Connect addr ≠ deposit; node-watch via ops-admin |
 | **Desk withdraw** | **GO** — request + **per-user TOTP/recovery**; ops completes via loopback admin (`:18445`) |
-| **USDT** | BSC BEP-20 **watch** + stub KYT **manual** (no Didit / no hot-send) |
+| **USDT** | BSC BEP-20 **watch** + **Didit** TM (hold → approve/webhook) · withdraw outbound KYT · **HOT_SEND=0** (manual broadcast) |
 | **BTC custody** | **HOLD** until dedicated cutover |
 | **Live mode in SPA** | **Blocked** (no `VITE_INTEGRATION_MODE=live` on public) |
 | **Desk Connect** | `VITE_PUBLIC_DESK_CONNECT=1` → `/desk-api` · seed export/import · 2FA enroll |
@@ -49,8 +49,8 @@ Own HMC market desk — **not** a third-party listing claim:
 
 | Phase | What |
 |-------|------|
-| **Now** | Soft-launch: matching + HMC/SUP deposit/withdraw + TOTP |
-| **Next** | Partner USDT/BTC bridge · raise soft-launch caps after soak |
+| **Now** | Soft-launch: matching + HMC/SUP custody + USDT BEP-20/Didit (manual payout) |
+| **Next** | Fund USDT hot · clear hold quarantine · raise caps · BTC rail |
 | **Foreign CEX** | Not part of soft launch |
 
 Pool: useful-PoW → [hackme.tech](https://hackme.tech/). No ROI promises.
@@ -76,8 +76,8 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 ## What this is NOT
 
 - Not a licensed exchange · not financial advice  
-- Not real USDT/BTC on-chain custody yet  
-- Not unlimited withdraw (soft-launch caps + ops complete)  
+- USDT hot-send stays **off** (ops broadcast after outbound KYT)  
+- Not unlimited withdraw (soft-launch caps + TOTP + KYT)  
 - Not a promise of foreign CEX listing  
 
 ## Roadmap
@@ -87,7 +87,7 @@ See [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 | **D0 Paper** | Static SPA — **shipped** |
 | **Soft-launch matching** | Caps + desk book/orders — **GO** |
 | **HMC/SUP custody** | Deposit addr + withdraw+2FA + ops complete — **GO** |
-| **USDT custody** | BSC watch + stub KYT **manual** (no Didit / no hot-send) |
+| **USDT custody** | BSC watch + Didit TM + manual payout — **soft-launch** (hot float required) |
 | **BTC custody** | Partner rail — **HOLD** |
 | **Full GO** | Raise/remove soft-launch caps after soak |
 
