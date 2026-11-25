@@ -512,7 +512,10 @@ function renderWithdrawCard(
               </select>
             </label>
             <label class="lab-field">Amount
-              <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.01" ${need2faBanner ? "disabled" : ""} />
+              <span class="cex-wd-amt-row">
+                <input id="lab-wd-amt" class="mono" type="number" step="any" min="0" placeholder="0.01" ${need2faBanner ? "disabled" : ""} />
+                <button type="button" class="linkish cex-wd-max" id="lab-wd-max" ${need2faBanner ? "disabled" : ""} title="Withdraw the whole balance (amount auto-adjusted for the fee)">Max</button>
+              </span>
             </label>
             <label class="lab-field lab-field-wide">Destination address
               <input id="lab-wd-dest" class="mono" type="text" placeholder="Your HackMe wallet address (HMC-…)" autocomplete="off" spellcheck="false" data-ph-hmc="Your HackMe wallet address (HMC-…)" data-ph-sup="Your HackMe wallet address (HMC-…)" data-ph-usdt="Your BNB Smart Chain address (0x…)" data-ph-btc="lab-ops-btc-01" ${need2faBanner ? "disabled" : ""} />
