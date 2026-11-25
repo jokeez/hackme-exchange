@@ -116,3 +116,16 @@ export function validateLabWithdrawAmount(displayAmount: number, asset?: string)
   }
   return { ok: true };
 }
+
+/**
+ * Most that can be withdrawn when the fee is charged ON TOP of the amount: the wallet is
+ * debited amount+fee, so entering the full balance always failed "insufficient balance"
+ * (the exact trap a real user hit on 2026-11-25). Max = available - fee, floored to the
+ * asset's display precision so it never rounds up past the balance.
+ */
+export function withdrawMaxAmount(available: number, fee: number, decimals: number): number {
+  const net = available - (fee > 0 ? fee : 0);
+  if (!(net > 0)) return 0;
+  const factor = Math.pow(10, decimals);
+  return Math.floor(net * factor) / factor;
+}

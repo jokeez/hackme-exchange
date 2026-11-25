@@ -178,3 +178,30 @@ describe("Account custody UI (buttons + copy)", () => {
     expect(html).toContain("&lt;img");
   });
 });
+
+
+import { describe as describeWdMax, it as itWdMax, expect as expectWdMax } from "vitest";
+import { withdrawMaxAmount } from "./labCustody";
+
+// Fee is on top (wallet debit = amount + fee), so entering the full balance always failed
+// "insufficient balance" — the exact trap a real user hit on 2026-11-25. Max must be
+// available - fee, floored so it never rounds up past the balance.
+describeWdMax("withdrawMaxAmount", () => {
+  itWdMax("subtracts the fee so amount+fee equals the balance (USDT, flat $1.5)", () => {
+    const max = withdrawMaxAmount(33.4804, 1.5, 4);
+    expectWdMax(max).toBe(31.9804);
+    expectWdMax(max + 1.5).toBeLessThanOrEqual(33.4804 + 1e-9);
+  });
+  itWdMax("never rounds up past the balance", () => {
+    const max = withdrawMaxAmount(20.00005, 1.5, 4);
+    expectWdMax(max + 1.5).toBeLessThanOrEqual(20.00005);
+  });
+  itWdMax("returns 0 when the balance cannot even cover the fee", () => {
+    expectWdMax(withdrawMaxAmount(1.0, 1.5, 4)).toBe(0);
+    expectWdMax(withdrawMaxAmount(0, 1.5, 4)).toBe(0);
+  });
+  itWdMax("honours BTC 8-dp precision", () => {
+    const max = withdrawMaxAmount(0.01234567, 0.0001, 8);
+    expectWdMax(max).toBe(0.01224567);
+  });
+});

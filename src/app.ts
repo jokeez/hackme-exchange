@@ -1,7 +1,7 @@
 import "./styles.css";
 import QRCode from "qrcode";
 import { patchAccountFundsDom, patchDeskHoldPills, renderAccountPage, wireAccountFunding } from "./account";
-import { validateLabWithdrawDestination, validateLabWithdrawAmount } from "./labCustody";
+import { validateLabWithdrawDestination, validateLabWithdrawAmount, withdrawMaxAmount } from "./labCustody";
 import {
   USDT_DEPOSIT_MIN,
   USDT_CONFIRMATIONS,
@@ -5646,6 +5646,33 @@ async function labWithdrawRequestUi(): Promise<void> {
   }
 }
 
+/** Fill the amount field with the most that can be withdrawn: available - fee, so the
+ *  wallet debit equals the full balance and nothing is stranded. Fee from a live custody
+ *  quote at the full balance; fee-on-top at the top is >= fee on the net, so subtracting
+ *  it never overshoots (exact for a flat fee). */
+async function labWithdrawMaxUi(): Promise<void> {
+  const asset = ((document.getElementById("lab-wd-asset") as HTMLSelectElement | null)?.value || "HMC").toUpperCase();
+  const availEl = document.getElementById("lab-wd-avail");
+  const amtInp = document.getElementById("lab-wd-amt") as HTMLInputElement | null;
+  if (!availEl || !amtInp) return;
+  const available = Number(availEl.getAttribute(`data-${asset.toLowerCase()}`) || 0);
+  if (!(available > 0)) {
+    amtInp.value = "";
+    void labWithdrawQuoteUi();
+    return;
+  }
+  let fee = 0;
+  try {
+    const res = await fetchCustodyFees({ side: "withdraw", asset, amount: displayToMinor(available) });
+    if (res.ok && res.quote && res.quote.fee > 0) fee = minorToDisplay(res.quote.fee);
+  } catch {
+    /* no quote: leave fee 0 — the quote line still warns if it will not cover */
+  }
+  const decimals = asset === "BTC" ? 8 : 4;
+  amtInp.value = String(withdrawMaxAmount(available, fee, decimals));
+  void labWithdrawQuoteUi();
+}
+
 async function labWithdrawQuoteUi(): Promise<void> {
   const seq = ++withdrawQuoteSeq;
   const quoteEl = document.getElementById("lab-wd-fee-quote");
@@ -6299,6 +6326,12 @@ function wireLabApiButtons(): void {
     amt.replaceWith(next);
     next.addEventListener("change", () => void labWithdrawQuoteUi());
     next.addEventListener("input", () => void labWithdrawQuoteUi());
+  }
+  const wdMax = document.getElementById("lab-wd-max");
+  if (wdMax) {
+    const next = wdMax.cloneNode(true) as HTMLButtonElement;
+    wdMax.replaceWith(next);
+    next.addEventListener("click", () => void labWithdrawMaxUi());
   }
 }
 
