@@ -51,7 +51,7 @@ describe("tradingGuards", () => {
     });
     expect(seeded.labMmSeeded).toBe(true);
 
-    // Live API shape: lab_mm object with enabled (seed MM live)
+    // Live API shape: enabled alone must NOT claim seeded Soft-MM badge
     const live = parseHealthTradingGuards({
       ok: true,
       min_notional: 100_000_000,
@@ -61,7 +61,7 @@ describe("tradingGuards", () => {
     expect(live.minNotionalQuote).toBe(1);
     expect(live.priceBandBps).toBe(1500);
     expect(live.labMmEnabled).toBe(true);
-    expect(live.labMmSeeded).toBe(true);
+    expect(live.labMmSeeded).toBe(false);
   });
 
   it("rejects paper dust notional and out-of-band limit", () => {

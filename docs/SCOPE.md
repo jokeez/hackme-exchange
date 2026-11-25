@@ -29,7 +29,7 @@
 |------|--------|
 | Public matching (book/orders live) | **GO** (soft-launch caps) |
 | HMC/SUP deposit + withdraw + TOTP | **GO** (ops-gated complete) |
-| USDT auto hot-send / Didit KYT | **HOLD** — BSC watch + stub KYT **manual** is live |
+| USDT auto hot-send | **HOLD** (`HOT_SEND=0`) — BSC watch + **Didit TM** screening is live |
 | BTC hot custody | **HOLD** — paper stub only |
 | Merging SPA into HackMe hub git | Sidecar only |
 | Foreign CEX “listing” claims | Not this product |
@@ -38,10 +38,10 @@
 
 | Role | Host |
 |------|------|
-| Paper SPA / Caddy | `89.150.41.40` · `exchange.hackme.tech` |
+| Paper SPA / Caddy | `exchange-origin-vps` · `exchange.hackme.tech` |
 | Same-origin desk proxy | `https://exchange.hackme.tech/desk-api/*` → loopback API (Strict cookies; SPA CSP `connect-src 'self'`) |
 | Public desk API | `exchange-api.hackme.tech` (CF) for ops/probes — **not** in SPA CSP |
-| Private C2 API (loopback) | **same** `89.150.41.40` — soft-launch trading ON |
+| Private C2 API (loopback) | **same** `exchange-origin-vps` — soft-launch trading ON |
 | Mining hub / node | `132.243.112.100` — **not** exchange edge |
 
 ---
@@ -60,5 +60,5 @@
 | This source repo | Public (AGPL) |
 | Paper / desk product | Live SPA + soft-launch matching |
 | Matching / HMC·SUP custody | **GO** |
-| USDT watch + manual KYT | **GO** (no Didit / no hot-send) |
+| USDT watch + Didit TM | **GO** (auto hot-send still HOLD) |
 | BTC hot custody | **HOLD** |

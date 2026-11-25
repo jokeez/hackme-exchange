@@ -73,7 +73,7 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   const root = document.querySelector(".modal-backdrop[data-settings-modal]");
   if (!root) return;
   const deskOn = !!wallet.deskConnect;
-  const live = !!wallet.sessionLive;
+  const sessionLive = !!wallet.sessionLive;
   const sessionEl = root.querySelector("#set-desk-session");
   if (sessionEl) {
     sessionEl.textContent = deskOn ? wallet.deskSessionLabel || "not connected" : "desk Connect off in this build";
@@ -86,11 +86,11 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   const connectBtn = root.querySelector("#set-desk-connect") as HTMLButtonElement | null;
   if (connectBtn) {
     connectBtn.disabled = !deskOn;
-    connectBtn.textContent = deskOn ? (live ? "Reconnect" : "Connect") : "Unavailable";
+    connectBtn.textContent = deskOn ? (sessionLive ? "Reconnect" : "Connect") : "Unavailable";
   }
   setDisabled("set-desk-copy", !(deskOn && !!wallet.deskAddress));
-  setDisabled("set-desk-logout", !(deskOn && live));
-  setDisabled("set-desk-revoke", !(deskOn && live));
+  setDisabled("set-desk-logout", !(deskOn && sessionLive));
+  setDisabled("set-desk-revoke", !(deskOn && sessionLive));
   setDisabled("set-desk-new-key", !deskOn);
   setDisabled("set-desk-export", !deskOn);
   setDisabled("set-desk-import", !deskOn);
@@ -102,15 +102,16 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   }
   const pending = isDeskEdgePending(wallet.matching);
   const matching = formatDeskMatchingLabel(wallet.matching);
+  const matchingLive = isDeskMatchingLive(wallet.matching);
   const vals = [
-    { on: isDeskMatchingLive(wallet.matching), text: `matching · ${matching}` },
+    { on: matchingLive, text: matchingLive ? "Trading open" : `Trading ${matching}` },
     {
       on: !!wallet.depositEnabled,
-      text: `deposit · ${pending ? "…" : wallet.depositEnabled ? "on" : "HOLD"}`,
+      text: pending ? "Deposits …" : wallet.depositEnabled ? "Deposits open" : "Deposits paused",
     },
     {
       on: !!wallet.withdrawEnabled,
-      text: `withdraw · ${pending ? "…" : wallet.withdrawEnabled ? "on" : "HOLD"}`,
+      text: pending ? "Withdrawals …" : wallet.withdrawEnabled ? "Withdrawals open" : "Withdrawals paused",
     },
   ];
   root.querySelectorAll("#set-desk-hold .settings-hold-pill").forEach((el, i) => {
@@ -122,9 +123,9 @@ export function patchSettingsWalletSessionChrome(wallet: SettingsWalletChrome): 
   const capsEl = root.querySelector("#set-desk-caps");
   if (capsEl) {
     const caps: string[] = [];
-    if (wallet.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max open ${wallet.maxOpenOrders}`);
-    if (wallet.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${wallet.priceBandBps} bps`);
-    if (wallet.minNotional && wallet.minNotional > 0) caps.push(`min notional ${wallet.minNotional}`);
+    if (wallet.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max ${wallet.maxOpenOrders} open`);
+    if (wallet.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${(wallet.priceBandBps / 100).toFixed(0)}% band`);
+    if (wallet.minNotional && wallet.minNotional > 0) caps.push(`min order ~${wallet.minNotional} quote`);
     capsEl.textContent = caps.length ? caps.join(" · ") : "";
     (capsEl as HTMLElement).hidden = caps.length === 0;
   }
@@ -240,7 +241,7 @@ export function renderUnifiedSettingsModal(
             <p class="muted small">${
               isDeskMatchingLive(wallet?.matching)
                 ? "Desk matching live · deposit/withdraw follow edge badges below."
-                : "Paper Spot stays local. Edge badges show matching / deposit / withdraw status."
+                : "Soft-launch desk · edge badges show matching / deposit / withdraw."
             }</p>
           </header>
           <div class="settings-edge-card" id="set-desk-hold" aria-live="polite">
@@ -249,17 +250,17 @@ export function renderUnifiedSettingsModal(
               <button type="button" class="btn-sm settings-hold-refresh" id="set-desk-health" title="Refresh /desk-api health">↻ Refresh</button>
             </div>
             <div class="settings-hold-row">
-              <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">matching · ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}</span>
-              <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">deposit · ${isDeskEdgePending(wallet?.matching) ? "…" : wallet?.depositEnabled ? "on" : "HOLD"}</span>
-              <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">withdraw · ${isDeskEdgePending(wallet?.matching) ? "…" : wallet?.withdrawEnabled ? "on" : "HOLD"}</span>
+              <span class="settings-hold-pill" data-on="${isDeskMatchingLive(wallet?.matching) ? "1" : "0"}">${isDeskMatchingLive(wallet?.matching) ? "Trading open" : `Trading ${escapeHtml(formatDeskMatchingLabel(wallet?.matching))}`}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.depositEnabled ? "1" : "0"}">${isDeskEdgePending(wallet?.matching) ? "Deposits …" : wallet?.depositEnabled ? "Deposits open" : "Deposits paused"}</span>
+              <span class="settings-hold-pill" data-on="${wallet?.withdrawEnabled ? "1" : "0"}">${isDeskEdgePending(wallet?.matching) ? "Withdrawals …" : wallet?.withdrawEnabled ? "Withdrawals open" : "Withdrawals paused"}</span>
             </div>
             <p class="muted small mono" id="set-desk-caps"${
               wallet?.maxOpenOrders || wallet?.priceBandBps || wallet?.minNotional ? "" : " hidden"
             }>${(() => {
               const caps: string[] = [];
-              if (wallet?.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max open ${wallet.maxOpenOrders}`);
-              if (wallet?.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${wallet.priceBandBps} bps`);
-              if (wallet?.minNotional && wallet.minNotional > 0) caps.push(`min notional ${wallet.minNotional}`);
+              if (wallet?.maxOpenOrders && wallet.maxOpenOrders > 0) caps.push(`max ${wallet.maxOpenOrders} open`);
+              if (wallet?.priceBandBps && wallet.priceBandBps > 0) caps.push(`±${(wallet.priceBandBps / 100).toFixed(0)}% band`);
+              if (wallet?.minNotional && wallet.minNotional > 0) caps.push(`min order ~${wallet.minNotional} quote`);
               return escapeHtml(caps.join(" · "));
             })()}</p>
           </div>
@@ -267,7 +268,7 @@ export function renderUnifiedSettingsModal(
             <div class="settings-action-row is-primary">
               <div class="settings-action-meta">
                 <strong>Desk Connect</strong>
-                <p class="muted small">Browser-local <code>HMC-…</code> via same-origin <code>/desk-api</code>.</p>
+                <p class="muted small">Browser wallet login for this exchange (not a deposit address).</p>
                 <p class="mono small settings-session" id="set-desk-session">${deskOn ? escapeHtml(session) : "desk Connect off in this build"}</p>
               </div>
               <div class="settings-action-btns">
@@ -390,7 +391,7 @@ export function renderUnifiedSettingsModal(
         <div class="modal-pane${dataP.active}" id="pane-data" role="tabpanel"${dataP.hidden}>
           <header class="settings-pane-head">
             <h4>Demo data</h4>
-            <p class="muted small">Export / import paper wallet, orders, and chart state.</p>
+            <p class="muted small">Export / import local demo snapshot (orders, chart). Desk custody is separate.</p>
           </header>
           <div class="settings-action-list">
             <div class="settings-action-row">

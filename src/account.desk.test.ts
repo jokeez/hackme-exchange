@@ -108,8 +108,8 @@ describe("Account desk session (HOLD)", () => {
       },
     });
     expect(html).toContain("acct-desk-caps");
-    expect(html).toContain("max open 96");
-    expect(html).toContain("±1500 bps");
+    expect(html).toContain("max 96 open");
+    expect(html).toContain("±15% band");
   });
 
   it("desk overview uses soft-launch VIP copy (not paper demo)", () => {

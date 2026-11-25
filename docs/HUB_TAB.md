@@ -55,7 +55,7 @@ Empty `document.referrer` on production hostname falls back to `https://hackme.t
 
 Paper build ships `frame-ancestors` in HTML meta **and** origin must send the same
 policy as an **HTTP** `Content-Security-Policy` header. Live origin is **Caddy** on
-`89.150.41.40` — see HackMe [`scripts/ops/caddy/exchange.Caddyfile`](https://github.com/jokeez/hackme/blob/main/scripts/ops/caddy/exchange.Caddyfile)
+`exchange-origin-vps` — see HackMe [`scripts/ops/caddy/exchange.Caddyfile`](https://github.com/jokeez/hackme/blob/main/scripts/ops/caddy/exchange.Caddyfile)
 (legacy nginx sketch: `scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
 Browsers ignore `frame-ancestors` in `<meta http-equiv>` — header is the real gate.
 

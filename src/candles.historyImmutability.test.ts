@@ -87,11 +87,12 @@ describe("closed candle immutability under tip pump", () => {
 
   beforeEach(() => {
     stubSessionStorage();
-    // applyMid/ensureContiguous fillToNow use Date.now() — pin wall clock to fixture.
-    vi.useFakeTimers({ now: nowMs });
+    // Pin wall clock without vi.useFakeTimers — fake timers + clear/useReal
+    // hang afterEach under soak (pending long timers → hookTimeout).
+    vi.spyOn(Date, "now").mockReturnValue(nowMs);
   });
   afterEach(() => {
-    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 

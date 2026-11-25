@@ -106,7 +106,7 @@ export function renderConvertRecentList(
   if (!rows.length) {
     const body =
       mode === "desk"
-        ? "Your converts will show here. Convert swaps instantly at the market reference price with your VIP taker fee; for large sizes use the Spot book."
+        ? "Connect on Account for server Convert; until then this is a local preview. After Connect, swaps use desk mid + VIP taker; large sizes → Spot book."
         : mode === "lab"
           ? "Lab convert uses server mid after you connect the fixture on Account."
           : "Pick HMC/USDT or HMC/SUP and Convert at mid — fees follow your VIP schedule.";

@@ -8,6 +8,16 @@ import {
 } from "../oracleStatus";
 import { escapeHtml } from "../sanitize";
 
+/**
+ * Live desk BTC is book-implied (HMC/USDT ÷ HMC/BTC), not an external BTC/USD mark.
+ * Soft-MM HMC/BTC ~9e-4 → desk ≈ $70–$100; label so $89 is not mistaken for CoinMarketCap.
+ */
+export function formatOracleBtcUsd(n: number): string {
+  if (!(n > 0) || !Number.isFinite(n)) return "—";
+  const core = `$${formatNum(n, n >= 1000 ? 0 : 0)}`;
+  return n < 1_000 ? `${core} (desk)` : core;
+}
+
 export function renderOracleTransparencyPanel(
   meta: OracleMeta,
   market: MarketSnapshot,
@@ -40,7 +50,7 @@ export function renderOracleTransparencyPanel(
         <ul class="oracle-trans-mids mono">
           <li>HMC <strong data-oracle-trans-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></li>
           <li>SUP <strong data-oracle-trans-mid="sup">${formatPrice(market.supUsdt)}</strong></li>
-          <li>BTC <strong data-oracle-trans-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></li>
+          <li>BTC desk <strong data-oracle-trans-mid="btc">${formatOracleBtcUsd(market.btcUsd)}</strong></li>
         </ul>
       </article>
       <article>
@@ -88,7 +98,7 @@ export function patchOracleTransparencyDom(
   const mids: Record<string, string> = {
     hmc: formatPrice(market.hmcUsdt),
     sup: formatPrice(market.supUsdt),
-    btc: `$${formatNum(market.btcUsd, 0)}`,
+    btc: formatOracleBtcUsd(market.btcUsd),
   };
   for (const [key, value] of Object.entries(mids)) {
     const el = root.querySelector(`[data-oracle-trans-mid="${key}"]`);

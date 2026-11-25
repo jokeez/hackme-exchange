@@ -2,7 +2,7 @@
 
 > **Canonical for Phase 2 backend design.** Demo numbers live in code (`src/fees.ts`, `src/market.ts`, `src/book.ts`); this doc states what is **demo**, what is **Phase 2 target**, and how exchange fees relate to **HackMe chain / pool / fuzz** economics (must not contradict).
 
-**Status:** D0 Paper · paper settlement · shared reference mids (±drift)  
+**Status:** Soft-launch · Soft-MM anchor ~0.05 · **Last** from durable fills / `/tickers` (not the anchor alone)  
 **Cross-check:** HackMe `internal/chain/economics.go`, `docs/FUZZ_ESCROW_20_80.md`, `docs/ORDER_ECONOMICS.md`, `docs/EXCHANGE_LISTING_MEMO.md`
 
 ---

@@ -14,7 +14,7 @@ Build helpers, paper gate, and optional Playwright / lab smokes.
 | `desk-connect-smoke.ts` | `npm run smoke:desk` — Connect + book; `EX_MATCHING_GO=1` expects book 200 |
 | `matching_go_security_probe.ts` | `npm run smoke:matching-sec` — CSRF/CORS/cookies/admin/metrics matrix |
 | `matching_go_acceptance_smoke.ts` | `npm run smoke:matching-go` — place/cancel; `EX_MATCHING_GO=1 EX_CUSTODY_GO=1` for public soft-launch |
-| `deploy_paper_origin.sh` | rsync `dist-d0` → CF origin `89.150.41.40:/var/www/exchange` (not hub VPS) |
+| `deploy_paper_origin.sh` | rsync `dist-d0` → CF origin `exchange-origin-vps:/var/www/exchange` (not hub VPS) |
 | `lab-smoke.ts` | `npm run smoke:lab` — loopback `:18443` |
 | `d1-smoke.ts` / `d1-local-dev.sh` | Staging helpers |
 | `node-watch-auth.ts` | Helper for API `d1_node_watch_e2e.sh` (auth + HMC/SUP deposit addrs, no lab mint) |

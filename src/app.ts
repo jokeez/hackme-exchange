@@ -538,12 +538,16 @@ const PAPER_BADGE = `<span class="demo-badge" title="Paper desk — operator ref
 const PAPER_BADGE_SM = `<span class="demo-badge sm" title="Paper desk — operator reference mid, not a live market price">PAPER</span>`;
 const LAB_BOOK_BADGE = `<span class="demo-badge" title="Live L2 from private lab matching engine">LAB · LIVE BOOK</span>`;
 const LAB_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live L2 from private lab matching engine">LAB</span>`;
-const DESK_BOOK_BADGE = `<span class="demo-badge" title="Live matching soft-launch — public L2 + tape">SPOT · LIVE</span>`;
-const DESK_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Live matching soft-launch">LIVE</span>`;
+const DESK_BOOK_BADGE = `<span class="demo-badge" title="Soft-launch matching — public L2 + Soft-MM tape (not organic volume)">SPOT · SOFT-LAUNCH</span>`;
+const DESK_BOOK_BADGE_SM = `<span class="demo-badge sm" title="Soft-launch matching · Soft-MM tape">SOFT-LAUNCH</span>`;
+/** Public desk build before first /health (or HOLD) — never paint PAPER · REF MID on soft-launch origin. */
+const DESK_PENDING_BADGE = `<span class="demo-badge" title="Soft-launch desk — waiting for matching health">SOFT-LAUNCH · …</span>`;
+const DESK_PENDING_BADGE_SM = `<span class="demo-badge sm" title="Soft-launch desk — waiting for matching health">SOFT-LAUNCH</span>`;
 
 function bookHeaderBadge(): string {
   if (useLabMatching()) return LAB_BOOK_BADGE_SM;
   if (useDeskMatching() || usePublicDeskBook()) return DESK_BOOK_BADGE_SM;
+  if (isDeskConnectEnabled()) return DESK_PENDING_BADGE_SM;
   return PAPER_BADGE_SM;
 }
 
@@ -1390,12 +1394,14 @@ async function hydrateDeskApiTickers(force = false): Promise<boolean> {
     const high = apiPriceToDisplay(Number(row.high_24h ?? 0));
     const low = apiPriceToDisplay(Number(row.low_24h ?? 0));
     const vol = minorToDisplay(Number(row.volume_24h_base ?? 0));
+    // Prefer open→last math so toolbar/% never drifts from a stale change_bps
+    // while H/L already refreshed (sliding 24h window). Fall back to bps.
     const bps = Number(row.change_bps ?? 0);
     const changePct =
-      Number.isFinite(bps) && bps !== 0
-        ? bps / 100
-        : open > 0 && last > 0
-          ? ((last - open) / open) * 100
+      open > 0 && last > 0
+        ? ((last - open) / open) * 100
+        : Number.isFinite(bps)
+          ? bps / 100
           : 0;
     deskApiTickers.set(pid, {
       last,
@@ -1567,20 +1573,26 @@ function renderAnnounce(): string {
     : lab
       ? "Private lab matching — not production custody"
       : deskLive
-        ? "Early access — live trading · deposits & withdrawals open"
+        ? "Soft-launch — live trading · HMC/SUP deposits & withdrawals open"
         : deskBook
-          ? "Early access — live market · connect to trade"
+          ? "Soft-launch — live market · Connect to trade"
           : desk
-            ? "Early access — trading opens soon"
+            ? "Soft-launch — trading opens soon"
             : "Paper Spot — simulated balances · reference mids";
   const detail = lab
     ? "lab ledger"
     : deskLive || deskBook
-      ? "real HMC, SUP and USDT"
+      ? "real HMC/SUP · USDT deposit watch on · auto hot-send HOLD"
       : desk
-        ? "connect to trade"
+        ? "Connect to trade"
         : "paper balances in localStorage";
-  const badge = lab ? LAB_BOOK_BADGE : deskLive || deskBook ? DESK_BOOK_BADGE : PAPER_BADGE;
+  const badge = lab
+    ? LAB_BOOK_BADGE
+    : deskLive || deskBook
+      ? DESK_BOOK_BADGE
+      : desk
+        ? DESK_PENDING_BADGE
+        : PAPER_BADGE;
   return `<div class="announce" id="announce-bar" role="status">
     <strong>${bold}</strong>
     ${(deskLive || deskBook || desk) && !lab ? "" : `· ${label}`}
@@ -2077,7 +2089,12 @@ function pairQuote(pairId: PairId = state.activePair): PairQuote {
   if (useLiveBook()) {
     const api = deskApiTickers.get(pairId);
     if (api) {
-      const changePct = api.changePct;
+      // % always vs durable last (not BBO mid) so Markets/toolbar match GET /tickers.
+      const lastPx = api.last > 0 ? api.last : mid;
+      const changePct =
+        api.open24h > 0 && lastPx > 0
+          ? ((lastPx - api.open24h) / api.open24h) * 100
+          : api.changePct;
       return {
         mid: mid > 0 ? mid : api.last,
         changePct,
@@ -2547,7 +2564,7 @@ function renderMarketsList(): string {
       <div class="mr-right">
         <span class="mono mr-px notranslate" translate="no">${q.mid > 0 ? formatPriceCompact(q.mid) : "—"}</span>
         <span class="mono mr-chg notranslate ${quoteToneClass(q.tone)}" translate="no">${formatPct(q.changePct)}</span>
-        <span class="mono mr-vol muted notranslate" translate="no" title="24h volume">${escapeHtml(volTxt)}</span>
+        <span class="mono mr-vol muted notranslate" translate="no" title="${escapeHtml(volTitle(p.id, p.base))}">${escapeHtml(volTxt)}</span>
       </div>
     </button></div>`;
   };
@@ -3186,7 +3203,13 @@ function renderConvert(): string {
           Confirm when spending &gt;50% of available balance
         </label>
         <button type="button" class="btn-primary btn-block cv-go" id="cv-go" aria-live="polite">Convert</button>
-        <p class="muted small cv-hint" id="cv-hint">HMC/USDT or HMC/SUP · live preview before you confirm</p>
+        <p class="muted small cv-hint" id="cv-hint">${
+          serverReady
+            ? "HMC/USDT or HMC/SUP · server convert after confirm"
+            : deskBook || (isDeskConnectEnabled() && isDeskMatchingLive(deskEdgeSnap.matching))
+              ? "HMC/USDT or HMC/SUP · Connect on Account for server convert"
+              : "HMC/USDT or HMC/SUP · local preview until Connect"
+        }</p>
         <div class="cv-actions">
           <button type="button" class="btn-sm" id="cv-open-spot" title="Open matching Spot market">Trade on Spot →</button>
         </div>
@@ -3212,6 +3235,14 @@ function refreshConvertPreview(): void {
 function paintConvertCta(go: HTMLButtonElement | null, amt: number, disabled: boolean): void {
   if (!go) return;
   go.disabled = disabled;
+  const deskNeedsConnect =
+    isDeskConnectEnabled() &&
+    (usePublicDeskBook() || isDeskMatchingLive(deskEdgeSnap.matching)) &&
+    !useServerConvert();
+  if (deskNeedsConnect && amt > 0) {
+    go.textContent = "Connect to convert";
+    return;
+  }
   go.textContent = convertCtaLabel(
     assetSymbol(convertFrom),
     assetSymbol(convertTo),
@@ -3523,7 +3554,8 @@ async function runConvertDesk(): Promise<void> {
         fallbackTakerBps: vip.takerBps,
       });
       await syncLabBalancesAndBook(state, market);
-      recordConvert(state, from, to, amt, got, market, labFee, def.pair);
+      // Ledger activity must match net credit (UI/toast), not gross `got`.
+      recordConvert(state, from, to, amt, net, market, labFee, def.pair);
       saveState(state);
       const resultDriftBps =
         slippageBps > 0 && lastConvertPreviewNet > 0
@@ -3559,10 +3591,15 @@ async function runConvertDesk(): Promise<void> {
     return;
   }
 
-  // Lab connected without /convert advertisement — never paper-convert (ledger desync).
-  // Desk without convert GO may still paper-convert (soft-launch).
-  if (useLabMatching() && !tradingGuards.convertFeeServer) {
-    toast("Lab /convert not advertised — enable on exchange-api or disconnect fixture", "warn");
+  // Lab/desk with session matching but no /convert advertisement — never paper-convert
+  // (local wallet toast + phantom funds until authoritative sync wipes them).
+  if (useServerMatching() && !tradingGuards.convertFeeServer) {
+    toast(
+      useDeskMatching()
+        ? "Server /convert not ready — Connect again or trade on Spot"
+        : "Lab /convert not advertised — enable on exchange-api or disconnect fixture",
+      "warn",
+    );
     return;
   }
 
@@ -3651,7 +3688,7 @@ function softPatchFeePayChrome(): void {
   const mode = document.querySelector(".convert-fee-mode");
   if (mode) {
     mode.textContent = state.feeConfig.payFeesInHmc
-      ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · paper only until health advertises hmc_fee_pay"}`
+      ? `Pay fees in HMC on (−${state.feeConfig.hmcDiscountPct}%)${tradingGuards.hmcFeePayServer ? " · server honors" : " · enabled when health advertises hmc_fee_pay"}`
       : `Fees in quote asset · toggle HMC (−${state.feeConfig.hmcDiscountPct}%) on Account or Spot`;
   }
   const lead = document.querySelector(".convert-lead");
@@ -5646,10 +5683,9 @@ async function labWithdrawRequestUi(): Promise<void> {
   }
 }
 
-/** Fill the amount field with the most that can be withdrawn: available - fee, so the
- *  wallet debit equals the full balance and nothing is stranded. Fee from a live custody
- *  quote at the full balance; fee-on-top at the top is >= fee on the net, so subtracting
- *  it never overshoots (exact for a flat fee). */
+/** Fill the amount field with withdrawMaxAmount for the selected asset, fee from a live
+ *  custody quote at the full balance (fee-on-top at the top is >= fee on the net, so the
+ *  result never overshoots). */
 async function labWithdrawMaxUi(): Promise<void> {
   const asset = ((document.getElementById("lab-wd-asset") as HTMLSelectElement | null)?.value || "HMC").toUpperCase();
   const availEl = document.getElementById("lab-wd-avail");
@@ -5666,7 +5702,7 @@ async function labWithdrawMaxUi(): Promise<void> {
     const res = await fetchCustodyFees({ side: "withdraw", asset, amount: displayToMinor(available) });
     if (res.ok && res.quote && res.quote.fee > 0) fee = minorToDisplay(res.quote.fee);
   } catch {
-    /* no quote: leave fee 0 — the quote line still warns if it will not cover */
+    /* no quote: leave fee 0 — the quote line below still warns if it will not cover */
   }
   const decimals = asset === "BTC" ? 8 : 4;
   amtInp.value = String(withdrawMaxAmount(available, fee, decimals));

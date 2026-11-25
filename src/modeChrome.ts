@@ -9,10 +9,10 @@ export function modeChromeLabel(): string {
   if (isStagingMode() && useLabMatching()) return "D1 staging · loopback ledger (local only)";
   if (isStagingMode()) return "D1 staging — connect fixture to loopback API";
   if (useLabMatching()) return "Lab matching (loopback) — DEMO/LAB only";
-  if (useDeskMatching()) return "Live trading — connected";
-  if (usePublicDeskBook()) return "Live trading — connect to trade";
+  if (useDeskMatching()) return "Soft-launch · live matching — connected";
+  if (usePublicDeskBook()) return "Soft-launch · Connect to trade";
   if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) {
-    return "Live trading — connect to trade";
+    return "Soft-launch · Connect to trade";
   }
   if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) {
     return "Connecting to the exchange…";
@@ -30,9 +30,9 @@ export function modeStatusPill(): string {
   if (isLiveModeBlocked()) return "⛔ Live blocked";
   if (isStagingMode()) return useLabMatching() ? "◈ D1 local" : "◈ D1 staging";
   if (useLabMatching()) return "◎ Lab";
-  if (useDeskMatching()) return "● Live";
-  if (usePublicDeskBook()) return "● Live · Connect";
-  if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) return "● Live · Connect";
+  if (useDeskMatching()) return "● Soft-launch";
+  if (usePublicDeskBook()) return "● Soft-launch · Connect";
+  if (isDeskConnectEnabled() && isDeskMatchingLive(getDeskMatchingStatus())) return "● Soft-launch · Connect";
   if (isDeskConnectEnabled() && isDeskEdgePending(getDeskMatchingStatus())) return "○ Connecting…";
   if (isDeskConnectEnabled()) return "○ Connect";
   return "◎ Paper";
