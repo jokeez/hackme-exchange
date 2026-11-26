@@ -6,7 +6,7 @@
 
 Prod QA + money-path (HMC) green on public desk. USDT = BEP-20 watch + Didit KYT + manual ops broadcast (no auto hot-send).
 
-[![Paper site](https://img.shields.io/badge/paper-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
+[![Desk](https://img.shields.io/badge/desk-exchange.hackme.tech-7fe7ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Main HackMe](https://img.shields.io/badge/main_repo-jokeez%2Fhackme-00d1ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jokeez/hackme)
 [![Matching](https://img.shields.io/badge/matching_API-soft--launch_GO-39ff14?style=for-the-badge)](docs/MATCHING_GO_CHECKLIST.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/jokeez/hackme-exchange/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/jokeez/hackme-exchange/actions)
@@ -22,7 +22,7 @@ Prod QA + money-path (HMC) green on public desk. USDT = BEP-20 watch + Didit KYT
 | Layer | Status |
 |-------|--------|
 | **This repo (source)** | Open (AGPL) — Spot SPA (paper + desk Connect) |
-| **Paper / desk site** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`89.150.41.40`** (Caddy) + same-origin `/desk-api` |
+| **Public desk** | [exchange.hackme.tech](https://exchange.hackme.tech) — static UI on **`exchange-origin-vps`** (Caddy) + same-origin `/desk-api` |
 | **Desk matching** | **GO** — `matching: ok` · `max_open_orders=96` · `price_band_bps=1500` · `min_notional=1e6` · Soft-MM tape |
 | **Desk deposit** | **GO** — HMC/SUP deposit addresses; Connect addr ≠ deposit; node-watch via ops-admin |
 | **Desk withdraw** | **GO** — request + **per-user TOTP/recovery**; ops completes via loopback admin (`:18445`) |

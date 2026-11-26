@@ -16,6 +16,7 @@ import {
   volume30dUsdt,
 } from "./fees";
 import { formatNum, formatPct, formatPrice } from "./market";
+import { formatOracleBtcUsd } from "./product/oraclePanel";
 import { pnlPct, walletEquityFromMarket } from "./store";
 import { dailyPnlCalendar, pnlWindows, renderPnlCalendarHtml } from "./pnl";
 import { ASSET_REGISTRY, PLANNED_ASSETS } from "./adapters/assets";
@@ -308,9 +309,9 @@ function renderDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): string {
   const wd = !!edge?.withdrawEnabled;
   const live = isDeskMatchingLive(edge?.matching);
   const caps: string[] = [];
-  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max open ${edge.maxOpenOrders}`);
-  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${edge.priceBandBps} bps`);
-  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min notional ${edge.minNotional}`);
+  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max ${edge.maxOpenOrders} open`);
+  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${(edge.priceBandBps / 100).toFixed(0)}% band`);
+  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min order ~${edge.minNotional} quote`);
   const capsLine =
     caps.length > 0
       ? `<p class="muted small mono acct-desk-caps" title="Soft-launch caps">${escapeHtml(caps.join(" · "))}</p>`
@@ -331,9 +332,15 @@ export function patchDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): void {
     const pending = isDeskEdgePending(edge.matching);
     const live = isDeskMatchingLive(edge.matching);
     const vals = [
-      { on: live, text: `matching · ${matching}` },
-      { on: !!edge.depositEnabled, text: `deposit · ${pending ? "…" : edge.depositEnabled ? "on" : "HOLD"}` },
-      { on: !!edge.withdrawEnabled, text: `withdraw · ${pending ? "…" : edge.withdrawEnabled ? "on" : "HOLD"}` },
+      { on: live, text: live ? "Trading open" : `Trading ${matching}` },
+      {
+        on: !!edge.depositEnabled,
+        text: pending ? "Deposits …" : edge.depositEnabled ? "Deposits open" : "Deposits paused",
+      },
+      {
+        on: !!edge.withdrawEnabled,
+        text: pending ? "Withdrawals …" : edge.withdrawEnabled ? "Withdrawals open" : "Withdrawals paused",
+      },
     ];
     row.querySelectorAll(".settings-hold-pill").forEach((el, i) => {
       const v = vals[i];
@@ -345,9 +352,9 @@ export function patchDeskHoldPills(edge?: AccountPageOpts["deskEdge"]): void {
   const capsEl = document.querySelector(".acct-desk-caps");
   if (!capsEl) return;
   const caps: string[] = [];
-  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max open ${edge.maxOpenOrders}`);
-  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${edge.priceBandBps} bps`);
-  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min notional ${edge.minNotional}`);
+  if (edge?.maxOpenOrders && edge.maxOpenOrders > 0) caps.push(`max ${edge.maxOpenOrders} open`);
+  if (edge?.priceBandBps && edge.priceBandBps > 0) caps.push(`±${(edge.priceBandBps / 100).toFixed(0)}% band`);
+  if (edge?.minNotional && edge.minNotional > 0) caps.push(`min order ~${edge.minNotional} quote`);
   if (caps.length > 0) {
     capsEl.classList.add("mono");
     capsEl.setAttribute("title", "Soft-launch caps from /health");
@@ -657,7 +664,7 @@ function renderFeesBlock(state: DemoState, market: MarketSnapshot, vip: ReturnTy
         <article class="acct-oracle-strip">
           <span class="acct-oracle-pill"><span class="muted">HMC</span> <strong class="mono" data-acct-oracle-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></span>
           <span class="acct-oracle-pill"><span class="muted">SUP</span> <strong class="mono" data-acct-oracle-mid="sup">${formatPrice(market.supUsdt)}</strong></span>
-          <span class="acct-oracle-pill"><span class="muted">BTC</span> <strong class="mono" data-acct-oracle-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></span>
+          <span class="acct-oracle-pill" title="Book-implied from HMC/USDT ÷ HMC/BTC — not external BTC/USD; BTC custody HOLD"><span class="muted">BTC desk</span> <strong class="mono" data-acct-oracle-mid="btc">${formatOracleBtcUsd(market.btcUsd)}</strong></span>
         </article>
         <table class="fee-table compact">
           <thead><tr><th>Tier</th><th>Vol</th><th>Maker</th><th>Taker</th></tr></thead>
@@ -1465,7 +1472,7 @@ export function patchAccountFundsDom(state: DemoState, market: MarketSnapshot, o
   const acctMids: Record<string, string> = {
     hmc: formatPrice(market.hmcUsdt),
     sup: formatPrice(market.supUsdt),
-    btc: `$${formatNum(market.btcUsd, 0)}`,
+    btc: formatOracleBtcUsd(market.btcUsd),
   };
   for (const [key, value] of Object.entries(acctMids)) {
     const el = document.querySelector(`[data-acct-oracle-mid="${key}"]`);

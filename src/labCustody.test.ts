@@ -179,7 +179,6 @@ describe("Account custody UI (buttons + copy)", () => {
   });
 });
 
-
 import { describe as describeWdMax, it as itWdMax, expect as expectWdMax } from "vitest";
 import { withdrawMaxAmount } from "./labCustody";
 
@@ -188,11 +187,13 @@ import { withdrawMaxAmount } from "./labCustody";
 // available - fee, floored so it never rounds up past the balance.
 describeWdMax("withdrawMaxAmount", () => {
   itWdMax("subtracts the fee so amount+fee equals the balance (USDT, flat $1.5)", () => {
+    // balance 33.4804, fee 1.50 → max 31.98 (31.9804 floored to 4dp)
     const max = withdrawMaxAmount(33.4804, 1.5, 4);
     expectWdMax(max).toBe(31.9804);
     expectWdMax(max + 1.5).toBeLessThanOrEqual(33.4804 + 1e-9);
   });
   itWdMax("never rounds up past the balance", () => {
+    // 20.00005 - 1.5 = 18.50005 → floored to 4dp = 18.5000, + fee = 20.0000 <= 20.00005
     const max = withdrawMaxAmount(20.00005, 1.5, 4);
     expectWdMax(max + 1.5).toBeLessThanOrEqual(20.00005);
   });

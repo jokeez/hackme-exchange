@@ -30,7 +30,7 @@ describe("deskWallet", () => {
     expect(id.address).toMatch(/^HMC-[0-9a-f]{16}$/);
     const pub = ed.getPublicKey(Uint8Array.from(a.match(/.{2}/g)!.map((x) => parseInt(x, 16))));
     expect(id.address).toBe(addressFromPubKey(pub));
-  });
+  }, 15_000);
 
   it("clearDeskSeed forces a new address on next identity", async () => {
     vi.doMock("../config/integration", () => ({

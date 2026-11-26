@@ -16,8 +16,8 @@ describe("desk public book helpers", () => {
     setDeskMatchingStatus("ok");
     expect(usePublicDeskBook()).toBe(true);
     expect(useLiveBook()).toBe(true);
-    expect(modeStatusPill()).toMatch(/Desk/);
-    expect(modeChromeLabel()).toMatch(/Connect/i);
+    expect(modeStatusPill()).toMatch(/Soft-launch/);
+    expect(modeChromeLabel()).toMatch(/Connect|Soft-launch/i);
   });
 
   it("HOLD matching disables public book", () => {
@@ -26,10 +26,9 @@ describe("desk public book helpers", () => {
     expect(usePublicDeskBook()).toBe(false);
   });
 
-  it("pre-health pending stays optimistic (no paper ladder flash)", () => {
+  it("pre-health pending stays false until first /health (no fake live chrome)", () => {
     if (!isDeskConnectEnabled()) return;
     setDeskMatchingStatus(null);
-    expect(usePublicDeskBook()).toBe(true);
-    expect(useLiveBook()).toBe(true);
+    expect(usePublicDeskBook()).toBe(false);
   });
 });

@@ -112,15 +112,16 @@ async function browserCheck() {
     document.querySelectorAll(".tour-backdrop, #tour-v2-backdrop, .tour-v2-backdrop").forEach((el) => el.remove());
   }).catch(() => {});
 
-  // Spot shell
+  // Spot shell — wait for boot/chunk paint (cold SW + part fetch can exceed 2.5s)
+  await page.waitForSelector("#chart-host, #chart-wrap, .order-col", { state: "visible", timeout: 30_000 }).catch(() => null);
   const spotOk = await page.locator("#chart-host, #chart-wrap, .order-col").first().isVisible().catch(() => false);
   if (!spotOk) fail("spot shell not visible");
   else ok("spot shell visible");
 
   // Convert
   await page.goto(`${BASE}/#convert`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.waitForTimeout(2000);
-  await page.waitForSelector("#cv-go, .convert-page, .convert-shell", { state: "visible", timeout: 15_000 }).catch(() => null);
+  await page.waitForTimeout(2500);
+  await page.waitForSelector("#cv-go, .convert-page, .convert-shell", { state: "visible", timeout: 25_000 }).catch(() => null);
   const cv = await page.locator("#cv-go, .convert-page, .convert-shell").first().isVisible().catch(() => false);
   if (!cv) fail("convert desk not visible");
   else ok("convert desk visible");

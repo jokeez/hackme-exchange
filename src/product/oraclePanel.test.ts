@@ -2,7 +2,11 @@
  * @vitest-environment happy-dom
  */
 import { describe, expect, it } from "vitest";
-import { patchOracleTransparencyDom, renderOracleTransparencyPanel } from "./oraclePanel";
+import {
+  formatOracleBtcUsd,
+  patchOracleTransparencyDom,
+  renderOracleTransparencyPanel,
+} from "./oraclePanel";
 import { sampleMarket } from "../testFixtures";
 import type { PoolLive } from "../types";
 
@@ -19,6 +23,12 @@ const liveOk: PoolLive = {
 
 describe("oraclePanel", () => {
   const now = 1_700_000_000_000;
+
+  it("formatOracleBtcUsd marks book-implied desk BTC under $1k", () => {
+    expect(formatOracleBtcUsd(89)).toBe("$89 (desk)");
+    expect(formatOracleBtcUsd(87_000)).toBe("$87,000");
+    expect(formatOracleBtcUsd(0)).toBe("—");
+  });
 
   it("patchOracleTransparencyDom updates mids and telemetry in place", () => {
     document.body.innerHTML = renderOracleTransparencyPanel(

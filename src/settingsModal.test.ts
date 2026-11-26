@@ -47,9 +47,9 @@ describe("Settings → Wallet pane", () => {
     expect(html).toContain("settings-shell");
     expect(html).toContain("settings-rail");
     expect(html).toContain("settings-switch-row");
-    expect(html).toContain("matching · HOLD");
-    expect(html).toContain("deposit · HOLD");
-    expect(html).toContain("withdraw · HOLD");
+    expect(html).toContain("Trading HOLD");
+    expect(html).toContain("Deposits paused");
+    expect(html).toContain("Withdrawals paused");
     expect(html).toContain("set-desk-connect");
     expect(html).toContain("Reconnect");
     expect(html).toContain("set-desk-export");
@@ -64,7 +64,7 @@ describe("Settings → Wallet pane", () => {
     expect(html).not.toContain("<script>");
   });
 
-  it("shows withdraw · on when edge health enables withdraw", () => {
+  it("shows withdraw open when edge health enables withdraw", () => {
     const html = renderUnifiedSettingsModal(baseState(), LAYOUT_DEFAULTS, "hub", {
       deskConnect: true,
       deskSessionLabel: "HMC-abcdef0123456789",
@@ -75,9 +75,9 @@ describe("Settings → Wallet pane", () => {
       depositEnabled: true,
       withdrawEnabled: true,
     });
-    expect(html).toContain("withdraw · on");
-    expect(html).toContain("deposit · on");
-    expect(html).toContain("matching · ok");
+    expect(html).toContain("Withdrawals open");
+    expect(html).toContain("Deposits open");
+    expect(html).toContain("Trading open");
     expect(html).toContain("TOTP required on every withdraw");
   });
 
@@ -198,7 +198,7 @@ describe("Settings → Wallet pane", () => {
     expect(document.getElementById("set-desk-session")?.textContent).toBe("not connected");
     expect((document.getElementById("set-desk-logout") as HTMLButtonElement).disabled).toBe(true);
     expect((document.getElementById("set-desk-connect") as HTMLButtonElement).textContent).toBe("Connect");
-    expect(document.getElementById("set-desk-hold")?.textContent).toContain("matching · HOLD");
+    expect(document.getElementById("set-desk-hold")?.textContent).toContain("Trading HOLD");
     document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
   });
 });

@@ -30,7 +30,7 @@ Threat checklist for this **open-source SPA**. Soft-launch matching / HMC·SUP c
 - [x] Build with **no** `VITE_HACKME_ADMIN_TOKEN`
 - [x] `VITE_INTEGRATION_MODE=paper` (live remains blocked)
 - [x] Keep `VITE_NODE_ORIGIN` as loopback in public SPA
-- [x] HTTP CSP + security headers on paper origin (Caddy on `89.150.41.40`)
+- [x] HTTP CSP + security headers on paper origin (Caddy on `exchange-origin-vps`)
 - [ ] Self-host fonts or add SRI when convenient
 
 ## Soft-launch principles

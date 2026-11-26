@@ -1,10 +1,10 @@
 # Matching GO checklist (public desk)
 
-**Status:** **Full GO (2026-10-09)** — matching `ok` · deposit/withdraw **ON** · USDT BSC watch + stub KYT manual · BTC hot custody **HOLD**.  
+**Status:** **Full GO (2026-10-09)** — matching `ok` · deposit/withdraw **ON** · USDT BSC watch + Didit TM manual · BTC hot custody **HOLD**.  
 **Scope:** public desk live book/orders + HMC/SUP custody. Caps: `max_open_orders=96`, `price_band_bps=1500`, `min_notional=1e6`.  
 Ops canon: `hackme-exchange-ops/docs/FULL_GO_CHECKLIST.md`.
 
-Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `89.150.41.40`.
+Hub VPS (`132…`) must **never** run the exchange edge. Paper SPA stays on `exchange-origin-vps`.
 
 ---
 

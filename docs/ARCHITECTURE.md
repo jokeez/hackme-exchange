@@ -1,6 +1,6 @@
 # Architecture — paper + soft-launch desk
 
-Topology for the open-source SPA + public soft-launch matching. USDT/BTC real custody remains HOLD until partner bridge.
+Topology for the open-source SPA + public soft-launch matching. USDT = Didit TM + watch (`HOT_SEND=0`); BTC hot custody remains HOLD.
 
 ```text
 ┌────────────────────────────┐     read-only oracle
@@ -10,7 +10,7 @@ Topology for the open-source SPA + public soft-launch matching. USDT/BTC real cu
              │ iframe / deep link                  │
              ▼                                     │
 ┌────────────────────────────┐                     │
-│  exchange.hackme.tech      │  CF → 89.150.41.40  │
+│  exchange.hackme.tech      │  CF → exchange-origin-vps  │
 │  static SPA (Caddy)        │  /desk-api → desk   │
 │  Desk Connect + matching   │  (soft-launch GO)   │
 └────────────────────────────┘                     │
@@ -23,7 +23,7 @@ Public desk soft-launch (matching ON)              │
                                                    │
 Private C2 (SSH / loopback) — same VPS             │
 ┌────────────────────────────┐                     │
-│  89.150.41.40              │                     │
+│  exchange-origin-vps              │                     │
 │  exchange-api staging      │  127.0.0.1:18444    │
 │  TLS wrapper               │  127.0.0.1:8443     │
 │  Postgres                  │  127.0.0.1:54330    │

@@ -129,15 +129,13 @@ export function parseHealthTradingGuards(health: HealthResponse | Record<string,
     out.maxOpenOrders = Math.floor(maxOpen);
   }
 
-  // MM seeded: only when an explicit flag is present (never invent when absent).
+  // MM seeded: only when an explicit flag is present (never invent from enabled alone —
+  // Soft-MM "SOFT MM" chrome must not claim liquidity before the book is seeded).
   if (labMmObj) {
     out.labMmEnabled = truthy(labMmObj.enabled ?? labMmObj.on ?? labMmObj.active);
     const explicitSeeded = labMmObj.seeded ?? labMmObj.mm_seeded ?? labMmObj.seed;
     if (explicitSeeded !== undefined) {
       out.labMmSeeded = truthy(explicitSeeded);
-    } else if (out.labMmEnabled) {
-      // API health uses lab_mm.enabled (+ address/levels) when the seed MM is live.
-      out.labMmSeeded = true;
     }
   } else if (typeof h.lab_mm === "boolean" || typeof h.lab_mm === "string" || typeof h.lab_mm === "number") {
     out.labMmEnabled = truthy(h.lab_mm);

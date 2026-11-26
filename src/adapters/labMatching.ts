@@ -105,11 +105,12 @@ export function useDeskMatching(): boolean {
 /**
  * Public L2 book is available without a session when health advertises matching ok.
  * Chart/book use this; placing orders still requires useDeskMatching().
- * Before the first health poll, stay optimistic so cold load never flashes a demo ladder.
+ * Before the first health poll, stay pending (false) — optimistic `true` painted live
+ * chrome / mid anchors before matching state was known.
  */
 export function usePublicDeskBook(): boolean {
   if (!isDeskConnectEnabled()) return false;
-  if (deskMatchingRaw === null) return true;
+  if (deskMatchingRaw === null) return false;
   return isDeskMatchingLive(deskMatchingRaw);
 }
 
@@ -741,7 +742,7 @@ export async function syncLabBalancesAndBook(
     const holdNote = isDeskConnectEnabled()
       ? usePublicDeskBook()
         ? `Desk sync · ${bal.address.slice(0, 14)}… · matching live · Connect to trade${bookNote}`
-        : `Desk sync · ${bal.address.slice(0, 14)}… · live book · paper Spot until Connect`
+        : `Desk sync · ${bal.address.slice(0, 14)}… · matching HOLD · Connect when edge is GO`
       : `API sync · ${bal.address.slice(0, 14)}… · matching off`;
     return { ok: true, note: holdNote };
   }

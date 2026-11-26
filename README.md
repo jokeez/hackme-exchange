@@ -13,20 +13,20 @@
 
 ### Soft-launch Spot terminal for the HackMe ecosystem
 
-**Soft-launch GO** — matching + HMC/SUP custody on public desk (TOTP withdraw, soft-launch caps). USDT/BTC real custody **HOLD**. Not a licensed exchange. Not financial advice.
+**Soft-launch GO** — matching + HMC/SUP custody on public desk (TOTP withdraw, soft-launch caps). Soft-MM keeps a live tape (operator inventory — not organic volume). USDT auto hot-send **HOLD**. Not a licensed exchange. Not financial advice.
 
 <br/>
 
-[![Paper site](https://img.shields.io/badge/desk-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
+[![Desk](https://img.shields.io/badge/desk-exchange.hackme.tech-00d1ff?style=for-the-badge)](https://exchange.hackme.tech)
 [![Matching API](https://img.shields.io/badge/matching_API-soft--launch_GO-39ff14?style=for-the-badge)](STATUS.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/jokeez/hackme-exchange/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/jokeez/hackme-exchange/actions)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge&logo=gnu&logoColor=white)](LICENSE)
-[![Mids](https://img.shields.io/badge/HMC_0.05_·_SUP_0.25-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
+[![Mids](https://img.shields.io/badge/Soft--MM_anchor_~0.05_·_Last_from_/tickers-ffb020?style=for-the-badge)](docs/ECONOMICS.md)
 [![Hub](https://img.shields.io/badge/hackme.tech-hub-ff6b9d?style=for-the-badge)](https://hackme.tech)
 
 <br/>
 
-**[🏠 Main HackMe](https://github.com/jokeez/hackme)** · **[Live paper](https://exchange.hackme.tech)** · **[STATUS](STATUS.md)** · **[Docs](docs/README.md)** · **[Economics](docs/ECONOMICS.md)** · **[Security](docs/SECURITY.md)**
+**[🏠 Main HackMe](https://github.com/jokeez/hackme)** · **[Live desk](https://exchange.hackme.tech)** · **[STATUS](STATUS.md)** · **[Docs](docs/README.md)** · **[Economics](docs/ECONOMICS.md)** · **[Security](docs/SECURITY.md)**
 
 </div>
 
@@ -34,17 +34,17 @@
 
 ## What this is
 
-HackMe’s pool and chain live in the **[main HackMe repository](https://github.com/jokeez/hackme)**. This sidecar is the **spot desk UI**: charts, book, convert, paper wallet — so the network can show an own-market terminal without merging SPA code into the hub.
+HackMe’s pool and chain live in the **[main HackMe repository](https://github.com/jokeez/hackme)**. This sidecar is the **spot desk UI**: charts, book, convert, desk wallet (Connect) · offline paper fallback — so the network can show an own-market terminal without merging SPA code into the hub.
 
 | Pillar | What you get |
 |--------|----------------|
 | **Spot** | Chart · book · market / limit / stop / OCO · VIP fees · pay-fees-in-HMC |
-| **Convert** | Instant swap at mid (paper) |
-| **Account** | Balances · VIP · paper portfolio |
+| **Convert** | Instant swap at mid after Connect (local preview until then) |
+| **Account** | Desk balances · deposit address ≠ Connect/login · VIP |
 | **Pool** | Read-only oracle telemetry from [hackme.tech](https://hackme.tech) |
 
 > Own HMC market desk — **not** a third-party CEX listing claim.  
-> Live site: [exchange.hackme.tech](https://exchange.hackme.tech) (soft-launch desk).
+> Live: [exchange.hackme.tech](https://exchange.hackme.tech) — Connect → deposit → trade.
 
 ---
 
@@ -61,14 +61,14 @@ Never put admin tokens in `VITE_*` — Vite inlines them into the browser bundle
 
 ---
 
-## Pricing (paper)
+## Pricing (soft-launch refs)
 
-| Pair / leg | Reference | Notes |
-|------------|-----------|-------|
-| **HMC/USDT** | **0.05** | Mild paper drift · **not** scaled by pool GH |
-| **SUP/USDT** | **0.25** | Same |
-| **HMC/SUP** | **0.2** | Cross = HMC ÷ SUP |
-| **HMC/BTC · SUP/BTC** | `usdt / btcUsd` | Shared paper pin |
+| Pair / leg | Soft-MM anchor | Notes |
+|------------|----------------|-------|
+| **HMC/USDT** | **~0.05** | Mild soft-ref drift · **Last** from durable `/tickers` (live tape) |
+| **SUP/USDT** | **~0.25** | Same |
+| **HMC/SUP** | **~0.2** | Cross = HMC ÷ SUP |
+| **HMC/BTC · SUP/BTC** | book-implied | Soft-MM / desk BTC pin — **not** external BTC/USD |
 
 Canonical sheet: [`docs/ECONOMICS.md`](docs/ECONOMICS.md).
 
@@ -108,7 +108,7 @@ Wiring: [`docs/LAB_API.md`](docs/LAB_API.md)
 | Unit + security | `npm test` |
 | UI smoke | `npm run test:ui-smoke` |
 | Visual (G10) | `npm run test:e2e` (needs Vite on `:5199`) |
-| Live paper smoke | `npm run smoke:live` |
+| Live desk smoke | `npm run smoke:live` |
 | Paper static build | `npm run d0:static` → gitignored `dist-d0/` |
 
 Maintainer extras (`test:e2e:full`, `audit:full`, lab smokes): [`scripts/README.md`](scripts/README.md).
@@ -134,7 +134,7 @@ Maintainer extras (`test:e2e:full`, `audit:full`, lab smokes): [`scripts/README.
 | Project | Link |
 |---------|------|
 | **HackMe Network** | [github.com/jokeez/hackme](https://github.com/jokeez/hackme) |
-| **Paper site** | [exchange.hackme.tech](https://exchange.hackme.tech) |
+| **Public desk** | [exchange.hackme.tech](https://exchange.hackme.tech) |
 | **Hub / pool** | [hackme.tech](https://hackme.tech) |
 
 Matching / custody API remains a **private** sibling until its own public gates pass.
@@ -145,6 +145,6 @@ Matching / custody API remains a **private** sibling until its own public gates 
 
 [GNU Affero General Public License v3.0](LICENSE) — same family as [HackMe](https://github.com/jokeez/hackme).
 
-Paper tooling only. **Not** a licensed exchange · **not** production custody.
+Soft-launch desk (matching + HMC/SUP custody). **Not** a licensed exchange · USDT hot-send HOLD.
 
 <sub>Copyright © 2026 HackMe contributors · <a href="LICENSE">AGPL-3.0</a></sub>

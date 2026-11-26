@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Publish dist-d0 paper SPA to the Cloudflare origin for exchange.hackme.tech.
-# CF DNS A → 89.150.41.40 (proxied). Do NOT deploy only to hackme-vps (/opt/hackme/web/exchange).
+# Publish dist-d0 SPA to the Cloudflare origin for exchange.hackme.tech.
+# Do NOT deploy only to hackme-vps (/opt/hackme/web/exchange).
+# Set EXCHANGE_DEPLOY_HOST (SSH target for the exchange origin VPS) — keep bare IPs out of git.
 #
 # Never use rsync --delete (can wipe sibling origin files). Never HOT_SEND.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL="${ROOT}/dist-d0"
-HOST="${EXCHANGE_DEPLOY_HOST:-root@89.150.41.40}"
+HOST="${EXCHANGE_DEPLOY_HOST:?set EXCHANGE_DEPLOY_HOST to the exchange origin SSH target}"
 REMOTE="${EXCHANGE_DEPLOY_PATH:-/var/www/exchange}"
 
 if [[ ! -f "$LOCAL/index.html" ]]; then

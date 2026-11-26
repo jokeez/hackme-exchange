@@ -82,7 +82,7 @@ export function renderDualOrderPanel(ctx: OrderPanelCtx): string {
   const modeBadge = labLive
     ? `<span class="demo-badge sm meta-compact" title="Private lab matching — not production">LAB</span>`
     : deskSession
-      ? `<span class="demo-badge sm meta-compact" title="Soft-launch session connected">LIVE</span>`
+      ? `<span class="demo-badge sm meta-compact" title="Soft-launch session connected">SOFT-LAUNCH</span>`
       : deskEdgeLive
         ? `<span class="demo-badge sm meta-compact" title="Soft-launch live book — Connect to trade">DESK</span>`
         : `<span class="demo-badge sm meta-compact" title="Simulated exchange — not real CEX">PAPER</span>`;

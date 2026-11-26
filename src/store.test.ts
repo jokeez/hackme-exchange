@@ -167,8 +167,8 @@ describe("store order mutations", () => {
   });
 
   it("ensureCandles is deterministic across fresh clients at the same time", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-16T10:00:00.000Z"));
+    // Date.now spy — full fake timers hang afterEach under suite load (same as immutability soak).
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-16T10:00:00.000Z"));
     const a = baseState();
     const b = baseState();
     const market = sampleMarket();
@@ -176,7 +176,7 @@ describe("store order mutations", () => {
     ensureCandles(b, market);
     expect(b.candles.HMC_USDT?.["1m"]).toEqual(a.candles.HMC_USDT?.["1m"]);
     expect(b.candles.HMC_USDT?.["15m"]).toEqual(a.candles.HMC_USDT?.["15m"]);
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("drops old persisted candles after state version bump", () => {
@@ -209,8 +209,7 @@ describe("store order mutations", () => {
   });
 
   it("ensureCandles matches on two clients with divergent prior local history", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-07T12:00:00.000Z"));
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-07T12:00:00.000Z"));
     const market = sampleMarket();
     const a = baseState();
     const b = baseState();
@@ -223,7 +222,7 @@ describe("store order mutations", () => {
     ensureCandles(b, market);
     expect(b.candles.HMC_USDT?.["1m"]).toEqual(a.candles.HMC_USDT?.["1m"]);
     expect(b.candles.HMC_USDT?.["15m"]).toEqual(a.candles.HMC_USDT?.["15m"]);
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("clears legacy orderPreview when quick order is off", () => {

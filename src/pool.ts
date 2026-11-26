@@ -4,7 +4,7 @@ import { escapeHtml } from "./sanitize";
 import { formatGh, formatNum, formatPrice, formatRewardPerM, tickerFromMarket } from "./market";
 import { fetchPoolStatsCached, fetchWorkStatsCached } from "./oracleFetch";
 import { oracleStatusKind, oracleStatusLabel, type OracleMeta } from "./oracleStatus";
-import { patchOracleTransparencyDom, renderOracleTransparencyPanel } from "./product/oraclePanel";
+import { formatOracleBtcUsd, patchOracleTransparencyDom, renderOracleTransparencyPanel } from "./product/oraclePanel";
 import { renderWorkerLookupPanel } from "./product/poolWorker";
 
 function poolBase(): string {
@@ -135,7 +135,9 @@ export function patchPoolLiveDom(
     hmc: formatPrice(market.hmcUsdt),
     sup: formatPrice(market.supUsdt),
     hmcSup: formatPrice(market.hmcSup),
-    btc: `$${formatNum(market.btcUsd, 0)}`,
+    // Desk BTC is book-implied on live Soft-MM (often ~$70–$100) — label honestly.
+    btc:
+      formatOracleBtcUsd(market.btcUsd),
     spread: `${formatNum(spreadBps, 1)} bps`,
   };
   for (const [key, value] of Object.entries(mids)) {
@@ -283,7 +285,7 @@ export function renderPoolPage(
             <li>HMC <strong data-pool-mid="hmc">${formatPrice(market.hmcUsdt)}</strong></li>
             <li>SUP <strong data-pool-mid="sup">${formatPrice(market.supUsdt)}</strong></li>
             <li>HMC/SUP <strong data-pool-mid="hmcSup">${formatPrice(market.hmcSup)}</strong></li>
-            <li>BTC ref <strong data-pool-mid="btc">$${formatNum(market.btcUsd, 0)}</strong></li>
+            <li>BTC desk <strong data-pool-mid="btc">${formatOracleBtcUsd(market.btcUsd)}</strong></li>
           </ul>
         </article>
         <article class="pool-card glass-inset">
@@ -292,7 +294,7 @@ export function renderPoolPage(
           <ul class="pool-list muted small pool-formula-notes">
             <li><span>HMC ref</span><strong>0.05 USDT (locked)</strong></li>
             <li><span>SUP ref</span><strong>0.25 USDT</strong></li>
-            <li><span>BTC crosses</span><strong>pinned $67,500 (shared paper)</strong></li>
+            <li><span>BTC crosses</span><strong>Soft-MM book-implied (not external BTC/USD)</strong></li>
             <li><span>Spread now</span><strong data-pool-mid="spread">${formatNum(spreadBps, 1)} bps</strong></li>
           </ul>
         </article>
